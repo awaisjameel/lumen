@@ -8,16 +8,20 @@ import (
 	"path/filepath"
 )
 
-// Paths are the on-disk locations Lumen owns. Nothing here is ever a user's
+// Paths are the on-disk locations Lumen uses. Nothing here is ever a user's
 // original file.
 type Paths struct {
 	DataDir  string // %LOCALAPPDATA%\Lumen
 	DBPath   string // DataDir\library.db
 	ThumbDir string // DataDir\thumbs
+	// Runtime holds what ships beside Lumen.exe: ONNX Runtime and DirectML
+	// DLLs, ffmpeg\ and models\ (deps/runtime in development).
+	Runtime string
 }
 
-// DefaultPaths resolves the standard per-user app-data location. LUMEN_DATA_DIR
-// overrides it, which is handy for tests and for trying a scratch library.
+// DefaultPaths resolves the standard per-user app-data location and the
+// runtime folder beside the executable. LUMEN_DATA_DIR and LUMEN_RUNTIME_DIR
+// override them (tests, scratch libraries, `go run`).
 func DefaultPaths() (Paths, error) {
 	dir := os.Getenv("LUMEN_DATA_DIR")
 	if dir == "" {
@@ -27,10 +31,19 @@ func DefaultPaths() (Paths, error) {
 		}
 		dir = filepath.Join(base, "Lumen")
 	}
-	return PathsIn(dir), nil
+	p := PathsIn(dir)
+	p.Runtime = os.Getenv("LUMEN_RUNTIME_DIR")
+	if p.Runtime == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return Paths{}, fmt.Errorf("locate Lumen.exe: %w", err)
+		}
+		p.Runtime = filepath.Dir(exe)
+	}
+	return p, nil
 }
 
-// PathsIn lays out Lumen's files inside dir.
+// PathsIn lays out Lumen's data files inside dir (Runtime is left empty).
 func PathsIn(dir string) Paths {
 	return Paths{
 		DataDir:  dir,
@@ -39,7 +52,18 @@ func PathsIn(dir string) Paths {
 	}
 }
 
-// Ensure creates the folders if they are missing.
+// FFmpeg is the bundled ffmpeg.exe ("" if there is no runtime folder).
+func (p Paths) FFmpeg() string {
+	if p.Runtime == "" {
+		return ""
+	}
+	return filepath.Join(p.Runtime, "ffmpeg", "ffmpeg.exe")
+}
+
+// SigLIP is the folder holding the SigLIP 2 model files.
+func (p Paths) SigLIP() string { return filepath.Join(p.Runtime, "models", "siglip2") }
+
+// Ensure creates the data folders if they are missing.
 func (p Paths) Ensure() error {
 	for _, d := range []string{p.DataDir, p.ThumbDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {

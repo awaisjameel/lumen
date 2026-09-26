@@ -6,14 +6,18 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
+	"lumen/internal/ai"
 	"lumen/internal/core"
 	"lumen/internal/index"
 	"lumen/internal/media"
+	"lumen/internal/search"
 	"lumen/internal/store"
 	"lumen/services"
 )
@@ -48,21 +52,26 @@ func run() error {
 	}
 	defer st.Close()
 
-	thumbs := media.GoThumbnailer{}
+	cache := media.NewCache(paths.ThumbDir, media.Decoders{FFmpeg: paths.FFmpeg()})
+	engine, aiErr := startAI(paths, st)
+	if aiErr != nil {
+		slog.Error("AI unavailable; search and Things are off", "err", aiErr)
+	}
 	events := &services.Emitter{}
-	ix := index.New(st, paths, thumbs, events)
+	ix := index.New(st, paths, cache, engine, aiErr, events)
 
 	app := application.New(application.Options{
 		Name:        "Lumen",
 		Description: "Local, private AI photo gallery",
 		Services: []application.Service{
-			application.NewService(&engine{ix: ix}),
+			application.NewService(&background{ix: ix, search: engine}),
 			application.NewService(services.NewLibraryService(st, ix)),
-			application.NewServiceWithOptions(services.NewMediaService(st, paths, thumbs),
+			application.NewService(services.NewSearchService(st, engine)),
+			application.NewServiceWithOptions(services.NewMediaService(st, cache),
 				application.ServiceOptions{Route: "/media"}),
 		},
 		Assets: application.AssetOptions{
-			Handler:        application.AssetFileServerFS(assets),
+			Handler:        spa(application.AssetFileServerFS(assets)),
 			DisableLogging: true, // thousands of thumbnail requests
 		},
 		// Two copies indexing one database would fight; focus the first instead.
@@ -94,18 +103,57 @@ func run() error {
 	return app.Run()
 }
 
-// engine starts background indexing once the app is running and stops it
-// cleanly before the database closes.
-type engine struct{ ix *index.Indexer }
+// startAI loads ONNX Runtime and the SigLIP model description. Models load
+// lazily later; this only fails if they aren't installed or the runtime
+// can't start, in which case Lumen runs without search and Things.
+func startAI(paths core.Paths, st *store.Store) (*search.Engine, error) {
+	if err := ai.Init(paths.Runtime); err != nil {
+		return nil, err
+	}
+	m, err := ai.LoadModel(paths.SigLIP())
+	if err != nil {
+		return nil, err
+	}
+	return search.NewEngine(st, m), nil
+}
 
-func (e *engine) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
-	e.ix.Start(context.WithoutCancel(ctx))
+// background starts the search engine and indexing once the app is running,
+// and stops them cleanly before the database closes.
+type background struct {
+	ix     *index.Indexer
+	search *search.Engine // nil without AI
+	cancel context.CancelFunc
+}
+
+func (b *background) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+	ctx, b.cancel = context.WithCancel(context.WithoutCancel(ctx))
+	if b.search != nil {
+		b.search.Start(ctx)
+	}
+	b.ix.Start(ctx)
 	return nil
 }
 
-func (e *engine) ServiceShutdown() error {
-	e.ix.Stop()
+func (b *background) ServiceShutdown() error {
+	b.cancel()
+	b.ix.Stop()
+	if b.search != nil {
+		b.search.Close() // after the indexer: it no longer adds embeddings
+		ai.Shutdown()    // after every model is closed
+	}
 	return nil
+}
+
+// spa serves the UI, answering client-side routes (/things, /settings…),
+// which are not files, with index.html, so they survive a reload.
+func spa(files http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if path.Ext(r.URL.Path) == "" && r.URL.Path != "/" {
+			r = r.Clone(r.Context())
+			r.URL.Path = "/"
+		}
+		files.ServeHTTP(w, r)
+	})
 }
 
 // devtoolsArgs opens the WebView's DevTools protocol on localhost when

@@ -6,4 +6,10 @@
  */
 export interface Settings {
     "videos": boolean;
+    "aiOnBattery": boolean;
+
+    /**
+     * core.TagConfidenceMin..Max
+     */
+    "tagConfidence": number;
 }

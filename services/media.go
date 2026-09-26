@@ -1,13 +1,10 @@
 package services
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 
 	"lumen/internal/core"
 	"lumen/internal/media"
@@ -20,14 +17,12 @@ import (
 //	/media/thumb/{id}/{256|1024}?v={thumbVersion}
 //	/media/original/{id}   (only formats the WebView can display)
 type MediaService struct {
-	store  *store.Store
-	paths  core.Paths
-	thumbs media.Thumbnailer
-	regen  sync.Map // asset id -> *sync.Mutex while a missing thumb is being rebuilt
+	store *store.Store
+	cache *media.Cache
 }
 
-func NewMediaService(st *store.Store, paths core.Paths, t media.Thumbnailer) *MediaService {
-	return &MediaService{store: st, paths: paths, thumbs: t}
+func NewMediaService(st *store.Store, cache *media.Cache) *MediaService {
+	return &MediaService{store: st, cache: cache}
 }
 
 func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -56,10 +51,15 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int64, size int) {
-	path := media.ThumbPath(m.paths.ThumbDir, id, size)
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+	path := m.cache.Path(id, size)
+	if _, err := os.Stat(path); err != nil {
 		// Evicted from the cache (or cleared): rebuild it now if the asset had one.
-		if err := m.rebuild(r.Context(), id, path); err != nil {
+		f, err := m.store.AssetFile(r.Context(), id)
+		if err != nil || f.ThumbVersion == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		if err := m.cache.Ensure(id, size, media.Original{Path: f.Path, Kind: f.Kind, Orientation: f.Orientation}); err != nil {
 			http.NotFound(w, r)
 			return
 		}
@@ -69,28 +69,6 @@ func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	http.ServeFile(w, r, path)
-}
-
-func (m *MediaService) rebuild(ctx context.Context, id int64, path string) error {
-	v, _ := m.regen.LoadOrStore(id, &sync.Mutex{})
-	mu := v.(*sync.Mutex)
-	mu.Lock()
-	defer func() {
-		m.regen.Delete(id) // later requests find the file (or retry afresh)
-		mu.Unlock()
-	}()
-	if _, err := os.Stat(path); err == nil {
-		return nil // another request rebuilt it while we waited
-	}
-	f, err := m.store.AssetFile(ctx, id)
-	if err != nil || f.ThumbVersion == 0 {
-		return errors.New("no thumbnail")
-	}
-	t, err := m.thumbs.Thumbnail(f.Path, f.Kind, f.Orientation)
-	if err != nil {
-		return err
-	}
-	return media.WriteThumbs(m.paths.ThumbDir, id, t)
 }
 
 func (m *MediaService) serveOriginal(w http.ResponseWriter, r *http.Request, id int64) {

@@ -34,10 +34,10 @@ export function Asset(id: number): $CancellablePromise<core$0.AssetDetail> {
 }
 
 /**
- * Days returns the grid items for the days from..to (YYYY-MM-DD, inclusive).
+ * Days returns the view's grid items for the days from..to (YYYY-MM-DD, inclusive).
  */
-export function Days($from: string, to: string, filter: core$0.Filter): $CancellablePromise<core$0.DayItems[] | null> {
-    return $Call.ByID(341148162, $from, to, filter);
+export function Days($from: string, to: string, view: core$0.View): $CancellablePromise<core$0.DayItems[] | null> {
+    return $Call.ByID(341148162, $from, to, view);
 }
 
 /**
@@ -76,6 +76,14 @@ export function Rescan(): $CancellablePromise<void> {
 }
 
 /**
+ * SetAIOnBattery lets the AI keep working on battery power (it waits for
+ * mains power by default).
+ */
+export function SetAIOnBattery(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1575093597, on);
+}
+
+/**
  * SetFavourite marks or unmarks a favourite.
  */
 export function SetFavourite(id: number, fav: boolean): $CancellablePromise<void> {
@@ -87,6 +95,14 @@ export function SetFavourite(id: number, fav: boolean): $CancellablePromise<void
  */
 export function SetPaused(paused: boolean): $CancellablePromise<void> {
     return $Call.ByID(1388624885, paused);
+}
+
+/**
+ * SetTagConfidence sets how sure the AI must be for a tag to apply. Stored
+ * scores cover the whole range, so this takes effect at once.
+ */
+export function SetTagConfidence(v: number): $CancellablePromise<void> {
+    return $Call.ByID(1275176765, v);
 }
 
 /**
@@ -126,8 +142,8 @@ export function SuggestedFolders(): $CancellablePromise<string[] | null> {
 }
 
 /**
- * Timeline returns asset counts per day, newest first.
+ * Timeline returns the view's asset counts per day, newest first.
  */
-export function Timeline(filter: core$0.Filter): $CancellablePromise<core$0.DayBucket[] | null> {
-    return $Call.ByID(636808110, filter);
+export function Timeline(view: core$0.View): $CancellablePromise<core$0.DayBucket[] | null> {
+    return $Call.ByID(636808110, view);
 }

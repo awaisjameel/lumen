@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { RouterLink, RouterView } from 'vue-router'
+import { RouterLink, RouterView, useRoute } from 'vue-router'
 import IndexStatus from './library/IndexStatus.vue'
 import { useLibrary } from './library/store'
 import Welcome from './onboarding/Welcome.vue'
@@ -9,6 +9,7 @@ import Icon from './shared/Icon.vue'
 import { t } from './shared/i18n'
 
 const lib = useLibrary()
+const route = useRoute()
 const failed = ref('')
 onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
 </script>
@@ -24,6 +25,9 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
           <span>{{ t('app.name') }}</span>
         </div>
         <RouterLink to="/" class="nav-item"><Icon name="photos" />{{ t('nav.library') }}</RouterLink>
+        <RouterLink to="/things" class="nav-item" :class="{ active: route.path.startsWith('/things') }">
+          <Icon name="things" />{{ t('nav.things') }}
+        </RouterLink>
         <RouterLink to="/favourites" class="nav-item"><Icon name="heart" />{{ t('nav.favourites') }}</RouterLink>
         <RouterLink v-if="lib.settings.videos" to="/videos" class="nav-item">
           <Icon name="video" />{{ t('nav.videos') }}
@@ -81,7 +85,8 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
   background: var(--surface-hover);
   color: var(--text);
 }
-.nav-item.router-link-exact-active {
+.nav-item.router-link-exact-active,
+.nav-item.active {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;

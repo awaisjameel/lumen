@@ -9,10 +9,12 @@ import { dayLabel } from '../shared/format'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
+import SearchBox from '../search/SearchBox.vue'
+import { useThings } from '../things/store'
 import { buildLayout, GAP, move, rowHeight, rowOfItem } from './layout'
 import type { Row } from './layout'
-import { useLibrary, ZOOM_MAX, ZOOM_MIN } from './store'
-import type { Sel } from './store'
+import { scopeKey, useLibrary, ZOOM_MAX, ZOOM_MIN } from './store'
+import type { Scope, Sel } from './store'
 import TimelineScrubber from './TimelineScrubber.vue'
 import DetailsPanel from './DetailsPanel.vue'
 import Viewer from './Viewer.vue'
@@ -20,17 +22,42 @@ import Viewer from './Viewer.vue'
 const PAD = 20 // horizontal padding of the grid
 
 const lib = useLibrary()
+const things = useThings()
 const route = useRoute()
 
-// The route decides the filter: /, /favourites, /videos.
-const filter = computed(() => route.meta.filter ?? Filter.FilterAll)
-watch(filter, (f) => void lib.setFilter(f).catch(logError), { immediate: true })
+// The route decides what the grid shows: a filter (/, /favourites, /videos),
+// one Thing (/things/:id) or search results (/search?q=…).
+const scope = computed<Scope>(() => {
+  if (route.name === 'search') return { kind: 'search', query: String(route.query.q ?? '').trim() }
+  return { kind: 'timeline', view: { filter: route.meta.filter ?? Filter.FilterAll, tag: Number(route.params.id) || 0 } }
+})
+watch(
+  () => scopeKey(scope.value),
+  () => void lib.setScope(scope.value).catch(logError),
+  { immediate: true },
+)
 
 const titles: Record<Filter, MessageKey> = {
   [Filter.FilterAll]: 'nav.library',
   [Filter.FilterFavourites]: 'nav.favourites',
   [Filter.FilterVideos]: 'nav.videos',
 }
+
+const tagId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.tag ?? 0) : 0))
+watch(
+  tagId,
+  (id) => {
+    if (id && !things.byId.has(id)) void things.load().catch(logError)
+  },
+  { immediate: true },
+)
+
+const title = computed(() => {
+  const s = scope.value
+  if (s.kind === 'search') return `“${s.query}”`
+  if (tagId.value) return things.byId.get(tagId.value)?.name ?? ''
+  return t(titles[s.view.filter])
+})
 
 // --- Layout and virtualization --------------------------------------------
 
@@ -50,7 +77,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => ro?.disconnect())
 
-const layout = computed(() => buildLayout(lib.buckets, Math.max(width.value, 200), lib.zoom))
+const layout = computed(() => buildLayout(lib.buckets, Math.max(width.value, 200), lib.zoom, !lib.isSearch))
 
 const virtualizer = useVirtualizer(
   computed(() => ({
@@ -90,7 +117,7 @@ watch(
   [visible, () => lib.days],
   () => {
     const days = [...new Set(visible.value.map((v) => v.row.day))]
-    if (!days.length) return
+    if (!days.length || lib.isSearch) return
     void lib.ensureDays(days)
     clearTimeout(focusTimer)
     focusTimer = window.setTimeout(() => void engine.focus(days[days.length - 1], days[0]).catch(logError), 300)
@@ -177,12 +204,39 @@ watch(
   },
 )
 
+const aiError = computed(() => lib.progress?.ai.error ?? '')
 const empty = computed(() => lib.timelineLoaded && lib.buckets.length === 0)
-const emptyText = computed((): [MessageKey, MessageKey] => {
-  if (filter.value === Filter.FilterFavourites) return ['favourites.empty', 'favourites.emptyHint']
-  if (filter.value === Filter.FilterVideos) return ['videos.empty', 'videos.emptyHint']
-  if (lib.progress?.scanning) return ['library.emptyScanning', 'library.emptyHint']
-  return ['library.empty', 'library.emptyHint']
+const emptyText = computed((): [string, string] => {
+  const s = scope.value
+  if (s.kind === 'search') {
+    return aiError.value ? [t('search.unavailable'), aiError.value] : [t('search.none'), t('search.noneHint')]
+  }
+  if (tagId.value) return [t('things.viewEmpty'), t('things.viewEmptyHint')]
+  const keys: [MessageKey, MessageKey] =
+    s.view.filter === Filter.FilterFavourites
+      ? ['favourites.empty', 'favourites.emptyHint']
+      : s.view.filter === Filter.FilterVideos
+        ? ['videos.empty', 'videos.emptyHint']
+        : lib.progress?.scanning
+          ? ['library.emptyScanning', 'library.emptyHint']
+          : ['library.empty', 'library.emptyHint']
+  return [t(keys[0]), t(keys[1])]
+})
+
+const countText = computed(() => {
+  if (!lib.total) return ''
+  return lib.isSearch ? t('search.results', { n: lib.total }) : t('status.items', { n: lib.total })
+})
+
+// Why a search may be missing photos: too many matches, or photos the AI
+// hasn't seen yet.
+const searchNotes = computed(() => {
+  const info = lib.searchInfo
+  if (!lib.isSearch || !info) return []
+  const notes: string[] = []
+  if (!info.complete) notes.push(t('search.more', { n: lib.total }))
+  if (info.pending) notes.push(t('search.pending', { n: info.pending }))
+  return notes
 })
 </script>
 
@@ -190,8 +244,11 @@ const emptyText = computed((): [MessageKey, MessageKey] => {
   <div class="library">
     <section class="main">
       <header class="topbar">
-        <h1>{{ t(titles[filter]) }}</h1>
-        <span v-if="lib.total" class="count">{{ t('status.items', { n: lib.total }) }}</span>
+        <div class="heading">
+          <h1 :title="title">{{ title }}</h1>
+          <span v-if="countText" class="count">{{ countText }}</span>
+        </div>
+        <SearchBox />
         <div class="spacer" />
         <label class="zoom" :title="t('library.zoom')">
           <Icon name="photos" :size="16" />
@@ -215,20 +272,22 @@ const emptyText = computed((): [MessageKey, MessageKey] => {
         </button>
       </header>
 
+      <p v-for="n in searchNotes" :key="n" class="note">{{ n }}</p>
+
       <div class="grid-wrap">
         <div
           ref="scroller"
           class="scroller"
           tabindex="0"
           role="grid"
-          :aria-label="t(titles[filter])"
+          :aria-label="title"
           @scroll.passive="onScroll"
           @keydown="onKey"
         >
           <div v-if="empty" class="empty">
-            <Icon name="photos" :size="40" />
-            <h2>{{ t(emptyText[0]) }}</h2>
-            <p class="muted">{{ t(emptyText[1]) }}</p>
+            <Icon :name="lib.isSearch ? 'search' : 'photos'" :size="40" />
+            <h2>{{ emptyText[0] }}</h2>
+            <p class="muted">{{ emptyText[1] }}</p>
           </div>
 
           <div class="rows" :style="{ height: virtualizer.getTotalSize() + 'px' }">
@@ -270,7 +329,7 @@ const emptyText = computed((): [MessageKey, MessageKey] => {
         </div>
 
         <TimelineScrubber
-          v-if="!empty && layout.total > viewportH"
+          v-if="!empty && !lib.isSearch && layout.total > viewportH"
           :buckets="lib.buckets"
           :layout="layout"
           :scroll-top="scrollTop"
@@ -305,12 +364,30 @@ const emptyText = computed((): [MessageKey, MessageKey] => {
   padding: 0 12px 0 20px;
   flex-shrink: 0;
 }
+.heading {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 30%;
+}
 .topbar h1 {
   margin: 0;
-  font: 600 20px/1 var(--font-display);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 600 20px/1.1 var(--font-display);
 }
 .count {
   color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.note {
+  margin: 0 20px 8px;
+  color: var(--text-3);
+  font-size: 12px;
 }
 .spacer {
   flex: 1;

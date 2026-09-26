@@ -20,10 +20,17 @@ type JobItem struct {
 // TimeRange limits a job query to assets taken in [From, To) (wall-clock seconds).
 type TimeRange struct{ From, To int64 }
 
+// waitsFor is the stage each stage needs finished first: thumbnails need
+// the orientation from metadata, and the AI reads the thumbnail.
+var waitsFor = map[core.Stage]core.Stage{
+	core.StageThumbnail: core.StageMetadata,
+	core.StageEmbedding: core.StageThumbnail,
+}
+
 // PendingJobs returns up to limit assets waiting for stage, newest first. With
 // a range, only assets inside it are returned; the indexer uses that to do
-// whatever the user is looking at first. Thumbnails wait for metadata, which
-// supplies the orientation.
+// whatever the user is looking at first. An asset whose previous stage is
+// still pending is left for later.
 func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeRange, limit int) ([]JobItem, error) {
 	q := `SELECT a.id, f.path, a.kind, a.ext, a.orientation
 		FROM asset_jobs j
@@ -31,9 +38,10 @@ func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeR
 		JOIN files f ON f.id = (SELECT id FROM files WHERE asset_id = a.id LIMIT 1)
 		WHERE j.stage = ? AND j.status = 'pending' AND a.missing_since IS NULL`
 	args := []any{stage}
-	if stage == core.StageThumbnail {
-		q += ` AND NOT EXISTS (SELECT 1 FROM asset_jobs m
-			WHERE m.asset_id = a.id AND m.stage = 'metadata' AND m.status = 'pending')`
+	if prev, ok := waitsFor[stage]; ok {
+		q += ` AND NOT EXISTS (SELECT 1 FROM asset_jobs p
+			WHERE p.asset_id = a.id AND p.stage = ? AND p.status = 'pending')`
+		args = append(args, prev)
 	}
 	if within != nil {
 		q += " AND a.taken_at >= ? AND a.taken_at < ?"
@@ -78,26 +86,13 @@ type ThumbResult struct {
 	Skipped bool // the format isn't supported by this build yet
 }
 
-// Versions recorded with each finished job. Bump one when its stage's output
-// would change (a better decoder, a new model); RequeueOutdated then re-runs
-// just that stage.
-const (
-	MetadataVersion  = "imagemeta-1.1+goexif"
-	ThumbnailVersion = "go-image-1"
-)
-
-// StageVersions maps each stage to its current version.
-var StageVersions = map[core.Stage]string{
-	core.StageMetadata:  MetadataVersion,
-	core.StageThumbnail: ThumbnailVersion,
-}
-
-// RequeueOutdated puts back in the queue every finished job whose stage has
-// a newer version (a better decoder, an upgraded model). Other stages and
-// all user edits are untouched. It returns how many jobs were requeued.
-func (s *Store) RequeueOutdated(ctx context.Context) (int64, error) {
+// RequeueOutdated puts back in the queue every finished job whose stage now
+// has a different version (a better decoder, an upgraded model). Every job
+// records the version that ran it, so only that stage re-runs; other stages
+// and all user edits are untouched. It returns how many jobs were requeued.
+func (s *Store) RequeueOutdated(ctx context.Context, versions map[core.Stage]string) (int64, error) {
 	var total int64
-	for stage, version := range StageVersions {
+	for stage, version := range versions {
 		res, err := s.w.ExecContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, updated_at = ?
 			WHERE stage = ? AND status != 'pending' AND COALESCE(model_version, '') != ?`,
 			time.Now().Unix(), stage, version)
@@ -110,8 +105,9 @@ func (s *Store) RequeueOutdated(ctx context.Context) (int64, error) {
 	return total, nil
 }
 
-// SaveMetadata stores a batch of metadata results and closes their jobs.
-func (s *Store) SaveMetadata(ctx context.Context, rs []MetadataResult) error {
+// SaveMetadata stores a batch of metadata results and closes their jobs,
+// recording the version that produced them.
+func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataResult) error {
 	if len(rs) == 0 {
 		return nil
 	}
@@ -139,7 +135,7 @@ func (s *Store) SaveMetadata(ctx context.Context, rs []MetadataResult) error {
 					return err
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageMetadata, MetadataVersion, jobStatus(r.Err), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageMetadata, version, jobStatus(r.Err, false), r.Err, now); err != nil {
 				return err
 			}
 		}
@@ -148,7 +144,7 @@ func (s *Store) SaveMetadata(ctx context.Context, rs []MetadataResult) error {
 }
 
 // SaveThumbnails records a batch of finished thumbnails and closes their jobs.
-func (s *Store) SaveThumbnails(ctx context.Context, rs []ThumbResult) error {
+func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbResult) error {
 	if len(rs) == 0 {
 		return nil
 	}
@@ -174,11 +170,7 @@ func (s *Store) SaveThumbnails(ctx context.Context, rs []ThumbResult) error {
 					return err
 				}
 			}
-			status := jobStatus(r.Err)
-			if r.Skipped {
-				status = core.JobSkipped
-			}
-			if err := execJob(ctx, job, r.AssetID, core.StageThumbnail, ThumbnailVersion, status, r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageThumbnail, version, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}
@@ -191,9 +183,12 @@ func prepareJobUpdate(ctx context.Context, tx *sql.Tx) (*sql.Stmt, error) {
 		WHERE asset_id = ? AND stage = ?`)
 }
 
-func jobStatus(errMsg string) core.JobStatus {
-	if errMsg != "" {
+func jobStatus(errMsg string, skipped bool) core.JobStatus {
+	switch {
+	case errMsg != "":
 		return core.JobError
+	case skipped:
+		return core.JobSkipped
 	}
 	return core.JobDone
 }
@@ -205,10 +200,14 @@ func execJob(ctx context.Context, st *sql.Stmt, assetID int64, stage core.Stage,
 }
 
 // JobCounts returns how many jobs are waiting per stage, and how many failed
-// or were skipped. It reads only unfinished jobs (the asset_jobs_status index).
+// or were skipped. It reads only unfinished jobs (the asset_jobs_status
+// index), and ignores assets whose files are gone: their jobs wait, unrun,
+// until the content reappears.
 func (s *Store) JobCounts(ctx context.Context) (pending map[core.Stage]int, failed, skipped int, err error) {
-	rows, err := s.r.QueryContext(ctx, `SELECT stage, status, count(*) FROM asset_jobs
-		WHERE status IN ('pending', 'error', 'skipped') GROUP BY stage, status`)
+	rows, err := s.r.QueryContext(ctx, `SELECT j.stage, j.status, count(*) FROM asset_jobs j
+		JOIN assets a ON a.id = j.asset_id
+		WHERE j.status IN ('pending', 'error', 'skipped') AND a.missing_since IS NULL
+		GROUP BY j.stage, j.status`)
 	if err != nil {
 		return nil, 0, 0, err
 	}

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, triggerRef } from 'vue'
 import { engine, Filter, onLibraryChanged, onProgress } from '../bridge'
-import type { DayBucket, GridItem, Progress, Settings, Source } from '../bridge'
+import type { DayBucket, GridItem, Progress, Settings, Source, View } from '../bridge'
 import { logError } from '../shared/errors'
 
 const ZOOM_KEY = 'lumen.zoom'
@@ -9,10 +9,26 @@ export const ZOOM_MIN = 96
 export const ZOOM_MAX = 320
 const ZOOM_DEFAULT = 168
 
+/** The single group search results live in (they have no days). */
+export const RESULTS = 'results'
+
+/** What the grid shows: part of the timeline, or search results (best first). */
+export type Scope = { kind: 'timeline'; view: View } | { kind: 'search'; query: string }
+
+export function scopeKey(s: Scope): string {
+  return s.kind === 'search' ? `search:${s.query}` : `view:${s.view.filter}:${s.view.tag ?? 0}`
+}
+
 /** A position in the library: which day, which asset. Survives items shifting. */
 export interface Sel {
   day: string
   id: number
+}
+
+/** What a search found beyond its items. */
+export interface SearchInfo {
+  pending: number // photos the AI hasn't seen yet
+  complete: boolean
 }
 
 function loadZoom(): number {
@@ -26,19 +42,21 @@ function loadZoom(): number {
 }
 
 /**
- * Library state: the day buckets for the current view, a cache of loaded
- * days, selection, and indexing progress. Days load lazily as they scroll
- * into view; a library change marks them stale and they reload in place.
+ * Library state: the groups (days, or one group of search results) for the
+ * current scope, a cache of loaded items, selection, and indexing progress.
+ * Days load lazily as they scroll into view; a library change marks them
+ * stale and they reload in place.
  */
 export const useLibrary = defineStore('library', () => {
   const ready = ref(false)
   const sources = ref<Source[]>([])
-  const settings = ref<Settings>({ videos: false })
+  const settings = ref<Settings>({ videos: false, aiOnBattery: false, tagConfidence: 0.02 })
   const progress = ref<Progress | null>(null)
 
-  const filter = ref<Filter>(Filter.FilterAll)
+  const scope = ref<Scope>({ kind: 'timeline', view: { filter: Filter.FilterAll } })
   const buckets = ref<DayBucket[]>([])
   const timelineLoaded = ref(false)
+  const searchInfo = ref<SearchInfo | null>(null)
 
   // day -> items. A shallowRef plus triggerRef keeps big maps cheap.
   const days = shallowRef(new Map<string, GridItem[]>())
@@ -53,6 +71,7 @@ export const useLibrary = defineStore('library', () => {
   const total = computed(() => buckets.value.reduce((n, b) => n + b.count, 0))
   const selectedItem = computed(() => itemAt(selected.value))
   const viewerItem = computed(() => itemAt(viewer.value))
+  const isSearch = computed(() => scope.value.kind === 'search')
 
   function itemAt(p: Sel | null): GridItem | null {
     if (!p) return null
@@ -79,21 +98,39 @@ export const useLibrary = defineStore('library', () => {
     ready.value = true
     onProgress((p) => (progress.value = p))
     onLibraryChanged(() => void refresh().catch(logError))
-    if (sources.value.length) await loadTimeline()
+    if (sources.value.length) await load()
   }
 
-  async function loadTimeline() {
-    buckets.value = await engine.timeline(filter.value)
+  /** Load the current scope's groups (and, for a search, its results). */
+  async function load() {
+    const s = scope.value
+    if (s.kind === 'search') {
+      const r = await engine.search(s.query)
+      if (scopeKey(s) !== scopeKey(scope.value)) return // superseded while searching
+      searchInfo.value = { pending: r.pending, complete: r.complete }
+      buckets.value = r.items.length ? [{ day: RESULTS, count: r.items.length }] : []
+      days.value = new Map(r.items.length ? [[RESULTS, r.items]] : [])
+      fresh.add(RESULTS)
+    } else {
+      const b = await engine.timeline(s.view)
+      if (scopeKey(s) !== scopeKey(scope.value)) return
+      buckets.value = b
+    }
     timelineLoaded.value = true
   }
 
-  /** Reload after the engine reports changes: counts, then visible days on demand. */
+  /**
+   * Reload after the engine reports changes: counts, then visible days on
+   * demand. Search results stay as they are (reshuffling them while someone
+   * looks would be jarring); searching again picks up new photos.
+   */
   let refreshing: Promise<void> | null = null
   async function refresh() {
+    if (isSearch.value) return
     if (refreshing) return refreshing
     refreshing = (async () => {
       try {
-        await loadTimeline()
+        await load()
         fresh.clear()
         triggerRef(days) // the view re-requests what it shows
       } finally {
@@ -108,14 +145,15 @@ export const useLibrary = defineStore('library', () => {
    * Never throws: a failed load is logged and retried when next needed.
    */
   async function ensureDays(want: string[]) {
+    const s = scope.value
+    if (s.kind === 'search') return // results arrive all at once
     const missing = want.filter((d) => !fresh.has(d) && !inflight.has(d))
     if (!missing.length) return
     missing.sort()
     missing.forEach((d) => inflight.add(d))
-    const f = filter.value
     try {
-      const got = await engine.days(missing[0], missing[missing.length - 1], f)
-      if (f !== filter.value) return // the view changed while loading
+      const got = await engine.days(missing[0], missing[missing.length - 1], s.view)
+      if (scopeKey(s) !== scopeKey(scope.value)) return // the view changed while loading
       const next = new Map(days.value)
       const inSpan = new Set(missing)
       for (const d of got) {
@@ -135,7 +173,7 @@ export const useLibrary = defineStore('library', () => {
     }
   }
 
-  /** The next (dir 1) or previous (dir -1) asset in timeline order, loading the neighbouring day if needed. */
+  /** The next (dir 1) or previous (dir -1) asset in grid order, loading the neighbouring day if needed. */
   async function neighbour(sel: Sel, dir: 1 | -1): Promise<Sel | null> {
     const list = days.value.get(sel.day) ?? []
     const i = list.findIndex((x) => x.id === sel.id)
@@ -149,15 +187,18 @@ export const useLibrary = defineStore('library', () => {
     return { day: nb.day, id: (dir > 0 ? next[0] : next[next.length - 1]).id }
   }
 
-  async function setFilter(f: Filter) {
-    if (f === filter.value && timelineLoaded.value) return
-    filter.value = f
+  /** Show another scope. Searching again with the same words re-runs the search. */
+  async function setScope(s: Scope) {
+    if (scopeKey(s) === scopeKey(scope.value) && timelineLoaded.value && s.kind !== 'search') return
+    scope.value = s
     selected.value = null
     viewer.value = null
+    searchInfo.value = null
     days.value = new Map()
+    buckets.value = []
     fresh.clear()
     timelineLoaded.value = false
-    await loadTimeline()
+    await load()
   }
 
   function setZoom(v: number) {
@@ -184,7 +225,8 @@ export const useLibrary = defineStore('library', () => {
       logError(e)
       return
     }
-    if (filter.value === Filter.FilterFavourites) await refresh().catch(logError)
+    const s = scope.value
+    if (s.kind === 'timeline' && s.view.filter === Filter.FilterFavourites) await refresh().catch(logError)
   }
 
   async function reloadSources() {
@@ -197,9 +239,10 @@ export const useLibrary = defineStore('library', () => {
     sources,
     settings,
     progress,
-    filter,
+    scope,
     buckets,
     timelineLoaded,
+    searchInfo,
     days,
     selected,
     viewer,
@@ -208,6 +251,7 @@ export const useLibrary = defineStore('library', () => {
     total,
     selectedItem,
     viewerItem,
+    isSearch,
     itemAt,
     indexOf,
     selAt,
@@ -215,7 +259,7 @@ export const useLibrary = defineStore('library', () => {
     refresh,
     ensureDays,
     neighbour,
-    setFilter,
+    setScope,
     setZoom,
     toggleFavourite,
     reloadSources,

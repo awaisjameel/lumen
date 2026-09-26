@@ -21,7 +21,11 @@ type Stage string
 const (
 	StageMetadata  Stage = "metadata"
 	StageThumbnail Stage = "thumbnail" // also produces the perceptual hash
+	StageEmbedding Stage = "embedding" // SigLIP image embedding, plus AI tags
 )
+
+// Stages lists every stage in pipeline order. A new asset gets a job for each.
+var Stages = []Stage{StageMetadata, StageThumbnail, StageEmbedding}
 
 // JobStatus is the state of one stage for one asset.
 type JobStatus string
@@ -30,14 +34,27 @@ const (
 	JobPending JobStatus = "pending"
 	JobDone    JobStatus = "done"
 	JobError   JobStatus = "error"
-	// JobSkipped means this build can't process the file yet (e.g. HEIC before
-	// libvips). Not a failure: it re-runs when the stage's version changes.
+	// JobSkipped means this machine can't process the file (e.g. a video
+	// before video support, or HEIC without a decoder). Not a failure: it
+	// re-runs when the stage's version changes.
 	JobSkipped JobStatus = "skipped"
 )
 
 // Settings keys.
 const (
-	SettingVideos = "videos_enabled" // bool: index videos too (off by default)
+	SettingVideos        = "videos_enabled"     // bool: index videos too (off by default)
+	SettingAIOnBattery   = "ai_on_battery"      // bool: keep AI indexing going on battery (off by default)
+	SettingTagConfidence = "tag_confidence"     // float: minimum AI probability for a tag to apply
+	SettingVocabulary    = "vocabulary_version" // int: built-in Things last synced
+)
+
+// Tag confidence: the default, and the range the setting may take. The
+// lower bound is also the lowest score stored, so the slider never needs a
+// re-scan.
+const (
+	TagConfidenceDefault = 0.02
+	TagConfidenceMin     = 0.002
+	TagConfidenceMax     = 0.3
 )
 
 // DateSource says where an asset's capture date came from, best first.
@@ -82,6 +99,58 @@ const (
 	FilterVideos     Filter = "videos"
 )
 
+// View is what the timeline grid shows: a filter, optionally narrowed to
+// one tag.
+type View struct {
+	Filter Filter `json:"filter"`
+	Tag    int64  `json:"tag,omitempty"` // 0 = any
+}
+
+// TagKind says where a tag comes from.
+type TagKind string
+
+const (
+	TagBuiltin TagKind = "builtin" // Lumen's vocabulary; the AI applies it
+	TagLabel   TagKind = "label"   // made by the user; the AI applies it
+	TagManual  TagKind = "manual"  // made by the user; only the user applies it
+)
+
+// TagSource says who put a tag on an asset.
+type TagSource string
+
+const (
+	TagByAI     TagSource = "ai"
+	TagByUser   TagSource = "user"
+	TagRejected TagSource = "rejected" // the user removed an AI tag; the AI never re-adds it
+)
+
+// Tag is one Thing, with how many visible assets carry it and one to show.
+type Tag struct {
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Kind       TagKind `json:"kind"`
+	Hidden     bool    `json:"hidden"`
+	Count      int     `json:"count"`
+	Cover      int64   `json:"cover"`      // asset id; 0 = none
+	CoverThumb int     `json:"coverThumb"` // its thumbnail version
+}
+
+// AssetTag is a tag on one asset.
+type AssetTag struct {
+	ID     int64     `json:"id"`
+	Name   string    `json:"name"`
+	Kind   TagKind   `json:"kind"`
+	Source TagSource `json:"source"`
+	Score  float32   `json:"score"` // AI probability; 0 for user tags
+}
+
+// SearchResult is the answer to a natural-language search, best match first.
+type SearchResult struct {
+	Items    []GridItem `json:"items"`
+	Pending  int        `json:"pending"`  // photos not yet understood, so not searchable yet
+	Complete bool       `json:"complete"` // false: more matched than are shown
+}
+
 // DayBucket is how many visible assets were taken on one calendar day.
 // The grid builds its whole layout from these before loading any items.
 type DayBucket struct {
@@ -120,9 +189,18 @@ type Progress struct {
 	Total      int  `json:"total"`      // assets in the library
 	Metadata   int  `json:"metadata"`   // assets still waiting for metadata
 	Thumbnail  int  `json:"thumbnail"`  // assets still waiting for thumbnails
+	Embedding  int  `json:"embedding"`  // assets still waiting for the AI
 	Errors     int  `json:"errors"`
 	Skipped    int  `json:"skipped"`
 	Paused     bool `json:"paused"`
+	OnBattery  bool `json:"onBattery"` // AI work is waiting for mains power
+	AI         AI   `json:"ai"`
+}
+
+// AI is the state of the on-device models.
+type AI struct {
+	Device string `json:"device"` // "gpu" or "cpu" while the image model is loaded, else ""
+	Error  string `json:"error"`  // why the AI can't run (models missing, runtime failed)
 }
 
 // WallClock converts t to "wall-clock seconds": the local date and time as it

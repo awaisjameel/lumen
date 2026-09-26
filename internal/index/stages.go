@@ -10,71 +10,107 @@ import (
 
 	"lumen/internal/core"
 	"lumen/internal/media"
+	"lumen/internal/search"
 	"lumen/internal/store"
 )
 
+// stage describes one step of the pipeline for runStage.
+type stage[R any] struct {
+	name  core.Stage
+	batch int           // jobs fetched per round
+	wake  chan struct{} // nudged when new work may exist
+	next  chan struct{} // nudged after a save (the following stage); may be nil
+	// process handles a batch. An error means the stage itself can't run
+	// right now (e.g. the model won't load): nothing is saved and the batch
+	// is retried later. Per-file failures go in the results instead.
+	process func(context.Context, []store.JobItem) ([]R, error)
+	save    func(context.Context, []R) error
+	idle    func() // called when the queue runs dry; may be nil
+}
+
 // runStage drains one stage's job queue: fetch a batch (what the user is
-// looking at first, then newest first), process it on a worker pool, save the
-// results in one transaction, repeat. With nothing to do it sleeps until woken.
-// Batches are small so the UI sees results stream in and focus changes apply fast.
-func runStage[R any](ctx context.Context, ix *Indexer, stage core.Stage, workers, batch int,
-	wake <-chan struct{}, process func(store.JobItem) R, save func(context.Context, []R) error, next chan struct{}) {
+// looking at first, then newest first), process it, save the results in one
+// transaction, repeat. With nothing to do it sleeps until woken. Batches are
+// small so the UI sees results stream in and focus changes apply fast.
+func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 	for {
-		if !ix.waitIfPaused(ctx) {
+		if !ix.waitTurn(ctx, s.name) {
 			return
 		}
-		items, err := ix.fetch(ctx, stage, batch)
+		items, err := ix.fetch(ctx, s.name, s.batch)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			slog.Error("fetch jobs", "stage", stage, "err", err)
+			slog.Error("fetch jobs", "stage", s.name, "err", err)
 			sleep(ctx, 5*time.Second)
 			continue
 		}
 		if len(items) == 0 {
+			if s.idle != nil {
+				s.idle()
+			}
 			select {
 			case <-ctx.Done():
 				return
-			case <-wake:
+			case <-s.wake:
 			case <-time.After(30 * time.Second):
 			}
 			continue
 		}
-
-		results := make([]R, len(items))
-		idx := make(chan int)
-		var wg sync.WaitGroup
-		for range min(workers, len(items)) {
-			wg.Go(func() {
-				for i := range idx {
-					results[i] = process(items[i])
-				}
-			})
-		}
-	feed:
-		for i := range items {
-			select {
-			case idx <- i:
-			case <-ctx.Done():
-				break feed // on shutdown, only finish the files already started
-			}
-		}
-		close(idx)
-		wg.Wait()
+		results, err := s.process(ctx, items)
 		if ctx.Err() != nil {
 			return // don't save half-cancelled work; it simply re-runs next time
 		}
-		if err := save(ctx, results); err != nil {
-			slog.Error("save results", "stage", stage, "err", err)
+		if err != nil {
+			slog.Error("stage can't run", "stage", s.name, "err", err)
+			sleep(ctx, time.Minute)
+			continue
+		}
+		if err := s.save(ctx, results); err != nil {
+			slog.Error("save results", "stage", s.name, "err", err)
 			sleep(ctx, 5*time.Second)
 			continue
 		}
 		ix.changed.Store(true)
-		if next != nil {
-			nudge(next)
+		if s.next != nil {
+			nudge(s.next)
 		}
 	}
+}
+
+// eachItem turns a per-file function into a batch processor that runs it on
+// a pool of workers. On shutdown it only finishes the files already started.
+func eachItem[R any](workers int, fn func(store.JobItem) R) func(context.Context, []store.JobItem) ([]R, error) {
+	return func(ctx context.Context, items []store.JobItem) ([]R, error) {
+		results := make([]R, len(items))
+		parallel(ctx, len(items), workers, func(i int) { results[i] = fn(items[i]) })
+		return results, nil
+	}
+}
+
+// parallel calls fn(0..n-1) on up to workers goroutines, stopping early
+// (without starting more calls) if ctx ends.
+func parallel(ctx context.Context, n, workers int, fn func(i int)) {
+	idx := make(chan int)
+	var wg sync.WaitGroup
+	for range min(workers, n) {
+		wg.Go(func() {
+			for i := range idx {
+				fn(i)
+			}
+		})
+	}
+feed:
+	for i := range n {
+		select {
+		case idx <- i:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(idx)
+	wg.Wait()
 }
 
 func (ix *Indexer) fetch(ctx context.Context, stage core.Stage, n int) ([]store.JobItem, error) {
@@ -108,7 +144,7 @@ func (ix *Indexer) doMetadata(j store.JobItem) (r store.MetadataResult) {
 func (ix *Indexer) doThumbnail(j store.JobItem) (r store.ThumbResult) {
 	r.AssetID = j.AssetID
 	defer recoverInto(&r.Err, j.Path)
-	t, err := ix.thumbs.Thumbnail(j.Path, j.Kind, j.Orientation)
+	t, err := ix.cache.Thumbs.Thumbnail(j.Path, j.Kind, j.Orientation)
 	switch {
 	case errors.Is(err, media.ErrUnsupported):
 		r.Skipped = true
@@ -117,12 +153,96 @@ func (ix *Indexer) doThumbnail(j store.JobItem) (r store.ThumbResult) {
 		r.Err = err.Error()
 		return r
 	}
-	if err := media.WriteThumbs(ix.paths.ThumbDir, j.AssetID, t); err != nil {
+	if err := ix.cache.Write(j.AssetID, t); err != nil {
 		r.Err = "write thumbnail: " + err.Error()
 		return r
 	}
 	r.PHash = &t.PHash
 	return r
+}
+
+// doEmbeddings embeds a batch of photos with SigLIP and tags them. Inputs
+// come from the 1024 px thumbnails (upright, small, already decoded once),
+// rebuilt first if they were evicted.
+func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]store.EmbedResult, error) {
+	if err := ix.search.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("search engine: %w", err)
+	}
+	enc, err := ix.encoder()
+	if err != nil {
+		return nil, err
+	}
+	side := ix.search.Model().ImageSize
+	results := make([]store.EmbedResult, len(items))
+	inputs := make([][]byte, len(items))
+	parallel(ctx, len(items), 4, func(i int) {
+		j := items[i]
+		r := &results[i]
+		r.AssetID = j.AssetID
+		defer recoverInto(&r.Err, j.Path)
+		if j.Kind != core.KindPhoto {
+			r.Skipped = true // video frames arrive with video support
+			return
+		}
+		orig := media.Original{Path: j.Path, Kind: j.Kind, Orientation: j.Orientation}
+		switch err := ix.cache.Ensure(j.AssetID, core.ThumbLarge, orig); {
+		case errors.Is(err, media.ErrUnsupported):
+			r.Skipped = true
+			return
+		case err != nil:
+			r.Err = "thumbnail: " + err.Error()
+			return
+		}
+		px, err := media.ModelInput(ix.cache.Path(j.AssetID, core.ThumbLarge), side)
+		if err != nil {
+			r.Err = err.Error()
+			return
+		}
+		inputs[i] = px
+	})
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// Run the model on full batches of whatever decoded.
+	var todo []int
+	for i, in := range inputs {
+		if in != nil {
+			todo = append(todo, i)
+		}
+	}
+	for lo := 0; lo < len(todo); lo += enc.BatchSize() {
+		chunk := todo[lo:min(lo+enc.BatchSize(), len(todo))]
+		batch := make([][]byte, len(chunk))
+		for k, i := range chunk {
+			batch[k] = inputs[i]
+		}
+		vecs, err := enc.Encode(batch)
+		if err != nil {
+			return nil, err
+		}
+		for k, i := range chunk {
+			results[i].Vec, results[i].Scale = search.Quantize(vecs[k])
+			results[i].Tags = ix.search.Tags(vecs[k])
+		}
+	}
+	ix.mu.Lock()
+	ix.aiDevice = string(enc.Device())
+	ix.mu.Unlock()
+	return results, nil
+}
+
+// saveEmbeddings stores a batch, then makes it searchable.
+func (ix *Indexer) saveEmbeddings(ctx context.Context, rs []store.EmbedResult) error {
+	if err := ix.store.SaveEmbeddings(ctx, ix.search.Model().Version, rs); err != nil {
+		return err
+	}
+	for _, r := range rs {
+		if r.Vec != nil {
+			ix.search.Add(r.AssetID, r.Vec, r.Scale)
+		}
+	}
+	return nil
 }
 
 // recoverInto turns a panic in a decoder (corrupt files find bugs) into a

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { DateSource, engine } from '../bridge'
-import type { AssetDetail } from '../bridge'
-import { errorText } from '../shared/errors'
+import { DateSource, engine, TagSource } from '../bridge'
+import type { AssetDetail, AssetTag } from '../bridge'
+import { errorText, logError } from '../shared/errors'
 import { bytes, dateTime, megapixels } from '../shared/format'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
@@ -13,6 +13,8 @@ import type { Sel } from './store'
 const props = defineProps<{ sel: Sel | null }>()
 const lib = useLibrary()
 const detail = ref<AssetDetail | null>(null)
+const tags = ref<AssetTag[]>([])
+const newTag = ref('')
 const error = ref('')
 
 watch(
@@ -32,6 +34,52 @@ watch(
   },
   { immediate: true },
 )
+
+// Tags: reload when the photo changes, and as the AI works through the
+// library (its tags may arrive while the panel is open).
+watch(
+  () => [props.sel?.id, lib.progress?.embedding] as const,
+  ([id]) => {
+    if (!id) {
+      tags.value = []
+      return
+    }
+    void loadTags(id)
+  },
+  { immediate: true },
+)
+
+async function loadTags(id: number) {
+  try {
+    const got = await engine.assetTags(id)
+    if (props.sel?.id === id) tags.value = got
+  } catch (e) {
+    logError(e)
+  }
+}
+
+/** Change this photo's tags, then show the result (and refresh a Thing's grid). */
+async function editTags(id: number, fn: () => Promise<void>) {
+  error.value = ''
+  try {
+    await fn()
+    await loadTags(id)
+    void lib.refresh().catch(logError)
+  } catch (e) {
+    error.value = errorText(e)
+  }
+}
+
+function addTag(id: number) {
+  const name = newTag.value.trim()
+  if (!name) return
+  newTag.value = ''
+  void editTags(id, () => engine.tagAsset(id, name))
+}
+
+function removeTag(id: number, tag: AssetTag) {
+  void editTags(id, () => engine.untagAsset(id, tag.id))
+}
 
 const dateFromText: Record<DateSource, MessageKey> = {
   [DateSource.DateFromEXIF]: 'details.dateFrom.exif',
@@ -80,6 +128,32 @@ function showInFolder(id: number) {
       <section v-if="detail.lat !== null && detail.lon !== null">
         <h3>{{ t('details.location') }}</h3>
         <p class="mono">{{ detail.lat.toFixed(5) }}, {{ detail.lon.toFixed(5) }}</p>
+      </section>
+
+      <section>
+        <h3>{{ t('details.tags') }}</h3>
+        <ul v-if="tags.length" class="tags">
+          <li
+            v-for="tag in tags"
+            :key="tag.id"
+            :class="{ ai: tag.source === TagSource.TagByAI }"
+            :title="tag.source === TagSource.TagByAI ? t('details.byAI') : t('details.byYou')"
+          >
+            <RouterLink :to="{ name: 'thing', params: { id: tag.id } }">{{ tag.name }}</RouterLink>
+            <button :title="t('details.removeTag', { name: tag.name })" @click="removeTag(detail.id, tag)">
+              <Icon name="close" :size="12" />
+            </button>
+          </li>
+        </ul>
+        <p v-else class="muted small">{{ t('details.noTags') }}</p>
+        <input
+          v-model="newTag"
+          class="add-tag"
+          :placeholder="t('details.addTag')"
+          :aria-label="t('details.addTag')"
+          maxlength="60"
+          @keydown.enter="addTag(detail.id)"
+        />
       </section>
 
       <section>
@@ -162,5 +236,64 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.tags li {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding-left: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 13px;
+  background: var(--accent-soft);
+  font-size: 12px;
+}
+.tags li.ai {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+.tags a {
+  color: var(--text);
+  text-decoration: none;
+}
+.tags a:hover {
+  text-decoration: underline;
+}
+.tags button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.tags button:hover {
+  color: var(--text);
+}
+.add-tag {
+  width: 100%;
+  height: 30px;
+  margin-top: 4px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.add-tag:focus {
+  border-color: var(--accent);
 }
 </style>

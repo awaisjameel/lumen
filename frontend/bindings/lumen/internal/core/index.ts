@@ -4,14 +4,21 @@
 export {
     DateSource,
     Filter,
-    Kind
+    Kind,
+    TagKind,
+    TagSource
 } from "./models.js";
 
 export type {
+    AI,
     AssetDetail,
+    AssetTag,
     DayBucket,
     DayItems,
     GridItem,
     Progress,
-    Source
+    SearchResult,
+    Source,
+    Tag,
+    View
 } from "./models.js";

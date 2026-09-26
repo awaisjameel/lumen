@@ -75,14 +75,15 @@ func TestIndexerEndToEnd(t *testing.T) {
 	}
 
 	ev := &fakeEvents{}
-	ix := New(st, paths, media.GoThumbnailer{}, ev)
+	cache := media.NewCache(paths.ThumbDir, media.Decoders{})
+	ix := New(st, paths, cache, nil, nil, ev)
 	ix.Start(ctx)
 	defer ix.Stop()
 
 	// 3 photos + 1 heic (thumbnail skipped). Hidden folder and .txt ignored.
 	waitIdle(t, ix, 4)
 
-	buckets, err := st.DayBuckets(ctx, core.FilterAll)
+	buckets, err := st.DayBuckets(ctx, core.View{}, core.TagConfidenceDefault)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestIndexerEndToEnd(t *testing.T) {
 		}
 	}
 
-	days, err := st.DayItems(ctx, "2023-05-14", "2023-05-14", core.FilterAll)
+	days, err := st.DayItems(ctx, "2023-05-14", "2023-05-14", core.View{}, core.TagConfidenceDefault)
 	if err != nil || len(days) != 1 || len(days[0].Items) != 1 {
 		t.Fatalf("day items = %v, %v", days, err)
 	}
@@ -107,7 +108,7 @@ func TestIndexerEndToEnd(t *testing.T) {
 		t.Errorf("big photo item = %+v", big)
 	}
 	for _, size := range []int{core.ThumbSmall, core.ThumbLarge} {
-		f, err := os.Open(media.ThumbPath(paths.ThumbDir, big.ID, size))
+		f, err := os.Open(cache.Path(big.ID, size))
 		if err != nil {
 			t.Fatalf("thumbnail %d missing: %v", size, err)
 		}
@@ -119,7 +120,7 @@ func TestIndexerEndToEnd(t *testing.T) {
 	}
 
 	// The duplicate shares one asset with two paths.
-	trip, _ := st.DayItems(ctx, "2024-01-01", "2024-01-01", core.FilterAll)
+	trip, _ := st.DayItems(ctx, "2024-01-01", "2024-01-01", core.View{}, core.TagConfidenceDefault)
 	var dupPaths int
 	for _, it := range trip[0].Items {
 		d, _ := st.AssetDetail(ctx, it.ID)
@@ -154,7 +155,7 @@ func waitIdle(t *testing.T, ix *Indexer, total int) {
 	for time.Now().Before(deadline) {
 		time.Sleep(200 * time.Millisecond)
 		p = ix.Progress(context.Background())
-		if !p.Scanning && p.Metadata == 0 && p.Thumbnail == 0 && p.Total == total && len(ix.scanReqs) == 0 {
+		if !p.Scanning && p.Metadata == 0 && p.Thumbnail == 0 && p.Embedding == 0 && p.Total == total && len(ix.scanReqs) == 0 {
 			return
 		}
 	}

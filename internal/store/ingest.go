@@ -133,7 +133,7 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 					return err
 				}
 				assetID, _ = res.LastInsertId()
-				for _, st := range []core.Stage{core.StageMetadata, core.StageThumbnail} {
+				for _, st := range core.Stages {
 					if _, err := insJob.ExecContext(ctx, assetID, st, now); err != nil {
 						return err
 					}

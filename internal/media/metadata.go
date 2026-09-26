@@ -18,6 +18,7 @@ import (
 	goexif "github.com/rwcarlsen/goexif/exif"
 
 	"lumen/internal/core"
+	"lumen/internal/media/vips"
 )
 
 // Metadata is what the metadata stage extracts from one file.
@@ -68,11 +69,18 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 		}
 	}
 
+	// No size in the EXIF: read the image header, with Go for the common
+	// formats and libvips for the rest (AVIF, HEIC).
 	if m.Width == 0 || m.Height == 0 {
 		if _, err := f.Seek(0, 0); err == nil {
 			if cfg, _, err := image.DecodeConfig(f); err == nil {
 				m.Width, m.Height = cfg.Width, cfg.Height
 			}
+		}
+	}
+	if m.Width == 0 || m.Height == 0 {
+		if w, h, err := vips.Size(path); err == nil {
+			m.Width, m.Height = w, h
 		}
 	}
 	if m.Orientation >= 5 { // 5..8 are rotated a quarter turn

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -12,11 +13,13 @@ import (
 // ErrNotFound is returned when an asset does not exist or is not visible.
 var ErrNotFound = errors.New("not found")
 
-// DayBuckets counts visible assets per calendar day, newest day first. The
-// grid builds its entire layout, and the timeline scrubber, from this list.
-func (s *Store) DayBuckets(ctx context.Context, f core.Filter) ([]core.DayBucket, error) {
+// DayBuckets counts the view's assets per calendar day, newest day first.
+// The grid builds its entire layout, and the timeline scrubber, from this
+// list. AI tags count from minScore up.
+func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float32) ([]core.DayBucket, error) {
+	where, args := viewSQL(v, minScore)
 	rows, err := s.r.QueryContext(ctx, `SELECT strftime('%Y-%m-%d', taken_at, 'unixepoch') AS day, count(*)
-		FROM assets WHERE `+visible+filterSQL(f)+` GROUP BY day ORDER BY day DESC`)
+		FROM assets WHERE `+where+` GROUP BY day ORDER BY day DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -32,20 +35,26 @@ func (s *Store) DayBuckets(ctx context.Context, f core.Filter) ([]core.DayBucket
 	return out, rows.Err()
 }
 
-// filterSQL is an extra AND clause for a grid filter.
-func filterSQL(f core.Filter) string {
-	switch f {
+// viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
+func viewSQL(v core.View, minScore float32) (string, []any) {
+	where := visible
+	var args []any
+	switch v.Filter {
 	case core.FilterFavourites:
-		return " AND favourite = 1"
+		where += " AND favourite = 1"
 	case core.FilterVideos:
-		return " AND kind = 'video'"
+		where += " AND kind = 'video'"
 	}
-	return ""
+	if v.Tag != 0 {
+		where += " AND id IN (SELECT x.asset_id FROM asset_tags x WHERE x.tag_id = ? AND " + tagApplies + ")"
+		args = append(args, v.Tag, minScore)
+	}
+	return where, args
 }
 
-// DayItems returns the grid items for the days from..to inclusive
+// DayItems returns the view's grid items for the days from..to inclusive
 // (YYYY-MM-DD, either order), grouped by day, newest first.
-func (s *Store) DayItems(ctx context.Context, from, to string, f core.Filter) ([]core.DayItems, error) {
+func (s *Store) DayItems(ctx context.Context, from, to string, v core.View, minScore float32) ([]core.DayItems, error) {
 	a, err := time.Parse(time.DateOnly, from)
 	if err != nil {
 		return nil, err
@@ -57,10 +66,10 @@ func (s *Store) DayItems(ctx context.Context, from, to string, f core.Filter) ([
 	if a.After(b) {
 		a, b = b, a
 	}
-	rows, err := s.r.QueryContext(ctx, `SELECT id, taken_at, COALESCE(width, 0), COALESCE(height, 0),
-			kind = 'video', favourite, thumb_version
-		FROM assets WHERE `+visible+filterSQL(f)+` AND taken_at >= ? AND taken_at < ?
-		ORDER BY taken_at DESC, id DESC`, a.Unix(), b.AddDate(0, 0, 1).Unix())
+	where, args := viewSQL(v, minScore)
+	rows, err := s.r.QueryContext(ctx, `SELECT id, taken_at, `+gridColumns+`
+		FROM assets WHERE `+where+` AND taken_at >= ? AND taken_at < ?
+		ORDER BY taken_at DESC, id DESC`, append(args, a.Unix(), b.AddDate(0, 0, 1).Unix())...)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +78,7 @@ func (s *Store) DayItems(ctx context.Context, from, to string, f core.Filter) ([
 	for rows.Next() {
 		var it core.GridItem
 		var takenAt int64
-		if err := rows.Scan(&it.ID, &takenAt, &it.W, &it.H, &it.Video, &it.Favourite, &it.Thumb); err != nil {
+		if err := rows.Scan(append([]any{&it.ID, &takenAt}, gridFields(&it)...)...); err != nil {
 			return nil, err
 		}
 		day := time.Unix(takenAt, 0).UTC().Format(time.DateOnly)
@@ -79,6 +88,50 @@ func (s *Store) DayItems(ctx context.Context, from, to string, f core.Filter) ([
 		out[len(out)-1].Items = append(out[len(out)-1].Items, it)
 	}
 	return out, rows.Err()
+}
+
+// gridColumns are the columns a core.GridItem needs besides its id, in
+// gridFields order.
+const gridColumns = "COALESCE(width, 0), COALESCE(height, 0), kind = 'video', favourite, thumb_version"
+
+func gridFields(it *core.GridItem) []any {
+	return []any{&it.W, &it.H, &it.Video, &it.Favourite, &it.Thumb}
+}
+
+// GridItems returns the visible assets among ids, in the order given
+// (search results arrive best match first).
+func (s *Store) GridItems(ctx context.Context, ids []int64) ([]core.GridItem, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	list, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.r.QueryContext(ctx, `SELECT id, `+gridColumns+`
+		FROM assets WHERE id IN (SELECT value FROM json_each(?)) AND `+visible, string(list))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	found := make(map[int64]core.GridItem, len(ids))
+	for rows.Next() {
+		var it core.GridItem
+		if err := rows.Scan(append([]any{&it.ID}, gridFields(&it)...)...); err != nil {
+			return nil, err
+		}
+		found[it.ID] = it
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]core.GridItem, 0, len(found))
+	for _, id := range ids {
+		if it, ok := found[id]; ok {
+			out = append(out, it)
+		}
+	}
+	return out, nil
 }
 
 // AssetDetail returns everything the details panel shows for one asset.

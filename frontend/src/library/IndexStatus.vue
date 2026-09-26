@@ -11,8 +11,11 @@ import { useLibrary } from './store'
 const lib = useLibrary()
 const p = computed(() => lib.progress)
 
-// Thumbnails are the long pole: every asset needs one, metadata first.
-const left = computed(() => (p.value ? Math.max(p.value.metadata, p.value.thumbnail) : 0))
+// Two phases: preparing (metadata, then thumbnails: browsable) and then
+// understanding (the AI: searchable). Each shows how much is left.
+const preparing = computed(() => (p.value ? Math.max(p.value.metadata, p.value.thumbnail) : 0))
+const understanding = computed(() => p.value?.embedding ?? 0)
+const left = computed(() => preparing.value || understanding.value)
 const busy = computed(() => !!p.value && (p.value.scanning || left.value > 0))
 const fraction = computed(() => {
   const v = p.value
@@ -25,7 +28,9 @@ const label = computed(() => {
   if (!v) return ''
   if (v.paused && left.value) return t('status.paused', { left: left.value })
   if (v.scanning) return t('status.scanning', { n: v.discovered })
-  if (left.value) return t('status.preparing', { left: left.value })
+  if (preparing.value) return t('status.preparing', { left: preparing.value })
+  if (understanding.value && v.onBattery) return t('status.battery', { left: understanding.value })
+  if (understanding.value) return t('status.understanding', { left: understanding.value })
   return t('status.upToDate')
 })
 
@@ -51,6 +56,7 @@ function togglePause() {
       <span :style="{ width: fraction * 100 + '%' }" />
     </div>
     <p v-if="!busy && p.total" class="sub">{{ t('status.items', { n: p.total }) }}</p>
+    <p v-if="p.ai.error" class="sub" :title="p.ai.error">{{ t('status.aiOff') }}</p>
     <p v-if="p.skipped" class="sub">{{ t('status.skipped', { n: p.skipped }) }}</p>
     <p v-if="p.errors" class="sub">{{ t('status.errors', { n: p.errors }) }}</p>
   </div>

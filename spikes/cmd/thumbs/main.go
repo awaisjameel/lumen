@@ -1,5 +1,6 @@
-// Spike: make 256 + 1024 px thumbnails for ~1,000 local images with the
-// current pure-Go thumbnailer and with libvips, and HEIC via WIC and FFmpeg.
+// Spike: make 256 + 1024 px thumbnails for ~1,000 local images with libvips,
+// and HEIC via WIC and FFmpeg. (It also timed the Phase 1 pure-Go
+// thumbnailer, since replaced by libvips; its numbers are in README.md.)
 package main
 
 import (
@@ -21,7 +22,6 @@ import (
 	"golang.org/x/image/draw"
 
 	"lumen/internal/core"
-	"lumen/internal/media"
 	"lumen/spikes/corpus"
 	"lumen/spikes/vips"
 	"lumen/spikes/wic"
@@ -50,10 +50,6 @@ func main() {
 	vips.SetConcurrency(1) // parallelism comes from our workers
 	fmt.Println("libvips", vips.Version())
 
-	run("pure Go (current)", paths, *workers, func(p string) error {
-		_, err := media.GoThumbnailer{}.Thumbnail(p, core.KindPhoto, 1)
-		return err
-	})
 	run("libvips", paths, *workers, func(p string) error {
 		big, small, _, _, err := vips.Thumbs(p, core.ThumbLarge, core.ThumbSmall)
 		if err == nil && strings.HasSuffix(p, "0.JPG") { // keep a few samples to eyeball

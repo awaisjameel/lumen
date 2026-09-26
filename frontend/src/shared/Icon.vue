@@ -17,6 +17,12 @@ export type IconName =
   | 'play'
   | 'image-off'
   | 'lock'
+  | 'search'
+  | 'tag'
+  | 'things'
+  | 'eye'
+  | 'eye-off'
+  | 'trash'
 
 const paths: Record<IconName, string> = {
   photos: 'M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 16l4.5-4.5a1.5 1.5 0 0 1 2.1 0L16 17M14 15l1.5-1.5a1.5 1.5 0 0 1 2.1 0L20 16M15.5 8.5h.01',
@@ -36,6 +42,12 @@ const paths: Record<IconName, string> = {
   play: 'M7 5l12 7-12 7z',
   'image-off': 'M4 4l16 16M20 16V6a2 2 0 0 0-2-2H8M4 8v10a2 2 0 0 0 2 2h10',
   lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
+  search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
+  tag: 'M3.5 12.5V5a1.5 1.5 0 0 1 1.5-1.5h7.5l8 8a1.5 1.5 0 0 1 0 2.1l-6.4 6.4a1.5 1.5 0 0 1-2.1 0zM8 8h.01',
+  things: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM17 14a3 3 0 1 1 0 6 3 3 0 0 1 0-6z',
+  eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  'eye-off': 'M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3 3.9M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
+  trash: 'M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3',
 }
 </script>
 

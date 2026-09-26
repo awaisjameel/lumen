@@ -133,14 +133,34 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 // visible is the WHERE clause of the assets_timeline partial index.
 const visible = "hidden = 0 AND trashed_at IS NULL AND missing_since IS NULL"
 
+// visibleAs is visible for the assets table under an alias, for joins.
+func visibleAs(alias string) string {
+	return alias + ".hidden = 0 AND " + alias + ".trashed_at IS NULL AND " + alias + ".missing_since IS NULL"
+}
+
+// setting reads a raw setting value; ok is false if it has never been set.
+func (s *Store) setting(ctx context.Context, key string) (v string, ok bool, err error) {
+	err = s.r.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return v, err == nil, err
+}
+
+func (s *Store) setSetting(ctx context.Context, key, value string) error {
+	_, err := s.w.ExecContext(ctx,
+		"INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+		key, value)
+	return err
+}
+
 // Bool returns a boolean setting, or def if it has never been set.
 func (s *Store) Bool(ctx context.Context, key string, def bool) (bool, error) {
-	var v string
-	err := s.r.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = ?", key).Scan(&v)
-	if errors.Is(err, sql.ErrNoRows) {
-		return def, nil
+	v, ok, err := s.setting(ctx, key)
+	if !ok {
+		return def, err
 	}
-	return v == "1", err
+	return v == "1", nil
 }
 
 // SetBool stores a boolean setting.
@@ -149,8 +169,24 @@ func (s *Store) SetBool(ctx context.Context, key string, v bool) error {
 	if v {
 		value = "1"
 	}
-	_, err := s.w.ExecContext(ctx,
-		"INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-		key, value)
-	return err
+	return s.setSetting(ctx, key, value)
+}
+
+// Float returns a number setting, or def if it has never been set (or is
+// unreadable).
+func (s *Store) Float(ctx context.Context, key string, def float64) (float64, error) {
+	v, ok, err := s.setting(ctx, key)
+	if !ok {
+		return def, err
+	}
+	f, perr := strconv.ParseFloat(v, 64)
+	if perr != nil {
+		return def, nil
+	}
+	return f, nil
+}
+
+// SetFloat stores a number setting.
+func (s *Store) SetFloat(ctx context.Context, key string, v float64) error {
+	return s.setSetting(ctx, key, strconv.FormatFloat(v, 'g', -1, 64))
 }

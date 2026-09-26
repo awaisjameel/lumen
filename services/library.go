@@ -46,7 +46,9 @@ func (e *Emitter) LibraryChanged(visible int) {
 
 // Settings are the user-facing toggles.
 type Settings struct {
-	Videos bool `json:"videos"`
+	Videos        bool    `json:"videos"`
+	AIOnBattery   bool    `json:"aiOnBattery"`
+	TagConfidence float64 `json:"tagConfidence"` // core.TagConfidenceMin..Max
 }
 
 // LibraryService is everything about browsing and managing the library.
@@ -134,14 +136,22 @@ func (s *LibraryService) RemoveSource(ctx context.Context, id int64) error {
 // Rescan checks every folder for changes.
 func (s *LibraryService) Rescan() { s.ix.RescanAll() }
 
-// Timeline returns asset counts per day, newest first.
-func (s *LibraryService) Timeline(ctx context.Context, filter core.Filter) ([]core.DayBucket, error) {
-	return s.store.DayBuckets(ctx, filter)
+// Timeline returns the view's asset counts per day, newest first.
+func (s *LibraryService) Timeline(ctx context.Context, view core.View) ([]core.DayBucket, error) {
+	min, err := tagConfidence(ctx, s.store)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.DayBuckets(ctx, view, min)
 }
 
-// Days returns the grid items for the days from..to (YYYY-MM-DD, inclusive).
-func (s *LibraryService) Days(ctx context.Context, from, to string, filter core.Filter) ([]core.DayItems, error) {
-	return s.store.DayItems(ctx, from, to, filter)
+// Days returns the view's grid items for the days from..to (YYYY-MM-DD, inclusive).
+func (s *LibraryService) Days(ctx context.Context, from, to string, view core.View) ([]core.DayItems, error) {
+	min, err := tagConfidence(ctx, s.store)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.DayItems(ctx, from, to, view, min)
 }
 
 // Focus tells the indexer which days are on screen so they are processed first.
@@ -179,7 +189,32 @@ func (s *LibraryService) SetPaused(paused bool) { s.ix.SetPaused(paused) }
 // Settings returns the user's settings.
 func (s *LibraryService) Settings(ctx context.Context) (Settings, error) {
 	videos, err := s.store.Bool(ctx, core.SettingVideos, false)
-	return Settings{Videos: videos}, err
+	if err != nil {
+		return Settings{}, err
+	}
+	battery, err := s.store.Bool(ctx, core.SettingAIOnBattery, false)
+	if err != nil {
+		return Settings{}, err
+	}
+	conf, err := tagConfidence(ctx, s.store)
+	return Settings{Videos: videos, AIOnBattery: battery, TagConfidence: float64(conf)}, err
+}
+
+// SetAIOnBattery lets the AI keep working on battery power (it waits for
+// mains power by default).
+func (s *LibraryService) SetAIOnBattery(ctx context.Context, on bool) error {
+	if err := s.store.SetBool(ctx, core.SettingAIOnBattery, on); err != nil {
+		return err
+	}
+	s.ix.SetAIOnBattery(on)
+	return nil
+}
+
+// SetTagConfidence sets how sure the AI must be for a tag to apply. Stored
+// scores cover the whole range, so this takes effect at once.
+func (s *LibraryService) SetTagConfidence(ctx context.Context, v float64) error {
+	v = min(max(v, core.TagConfidenceMin), core.TagConfidenceMax)
+	return s.store.SetFloat(ctx, core.SettingTagConfidence, v)
 }
 
 // SetVideos turns video indexing on or off, then rescans so the change applies.

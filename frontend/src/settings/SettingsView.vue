@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { engine } from '../bridge'
+import { computed, onBeforeUnmount, ref } from 'vue'
+import { engine, TAG_CONFIDENCE_MAX, TAG_CONFIDENCE_MIN } from '../bridge'
 import { useLibrary } from '../library/store'
-import { errorText, orFallback } from '../shared/errors'
+import { errorText, logError, orFallback } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { theme } from '../shared/theme'
@@ -28,6 +28,42 @@ async function addFolder() {
 }
 
 const themes: Theme[] = ['system', 'light', 'dark']
+
+const aiStatus = computed(() => {
+  const ai = lib.progress?.ai
+  if (ai?.error) return t('settings.aiError', { error: ai.error })
+  if (ai?.device === 'gpu') return t('settings.aiGpu')
+  if (ai?.device === 'cpu') return t('settings.aiCpu')
+  return t('settings.aiIdle')
+})
+
+// Tag confidence on a log scale: probabilities span two orders of magnitude.
+// The slider runs from more tags (left) to fewer, surer ones (right).
+const span = Math.log(TAG_CONFIDENCE_MAX / TAG_CONFIDENCE_MIN)
+const confidencePos = computed(() =>
+  Math.round((100 * Math.log(lib.settings.tagConfidence / TAG_CONFIDENCE_MIN)) / span),
+)
+let saveTimer = 0
+function onConfidence(pos: number) {
+  lib.settings.tagConfidence = TAG_CONFIDENCE_MIN * Math.exp((span * pos) / 100)
+  clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(() => {
+    engine
+      .setTagConfidence(lib.settings.tagConfidence)
+      .then(() => lib.refresh())
+      .catch((e: unknown) => (error.value = errorText(e)))
+  }, 250)
+}
+onBeforeUnmount(() => clearTimeout(saveTimer))
+
+function setAIOnBattery(on: boolean) {
+  lib.settings.aiOnBattery = on
+  engine.setAIOnBattery(on).catch((e: unknown) => {
+    lib.settings.aiOnBattery = !on
+    error.value = errorText(e)
+    logError(e)
+  })
+}
 </script>
 
 <template>
@@ -75,6 +111,42 @@ const themes: Theme[] = ['system', 'light', 'dark']
           />
           <span>{{ t('settings.pause') }}</span>
         </label>
+      </section>
+
+      <section>
+        <h2>{{ t('settings.ai') }}</h2>
+        <p class="muted hint">{{ t('settings.aiHint') }}</p>
+        <p class="ai-status">{{ aiStatus }}</p>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            :checked="lib.settings.aiOnBattery"
+            @change="setAIOnBattery(($event.target as HTMLInputElement).checked)"
+          />
+          <span>
+            {{ t('settings.aiOnBattery') }}
+            <small class="muted">{{ t('settings.aiOnBatteryHint') }}</small>
+          </span>
+        </label>
+        <details class="advanced">
+          <summary>{{ t('settings.advanced') }}</summary>
+          <div class="slider">
+            <label for="confidence">{{ t('settings.confidence') }}</label>
+            <small class="muted">{{ t('settings.confidenceHint') }}</small>
+            <input
+              id="confidence"
+              type="range"
+              min="0"
+              max="100"
+              :value="confidencePos"
+              @input="onConfidence(Number(($event.target as HTMLInputElement).value))"
+            />
+            <div class="ends muted">
+              <span>{{ t('settings.confidenceMore') }}</span>
+              <span>{{ t('settings.confidenceFewer') }}</span>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section>
@@ -201,5 +273,32 @@ h2 {
 }
 .error {
   color: var(--danger);
+}
+.ai-status {
+  margin: 0 0 4px;
+}
+.advanced {
+  margin-top: 8px;
+}
+.advanced summary {
+  padding: 6px 0;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.slider {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 420px;
+  padding: 8px 0 0;
+}
+.slider input {
+  margin: 8px 0 2px;
+  accent-color: var(--accent);
+}
+.ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
 }
 </style>

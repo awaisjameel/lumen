@@ -45,6 +45,8 @@ tasks:
             ref: .DEV
       - task: common:generate:icons
     preconditions:
+      - sh: '[ -f deps/vips/lib/libvips.lib ] && [ -f deps/runtime/models/siglip2/siglip2.json ]'
+        msg: "Native dependencies missing: run scripts/deps.sh (Git Bash) once. It fetches libvips, ONNX Runtime, FFmpeg and the models into deps/."
       - sh: '{{if eq .OBFUSCATED "true"}}command -v garble >/dev/null 2>&1{{else}}true{{end}}'
         msg: "garble is required for obfuscated builds. Install it with: go install mvdan.cc/garble@v0.16.0 (requires Go 1.24+). See https://github.com/burrowers/garble/releases for version/toolchain compatibility."
     cmds:
