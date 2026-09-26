@@ -88,19 +88,31 @@ function addTag(id: number) {
   const name = newTag.value.trim()
   if (!name) return
   newTag.value = ''
-  void edit(() => engine.tagAsset(id, name), () => loadTags(id))
+  void edit(
+    () => engine.tagAsset(id, name),
+    () => loadTags(id),
+  )
 }
 
 function removeTag(id: number, tag: AssetTag) {
-  void edit(() => engine.untagAsset(id, tag.id), () => loadTags(id))
+  void edit(
+    () => engine.untagAsset(id, tag.id),
+    () => loadTags(id),
+  )
 }
 
 function nameFace(id: number, face: Face, name: string) {
-  void edit(() => engine.nameFaces([face.id], name), () => loadFaces(id))
+  void edit(
+    () => engine.nameFaces([face.id], name),
+    () => loadFaces(id),
+  )
 }
 
 function notThem(id: number, face: Face) {
-  void edit(() => engine.rejectFaces(face.person, [face.id]), () => loadFaces(id))
+  void edit(
+    () => engine.rejectFaces(face.person, [face.id]),
+    () => loadFaces(id),
+  )
 }
 
 const dateFromText: Record<DateSource, MessageKey> = {

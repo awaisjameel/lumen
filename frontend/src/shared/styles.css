@@ -5,8 +5,8 @@
 :root {
   color-scheme: light dark;
 
-  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
 
   --radius-s: 4px;
   --radius-m: 8px;
@@ -34,11 +34,11 @@
   --viewer-bg: #0c0c0e;
 }
 
-:root[data-theme="light"] {
+:root[data-theme='light'] {
   color-scheme: light;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme='dark'] {
   color-scheme: dark;
 }
 
@@ -128,7 +128,7 @@ select {
   background: var(--surface-hover);
   color: var(--text);
 }
-.icon-btn[aria-pressed="true"] {
+.icon-btn[aria-pressed='true'] {
   background: var(--accent-soft);
   color: var(--accent);
 }

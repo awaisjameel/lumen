@@ -25,11 +25,8 @@ const text = ref('')
 const open = ref(false)
 const active = ref(0) // index into options
 
-const found = useSuggestions(
-  text,
-  (q) => Promise.all([engine.suggestPeople(q), engine.suggestTags(q)]),
-  [[], []] as [Person[], Tag[]],
-)
+const suggest = (q: string) => Promise.all([engine.suggestPeople(q), engine.suggestTags(q)])
+const found = useSuggestions<[Person[], Tag[]]>(text, suggest, [[], []])
 
 /** What the menu offers: searching for the text, then people, then Things. */
 type Option = { kind: 'search' } | { kind: 'person'; person: Person } | { kind: 'thing'; tag: Tag }

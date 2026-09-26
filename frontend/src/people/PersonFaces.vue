@@ -33,10 +33,14 @@ async function load() {
   faces.value = f
   selected.value = new Set([...selected.value].filter((x) => f.some((y) => y.id === x)))
 }
-watch(id, () => {
-  selected.value = new Set()
-  load().catch((e: unknown) => (error.value = errorText(e)))
-}, { immediate: true })
+watch(
+  id,
+  () => {
+    selected.value = new Set()
+    load().catch((e: unknown) => (error.value = errorText(e)))
+  },
+  { immediate: true },
+)
 
 function toggle(f: Face) {
   const s = new Set(selected.value)

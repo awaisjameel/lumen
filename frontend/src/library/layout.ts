@@ -7,9 +7,9 @@ import type { DayBucket } from '../bridge'
 const HEADER_H = 48
 export const GAP = 4
 
+/** A day's header, or a row of cells: items [start, start+n) of that day. */
 export type Row =
-  | { kind: 'header'; day: string; count: number }
-  | { kind: 'cells'; day: string; start: number; n: number } // items [start, start+n) of that day
+  { kind: 'header'; day: string; count: number } | { kind: 'cells'; day: string; start: number; n: number }
 
 export interface Layout {
   rows: Row[]

@@ -138,8 +138,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
         </template>
       </div>
 
-      <button class="nav prev" :title="t('viewer.prev')" @click="go(-1)"><Icon name="chevron-left" :size="28" /></button>
-      <button class="nav next" :title="t('viewer.next')" @click="go(1)"><Icon name="chevron-right" :size="28" /></button>
+      <button class="nav prev" :title="t('viewer.prev')" @click="go(-1)">
+        <Icon name="chevron-left" :size="28" />
+      </button>
+      <button class="nav next" :title="t('viewer.next')" @click="go(1)">
+        <Icon name="chevron-right" :size="28" />
+      </button>
     </div>
     <DetailsPanel v-if="lib.showDetails" :sel="lib.viewer" class="panel" />
   </div>

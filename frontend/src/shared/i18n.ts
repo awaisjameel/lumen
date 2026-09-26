@@ -4,7 +4,7 @@
 // {n} (Intl.PluralRules: English uses one and other).
 
 /** A message, or one form per plural category of its {n}. */
-type Message = string | Partial<Record<Intl.LDMLPluralRule, string>> & { other: string }
+type Message = string | (Partial<Record<Intl.LDMLPluralRule, string>> & { other: string })
 
 const en = {
   'app.name': 'Lumen',
@@ -34,7 +34,8 @@ const en = {
   'search.peopleHeading': 'People',
   'search.withPeople': 'Photos with {names}.',
 
-  'people.intro': 'Lumen finds the people in your photos, right here on this computer. Name someone once and every photo of them follows.',
+  'people.intro':
+    'Lumen finds the people in your photos, right here on this computer. Name someone once and every photo of them follows.',
   'people.unavailable': 'People isn’t available: {error}',
   'people.named': 'Named',
   'people.notNamed': 'Not named yet',
@@ -97,7 +98,8 @@ const en = {
   'welcome.none': 'We couldn’t find the usual photo folders. Add one to get started.',
   'welcome.addFolder': 'Add a folder…',
   'welcome.start': 'Start',
-  'welcome.privacy': 'Everything stays on this computer. Nothing is uploaded, and your files are never moved or changed.',
+  'welcome.privacy':
+    'Everything stays on this computer. Nothing is uploaded, and your files are never moved or changed.',
 
   'status.scanning': 'Looking for photos… {n} found',
   'status.preparing': 'Preparing your library… {left} left',
@@ -157,7 +159,8 @@ const en = {
 
   'settings.title': 'Settings',
   'settings.folders': 'Folders',
-  'settings.foldersHint': 'Lumen looks for photos in these folders and keeps watching them for changes. Removing a folder never deletes anything on disk.',
+  'settings.foldersHint':
+    'Lumen looks for photos in these folders and keeps watching them for changes. Removing a folder never deletes anything on disk.',
   'settings.addFolder': 'Add a folder…',
   'settings.remove': 'Remove',
   'settings.rescan': 'Check for changes now',
@@ -166,7 +169,8 @@ const en = {
   'settings.indexing': 'Background work',
   'settings.pause': 'Pause indexing',
   'settings.ai': 'Search, Things and People',
-  'settings.aiHint': 'Lumen understands your photos on this computer, so you can search them by what’s in them and who is in them. Nothing is uploaded.',
+  'settings.aiHint':
+    'Lumen understands your photos on this computer, so you can search them by what’s in them and who is in them. Nothing is uploaded.',
   'settings.aiGpu': 'Working on the graphics card.',
   'settings.aiCpu': 'Working on the processor.',
   'settings.aiIdle': 'Ready.',
@@ -185,7 +189,8 @@ const en = {
   'settings.theme.light': 'Light',
   'settings.theme.dark': 'Dark',
   'settings.privacy': 'Privacy',
-  'settings.privacyText': 'Lumen works entirely on this computer. It makes no network connections and collects no data.',
+  'settings.privacyText':
+    'Lumen works entirely on this computer. It makes no network connections and collects no data.',
 
   'common.cancel': 'Cancel',
 

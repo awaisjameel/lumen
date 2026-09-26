@@ -54,7 +54,7 @@ It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, F
 
 Check with `wails3 doctor`.
 
-Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), whatever `core.autocrlf` says.
+Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), whatever `core.autocrlf` says. Formatting is the tools' job, never by hand: gofmt for Go, Prettier for the frontend (`npm run format`, pinned in `package.json`). `.editorconfig` and `.vscode/settings.json` make editors do the same on save (install the recommended extensions).
 
 ## Commands
 
@@ -66,6 +66,7 @@ go test -race ./internal/...  # engine tests, with the race detector (AI tests u
 go vet . ./internal/... ./services/...
 staticcheck . ./internal/... ./services/...   # go install honnef.co/go/tools/cmd/staticcheck@latest
 cd frontend && npm run typecheck
+cd frontend && npm run format # Prettier (pinned, frontend/.prettierrc.json); format:check only checks
 ```
 
 Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates, which only build for their own platforms.

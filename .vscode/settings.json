@@ -1,0 +1,16 @@
+{
+  // Format on save with the project's own tools, so saving never fights the
+  // repository's style: Prettier from frontend/node_modules with
+  // frontend/.prettierrc.json, and gofmt (via gopls) for Go.
+  "editor.formatOnSave": true,
+  "files.eol": "\n",
+  "prettier.requireConfig": true,
+  "prettier.resolveGlobalModules": false,
+  "prettier.ignorePath": "frontend/.prettierignore",
+  "[typescript][javascript][vue][css][html][json][jsonc]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[go]": {
+    "editor.defaultFormatter": "golang.go"
+  }
+}
