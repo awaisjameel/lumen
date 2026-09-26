@@ -7,6 +7,7 @@ import { bytes, dateTime, megapixels } from '../shared/format'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
+import { useLiveReload } from '../shared/liveReload'
 import FaceThumb from '../people/FaceThumb.vue'
 import PersonPicker from '../people/PersonPicker.vue'
 import { useLibrary } from './store'
@@ -38,18 +39,15 @@ watch(
   { immediate: true },
 )
 
-// Tags and faces: reload when the photo changes, and as the AI works
-// through the library (they may arrive while the panel is open).
+// Tags and faces: load with the photo, and again as the library changes
+// while the panel is open (the AI adds tags, finds faces, groups people).
+const loadExtras = (id: number | undefined) => Promise.all([loadTags(id), loadFaces(id)])
 watch(
-  () => [props.sel?.id, lib.progress?.embedding] as const,
-  ([id]) => void loadTags(id),
+  () => props.sel?.id,
+  (id) => void loadExtras(id),
   { immediate: true },
 )
-watch(
-  () => [props.sel?.id, lib.progress?.faces] as const,
-  ([id]) => void loadFaces(id),
-  { immediate: true },
-)
+useLiveReload(() => loadExtras(props.sel?.id))
 
 async function loadTags(id: number | undefined) {
   if (!id) return void (tags.value = [])
@@ -197,7 +195,12 @@ function showInFolder(id: number) {
                 <Icon name="close" :size="12" />
               </button>
             </template>
-            <PersonPicker v-else class="who" :placeholder="t('details.whoIsThis')" @pick="(n) => nameFace(detail!.id, f, n)" />
+            <PersonPicker
+              v-else
+              class="who"
+              :placeholder="t('details.whoIsThis')"
+              @pick="(n) => nameFace(detail!.id, f, n)"
+            />
           </li>
         </ul>
       </section>

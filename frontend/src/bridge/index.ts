@@ -99,7 +99,6 @@ export const engine = {
   setPersonHidden: (id: number, hidden: boolean): Promise<void> => PeopleService.SetPersonHidden(id, hidden),
   setPersonCover: (id: number, face: number): Promise<void> => PeopleService.SetPersonCover(id, face),
   rejectFaces: (person: number, faces: number[]): Promise<void> => PeopleService.RejectFaces(person, faces),
-  moveFaces: (faces: number[], person: number): Promise<void> => PeopleService.MoveFaces(faces, person),
   nameFaces: (faces: number[], name: string): Promise<number> => PeopleService.NameFaces(faces, name),
 }
 

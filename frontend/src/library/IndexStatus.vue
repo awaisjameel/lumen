@@ -58,6 +58,7 @@ function togglePause() {
     </div>
     <p v-if="!busy && p.total" class="sub">{{ t('status.items', { n: p.total }) }}</p>
     <p v-if="p.ai.error" class="sub" :title="p.ai.error">{{ t('status.aiOff') }}</p>
+    <p v-if="p.ai.facesError" class="sub" :title="p.ai.facesError">{{ t('status.peopleOff') }}</p>
     <p v-if="p.skipped" class="sub">{{ t('status.skipped', { n: p.skipped }) }}</p>
     <p v-if="p.errors" class="sub">{{ t('status.errors', { n: p.errors }) }}</p>
   </div>

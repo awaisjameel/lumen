@@ -2,7 +2,11 @@ package people
 
 import (
 	"cmp"
+	"context"
+	"runtime"
 
+	"lumen/internal/ai"
+	"lumen/internal/parallel"
 	"lumen/internal/store"
 )
 
@@ -55,13 +59,13 @@ func (l *Linker) Update(faces []store.ClusterFace) map[int64][]int64 {
 	// also offered to the old face's list afterwards.
 	lists := make([][]near, len(fresh))
 	back := make([][]near, len(fresh)) // (old face, similarity to this new face)
-	parallel(len(fresh), func(k int) {
+	parallel.For(context.Background(), len(fresh), runtime.NumCPU(), func(k int) {
 		v := loose[fresh[k]]
 		for _, o := range loose {
 			if o.ID == v.ID {
 				continue
 			}
-			s := dot(v.Vec, o.Vec)
+			s := ai.Dot(v.Vec, o.Vec)
 			if s < l.floor {
 				continue
 			}

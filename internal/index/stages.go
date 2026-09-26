@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"sync"
 	"time"
 
 	"lumen/internal/ai"
 	"lumen/internal/core"
 	"lumen/internal/media"
+	"lumen/internal/parallel"
 	"lumen/internal/search"
 	"lumen/internal/store"
 )
@@ -92,33 +92,9 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 func eachItem[R any](workers int, fn func(context.Context, store.JobItem) R) func(context.Context, []store.JobItem) ([]R, error) {
 	return func(ctx context.Context, items []store.JobItem) ([]R, error) {
 		results := make([]R, len(items))
-		parallel(ctx, len(items), workers, func(i int) { results[i] = fn(ctx, items[i]) })
+		parallel.For(ctx, len(items), workers, func(i int) { results[i] = fn(ctx, items[i]) })
 		return results, nil
 	}
-}
-
-// parallel calls fn(0..n-1) on up to workers goroutines, stopping early
-// (without starting more calls) if ctx ends.
-func parallel(ctx context.Context, n, workers int, fn func(i int)) {
-	idx := make(chan int)
-	var wg sync.WaitGroup
-	for range min(workers, n) {
-		wg.Go(func() {
-			for i := range idx {
-				fn(i)
-			}
-		})
-	}
-feed:
-	for i := range n {
-		select {
-		case idx <- i:
-		case <-ctx.Done():
-			break feed
-		}
-	}
-	close(idx)
-	wg.Wait()
 }
 
 func (ix *Indexer) fetch(ctx context.Context, stage core.Stage, n int) ([]store.JobItem, error) {
@@ -169,6 +145,10 @@ func (ix *Indexer) doThumbnail(ctx context.Context, j store.JobItem) (r store.Th
 	return r
 }
 
+// embedWorkers is how many photos have their image model input (read from
+// the thumbnail) prepared at once.
+const embedWorkers = 4
+
 // doEmbeddings embeds a batch of photos with SigLIP and tags them. Inputs
 // come from the 1024 px thumbnails (upright, small, already decoded once),
 // rebuilt first if they were evicted.
@@ -183,7 +163,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 	side := ix.search.Model().ImageSize
 	results := make([]store.EmbedResult, len(items))
 	inputs := make([][]byte, len(items))
-	parallel(ctx, len(items), 4, func(i int) {
+	parallel.For(ctx, len(items), embedWorkers, func(i int) {
 		j := items[i]
 		r := &results[i]
 		r.AssetID = j.AssetID
@@ -270,7 +250,7 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 		return nil, err
 	}
 	results := make([]store.FaceResult, len(items))
-	parallel(ctx, len(items), faceWorkers, func(i int) {
+	parallel.For(ctx, len(items), faceWorkers, func(i int) {
 		j := items[i]
 		r := &results[i]
 		r.AssetID = j.AssetID

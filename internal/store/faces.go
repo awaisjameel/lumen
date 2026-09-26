@@ -251,7 +251,7 @@ func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 }
 
 // mergePeople moves everything of person from to person into and deletes
-// from. into keeps its name, or takes from's if it has none.
+// from. into keeps its name and picture, or takes from's if it has none.
 func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64) error {
 	var name sql.NullString
 	if err := tx.QueryRowContext(ctx, "SELECT name FROM people WHERE id = ?", from).Scan(&name); err != nil {
@@ -259,6 +259,8 @@ func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64) error {
 	}
 	for _, q := range []string{
 		"UPDATE faces SET person_id = ?2 WHERE person_id = ?1",
+		`UPDATE people SET cover_face = (SELECT cover_face FROM people WHERE id = ?1)
+			WHERE id = ?2 AND cover_face IS NULL`,
 		`INSERT OR IGNORE INTO face_rejections (face_id, person_id)
 			SELECT face_id, ?2 FROM face_rejections WHERE person_id = ?1`,
 		// A face now in into can't also be rejected by it.

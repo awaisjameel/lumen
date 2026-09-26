@@ -86,23 +86,12 @@ func (s *PeopleService) RejectFaces(ctx context.Context, person int64, faces []i
 	return s.edited(s.store.RejectFaces(ctx, person, faces))
 }
 
-// MoveFaces puts faces with another person.
-func (s *PeopleService) MoveFaces(ctx context.Context, faces []int64, person int64) error {
-	return s.edited(s.store.MoveFaces(ctx, faces, person))
-}
-
 // NameFaces puts faces with the person of that name, who is created if new
 // ("" makes a new unnamed person: splitting someone in two). It returns
 // their id.
 func (s *PeopleService) NameFaces(ctx context.Context, faces []int64, name string) (int64, error) {
-	id, err := s.store.PersonByName(ctx, name)
-	if errors.Is(err, store.ErrNotFound) || name == "" {
-		id, err = s.store.CreatePerson(ctx, name)
-	}
-	if err != nil {
-		return 0, err
-	}
-	return id, s.edited(s.store.MoveFaces(ctx, faces, id))
+	id, err := s.store.NameFaces(ctx, faces, name)
+	return id, s.edited(err)
 }
 
 // edited asks for clustering after a correction succeeded (the faces it

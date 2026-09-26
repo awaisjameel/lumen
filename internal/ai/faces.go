@@ -103,10 +103,10 @@ func (f *Faces) Close() {
 // surest first. The image is scaled to fit the detector's square input, so
 // its long edge sets the smallest face found (about 10 detector pixels).
 func (f *Faces) Detect(pix []byte, w, h int, minScore float32) ([]Face, error) {
-	side := f.m.DetectSize
-	if w <= 0 || h <= 0 || len(pix) != w*h*3 {
-		return nil, fmt.Errorf("detect faces: bad image (%dx%d, %d bytes)", w, h, len(pix))
+	if err := checkRGB(pix, w, h); err != nil {
+		return nil, err
 	}
+	side := f.m.DetectSize
 	scale := float64(side) / float64(max(w, h))
 	dw, dh := max(1, int(math.Round(float64(w)*scale))), max(1, int(math.Round(float64(h)*scale)))
 	small := resample(pix, w, h, dw, dh)
@@ -174,6 +174,9 @@ type Identity struct {
 // Embed aligns each face of an 8-bit RGB image (as Detect found it there)
 // and recognises it.
 func (f *Faces) Embed(pix []byte, w, h int, faces []Face) ([]Identity, error) {
+	if err := checkRGB(pix, w, h); err != nil {
+		return nil, err
+	}
 	side := f.m.CropSize
 	plane := side * side
 	out := make([]Identity, 0, len(faces))
@@ -295,12 +298,21 @@ func bilinear(pix []byte, w, h int, x, y float64) [3]float64 {
 		return [3]float64{}
 	}
 	x0, y0 := int(x), int(y)
-	x1, y1 := min(x0+1, w-1), min(y0+1, h-1)
 	fx, fy := x-float64(x0), y-float64(y0)
+	// The four neighbours (repeating the last row or column at the edge),
+	// and their weights.
+	dx, dy := 3, 3*w
+	if x0 == w-1 {
+		dx = 0
+	}
+	if y0 == h-1 {
+		dy = 0
+	}
+	i := (y0*w + x0) * 3
+	w00, w10, w01, w11 := (1-fx)*(1-fy), fx*(1-fy), (1-fx)*fy, fx*fy
 	var c [3]float64
 	for ch := range 3 {
-		p := func(xx, yy int) float64 { return float64(pix[(yy*w+xx)*3+ch]) }
-		c[ch] = p(x0, y0)*(1-fx)*(1-fy) + p(x1, y0)*fx*(1-fy) + p(x0, y1)*(1-fx)*fy + p(x1, y1)*fx*fy
+		c[ch] = float64(pix[i+ch])*w00 + float64(pix[i+dx+ch])*w10 + float64(pix[i+dy+ch])*w01 + float64(pix[i+dy+dx+ch])*w11
 	}
 	return c
 }
@@ -373,3 +385,11 @@ func clip(f Face, w, h float64) Face {
 }
 
 func clamp01(x float32) float32 { return max(0, min(1, x)) }
+
+// checkRGB rejects pixels that aren't a w x h 8-bit RGB image.
+func checkRGB(pix []byte, w, h int) error {
+	if w <= 0 || h <= 0 || len(pix) != w*h*3 {
+		return fmt.Errorf("faces: bad image (%dx%d, %d bytes)", w, h, len(pix))
+	}
+	return nil
+}

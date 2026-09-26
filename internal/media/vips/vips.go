@@ -153,11 +153,10 @@ static int lumen_rgb_pixels(const void *pix, size_t len, int w, int h, int bands
 
 // lumen_square decodes path squashed to exactly side x side RGB (aspect
 // ignored), as image models expect.
-static int lumen_square(const char *path, int side, void **buf, size_t *len) {
+static int lumen_square(const char *path, int side, void **buf, size_t *len, int *w, int *h) {
 	VipsImage *t = NULL;
-	int w, h;
 	if (vips_thumbnail(path, &t, side, "height", side, "size", VIPS_SIZE_FORCE, NULL)) return -1;
-	return to_rgb(t, buf, len, &w, &h);
+	return to_rgb(t, buf, len, w, h);
 }
 
 // lumen_header reads only the header: the stored (not rotated) size.
@@ -322,14 +321,13 @@ func Square(path string, side int) ([]byte, error) {
 	defer C.free(unsafe.Pointer(cpath))
 	var buf unsafe.Pointer
 	var n C.size_t
-	if C.lumen_square(cpath, C.int(side), &buf, &n) != 0 {
-		return nil, lastError()
+	var w, h C.int
+	rc := C.lumen_square(cpath, C.int(side), &buf, &n, &w, &h)
+	im, err := collectRGB(rc, buf, n, w, h)
+	if err == nil && (im.W != side || im.H != side) {
+		err = errors.New("vips: unexpected square size")
 	}
-	defer C.g_free(C.gpointer(buf))
-	if int(n) != side*side*3 {
-		return nil, errors.New("vips: unexpected square size")
-	}
-	return C.GoBytes(buf, C.int(n)), nil
+	return im.Pix, err
 }
 
 // Size reads a file's stored pixel size from its header, without decoding.

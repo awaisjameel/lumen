@@ -67,8 +67,8 @@ const useAsCover = () => act(async ([face]) => engine.setPersonCover(id.value, f
 </script>
 
 <template>
-  <div class="faces-view">
-    <header class="topbar">
+  <div class="page">
+    <header class="topbar back">
       <RouterLink :to="{ name: 'person', params: { id } }" class="icon-btn" :title="t('faces.back')">
         <Icon name="chevron-left" />
       </RouterLink>
@@ -92,7 +92,7 @@ const useAsCover = () => act(async ([face]) => engine.setPersonCover(id.value, f
     </div>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
-    <div class="body">
+    <div class="page-body">
       <div class="grid">
         <button
           v-for="f in faces"
@@ -113,25 +113,9 @@ const useAsCover = () => act(async ([face]) => engine.setPersonCover(id.value, f
 </template>
 
 <style scoped>
-.faces-view {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-.topbar {
-  display: flex;
-  align-items: center;
+.back {
   gap: 8px;
-  height: var(--topbar-h);
   padding: 0 20px 0 12px;
-  flex-shrink: 0;
-}
-.topbar h1 {
-  margin: 0;
-  font: 600 20px/1 var(--font-display);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .icon-btn {
   color: var(--text);
@@ -152,12 +136,6 @@ const useAsCover = () => act(async ([face]) => engine.setPersonCover(id.value, f
 }
 .error {
   margin: 0 20px 8px;
-  color: var(--danger);
-}
-.body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 20px 24px;
 }
 .grid {
   display: grid;

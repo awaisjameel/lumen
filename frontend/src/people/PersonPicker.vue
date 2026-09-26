@@ -5,7 +5,7 @@
 import { computed, ref, useId, watch } from 'vue'
 import { engine } from '../bridge'
 import type { Person } from '../bridge'
-import { logError } from '../shared/errors'
+import { useSuggestions } from '../shared/suggest'
 import FaceThumb from './FaceThumb.vue'
 
 const props = defineProps<{ placeholder: string; exclude?: number }>()
@@ -14,26 +14,11 @@ const emit = defineEmits<{ pick: [name: string] }>()
 const id = useId()
 const text = ref('')
 const open = ref(false)
-const found = ref<Person[]>([])
 const active = ref(-1) // -1 = the typed text
 
+const found = useSuggestions(text, engine.suggestPeople, [] as Person[])
 const options = computed(() => found.value.filter((p) => p.id !== props.exclude))
-
-let asked = 0
-watch(text, async (v) => {
-  active.value = -1
-  const n = ++asked
-  if (!v.trim()) {
-    found.value = []
-    return
-  }
-  try {
-    const got = await engine.suggestPeople(v)
-    if (n === asked) found.value = got
-  } catch (e) {
-    logError(e)
-  }
-})
+watch(text, () => (active.value = -1))
 
 function pick(name: string) {
   name = name.trim()

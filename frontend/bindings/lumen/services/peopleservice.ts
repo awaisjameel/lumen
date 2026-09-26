@@ -30,13 +30,6 @@ export function MergePeople($from: number, into: number): $CancellablePromise<vo
 }
 
 /**
- * MoveFaces puts faces with another person.
- */
-export function MoveFaces(faces: number[] | null, person: number): $CancellablePromise<void> {
-    return $Call.ByID(3158937632, faces, person);
-}
-
-/**
  * NameFaces puts faces with the person of that name, who is created if new
  * ("" makes a new unnamed person: splitting someone in two). It returns
  * their id.

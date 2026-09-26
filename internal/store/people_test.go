@@ -54,8 +54,8 @@ func TestFacesKeepTheirPersonWhenSeenAgain(t *testing.T) {
 	if len(before) != 2 || before[0].X != 0.1 {
 		t.Fatalf("faces = %+v", before)
 	}
-	ali, _ := st.CreatePerson(ctx, "Ali")
-	if err := st.MoveFaces(ctx, []int64{before[0].ID}, ali); err != nil {
+	ali, err := st.NameFaces(ctx, []int64{before[0].ID}, "Ali")
+	if err != nil {
 		t.Fatal(err)
 	}
 	// A new model finds the left face slightly moved and loses the right one.
@@ -97,8 +97,10 @@ func TestClusteringNeverOverridesTheUser(t *testing.T) {
 	if err := st.NamePerson(ctx, p, "Sara"); err != nil {
 		t.Fatal(err)
 	}
-	other, _ := st.CreatePerson(ctx, "")
-	st.MoveFaces(ctx, []int64{fc[0].ID}, other)
+	other, err := st.NameFaces(ctx, []int64{fc[0].ID}, "") // someone new
+	if err != nil || other == p {
+		t.Fatalf("new person = %d (%v)", other, err)
+	}
 	err = st.ApplyClusters(ctx, ClusterChanges{
 		Assign: map[int64]int64{fb[0].ID: other, fa[0].ID: other}, // fa is already Sara's
 		Merges: []Merge{{From: p, Into: other}},
@@ -139,12 +141,16 @@ func TestPeopleEdits(t *testing.T) {
 	if err := st.NamePerson(ctx, pb, "ali"); !errors.Is(err, ErrPersonExists) {
 		t.Fatalf("duplicate name: %v", err)
 	}
-	// Merging an unnamed person into Ali: Ali keeps the name and gains a photo.
+	// Merging an unnamed person into Ali: Ali keeps the name and gains a
+	// photo, and the picture chosen for the other (Ali has none).
+	if err := st.SetPersonCover(ctx, pb, fb[0].ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.MergePeople(ctx, pb, pa); err != nil {
 		t.Fatal(err)
 	}
 	ali, err := st.Person(ctx, pa)
-	if err != nil || ali.Name != "Ali" || ali.Count != 2 {
+	if err != nil || ali.Name != "Ali" || ali.Count != 2 || ali.Cover.ID != fb[0].ID {
 		t.Fatalf("ali = %+v (%v)", ali, err)
 	}
 	if _, err := st.Person(ctx, pb); !errors.Is(err, ErrNotFound) {
@@ -168,9 +174,10 @@ func TestPeopleEdits(t *testing.T) {
 		t.Errorf("search people = %+v", found)
 	}
 
-	// Moving the other person's faces to Ali empties and removes them.
-	if err := st.MoveFaces(ctx, []int64{fa[1].ID, fc[0].ID}, pa); err != nil {
-		t.Fatal(err)
+	// Moving the other person's faces to Ali (by name, in any case) empties
+	// and removes them.
+	if id, err := st.NameFaces(ctx, []int64{fa[1].ID, fc[0].ID}, " ALI "); err != nil || id != pa {
+		t.Fatalf("named faces went to %d (%v), want Ali (%d)", id, err, pa)
 	}
 	if _, err := st.Person(ctx, pc); !errors.Is(err, ErrNotFound) {
 		t.Errorf("empty unnamed person kept: %v", err)

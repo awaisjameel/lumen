@@ -67,133 +67,123 @@ function setAIOnBattery(on: boolean) {
 </script>
 
 <template>
-  <main class="settings">
+  <main class="page">
     <header class="topbar">
       <h1>{{ t('settings.title') }}</h1>
     </header>
-    <div class="content">
-      <p v-if="error" class="error">{{ error }}</p>
+    <div class="page-body">
+      <div class="content">
+        <p v-if="error" class="error">{{ error }}</p>
 
-      <section>
-        <h2>{{ t('settings.folders') }}</h2>
-        <p class="muted hint">{{ t('settings.foldersHint') }}</p>
-        <ul class="list">
-          <li v-for="s in lib.sources" :key="s.id">
-            <Icon name="folder" :size="18" />
-            <span class="path" :title="s.path">{{ s.path }}</span>
-            <button class="btn" @click="run(() => engine.removeSource(s.id))">{{ t('settings.remove') }}</button>
-          </li>
-        </ul>
-        <div class="row">
-          <button class="btn" @click="addFolder"><Icon name="plus" :size="16" />{{ t('settings.addFolder') }}</button>
-          <button class="btn" @click="run(engine.rescan, false)"><Icon name="refresh" :size="16" />{{ t('settings.rescan') }}</button>
-        </div>
-      </section>
-
-      <section>
-        <h2>{{ t('settings.indexing') }}</h2>
-        <label class="toggle">
-          <input
-            type="checkbox"
-            :checked="lib.settings.videos"
-            @change="run(() => engine.setVideos(($event.target as HTMLInputElement).checked))"
-          />
-          <span>
-            {{ t('settings.videos') }}
-            <small class="muted">{{ t('settings.videosHint') }}</small>
-          </span>
-        </label>
-        <label class="toggle">
-          <input
-            type="checkbox"
-            :checked="lib.progress?.paused"
-            @change="run(() => engine.setPaused(($event.target as HTMLInputElement).checked), false)"
-          />
-          <span>{{ t('settings.pause') }}</span>
-        </label>
-      </section>
-
-      <section>
-        <h2>{{ t('settings.ai') }}</h2>
-        <p class="muted hint">{{ t('settings.aiHint') }}</p>
-        <p class="ai-status">{{ aiStatus }}</p>
-        <p v-if="lib.progress?.ai.facesError" class="ai-status">
-          {{ t('settings.peopleError', { error: lib.progress.ai.facesError }) }}
-        </p>
-        <label class="toggle">
-          <input
-            type="checkbox"
-            :checked="lib.settings.aiOnBattery"
-            @change="setAIOnBattery(($event.target as HTMLInputElement).checked)"
-          />
-          <span>
-            {{ t('settings.aiOnBattery') }}
-            <small class="muted">{{ t('settings.aiOnBatteryHint') }}</small>
-          </span>
-        </label>
-        <details class="advanced">
-          <summary>{{ t('settings.advanced') }}</summary>
-          <div class="slider">
-            <label for="confidence">{{ t('settings.confidence') }}</label>
-            <small class="muted">{{ t('settings.confidenceHint') }}</small>
-            <input
-              id="confidence"
-              type="range"
-              min="0"
-              max="100"
-              :value="confidencePos"
-              @input="onConfidence(Number(($event.target as HTMLInputElement).value))"
-            />
-            <div class="ends muted">
-              <span>{{ t('settings.confidenceMore') }}</span>
-              <span>{{ t('settings.confidenceFewer') }}</span>
-            </div>
+        <section>
+          <h2>{{ t('settings.folders') }}</h2>
+          <p class="muted hint">{{ t('settings.foldersHint') }}</p>
+          <ul class="list">
+            <li v-for="s in lib.sources" :key="s.id">
+              <Icon name="folder" :size="18" />
+              <span class="path" :title="s.path">{{ s.path }}</span>
+              <button class="btn" @click="run(() => engine.removeSource(s.id))">{{ t('settings.remove') }}</button>
+            </li>
+          </ul>
+          <div class="row">
+            <button class="btn" @click="addFolder"><Icon name="plus" :size="16" />{{ t('settings.addFolder') }}</button>
+            <button class="btn" @click="run(engine.rescan, false)">
+              <Icon name="refresh" :size="16" />{{ t('settings.rescan') }}
+            </button>
           </div>
-        </details>
-      </section>
+        </section>
 
-      <section>
-        <h2>{{ t('settings.appearance') }}</h2>
-        <div class="segmented" role="radiogroup" :aria-label="t('settings.theme')">
-          <button
-            v-for="th in themes"
-            :key="th"
-            role="radio"
-            :aria-checked="theme === th"
-            :class="{ on: theme === th }"
-            @click="theme = th"
-          >
-            {{ t(`settings.theme.${th}`) }}
-          </button>
-        </div>
-      </section>
+        <section>
+          <h2>{{ t('settings.indexing') }}</h2>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              :checked="lib.settings.videos"
+              @change="run(() => engine.setVideos(($event.target as HTMLInputElement).checked))"
+            />
+            <span>
+              {{ t('settings.videos') }}
+              <small class="muted">{{ t('settings.videosHint') }}</small>
+            </span>
+          </label>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              :checked="lib.progress?.paused"
+              @change="run(() => engine.setPaused(($event.target as HTMLInputElement).checked), false)"
+            />
+            <span>{{ t('settings.pause') }}</span>
+          </label>
+        </section>
 
-      <section>
-        <h2>{{ t('settings.privacy') }}</h2>
-        <p class="muted hint"><Icon name="lock" :size="16" /> {{ t('settings.privacyText') }}</p>
-      </section>
+        <section>
+          <h2>{{ t('settings.ai') }}</h2>
+          <p class="muted hint">{{ t('settings.aiHint') }}</p>
+          <p class="ai-status">{{ aiStatus }}</p>
+          <p v-if="lib.progress?.ai.facesError" class="ai-status">
+            {{ t('settings.peopleError', { error: lib.progress.ai.facesError }) }}
+          </p>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              :checked="lib.settings.aiOnBattery"
+              @change="setAIOnBattery(($event.target as HTMLInputElement).checked)"
+            />
+            <span>
+              {{ t('settings.aiOnBattery') }}
+              <small class="muted">{{ t('settings.aiOnBatteryHint') }}</small>
+            </span>
+          </label>
+          <details class="advanced">
+            <summary>{{ t('settings.advanced') }}</summary>
+            <div class="slider">
+              <label for="confidence">{{ t('settings.confidence') }}</label>
+              <small class="muted">{{ t('settings.confidenceHint') }}</small>
+              <input
+                id="confidence"
+                type="range"
+                min="0"
+                max="100"
+                :value="confidencePos"
+                @input="onConfidence(Number(($event.target as HTMLInputElement).value))"
+              />
+              <div class="ends muted">
+                <span>{{ t('settings.confidenceMore') }}</span>
+                <span>{{ t('settings.confidenceFewer') }}</span>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <section>
+          <h2>{{ t('settings.appearance') }}</h2>
+          <div class="segmented" role="radiogroup" :aria-label="t('settings.theme')">
+            <button
+              v-for="th in themes"
+              :key="th"
+              role="radio"
+              :aria-checked="theme === th"
+              :class="{ on: theme === th }"
+              @click="theme = th"
+            >
+              {{ t(`settings.theme.${th}`) }}
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h2>{{ t('settings.privacy') }}</h2>
+          <p class="muted hint"><Icon name="lock" :size="16" /> {{ t('settings.privacyText') }}</p>
+        </section>
+      </div>
     </div>
   </main>
 </template>
 
 <style scoped>
-.settings {
-  height: 100%;
-  overflow-y: auto;
-}
-.topbar {
-  display: flex;
-  align-items: center;
-  height: var(--topbar-h);
-  padding: 0 20px;
-}
-h1 {
-  margin: 0;
-  font: 600 20px/1 var(--font-display);
-}
 .content {
   max-width: 720px;
-  padding: 8px 20px 40px;
+  padding: 4px 0 16px;
 }
 section {
   margin-bottom: 32px;
@@ -273,9 +263,6 @@ h2 {
   background: var(--surface);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
   font-weight: 600;
-}
-.error {
-  color: var(--danger);
 }
 .ai-status {
   margin: 0 0 4px;

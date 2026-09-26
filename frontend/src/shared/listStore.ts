@@ -1,8 +1,6 @@
 import { defineStore } from 'pinia'
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { Ref } from 'vue'
-import { onLibraryChanged } from '../bridge'
-import { logError } from './errors'
 
 /**
  * A store holding one list from the engine (Things, People), loaded on
@@ -29,25 +27,5 @@ export function defineListStore<T extends { id: number }>(id: string, fetch: () 
     }
 
     return { list, loaded, byId, load }
-  })
-}
-
-/**
- * Calls reload now and then while the library changes (counts grow as the
- * AI works), at most every few seconds, for as long as the calling
- * component is mounted.
- */
-export function useLiveReload(reload: () => Promise<unknown>, every = 3000): void {
-  let timer = 0
-  const stop = onLibraryChanged(() => {
-    if (timer) return
-    timer = window.setTimeout(() => {
-      timer = 0
-      reload().catch(logError)
-    }, every)
-  })
-  onBeforeUnmount(() => {
-    stop()
-    clearTimeout(timer)
   })
 }

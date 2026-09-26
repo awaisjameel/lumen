@@ -1,10 +1,12 @@
 // Package ai runs Lumen's models with ONNX Runtime: SigLIP 2 for search and
-// tags now, faces and OCR later. It knows nothing about the database; the
-// index package feeds it pixels and text and stores what comes back.
+// Things, YuNet and SFace for faces (OCR later). It knows nothing about the
+// database; the index package feeds it pixels and text and stores what
+// comes back.
 //
 // ONNX Runtime 1.24.4 (the last DirectML build) and DirectML ship beside the
-// executable (deps/runtime in development). Every model runs on the GPU
-// through DirectML when one is usable, and on the CPU otherwise.
+// executable (deps/runtime in development). The image model runs on the GPU
+// through DirectML when one is usable, and on the CPU otherwise; the small
+// text and face models always run on the CPU.
 package ai
 
 import (

@@ -258,7 +258,7 @@ func (e *Engine) Tags(v []float32) []store.TagScore {
 	for i, l := range e.labels {
 		cos[i] = -1
 		for _, p := range l.vecs {
-			cos[i] = max(cos[i], dot(v, p))
+			cos[i] = max(cos[i], ai.Dot(v, p))
 		}
 		if l.exclusive && (bestKind < 0 || cos[i] > cos[bestKind]) {
 			bestKind = i
@@ -444,12 +444,4 @@ func split(flat []float32, dim int) [][]float32 {
 		out = append(out, flat[i:i+dim:i+dim])
 	}
 	return out
-}
-
-func dot(a, b []float32) float32 {
-	var s float32
-	for i := range a {
-		s += a[i] * b[i]
-	}
-	return s
 }

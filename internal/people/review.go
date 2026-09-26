@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 
+	"lumen/internal/ai"
 	"lumen/internal/core"
 )
 
@@ -24,7 +25,7 @@ func OddOnesFirst(faces []core.Face, vecs [][]float32) []core.Face {
 	}
 	all := make([]scoredFace, len(faces))
 	for i, f := range faces {
-		all[i] = scoredFace{f, dot(vecs[i], mean)}
+		all[i] = scoredFace{f, ai.Dot(vecs[i], mean)}
 	}
 	slices.SortStableFunc(all, func(a, b scoredFace) int {
 		if a.f.ByUser != b.f.ByUser {

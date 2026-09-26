@@ -6,8 +6,9 @@ import { engine } from '../bridge'
 import type { Person } from '../bridge'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
+import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
-import { useLiveReload } from '../shared/listStore'
+import { useLiveReload } from '../shared/liveReload'
 import { useLibrary } from '../library/store'
 import SearchBox from '../search/SearchBox.vue'
 import FaceThumb from './FaceThumb.vue'
@@ -22,6 +23,11 @@ const shown = computed(() => people.list.filter((p) => !p.hidden || showHidden.v
 const named = computed(() => shown.value.filter((p) => p.name))
 const unnamed = computed(() => shown.value.filter((p) => !p.name))
 const hiddenCount = computed(() => people.list.filter((p) => p.hidden).length)
+const hiddenToggle = computed(() =>
+  showHidden.value
+    ? t('people.hideHidden')
+    : `${t('people.showHidden')} (${t('people.hidden', { n: hiddenCount.value })})`,
+)
 const facesError = computed(() => lib.progress?.ai.facesError ?? '')
 const looking = computed(() => lib.progress?.faces ?? 0)
 
@@ -40,14 +46,14 @@ async function toggleHidden(p: Person) {
 </script>
 
 <template>
-  <div class="people">
+  <div class="page">
     <header class="topbar">
       <h1>{{ t('nav.people') }}</h1>
       <SearchBox />
       <div class="spacer" />
     </header>
 
-    <div class="body">
+    <div class="page-body">
       <p class="muted intro">{{ t('people.intro') }}</p>
       <p v-if="error || facesError" class="error" role="alert">
         {{ error || t('people.unavailable', { error: facesError }) }}
@@ -75,51 +81,27 @@ async function toggleHidden(p: Person) {
         </template>
       </template>
 
-      <div v-if="people.loaded && !shown.length" class="empty">
-        <Icon name="people" :size="40" />
-        <h2>{{ t('people.empty') }}</h2>
-        <p class="muted">{{ looking ? t('people.emptyWorking', { n: looking }) : t('people.emptyHint') }}</p>
-      </div>
+      <EmptyState
+        v-if="people.loaded && !shown.length"
+        class="empty"
+        icon="people"
+        :title="t('people.empty')"
+        :text="looking ? t('people.emptyWorking', { n: looking }) : t('people.emptyHint')"
+      />
 
       <button v-if="hiddenCount" class="btn subtle" @click="showHidden = !showHidden">
-        {{ showHidden ? t('people.hideHidden') : `${t('people.showHidden')} (${t('people.hidden', { n: hiddenCount })})` }}
+        {{ hiddenToggle }}
       </button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.people {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: var(--topbar-h);
-  padding: 0 12px 0 20px;
-  flex-shrink: 0;
-}
-.topbar h1 {
-  margin: 0;
-  font: 600 20px/1 var(--font-display);
-}
-.spacer {
-  flex: 1;
-}
-.body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 20px 24px;
-}
 .intro {
   margin: 0 0 8px;
 }
 .error {
   margin: 0 0 8px;
-  color: var(--danger);
 }
 h2 {
   margin: 20px 0 12px;
@@ -180,20 +162,7 @@ h2 {
   opacity: 1;
 }
 .empty {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  margin-top: 60px;
-  text-align: center;
-  color: var(--text-3);
-}
-.empty h2 {
-  margin: 8px 0 0;
-  color: var(--text);
-  font: 600 18px var(--font-display);
-}
-.empty p {
-  margin: 0;
+  margin-top: 36px;
 }
 .subtle {
   margin-top: 24px;

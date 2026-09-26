@@ -6,10 +6,12 @@ package people
 import (
 	"cmp"
 	"container/heap"
+	"context"
 	"runtime"
 	"slices"
-	"sync"
 
+	"lumen/internal/ai"
+	"lumen/internal/parallel"
 	"lumen/internal/store"
 )
 
@@ -172,10 +174,10 @@ func (c *clustering) link(links map[int64][]int64, p Params) {
 		means[i] = scaled(c.groups[i].sum, 1/float32(c.groups[i].n))
 	}
 	near := make([][]scored, len(loose))
-	parallel(len(loose), func(k int) {
+	parallel.For(context.Background(), len(loose), runtime.NumCPU(), func(k int) {
 		v := c.groups[loose[k]].sum // a single face: its sum is its vector
 		for _, j := range placed {
-			if s := dot(v, means[j]); s >= p.Threshold {
+			if s := ai.Dot(v, means[j]); s >= p.Threshold {
 				near[k] = keepTop(near[k], scored{j, s}, p.Neighbours, byScore)
 			}
 		}
@@ -187,7 +189,7 @@ func (c *clustering) link(links map[int64][]int64, p Params) {
 	}
 	for a, i := range placed {
 		for _, j := range placed[a+1:] {
-			if dot(means[i], means[j]) >= p.Threshold {
+			if ai.Dot(means[i], means[j]) >= p.Threshold {
 				connect(i, j)
 			}
 		}
@@ -229,7 +231,7 @@ func (c *clustering) merge(threshold float32) {
 
 func (c *clustering) similarity(a, b int) float32 {
 	ga, gb := c.groups[a], c.groups[b]
-	return dot(ga.sum, gb.sum) / float32(ga.n*gb.n)
+	return ai.Dot(ga.sum, gb.sum) / float32(ga.n*gb.n)
 }
 
 // allowed reports whether two groups may be one person.
@@ -294,13 +296,13 @@ func (c *clustering) changes(p Params) store.ClusterChanges {
 			continue
 		}
 		if len(g.persons) == 0 {
-			clear := map[int64]bool{} // photos with a clear face of them
+			clearIn := map[int64]bool{} // photos with a clear face of them
 			for _, i := range g.faces {
 				if f := c.faces[i]; f.Sharpness >= p.MinSharpness && f.Yaw <= p.MaxYaw {
-					clear[f.AssetID] = true
+					clearIn[f.AssetID] = true
 				}
 			}
-			if len(clear) >= p.MinFaces {
+			if len(clearIn) >= p.MinFaces {
 				ids := make([]int64, len(g.faces))
 				for i, f := range g.faces {
 					ids[i] = c.faces[f].ID
@@ -383,28 +385,6 @@ func (q *queue) Pop() any {
 	x := old[len(old)-1]
 	*q = old[:len(old)-1]
 	return x
-}
-
-// parallel calls fn(0..n-1) on every core.
-func parallel(n int, fn func(i int)) {
-	workers := max(1, min(runtime.NumCPU(), n/64))
-	var wg sync.WaitGroup
-	for w := range workers {
-		wg.Go(func() {
-			for i := w; i < n; i += workers {
-				fn(i)
-			}
-		})
-	}
-	wg.Wait()
-}
-
-func dot(a, b []float32) float32 {
-	var s float32
-	for i := range a {
-		s += a[i] * b[i]
-	}
-	return s
 }
 
 func add(dst, v []float32) {

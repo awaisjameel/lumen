@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"lumen/internal/core"
@@ -21,10 +22,13 @@ type JobItem struct {
 type TimeRange struct{ From, To int64 }
 
 // waitsFor is the stage each stage needs finished first: thumbnails need
-// the orientation from metadata, and the AI reads the thumbnail.
+// the orientation from metadata, the image model reads the thumbnail, and
+// faces need both (the orientation to decode upright, the thumbnail to be
+// shown cut out of).
 var waitsFor = map[core.Stage]core.Stage{
 	core.StageThumbnail: core.StageMetadata,
 	core.StageEmbedding: core.StageThumbnail,
+	core.StageFaces:     core.StageThumbnail,
 }
 
 // PendingJobs returns up to limit assets waiting for stage, newest first. With
@@ -185,6 +189,22 @@ func execJob(ctx context.Context, st *sql.Stmt, assetID int64, stage core.Stage,
 	status core.JobStatus, errMsg string, now int64) error {
 	_, err := st.ExecContext(ctx, status, version, errMsg, now, assetID, stage)
 	return err
+}
+
+// CountPending returns how many visible assets still wait for any of the
+// stages, so a search can say its results may grow.
+func (s *Store) CountPending(ctx context.Context, stages ...core.Stage) (int, error) {
+	if len(stages) == 0 {
+		return 0, nil
+	}
+	list, err := json.Marshal(stages)
+	if err != nil {
+		return 0, err
+	}
+	var n int
+	err = s.r.QueryRowContext(ctx, `SELECT count(DISTINCT j.asset_id) FROM asset_jobs j JOIN assets a ON a.id = j.asset_id
+		WHERE j.status = 'pending' AND j.stage IN (SELECT value FROM json_each(?)) AND `+visibleAs("a"), string(list)).Scan(&n)
+	return n, err
 }
 
 // JobCounts returns how many jobs are waiting per stage, and how many failed

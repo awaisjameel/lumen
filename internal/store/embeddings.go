@@ -161,12 +161,3 @@ func (s *Store) Embeddings(ctx context.Context, model string, fn func(id int64, 
 	}
 	return rows.Err()
 }
-
-// CountAwaitingAI returns how many visible photos still wait for the AI, so a
-// search can say its results are partial.
-func (s *Store) CountAwaitingAI(ctx context.Context) (int, error) {
-	var n int
-	err := s.r.QueryRowContext(ctx, `SELECT count(*) FROM asset_jobs j JOIN assets a ON a.id = j.asset_id
-		WHERE j.stage = 'embedding' AND j.status = 'pending' AND `+visibleAs("a")).Scan(&n)
-	return n, err
-}

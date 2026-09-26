@@ -9,8 +9,9 @@ import { engine, TagKind, thumbUrl } from '../bridge'
 import type { Tag } from '../bridge'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
+import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
-import { useLiveReload } from '../shared/listStore'
+import { useLiveReload } from '../shared/liveReload'
 import { useLibrary } from '../library/store'
 import SearchBox from '../search/SearchBox.vue'
 import { useThings } from './store'
@@ -31,6 +32,11 @@ const builtin = computed(() =>
 // Built-ins without photos never show, hidden or not.
 const hiddenCount = computed(
   () => things.list.filter((x) => x.hidden && (x.kind !== TagKind.TagBuiltin || x.count > 0)).length,
+)
+const hiddenToggle = computed(() =>
+  showHidden.value
+    ? t('things.hideHidden')
+    : `${t('things.showHidden')} (${t('things.hidden', { n: hiddenCount.value })})`,
 )
 const aiError = computed(() => lib.progress?.ai.error ?? '')
 const understanding = computed(() => lib.progress?.embedding ?? 0)
@@ -71,14 +77,14 @@ const remove = (tag: Tag) => act(() => engine.deleteTag(tag.id))
 </script>
 
 <template>
-  <div class="things">
+  <div class="page">
     <header class="topbar">
       <h1>{{ t('nav.things') }}</h1>
       <SearchBox />
       <div class="spacer" />
     </header>
 
-    <div class="body">
+    <div class="page-body">
       <p class="muted intro">{{ t('things.intro') }}</p>
 
       <form class="new" @submit.prevent="create">
@@ -133,47 +139,22 @@ const remove = (tag: Tag) => act(() => engine.deleteTag(tag.id))
         </div>
       </div>
 
-      <div v-else-if="things.loaded && !mine.length" class="empty">
-        <Icon name="things" :size="40" />
-        <h2>{{ t('things.empty') }}</h2>
-        <p class="muted">
-          {{ understanding ? t('things.emptyWorking', { n: understanding }) : t('things.emptyHint') }}
-        </p>
-      </div>
+      <EmptyState
+        v-else-if="things.loaded && !mine.length"
+        class="empty"
+        icon="things"
+        :title="t('things.empty')"
+        :text="understanding ? t('things.emptyWorking', { n: understanding }) : t('things.emptyHint')"
+      />
 
       <button v-if="hiddenCount" class="btn subtle" @click="showHidden = !showHidden">
-        {{ showHidden ? t('things.hideHidden') : `${t('things.showHidden')} (${t('things.hidden', { n: hiddenCount })})` }}
+        {{ hiddenToggle }}
       </button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.things {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: var(--topbar-h);
-  padding: 0 12px 0 20px;
-  flex-shrink: 0;
-}
-.topbar h1 {
-  margin: 0;
-  font: 600 20px/1 var(--font-display);
-}
-.spacer {
-  flex: 1;
-}
-.body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 20px 24px;
-}
 .intro {
   margin: 0 0 12px;
 }
@@ -199,7 +180,6 @@ const remove = (tag: Tag) => act(() => engine.deleteTag(tag.id))
 }
 .error {
   margin: 0 0 8px;
-  color: var(--danger);
 }
 h2 {
   margin: 20px 0 10px;
@@ -266,20 +246,7 @@ h2 {
   opacity: 1;
 }
 .empty {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  margin-top: 60px;
-  text-align: center;
-  color: var(--text-3);
-}
-.empty h2 {
-  margin: 8px 0 0;
-  color: var(--text);
-  font: 600 18px var(--font-display);
-}
-.empty p {
-  margin: 0;
+  margin-top: 36px;
 }
 .subtle {
   margin-top: 20px;

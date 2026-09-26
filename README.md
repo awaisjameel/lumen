@@ -91,6 +91,7 @@ internal/ai          ONNX Runtime sessions, SigLIP 2 image/text encoders, tokeni
 internal/search      in-memory int8 vector index, search, Things vocabulary and tagging
 internal/people      face clustering (incremental, constrained by the user's corrections), names in searches
 internal/index       background pipeline: scan loop, stage workers, model loading, battery, events
+internal/parallel    the worker pool loops run on
 services/            thin Wails services (LibraryService, SearchService, PeopleService, MediaService)
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/{library,search,things,people,onboarding,settings,shared}   UI by feature

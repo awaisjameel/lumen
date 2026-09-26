@@ -18,10 +18,11 @@ var ErrNoAI = errors.New("the on-device AI isn't available")
 type SearchService struct {
 	store  *store.Store
 	engine *search.Engine // nil when the AI can't run
+	faces  bool           // faces are being recognised (the people engine runs)
 }
 
-func NewSearchService(st *store.Store, engine *search.Engine) *SearchService {
-	return &SearchService{store: st, engine: engine}
+func NewSearchService(st *store.Store, engine *search.Engine, faces *people.Engine) *SearchService {
+	return &SearchService{store: st, engine: engine, faces: faces != nil}
 }
 
 // Search finds photos matching a description, best match first. Named
@@ -34,13 +35,18 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	}
 	who, names, text := people.FindNames(query, named)
 	var ids []int64
+	var waitFor []core.Stage // stages whose photos can't be found yet
 	complete := true
 	if len(who) > 0 {
 		if ids, err = s.store.PeopleAssets(ctx, who); err != nil {
 			return core.SearchResult{}, err
 		}
+		if s.faces {
+			waitFor = append(waitFor, core.StageFaces)
+		}
 	}
 	if text != "" || len(who) == 0 {
+		waitFor = append(waitFor, core.StageEmbedding)
 		if s.engine == nil {
 			return core.SearchResult{}, ErrNoAI
 		}
@@ -65,7 +71,7 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	pending, err := s.store.CountAwaitingAI(ctx)
+	pending, err := s.store.CountPending(ctx, waitFor...)
 	if err != nil {
 		return core.SearchResult{}, err
 	}

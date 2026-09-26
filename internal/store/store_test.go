@@ -127,6 +127,9 @@ func TestJobsFlowAndRequeue(t *testing.T) {
 	src, _ := st.AddSource(ctx, `C:\Photos`)
 	st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.heic`, "a")})
 
+	if n, err := st.CountPending(ctx, core.StageEmbedding, core.StageFaces); err != nil || n != 1 {
+		t.Fatalf("photos waiting for the AI = %d (%v), want 1", n, err)
+	}
 	// Thumbnails wait for metadata (it supplies the orientation).
 	if jobs, _ := st.PendingJobs(ctx, core.StageThumbnail, nil, 10); len(jobs) != 0 {
 		t.Fatalf("thumbnail jobs before metadata: %d", len(jobs))
@@ -143,9 +146,11 @@ func TestJobsFlowAndRequeue(t *testing.T) {
 	if len(jobs) != 1 || jobs[0].Orientation != 6 {
 		t.Fatalf("thumbnail jobs = %+v", jobs)
 	}
-	// The AI waits for the thumbnail it reads.
-	if jobs, _ := st.PendingJobs(ctx, core.StageEmbedding, nil, 10); len(jobs) != 0 {
-		t.Fatalf("embedding jobs before thumbnails: %d", len(jobs))
+	// The AI stages wait for the thumbnail (and so for the orientation).
+	for _, stage := range []core.Stage{core.StageEmbedding, core.StageFaces} {
+		if jobs, _ := st.PendingJobs(ctx, stage, nil, 10); len(jobs) != 0 {
+			t.Fatalf("%s jobs before thumbnails: %d", stage, len(jobs))
+		}
 	}
 	if err := st.SaveThumbnails(ctx, "t1", []ThumbResult{{AssetID: id, Skipped: true}}); err != nil {
 		t.Fatal(err)
@@ -153,8 +158,10 @@ func TestJobsFlowAndRequeue(t *testing.T) {
 	if _, _, skipped, _ := st.JobCounts(ctx); skipped != 1 {
 		t.Fatalf("skipped = %d, want 1", skipped)
 	}
-	if jobs, _ := st.PendingJobs(ctx, core.StageEmbedding, nil, 10); len(jobs) != 1 {
-		t.Fatalf("embedding jobs after thumbnails: %d, want 1", len(jobs))
+	for _, stage := range []core.Stage{core.StageEmbedding, core.StageFaces} {
+		if jobs, _ := st.PendingJobs(ctx, stage, nil, 10); len(jobs) != 1 || jobs[0].Orientation != 6 {
+			t.Fatalf("%s jobs after thumbnails: %+v, want 1 with orientation 6", stage, jobs)
+		}
 	}
 
 	// Jobs of an asset whose file is gone neither run nor count as waiting.

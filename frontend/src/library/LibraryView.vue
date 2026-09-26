@@ -8,6 +8,7 @@ import { logError } from '../shared/errors'
 import { dayLabel } from '../shared/format'
 import { listFormat, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
+import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
 import PersonHeader from '../people/PersonHeader.vue'
 import { usePeople } from '../people/store'
@@ -267,7 +268,7 @@ const searchNotes = computed(() => {
 
 <template>
   <div class="library">
-    <section class="main">
+    <section class="page main">
       <header class="topbar">
         <PersonHeader v-if="personId" :id="personId" />
         <div v-else class="heading">
@@ -310,15 +311,14 @@ const searchNotes = computed(() => {
           @scroll.passive="onScroll"
           @keydown="onKey"
         >
-          <div v-if="searching" class="empty" role="status">
-            <Icon name="search" :size="40" />
-            <h2>{{ t('search.searching') }}</h2>
-          </div>
-          <div v-else-if="empty" class="empty">
-            <Icon :name="lib.isSearch ? 'search' : 'photos'" :size="40" />
-            <h2>{{ emptyText[0] }}</h2>
-            <p class="muted">{{ emptyText[1] }}</p>
-          </div>
+          <EmptyState v-if="searching" class="overlay" role="status" icon="search" :title="t('search.searching')" />
+          <EmptyState
+            v-else-if="empty"
+            class="overlay"
+            :icon="lib.isSearch ? 'search' : 'photos'"
+            :title="emptyText[0]"
+            :text="emptyText[1]"
+          />
 
           <div class="rows" :style="{ height: virtualizer.getTotalSize() + 'px' }">
             <div
@@ -382,17 +382,6 @@ const searchNotes = computed(() => {
 }
 .main {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: var(--topbar-h);
-  padding: 0 12px 0 20px;
-  flex-shrink: 0;
 }
 .heading {
   display: flex;
@@ -401,13 +390,6 @@ const searchNotes = computed(() => {
   gap: 4px;
   min-width: 0;
   max-width: 30%;
-}
-.topbar h1 {
-  margin: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font: 600 20px/1.1 var(--font-display);
 }
 .count {
   color: var(--text-3);
@@ -418,9 +400,6 @@ const searchNotes = computed(() => {
   margin: 0 20px 8px;
   color: var(--text-3);
   font-size: 12px;
-}
-.spacer {
-  flex: 1;
 }
 .zoom {
   display: flex;
@@ -528,24 +507,9 @@ const searchNotes = computed(() => {
   bottom: 6px;
   left: 6px;
 }
-.empty {
+.overlay {
   position: absolute;
   inset: 0;
-  display: grid;
   place-content: center;
-  justify-items: center;
-  gap: 4px;
-  text-align: center;
-  color: var(--text-3);
-  padding: 24px;
-}
-.empty h2 {
-  margin: 8px 0 0;
-  color: var(--text);
-  font: 600 18px var(--font-display);
-}
-.empty p {
-  margin: 0;
-  max-width: 360px;
 }
 </style>

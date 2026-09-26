@@ -164,20 +164,6 @@ func (s *Store) PersonByName(ctx context.Context, name string) (int64, error) {
 	return id, err
 }
 
-// CreatePerson adds a person with no faces yet ("" = unnamed), for faces
-// the user is about to move there.
-func (s *Store) CreatePerson(ctx context.Context, name string) (int64, error) {
-	res, err := s.w.ExecContext(ctx, "INSERT INTO people (name, created_at) VALUES (NULLIF(?, ''), ?)",
-		strings.TrimSpace(name), time.Now().Unix())
-	if isUnique(err) {
-		return 0, ErrPersonExists
-	}
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
-}
-
 // NamePerson names (or with "", unnames) a person.
 func (s *Store) NamePerson(ctx context.Context, id int64, name string) error {
 	res, err := s.w.ExecContext(ctx, "UPDATE people SET name = NULLIF(?, '') WHERE id = ?", strings.TrimSpace(name), id)
@@ -233,16 +219,28 @@ func (s *Store) RejectFaces(ctx context.Context, person int64, faces []int64) er
 	})
 }
 
-// MoveFaces puts faces with a person, as the user's own choice: clustering
-// never moves them again.
-func (s *Store) MoveFaces(ctx context.Context, faces []int64, person int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
-		var ok bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM people WHERE id = ?)", person).Scan(&ok); err != nil {
-			return err
+// NameFaces puts faces with the person called name, as the user's own
+// choice (clustering never moves them again), and returns that person. A
+// new name makes a new person; "" always does, unnamed (splitting someone
+// in two).
+func (s *Store) NameFaces(ctx context.Context, faces []int64, name string) (int64, error) {
+	if len(faces) == 0 {
+		return 0, errors.New("no faces to name")
+	}
+	name = strings.TrimSpace(name)
+	var person int64
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx, "SELECT id FROM people WHERE name = ?", name).Scan(&person)
+		if errors.Is(err, sql.ErrNoRows) {
+			var res sql.Result
+			res, err = tx.ExecContext(ctx, "INSERT INTO people (name, created_at) VALUES (NULLIF(?, ''), ?)",
+				name, time.Now().Unix())
+			if err == nil {
+				person, err = res.LastInsertId()
+			}
 		}
-		if !ok {
-			return ErrNotFound
+		if err != nil {
+			return err
 		}
 		for _, q := range []string{
 			`UPDATE faces SET person_id = ?1, assigned_by = 'user' WHERE id IN (SELECT value FROM json_each(?2))`,
@@ -254,6 +252,7 @@ func (s *Store) MoveFaces(ctx context.Context, faces []int64, person int64) erro
 		}
 		return dropEmptyPeople(ctx, tx)
 	})
+	return person, err
 }
 
 // execList runs q with ?1 = id and ?2 = ids as a JSON array.

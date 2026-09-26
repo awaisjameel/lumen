@@ -2,7 +2,7 @@
 // The one search box: type a description and press Enter to search by what's
 // in the photos (names of people narrow it to them), or pick a matching
 // person or Thing. Ctrl+F or / focuses it.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import { engine } from '../bridge'
@@ -11,6 +11,7 @@ import { logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { isTyping } from '../shared/keys'
+import { useSuggestions } from '../shared/suggest'
 import { useLibrary } from '../library/store'
 import FaceThumb from '../people/FaceThumb.vue'
 
@@ -18,24 +19,29 @@ const route = useRoute()
 const router = useRouter()
 const lib = useLibrary()
 
+const id = useId()
 const input = ref<HTMLInputElement | null>(null)
 const text = ref('')
 const open = ref(false)
-const people = ref<Person[]>([])
-const things = ref<Tag[]>([])
 const active = ref(0) // index into options
+
+const found = useSuggestions(
+  text,
+  (q) => Promise.all([engine.suggestPeople(q), engine.suggestTags(q)]),
+  [[], []] as [Person[], Tag[]],
+)
 
 /** What the menu offers: searching for the text, then people, then Things. */
 type Option = { kind: 'search' } | { kind: 'person'; person: Person } | { kind: 'thing'; tag: Tag }
-const options = computed<Option[]>(() =>
-  text.value.trim()
-    ? [
-        { kind: 'search' },
-        ...people.value.map((person): Option => ({ kind: 'person', person })),
-        ...things.value.map((tag): Option => ({ kind: 'thing', tag })),
-      ]
-    : [],
-)
+const options = computed<Option[]>(() => {
+  if (!text.value.trim()) return []
+  const [people, things] = found.value
+  return [
+    { kind: 'search' },
+    ...people.map((person): Option => ({ kind: 'person', person })),
+    ...things.map((tag): Option => ({ kind: 'thing', tag })),
+  ]
+})
 
 // Show the current query while on the results page.
 watch(
@@ -46,26 +52,7 @@ watch(
   { immediate: true },
 )
 
-let timer = 0
-let asked = 0
-watch(text, (v) => {
-  active.value = 0
-  clearTimeout(timer)
-  if (!v.trim()) {
-    people.value = []
-    things.value = []
-    return
-  }
-  timer = window.setTimeout(async () => {
-    const n = ++asked
-    try {
-      const [p, s] = await Promise.all([engine.suggestPeople(v), engine.suggestTags(v)])
-      if (n === asked) [people.value, things.value] = [p, s]
-    } catch (e) {
-      logError(e)
-    }
-  }, 120)
-})
+watch(text, () => (active.value = 0))
 
 function close() {
   open.value = false
@@ -125,10 +112,11 @@ function onGlobalKey(e: KeyboardEvent) {
   }
 }
 onMounted(() => window.addEventListener('keydown', onGlobalKey))
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onGlobalKey)
-  clearTimeout(timer)
-})
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
+
+function optionKey(o: Option): string {
+  return o.kind === 'person' ? `p${o.person.id}` : o.kind === 'thing' ? `t${o.tag.id}` : 's'
+}
 
 /** The first option of each kind gets a heading above it. */
 function heading(i: number): string {
@@ -147,9 +135,9 @@ function heading(i: number): string {
       type="search"
       role="combobox"
       aria-autocomplete="list"
-      aria-controls="search-options"
+      :aria-controls="`${id}-list`"
       :aria-expanded="open && options.length > 0"
-      :aria-activedescendant="open && options.length ? `search-opt-${active}` : undefined"
+      :aria-activedescendant="open && options.length ? `${id}-${active}` : undefined"
       :aria-label="t('search.shortcut')"
       :placeholder="t('search.placeholder')"
       :title="t('search.shortcut')"
@@ -163,11 +151,11 @@ function heading(i: number): string {
       <Icon name="close" :size="16" />
     </button>
 
-    <ul v-if="open && options.length" id="search-options" class="menu" role="listbox" @mousedown.prevent>
-      <template v-for="(o, i) in options" :key="o.kind === 'person' ? `p${o.person.id}` : o.kind === 'thing' ? `t${o.tag.id}` : 's'">
+    <ul v-if="open && options.length" :id="`${id}-list`" class="menu" role="listbox" @mousedown.prevent>
+      <template v-for="(o, i) in options" :key="optionKey(o)">
         <li v-if="heading(i)" class="heading" role="presentation">{{ heading(i) }}</li>
         <li
-          :id="`search-opt-${i}`"
+          :id="`${id}-${i}`"
           role="option"
           :aria-selected="active === i"
           :class="{ active: active === i }"

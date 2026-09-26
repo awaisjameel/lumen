@@ -169,3 +169,16 @@ func TestYaw(t *testing.T) {
 		t.Errorf("turned face yaw %.3f, want > 0.5", y)
 	}
 }
+
+func BenchmarkAlign(b *testing.B) {
+	const w, h = 2048, 1536
+	pix := make([]byte, w*h*3)
+	for i := range pix {
+		pix[i] = byte(i * 7)
+	}
+	// A 400 px face: 4 x 4 samples per crop pixel.
+	lm := [5][2]float64{{900, 600}, {1150, 600}, {1025, 750}, {930, 900}, {1120, 900}}
+	for b.Loop() {
+		Align(pix, w, h, lm, 112)
+	}
+}

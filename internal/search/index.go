@@ -108,12 +108,7 @@ func (x *Index) scan(q []int8, qs float32, lo, hi int, minCos float32, k int, al
 		if allow != nil && !allow(x.ids[i]) {
 			continue
 		}
-		v := x.vecs[i*x.dim : (i+1)*x.dim]
-		var dot int32
-		for j, a := range v {
-			dot += int32(a) * int32(q[j])
-		}
-		s := float32(dot) * qs * x.scales[i]
+		s := x.cos(i, q, qs)
 		if s < floor {
 			continue
 		}
@@ -145,13 +140,19 @@ func (x *Index) ScoreAll(q []float32, fn func(id int64, cos float32)) {
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 	for i, id := range x.ids {
-		v := x.vecs[i*x.dim : (i+1)*x.dim]
-		var dot int32
-		for j, a := range v {
-			dot += int32(a) * int32(qq[j])
-		}
-		fn(id, float32(dot)*qs*x.scales[i])
+		fn(id, x.cos(i, qq, qs))
 	}
+}
+
+// cos is the cosine similarity of row i to the quantized query q * qs.
+// Call with mu held.
+func (x *Index) cos(i int, q []int8, qs float32) float32 {
+	v := x.vecs[i*x.dim : (i+1)*x.dim]
+	var dot int32
+	for j, a := range v {
+		dot += int32(a) * int32(q[j])
+	}
+	return float32(dot) * qs * x.scales[i]
 }
 
 func byScore(a, b Hit) int {

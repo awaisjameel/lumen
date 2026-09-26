@@ -1,5 +1,10 @@
 // Every user-facing string lives here, so another language (e.g. Urdu) can be
-// added later as a second dictionary without touching components.
+// added later as a second dictionary without touching components. A message
+// that reads differently for one thing has a form per plural category of
+// {n} (Intl.PluralRules: English uses one and other).
+
+/** A message, or one form per plural category of its {n}. */
+type Message = string | Partial<Record<Intl.LDMLPluralRule, string>> & { other: string }
 
 const en = {
   'app.name': 'Lumen',
@@ -16,9 +21,12 @@ const en = {
   'search.shortcut': 'Search (Ctrl+F)',
   'search.thingsHeading': 'Things',
   'search.for': 'Search for “{q}”',
-  'search.results': '{n} matches, best first',
+  'search.results': { one: '1 match', other: '{n} matches, best first' },
   'search.more': 'Showing the best {n}. Add words to narrow it down.',
-  'search.pending': 'Lumen is still understanding {n} photos, so results may grow.',
+  'search.pending': {
+    one: 'Lumen is still understanding 1 photo, so results may grow.',
+    other: 'Lumen is still understanding {n} photos, so results may grow.',
+  },
   'search.searching': 'Searching…',
   'search.none': 'No matches',
   'search.noneHint': 'Try other words, or describe what’s in the photo, like “a dog on a sofa”.',
@@ -31,7 +39,10 @@ const en = {
   'people.named': 'Named',
   'people.notNamed': 'Not named yet',
   'people.empty': 'No people yet',
-  'people.emptyWorking': 'Lumen is still looking for faces: {n} photos to go.',
+  'people.emptyWorking': {
+    one: 'Lumen is still looking for faces: 1 photo to go.',
+    other: 'Lumen is still looking for faces: {n} photos to go.',
+  },
   'people.emptyHint': 'Someone appears here once they are clearly in three or more photos.',
   'people.hide': 'Hide from People',
   'people.unhide': 'Show in People',
@@ -97,9 +108,10 @@ const en = {
   'status.understanding': 'Understanding your photos… {left} left',
   'status.battery': 'Waiting for mains power · {left} left',
   'status.aiOff': 'Search is off',
+  'status.peopleOff': 'People is off',
   'status.errors': '{n} couldn’t be read',
   'status.skipped': '{n} can’t be shown on this PC yet',
-  'status.items': '{n} items',
+  'status.items': { one: '1 item', other: '{n} items' },
 
   'library.emptyScanning': 'Looking for photos…',
   'library.empty': 'No photos here yet',
@@ -133,7 +145,6 @@ const en = {
   'details.byAI': 'Suggested by Lumen',
   'details.byYou': 'Added by you',
   'details.people': 'People',
-  'details.unknownFace': 'Someone',
   'details.whoIsThis': 'Who is this?',
   'details.notThisPerson': 'Not {name}',
   'details.favourite': 'Favourite',
@@ -179,7 +190,7 @@ const en = {
   'common.cancel': 'Cancel',
 
   'error.generic': 'Something went wrong: {msg}',
-} as const
+} as const satisfies Record<string, Message>
 
 export type MessageKey = keyof typeof en
 
@@ -187,13 +198,15 @@ export type MessageKey = keyof typeof en
 export const LOCALE = 'en-GB'
 
 const numberFmt = new Intl.NumberFormat(LOCALE)
+const plurals = new Intl.PluralRules(LOCALE)
 
 /** Joins names for a sentence: "Ali, Sara and Omar". */
 export const listFormat = new Intl.ListFormat(LOCALE, { type: 'conjunction' })
 
 /** Translate a key, filling {placeholders}. Numbers are locale-formatted. */
 export function t(key: MessageKey, vars?: Record<string, string | number>): string {
-  let s: string = en[key]
+  const m: Message = en[key]
+  let s = typeof m === 'string' ? m : (m[plurals.select(Number(vars?.n))] ?? m.other)
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
       s = s.replaceAll(`{${k}}`, typeof v === 'number' ? numberFmt.format(v) : v)

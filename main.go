@@ -66,7 +66,7 @@ func run() error {
 		Services: []application.Service{
 			application.NewService(&background{ix: ix, search: models.Search}),
 			application.NewService(services.NewLibraryService(st, ix)),
-			application.NewService(services.NewSearchService(st, models.Search)),
+			application.NewService(services.NewSearchService(st, models.Search, models.People)),
 			application.NewService(services.NewPeopleService(st, models.People)),
 			application.NewServiceWithOptions(services.NewMediaService(st, cache),
 				application.ServiceOptions{Route: "/media"}),
