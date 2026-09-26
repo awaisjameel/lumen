@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.0.1"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "0.0.1",
+			"CompanyName": "Lumen contributors",
+			"FileDescription": "Local, private AI photo gallery",
+			"LegalCopyright": "(c) 2026, Lumen contributors",
+			"ProductName": "Lumen",
+			"Comments": "Runs entirely on your computer"
+		}
+	}
+}

@@ -1,0 +1,26 @@
+{
+  "name": "lumen-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "vue-tsc --noEmit",
+    "build:dev": "vue-tsc --noEmit && vite build --minify false --mode development",
+    "build": "vue-tsc --noEmit && vite build --mode production",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/vue-virtual": "^3.13.39",
+    "@wailsio/runtime": "3.0.0-beta.26",
+    "pinia": "^4.0.3",
+    "vue": "^3.5.43",
+    "vue-router": "^5.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.9",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.1",
+    "vue-tsc": "^3.3.11"
+  }
+}

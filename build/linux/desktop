@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Lumen
+Comment=Local, private AI photo gallery
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/lumen %u
+Terminal=false
+Type=Application
+Icon=lumen
+Categories=Utility;
+StartupWMClass=lumen
+
+ 
