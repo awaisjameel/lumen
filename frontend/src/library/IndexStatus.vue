@@ -12,9 +12,10 @@ const lib = useLibrary()
 const p = computed(() => lib.progress)
 
 // Two phases: preparing (metadata, then thumbnails: browsable) and then
-// understanding (the AI: searchable). Each shows how much is left.
+// understanding (the AI, side by side: what's in the photos, and who).
+// Each shows how much is left.
 const preparing = computed(() => (p.value ? Math.max(p.value.metadata, p.value.thumbnail) : 0))
-const understanding = computed(() => p.value?.embedding ?? 0)
+const understanding = computed(() => (p.value ? Math.max(p.value.embedding, p.value.faces) : 0))
 const left = computed(() => preparing.value || understanding.value)
 const busy = computed(() => !!p.value && (p.value.scanning || left.value > 0))
 const fraction = computed(() => {

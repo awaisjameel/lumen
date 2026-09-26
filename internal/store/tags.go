@@ -271,7 +271,7 @@ func (s *Store) SearchTags(ctx context.Context, text string, limit int) ([]core.
 	if text == "" {
 		return []core.Tag{}, nil
 	}
-	like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(text) + "%"
+	like := "%" + likeEscaper.Replace(text) + "%"
 	return queryAll(ctx, s.r, func(r *sql.Rows) (t core.Tag, err error) {
 		return t, r.Scan(&t.ID, &t.Name, &t.Kind, &t.Hidden)
 	}, `SELECT id, name, kind, hidden FROM tags

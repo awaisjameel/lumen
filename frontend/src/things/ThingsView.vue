@@ -3,13 +3,14 @@
 // the built-in ones; people add their own ("Eiffel Tower") and the AI finds
 // those across the library straight away. Built-ins can be hidden, the
 // user's own deleted.
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { engine, onLibraryChanged, TagKind, thumbUrl } from '../bridge'
+import { engine, TagKind, thumbUrl } from '../bridge'
 import type { Tag } from '../bridge'
-import { errorText, logError } from '../shared/errors'
+import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
+import { useLiveReload } from '../shared/listStore'
 import { useLibrary } from '../library/store'
 import SearchBox from '../search/SearchBox.vue'
 import { useThings } from './store'
@@ -35,20 +36,7 @@ const aiError = computed(() => lib.progress?.ai.error ?? '')
 const understanding = computed(() => lib.progress?.embedding ?? 0)
 
 onMounted(() => void things.load().catch((e: unknown) => (error.value = errorText(e))))
-
-// Counts grow while the AI works; refresh now and then, not on every change.
-let timer = 0
-const stop = onLibraryChanged(() => {
-  if (timer) return
-  timer = window.setTimeout(() => {
-    timer = 0
-    void things.load().catch(logError)
-  }, 3000)
-})
-onBeforeUnmount(() => {
-  stop()
-  clearTimeout(timer)
-})
+useLiveReload(things.load) // counts grow while the AI works
 
 async function create() {
   const n = name.value.trim()

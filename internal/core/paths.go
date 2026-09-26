@@ -63,6 +63,9 @@ func (p Paths) FFmpeg() string {
 // SigLIP is the folder holding the SigLIP 2 model files.
 func (p Paths) SigLIP() string { return filepath.Join(p.Runtime, "models", "siglip2") }
 
+// Faces is the folder holding the face models (YuNet and SFace).
+func (p Paths) Faces() string { return filepath.Join(p.Runtime, "models", "faces") }
+
 // Ensure creates the data folders if they are missing.
 func (p Paths) Ensure() error {
 	for _, d := range []string{p.DataDir, p.ThumbDir} {

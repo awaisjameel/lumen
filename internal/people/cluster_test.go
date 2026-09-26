@@ -1,0 +1,216 @@
+package people
+
+import (
+	"math"
+	"math/rand/v2"
+	"reflect"
+	"slices"
+	"testing"
+
+	"lumen/internal/store"
+)
+
+const dim = 128
+
+// world makes identity vectors: each person has a random direction, and
+// each face of them is that direction plus noise (same person ~0.7 cosine,
+// different people ~0).
+type world struct {
+	rng    *rand.Rand
+	people [][]float32
+	nextID int64
+}
+
+func newWorld(seed uint64, n int) *world {
+	w := &world{rng: rand.New(rand.NewPCG(seed, 1))}
+	for range n {
+		w.people = append(w.people, w.unit(nil, 0))
+	}
+	return w
+}
+
+func (w *world) unit(base []float32, noise float64) []float32 {
+	v := make([]float32, dim)
+	var n float64
+	for i := range v {
+		x := w.rng.NormFloat64()
+		if base != nil {
+			x = float64(base[i]) + noise*x/math.Sqrt(dim)
+		}
+		v[i] = float32(x)
+		n += x * x
+	}
+	for i := range v {
+		v[i] /= float32(math.Sqrt(n))
+	}
+	return v
+}
+
+// face is a new face of person k in photo asset (0 = a photo of its own).
+func (w *world) face(k int, asset int64) store.ClusterFace {
+	w.nextID++
+	if asset == 0 {
+		asset = 1000 + w.nextID
+	}
+	return store.ClusterFace{ID: w.nextID, AssetID: asset, Sharpness: 50, Vec: w.unit(w.people[k], 0.65)}
+}
+
+func (w *world) faces(k, n int) []store.ClusterFace {
+	var out []store.ClusterFace
+	for range n {
+		out = append(out, w.face(k, 0))
+	}
+	return out
+}
+
+func TestFindsEachPersonOnce(t *testing.T) {
+	w := newWorld(1, 4)
+	var faces []store.ClusterFace
+	for k := range 3 {
+		faces = append(faces, w.faces(k, 6)...)
+	}
+	faces = append(faces, w.faces(3, 2)...) // too few to be someone yet
+	got := Cluster(Input{Faces: faces}, DefaultParams)
+	if len(got.NewPeople) != 3 || len(got.Assign) != 0 || len(got.Merges) != 0 {
+		t.Fatalf("changes = %+v, want 3 new people", got)
+	}
+	for i, ids := range got.NewPeople {
+		want := faces[i*6 : i*6+6]
+		if len(ids) != 6 || !slices.ContainsFunc(want, func(f store.ClusterFace) bool { return f.ID == ids[0] }) {
+			t.Errorf("person %d = %v, want the 6 faces of one identity", i, ids)
+		}
+	}
+	if again := Cluster(Input{Faces: faces}, DefaultParams); !reflect.DeepEqual(again, got) {
+		t.Error("clustering the same faces twice gave different answers")
+	}
+}
+
+func TestNewFacesJoinTheirPerson(t *testing.T) {
+	w := newWorld(2, 2)
+	faces := w.faces(0, 5)
+	for i := range faces {
+		faces[i].Person = 7
+	}
+	newAli, stranger := w.face(0, 0), w.face(1, 0)
+	faces = append(faces, newAli, stranger)
+	got := Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 7}}}, DefaultParams)
+	if got.Assign[newAli.ID] != 7 || len(got.Assign) != 1 || len(got.NewPeople) != 0 {
+		t.Errorf("changes = %+v, want only the new face placed with person 7", got)
+	}
+}
+
+func TestTwoFacesInOnePhotoAreTwoPeople(t *testing.T) {
+	w := newWorld(3, 1)
+	// Near-identical twins: every photo holds both, so no two of these faces
+	// may be one person; alone they are too few for anyone.
+	var faces []store.ClusterFace
+	for photo := range int64(4) {
+		faces = append(faces, w.face(0, photo+1), w.face(0, photo+1))
+	}
+	got := Cluster(Input{Faces: faces}, DefaultParams)
+	for _, ids := range got.NewPeople {
+		assets := map[int64]bool{}
+		for _, id := range ids {
+			a := faces[id-1].AssetID
+			if assets[a] {
+				t.Fatalf("person %v holds two faces of photo %d", ids, a)
+			}
+			assets[a] = true
+		}
+	}
+}
+
+func TestRejectedFaceStaysOut(t *testing.T) {
+	w := newWorld(4, 1)
+	faces := w.faces(0, 5)
+	for i := range faces {
+		faces[i].Person = 7
+	}
+	f := w.face(0, 0)
+	faces = append(faces, f)
+	got := Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 7}}, Rejections: []store.Rejection{{Face: f.ID, Person: 7}}}, DefaultParams)
+	if _, ok := got.Assign[f.ID]; ok {
+		t.Errorf("rejected face placed: %+v", got)
+	}
+}
+
+func TestSplitPeopleMergeUnlessBothConfirmed(t *testing.T) {
+	w := newWorld(5, 1)
+	as, bs := w.faces(0, 5), w.faces(0, 5) // one identity, found as two people
+	for i := range as {
+		as[i].Person, bs[i].Person = 3, 8
+	}
+	faces := append(as, bs...)
+
+	got := Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 3}, {ID: 8}}}, DefaultParams)
+	if len(got.Merges) != 1 || got.Merges[0] != (store.Merge{From: 8, Into: 3}) {
+		t.Errorf("unnamed split: merges = %+v, want 8 into 3 (the older)", got.Merges)
+	}
+	got = Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 3}, {ID: 8, Named: true}}}, DefaultParams)
+	if len(got.Merges) != 1 || got.Merges[0] != (store.Merge{From: 3, Into: 8}) {
+		t.Errorf("one named: merges = %+v, want 3 into the named 8", got.Merges)
+	}
+	got = Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 3, Named: true}, {ID: 8, Named: true}}}, DefaultParams)
+	if len(got.Merges) != 0 {
+		t.Errorf("both named: merges = %+v, want none", got.Merges)
+	}
+	bs[0].ByUser = true // the user placed a face with 8: confirmed too
+	got = Cluster(Input{Faces: append(as, bs...), People: []store.ClusterPerson{{ID: 3, Named: true}, {ID: 8}}}, DefaultParams)
+	if len(got.Merges) != 0 {
+		t.Errorf("named and user-confirmed: merges = %+v, want none", got.Merges)
+	}
+}
+
+func BenchmarkCluster5000(b *testing.B) {
+	w := newWorld(6, 200)
+	var faces []store.ClusterFace
+	for k := range 200 {
+		faces = append(faces, w.faces(k, 25)...)
+	}
+	b.ResetTimer()
+	for range b.N {
+		Cluster(Input{Faces: faces}, DefaultParams)
+	}
+}
+
+// Linking in steps, as faces arrive, must give the same links as all at once.
+func TestLinkerIsIncremental(t *testing.T) {
+	w := newWorld(7, 20)
+	var faces []store.ClusterFace
+	for k := range 20 {
+		faces = append(faces, w.faces(k, 6)...)
+	}
+	all := NewLinker(DefaultParams).Update(faces)
+	l := NewLinker(DefaultParams)
+	l.Update(faces[:40])
+	l.Update(faces[:90])
+	if got := l.Update(faces); !reflect.DeepEqual(got, all) {
+		t.Error("incremental links differ from linking all at once")
+	}
+	// Placing faces drops them from the links.
+	faces[0].Person = 1
+	if got := l.Update(faces); got[faces[0].ID] != nil || len(got) != len(all)-1 {
+		t.Errorf("placed face still linked (%d links)", len(got))
+	}
+}
+
+// Blurry faces look alike whoever they are: they may join a person but
+// never start one.
+func TestBlurryFacesDontStartPeople(t *testing.T) {
+	w := newWorld(8, 1)
+	faces := w.faces(0, 5)
+	for i := range faces {
+		faces[i].Sharpness = 5
+	}
+	if got := Cluster(Input{Faces: faces}, DefaultParams); len(got.NewPeople) != 0 {
+		t.Errorf("blurry faces started a person: %+v", got)
+	}
+	faces[0].Sharpness, faces[1].Sharpness, faces[2].Sharpness = 40, 40, 40
+	if got := Cluster(Input{Faces: faces}, DefaultParams); len(got.NewPeople) != 1 || len(got.NewPeople[0]) != 5 {
+		t.Errorf("three clear faces and two blurry ones: %+v, want one person of 5", got)
+	}
+	faces[2].Yaw = 0.8 // in profile: no longer clear
+	if got := Cluster(Input{Faces: faces}, DefaultParams); len(got.NewPeople) != 0 {
+		t.Errorf("two clear faces and a profile started a person: %+v", got)
+	}
+}

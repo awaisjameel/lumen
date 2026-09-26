@@ -3,14 +3,16 @@
 // can be understood (and mocked) from this file alone.
 
 import { Events } from '@wailsio/runtime'
-import { LibraryService, SearchService } from '../../bindings/lumen/services'
+import { LibraryService, PeopleService, SearchService } from '../../bindings/lumen/services'
 import { DateSource, Filter, Kind, TagKind, TagSource } from '../../bindings/lumen/internal/core'
 import type {
   AssetDetail as RawAssetDetail,
   AssetTag,
   DayBucket,
   DayItems as RawDayItems,
+  Face,
   GridItem,
+  Person,
   Progress,
   SearchResult,
   Settings,
@@ -20,7 +22,7 @@ import type {
 } from '../../bindings/lumen/internal/core'
 
 export { DateSource, Filter, Kind, TagKind, TagSource }
-export type { AssetTag, DayBucket, GridItem, Progress, Settings, Source, Tag, View }
+export type { AssetTag, DayBucket, Face, GridItem, Person, Progress, Settings, Source, Tag, View }
 
 // Go sends an empty list as null; the generated types say so. These are the
 // same types with their lists made non-null, which this file guarantees, so
@@ -32,7 +34,7 @@ export type AssetDetail = NonNullLists<RawAssetDetail, 'paths'>
 /** One day of the grid. */
 export type DayItems = NonNullLists<RawDayItems, 'items'>
 /** A search's results, best first. */
-export type SearchResults = NonNullLists<SearchResult, 'items'>
+export type SearchResults = NonNullLists<SearchResult, 'items' | 'people'>
 
 // Thumbnail sizes (longest edge). Must match core.ThumbSmall / core.ThumbLarge;
 // the media route is plain HTTP, so they are not part of the generated bindings.
@@ -75,7 +77,7 @@ export const engine = {
 
   search: async (query: string): Promise<SearchResults> => {
     const r = await SearchService.Search(query)
-    return { ...r, items: r.items ?? [] }
+    return { ...r, items: r.items ?? [], people: r.people ?? [] }
   },
   suggestTags: async (text: string): Promise<Tag[]> => (await SearchService.SuggestTags(text)) ?? [],
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],
@@ -85,6 +87,20 @@ export const engine = {
   assetTags: async (id: number): Promise<AssetTag[]> => (await SearchService.AssetTags(id)) ?? [],
   tagAsset: (id: number, name: string): Promise<void> => SearchService.TagAsset(id, name),
   untagAsset: (id: number, tagID: number): Promise<void> => SearchService.UntagAsset(id, tagID),
+
+  people: async (): Promise<Person[]> => (await PeopleService.People()) ?? [],
+  person: (id: number): Promise<Person> => PeopleService.Person(id),
+  personFaces: async (id: number): Promise<Face[]> => (await PeopleService.PersonFaces(id)) ?? [],
+  assetFaces: async (id: number): Promise<Face[]> => (await PeopleService.AssetFaces(id)) ?? [],
+  suggestPeople: async (text: string): Promise<Person[]> => (await PeopleService.SuggestPeople(text)) ?? [],
+  personByName: (name: string): Promise<number> => PeopleService.PersonByName(name),
+  namePerson: (id: number, name: string): Promise<void> => PeopleService.NamePerson(id, name),
+  mergePeople: (from: number, into: number): Promise<void> => PeopleService.MergePeople(from, into),
+  setPersonHidden: (id: number, hidden: boolean): Promise<void> => PeopleService.SetPersonHidden(id, hidden),
+  setPersonCover: (id: number, face: number): Promise<void> => PeopleService.SetPersonCover(id, face),
+  rejectFaces: (person: number, faces: number[]): Promise<void> => PeopleService.RejectFaces(person, faces),
+  moveFaces: (faces: number[], person: number): Promise<void> => PeopleService.MoveFaces(faces, person),
+  nameFaces: (faces: number[], name: string): Promise<number> => PeopleService.NameFaces(faces, name),
 }
 
 /** Fires whenever indexing progress changes. Returns an unsubscribe function. */

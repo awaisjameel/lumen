@@ -5,6 +5,7 @@ const en = {
   'app.name': 'Lumen',
 
   'nav.library': 'Library',
+  'nav.people': 'People',
   'nav.favourites': 'Favourites',
   'nav.videos': 'Videos',
   'nav.things': 'Things',
@@ -18,9 +19,49 @@ const en = {
   'search.results': '{n} matches, best first',
   'search.more': 'Showing the best {n}. Add words to narrow it down.',
   'search.pending': 'Lumen is still understanding {n} photos, so results may grow.',
+  'search.searching': 'Searching…',
   'search.none': 'No matches',
   'search.noneHint': 'Try other words, or describe what’s in the photo, like “a dog on a sofa”.',
   'search.unavailable': 'Search isn’t available right now',
+  'search.peopleHeading': 'People',
+  'search.withPeople': 'Photos with {names}.',
+
+  'people.intro': 'Lumen finds the people in your photos, right here on this computer. Name someone once and every photo of them follows.',
+  'people.unavailable': 'People isn’t available: {error}',
+  'people.named': 'Named',
+  'people.notNamed': 'Not named yet',
+  'people.empty': 'No people yet',
+  'people.emptyWorking': 'Lumen is still looking for faces: {n} photos to go.',
+  'people.emptyHint': 'Someone appears here once they are clearly in three or more photos.',
+  'people.hide': 'Hide from People',
+  'people.unhide': 'Show in People',
+  'people.hidden': '{n} hidden',
+  'people.showHidden': 'Show hidden',
+  'people.hideHidden': 'Hide hidden',
+
+  'person.unnamed': 'Unnamed person',
+  'person.addName': 'Add a name',
+  'person.name': 'Name',
+  'person.namePlaceholder': 'Who is this?',
+  'person.rename': 'Change the name',
+  'person.review': 'Review faces',
+  'person.mergeTitle': 'Someone is already called “{name}”',
+  'person.mergeText': 'Are they the same person? Their photos will be put together.',
+  'person.merge': 'Same person',
+  'person.empty': 'No photos of them right now',
+  'person.emptyHint': 'Their photos may be in a folder that was removed, or their faces were moved to someone else.',
+
+  'faces.title': 'Faces of {name}',
+  'faces.back': 'Back to their photos',
+  'faces.hint': 'Least alike first. Select any that aren’t {name}.',
+  'faces.selected': '{n} selected',
+  'faces.notThem': 'Not {name}',
+  'faces.moveTo': 'Move to someone…',
+  'faces.cover': 'Use as their picture',
+  'faces.selectAll': 'Select all',
+  'faces.clear': 'Clear',
+  'faces.none': 'No faces left.',
+  'faces.byYou': 'Placed by you',
 
   'things.intro': 'Lumen sorts your photos by what’s in them, right here on this computer.',
   'things.new': 'Look for something new, like “Eiffel Tower”',
@@ -91,6 +132,10 @@ const en = {
   'details.removeTag': 'Remove “{name}”',
   'details.byAI': 'Suggested by Lumen',
   'details.byYou': 'Added by you',
+  'details.people': 'People',
+  'details.unknownFace': 'Someone',
+  'details.whoIsThis': 'Who is this?',
+  'details.notThisPerson': 'Not {name}',
   'details.favourite': 'Favourite',
   'details.unfavourite': 'Remove favourite',
 
@@ -109,12 +154,13 @@ const en = {
   'settings.videosHint': 'Off by default. Video support is limited until video processing arrives.',
   'settings.indexing': 'Background work',
   'settings.pause': 'Pause indexing',
-  'settings.ai': 'Search and Things',
-  'settings.aiHint': 'Lumen understands your photos on this computer, so you can search them by what’s in them. Nothing is uploaded.',
+  'settings.ai': 'Search, Things and People',
+  'settings.aiHint': 'Lumen understands your photos on this computer, so you can search them by what’s in them and who is in them. Nothing is uploaded.',
   'settings.aiGpu': 'Working on the graphics card.',
   'settings.aiCpu': 'Working on the processor.',
   'settings.aiIdle': 'Ready.',
   'settings.aiError': 'Not available: {error}',
+  'settings.peopleError': 'Recognising people isn’t available: {error}',
   'settings.aiOnBattery': 'Keep working on battery',
   'settings.aiOnBatteryHint': 'Off by default: understanding photos is heavy work, so Lumen waits for mains power.',
   'settings.advanced': 'Advanced',
@@ -130,6 +176,8 @@ const en = {
   'settings.privacy': 'Privacy',
   'settings.privacyText': 'Lumen works entirely on this computer. It makes no network connections and collects no data.',
 
+  'common.cancel': 'Cancel',
+
   'error.generic': 'Something went wrong: {msg}',
 } as const
 
@@ -139,6 +187,9 @@ export type MessageKey = keyof typeof en
 export const LOCALE = 'en-GB'
 
 const numberFmt = new Intl.NumberFormat(LOCALE)
+
+/** Joins names for a sentence: "Ali, Sara and Omar". */
+export const listFormat = new Intl.ListFormat(LOCALE, { type: 'conjunction' })
 
 /** Translate a key, filling {placeholders}. Numbers are locale-formatted. */
 export function t(key: MessageKey, vars?: Record<string, string | number>): string {

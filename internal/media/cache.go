@@ -24,15 +24,15 @@ type Original struct {
 // clears the folder; later, the size cap evicts them), so readers call
 // Ensure, which rebuilds a missing pair from the original.
 type Cache struct {
-	Dir    string
-	Thumbs Thumbnailer
+	Dir     string
+	Decoder Decoder
 
 	rebuilding sync.Map       // asset id -> *sync.Mutex while its thumbnails are rebuilt
 	writing    [64]sync.Mutex // striped by asset id: one writer per asset at a time
 }
 
-// NewCache returns the cache in dir, rebuilding with t.
-func NewCache(dir string, t Thumbnailer) *Cache { return &Cache{Dir: dir, Thumbs: t} }
+// NewCache returns the cache in dir, rebuilding with d.
+func NewCache(dir string, d Decoder) *Cache { return &Cache{Dir: dir, Decoder: d} }
 
 // Path is where a thumbnail lives, fanned out over 256 sub-folders so no
 // folder holds hundreds of thousands of files.
@@ -115,7 +115,7 @@ func (c *Cache) Ensure(ctx context.Context, id int64, size int, orig Original) e
 	if _, err := os.Stat(path); err == nil {
 		return nil // rebuilt by another caller while we waited
 	}
-	t, err := c.Thumbs.Thumbnail(ctx, orig.Path, orig.Kind, orig.Orientation)
+	t, err := c.Decoder.Thumbnail(ctx, orig.Path, orig.Kind, orig.Orientation)
 	if err != nil {
 		return err
 	}

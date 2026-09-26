@@ -61,15 +61,18 @@ const (
 	CPU Device = "cpu"
 )
 
-// session is one loaded model: one input, one (pooled) output.
+// session is one loaded model: one input, float32 outputs.
 type session struct {
-	s      *ort.DynamicAdvancedSession
-	device Device
+	s       *ort.DynamicAdvancedSession
+	device  Device
+	outputs []string
 }
 
 // openSession loads a model on the given device. threads limits CPU threads
-// (0 = ONNX Runtime's choice).
-func openSession(path string, device Device, threads int) (*session, error) {
+// (0 = ONNX Runtime's choice). outputs names the outputs run returns; with
+// none it returns the model's embedding (pooler_output when the model has
+// one, else its first output).
+func openSession(path string, device Device, threads int, outputs ...string) (*session, error) {
 	opts, err := ort.NewSessionOptions()
 	if err != nil {
 		return nil, err
@@ -114,39 +117,47 @@ func openSession(path string, device Device, threads int) (*session, error) {
 	if len(in) != 1 || len(out) == 0 {
 		return nil, fmt.Errorf("model %s: want one input and an output, got %d and %d", filepath.Base(path), len(in), len(out))
 	}
-	// Prepared models have one output; a raw export also has the hidden
-	// states, and only the pooled embedding is wanted.
-	output := out[0].Name
-	for _, o := range out {
-		if o.Name == "pooler_output" {
-			output = o.Name
+	if len(outputs) == 0 {
+		// Prepared models have one output; a raw export also has the hidden
+		// states, and only the pooled embedding is wanted.
+		outputs = []string{out[0].Name}
+		for _, o := range out {
+			if o.Name == "pooler_output" {
+				outputs[0] = o.Name
+			}
 		}
 	}
-	s, err := ort.NewDynamicAdvancedSession(path, []string{in[0].Name}, []string{output}, opts)
+	s, err := ort.NewDynamicAdvancedSession(path, []string{in[0].Name}, outputs, opts)
 	if err != nil {
 		return nil, fmt.Errorf("load model %s: %w", filepath.Base(path), err)
 	}
-	return &session{s: s, device: device}, nil
+	return &session{s: s, device: device, outputs: outputs}, nil
 }
 
 // errClosed means the model was freed (or failed to reload after a GPU error).
 var errClosed = errors.New("model is not loaded")
 
-// run feeds one input and returns the float32 output's data (copied) and shape.
-func (s *session) run(in ort.Value) ([]float32, ort.Shape, error) {
+// run feeds one input and returns each output's data (copied), in the order
+// openSession named them. Safe for concurrent use.
+func (s *session) run(in ort.Value) ([][]float32, error) {
 	if s == nil || s.s == nil {
-		return nil, nil, errClosed
+		return nil, errClosed
 	}
-	outs := []ort.Value{nil} // ONNX Runtime allocates the output
+	outs := make([]ort.Value, len(s.outputs)) // ONNX Runtime allocates them
 	if err := s.s.Run([]ort.Value{in}, outs); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	defer outs[0].Destroy()
-	t, ok := outs[0].(*ort.Tensor[float32])
-	if !ok {
-		return nil, nil, errors.New("model output is not float32")
+	data := make([][]float32, len(outs))
+	var err error
+	for i, o := range outs {
+		if t, ok := o.(*ort.Tensor[float32]); ok {
+			data[i] = append([]float32(nil), t.GetData()...)
+		} else if err == nil {
+			err = fmt.Errorf("model output %s is not float32", s.outputs[i])
+		}
+		o.Destroy()
 	}
-	return append([]float32(nil), t.GetData()...), t.GetShape(), nil
+	return data, err
 }
 
 func (s *session) close() {

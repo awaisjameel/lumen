@@ -67,7 +67,7 @@ func TestSearchMatchesExactScan(t *testing.T) {
 		return 1
 	})
 
-	hits := x.Search(query, -1, 20)
+	hits := x.Search(query, -1, 20, nil)
 	if len(hits) != 20 {
 		t.Fatalf("got %d hits, want 20", len(hits))
 	}
@@ -85,8 +85,12 @@ func TestSearchMatchesExactScan(t *testing.T) {
 	if !slices.IsSortedFunc(hits, byScore) {
 		t.Error("hits are not best first")
 	}
-	if h := x.Search(query, exact[0].s+0.1, 20); len(h) != 0 {
+	if h := x.Search(query, exact[0].s+0.1, 20, nil); len(h) != 0 {
 		t.Errorf("minimum score ignored: %d hits", len(h))
+	}
+	even := func(id int64) bool { return id%2 == 0 }
+	if h := x.Search(query, -1, 20, even); len(h) != 20 || slices.ContainsFunc(h, func(h Hit) bool { return !even(h.ID) }) {
+		t.Errorf("filtered search returned other assets: %+v", h)
 	}
 }
 
@@ -98,7 +102,7 @@ func TestPutReplaces(t *testing.T) {
 	if x.Len() != 1 {
 		t.Fatalf("len %d, want 1", x.Len())
 	}
-	if h := x.Search([]float32{0, 1}, 0.5, 5); len(h) != 1 || h[0].ID != 7 {
+	if h := x.Search([]float32{0, 1}, 0.5, 5, nil); len(h) != 1 || h[0].ID != 7 {
 		t.Fatalf("hits %+v", h)
 	}
 }

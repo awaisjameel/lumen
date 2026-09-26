@@ -58,3 +58,18 @@ func HEICSamples(t testing.TB) []string {
 	}
 	return paths
 }
+
+// FacePhotos returns the photos in the folder LUMEN_FACE_PHOTOS names (real
+// photos of people, kept out of the repo), skipping the test if it is unset.
+func FacePhotos(t testing.TB, n int) []string {
+	t.Helper()
+	dir := os.Getenv("LUMEN_FACE_PHOTOS")
+	if dir == "" {
+		t.Skip("LUMEN_FACE_PHOTOS not set: no photos of people to test on")
+	}
+	paths, _ := filepath.Glob(filepath.Join(dir, "*.[jJ][pP][gG]"))
+	if len(paths) == 0 {
+		t.Skipf("no JPEGs in %s", dir)
+	}
+	return paths[:min(n, len(paths))]
+}

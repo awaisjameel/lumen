@@ -1,7 +1,10 @@
-"""Turn the downloaded SigLIP 2 files into what Lumen ships.
+"""Turn the downloaded model files into what Lumen ships.
 
-Run by scripts/deps.sh (which pins and verifies the inputs). Reads
-deps/src/siglip2 and writes deps/runtime/models/siglip2:
+Run by scripts/deps.sh (which pins and verifies the inputs) as
+
+  prepare_models.py MODEL deps/src/MODEL deps/runtime/models/MODEL
+
+siglip2 writes:
 
   vision.onnx     fp16 image tower, input fixed to BATCH x 3 x 224 x 224 so
                   DirectML can compile the whole graph; only pooler_output kept
@@ -11,8 +14,17 @@ deps/src/siglip2 and writes deps/runtime/models/siglip2:
                   in milliseconds (format below, mirrored by internal/ai/tokenizer.go)
   siglip2.json    what the engine needs to know about the model
 
-With a third argument it also writes reference encodings from Hugging Face
+With a fourth argument it also writes reference encodings from Hugging Face
 `tokenizers` there (internal/ai/testdata/tokenizer_fixtures.json).
+
+faces writes:
+
+  yunet.onnx      the YuNet detector as published (fixed 1 x 3 x 640 x 640 input)
+  sface.onnx      the SFace recognizer with its weights moved out of the graph
+                  inputs (a quirk of the 2021 export) and a variable batch size,
+                  so every face in a photo is embedded in one run
+  *.LICENSE       the models' licences (MIT, Apache-2.0), shipped beside them
+  faces.json      what the engine needs to know about the models
 """
 
 import json
@@ -37,8 +49,13 @@ CHECKPOINT = ("https://huggingface.co/google/siglip2-base-patch16-224/resolve/"
               "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2/model.safetensors")
 VERSION = "siglip2-base-p16-224-fp16-1"  # bump when the prepared files change
 
+FACES_VERSION = "yunet-2023mar+sface-2021dec-1"  # bump when the prepared files change
+DETECT_SIZE = 640  # YuNet's input side
+CROP_SIZE = 112    # SFace's aligned face side
+FACE_DIM = 128
 
-def main(src: Path, dst: Path, fixtures: Path | None) -> None:
+
+def siglip2(src: Path, dst: Path, fixtures: Path | None) -> None:
     dst.mkdir(parents=True, exist_ok=True)
     vision(src / "vision_model_fp16.onnx", dst / "vision.onnx")
     text(src / "text_model_fp16.onnx", dst / "text.onnx")
@@ -180,5 +197,44 @@ def logit_params() -> tuple[float, float]:
     return float(np.exp(vals[0])), vals[1]
 
 
+def faces(src: Path, dst: Path) -> None:
+    dst.mkdir(parents=True, exist_ok=True)
+    yunet = onnx.load(src / "yunet.onnx")
+    dims = [d.dim_value for d in yunet.graph.input[0].type.tensor_type.shape.dim]
+    assert dims == [1, 3, DETECT_SIZE, DETECT_SIZE], dims
+    onnx.checker.check_model(yunet)
+    onnx.save(yunet, dst / "yunet.onnx")
+
+    sface = onnx.load(src / "sface.onnx")
+    g = sface.graph
+    weights = {i.name for i in g.initializer}
+    keep = [i for i in g.input if i.name not in weights]
+    del g.input[:]
+    g.input.extend(keep)
+    assert [i.name for i in g.input] == ["data"], [i.name for i in g.input]
+    for t in (g.input[0], g.output[0]):
+        d = t.type.tensor_type.shape.dim[0]
+        d.ClearField("dim_value")
+        d.dim_param = "batch"
+    onnx.checker.check_model(sface)
+    onnx.save(sface, dst / "sface.onnx")
+
+    for name in ("yunet.LICENSE", "sface.LICENSE"):
+        (dst / name).write_bytes((src / name).read_bytes())
+    (dst / "faces.json").write_text(json.dumps({
+        "version": FACES_VERSION,
+        "detectSize": DETECT_SIZE,
+        "cropSize": CROP_SIZE,
+        "dim": FACE_DIM,
+    }, indent=2) + "\n")
+    print("prepared", dst)
+
+
 if __name__ == "__main__":
-    main(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]) if len(sys.argv) > 3 else None)
+    model, src, dst = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
+    if model == "siglip2":
+        siglip2(src, dst, Path(sys.argv[4]) if len(sys.argv) > 4 else None)
+    elif model == "faces":
+        faces(src, dst)
+    else:
+        sys.exit(f"unknown model {model!r}: want siglip2 or faces")

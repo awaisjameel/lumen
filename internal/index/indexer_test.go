@@ -76,7 +76,7 @@ func TestIndexerEndToEnd(t *testing.T) {
 
 	ev := &fakeEvents{}
 	cache := media.NewCache(paths.ThumbDir, media.Decoders{})
-	ix := New(st, paths, cache, nil, nil, ev)
+	ix := New(st, paths, cache, Models{}, ev)
 	ix.Start(ctx)
 	defer ix.Stop()
 

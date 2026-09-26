@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
+	"lumen/internal/ai"
 	"lumen/internal/core"
 	"lumen/internal/media"
 	"lumen/internal/search"
@@ -17,15 +19,21 @@ import (
 // stage describes one step of the pipeline for runStage.
 type stage[R any] struct {
 	name  core.Stage
-	batch int           // jobs fetched per round
-	wake  chan struct{} // nudged when new work may exist
-	next  chan struct{} // nudged after a save (the following stage); may be nil
+	batch int             // jobs fetched per round
+	wake  chan struct{}   // nudged when new work may exist
+	next  []chan struct{} // nudged after a save: the stages that wait for this one
+	model releaser        // the model the stage runs, freed when idle or held; may be nil
 	// process handles a batch. An error means the stage itself can't run
 	// right now (e.g. the model won't load): nothing is saved and the batch
 	// is retried later. Per-file failures go in the results instead.
 	process func(context.Context, []store.JobItem) ([]R, error)
 	save    func(context.Context, []R) error
-	idle    func() // called when the queue runs dry; may be nil
+}
+
+// releaser frees a model (see model).
+type releaser interface {
+	releaseIdle()
+	release()
 }
 
 // runStage drains one stage's job queue: fetch a batch (what the user is
@@ -34,7 +42,7 @@ type stage[R any] struct {
 // small so the UI sees results stream in and focus changes apply fast.
 func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 	for {
-		if !ix.waitTurn(ctx, s.name) {
+		if !ix.waitTurn(ctx, s.name, s.model) {
 			return
 		}
 		items, err := ix.fetch(ctx, s.name, s.batch)
@@ -47,8 +55,8 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 			continue
 		}
 		if len(items) == 0 {
-			if s.idle != nil {
-				s.idle()
+			if s.model != nil {
+				s.model.releaseIdle()
 			}
 			select {
 			case <-ctx.Done():
@@ -73,8 +81,8 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 			continue
 		}
 		ix.changed.Store(true)
-		if s.next != nil {
-			nudge(s.next)
+		for _, ch := range s.next {
+			nudge(ch)
 		}
 	}
 }
@@ -144,7 +152,7 @@ func (ix *Indexer) doMetadata(_ context.Context, j store.JobItem) (r store.Metad
 func (ix *Indexer) doThumbnail(ctx context.Context, j store.JobItem) (r store.ThumbResult) {
 	r.AssetID = j.AssetID
 	defer recoverInto(&r.Err, j.Path)
-	t, err := ix.cache.Thumbs.Thumbnail(ctx, j.Path, j.Kind, j.Orientation)
+	t, err := ix.cache.Decoder.Thumbnail(ctx, j.Path, j.Kind, j.Orientation)
 	switch {
 	case errors.Is(err, media.ErrUnsupported):
 		r.Skipped = true
@@ -168,7 +176,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 	if err := ix.search.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("search engine: %w", err)
 	}
-	enc, err := ix.encoder()
+	enc, err := ix.encoder.get()
 	if err != nil {
 		return nil, err
 	}
@@ -226,9 +234,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 			results[i].Tags = ix.search.Tags(vecs[k])
 		}
 	}
-	ix.mu.Lock()
-	ix.aiDevice = string(enc.Device())
-	ix.mu.Unlock()
+	ix.setAIState(func() { ix.aiDevice = string(enc.Device()) }) // it may have moved to the CPU
 	return results, nil
 }
 
@@ -242,6 +248,73 @@ func (ix *Indexer) saveEmbeddings(ctx context.Context, rs []store.EmbedResult) e
 			ix.search.Add(r.AssetID, r.Vec, r.Scale)
 		}
 	}
+	return nil
+}
+
+// Face finding. Photos are decoded at faceSide for it: the detector sees the
+// whole photo at 640 px, which finds faces down to a few percent of the
+// frame, and at faceSide nearly all of them are big enough to recognise
+// (Phase 3 measured 99.7% at 40 px or more on a folder of group photos).
+const (
+	faceSide     = 2048
+	faceMinScore = 0.8 // detection confidence to keep a face
+	faceMinSide  = 40  // px at faceSide; smaller faces are too blurry to recognise
+	faceWorkers  = 4
+	faceThreads  = 2 // CPU threads per face model run
+)
+
+// doFaces finds, aligns and recognises the faces in a batch of photos.
+func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.FaceResult, error) {
+	faces, err := ix.faces.get()
+	if err != nil {
+		return nil, err
+	}
+	results := make([]store.FaceResult, len(items))
+	parallel(ctx, len(items), faceWorkers, func(i int) {
+		j := items[i]
+		r := &results[i]
+		r.AssetID = j.AssetID
+		defer recoverInto(&r.Err, j.Path)
+		im, err := ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
+		switch {
+		case errors.Is(err, media.ErrUnsupported):
+			r.Skipped = true
+			return
+		case err != nil:
+			r.Err = err.Error()
+			return
+		}
+		found, err := faces.Detect(im.Pix, im.W, im.H, faceMinScore)
+		if err != nil {
+			r.Err = err.Error()
+			return
+		}
+		found = slices.DeleteFunc(found, func(f ai.Face) bool { return min(f.W, f.H) < faceMinSide })
+		ids, err := faces.Embed(im.Pix, im.W, im.H, found)
+		if err != nil {
+			r.Err = err.Error()
+			return
+		}
+		w, h := float64(im.W), float64(im.H)
+		for k, f := range found {
+			r.Faces = append(r.Faces, store.DetectedFace{
+				X: float32(f.X / w), Y: float32(f.Y / h), W: float32(f.W / w), H: float32(f.H / h),
+				Score: f.Score, Sharpness: ids[k].Sharpness, Yaw: f.Yaw(), Vec: ids[k].Vec,
+			})
+		}
+	})
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return results, nil
+}
+
+// saveFaces stores a batch, then lets the people engine group them.
+func (ix *Indexer) saveFaces(ctx context.Context, rs []store.FaceResult) error {
+	if err := ix.store.SaveFaces(ctx, ix.people.Model().Version, rs); err != nil {
+		return err
+	}
+	ix.people.Nudge()
 	return nil
 }
 

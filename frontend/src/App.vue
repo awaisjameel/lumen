@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 import IndexStatus from './library/IndexStatus.vue'
 import { useLibrary } from './library/store'
 import Welcome from './onboarding/Welcome.vue'
+import ConfirmDialog from './shared/ConfirmDialog.vue'
 import { errorText } from './shared/errors'
 import Icon from './shared/Icon.vue'
 import { t } from './shared/i18n'
@@ -25,6 +26,9 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
           <span>{{ t('app.name') }}</span>
         </div>
         <RouterLink to="/" class="nav-item"><Icon name="photos" />{{ t('nav.library') }}</RouterLink>
+        <RouterLink to="/people" class="nav-item" :class="{ active: route.path.startsWith('/people') }">
+          <Icon name="people" />{{ t('nav.people') }}
+        </RouterLink>
         <RouterLink to="/things" class="nav-item" :class="{ active: route.path.startsWith('/things') }">
           <Icon name="things" />{{ t('nav.things') }}
         </RouterLink>
@@ -42,6 +46,7 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
     </div>
   </template>
   <p v-else-if="failed" class="failed" role="alert">{{ failed }}</p>
+  <ConfirmDialog />
 </template>
 
 <style scoped>

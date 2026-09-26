@@ -11,9 +11,14 @@ export interface AI {
     "device": string;
 
     /**
-     * why the AI can't run (models missing, runtime failed)
+     * why search and Things can't run (models missing, runtime failed)
      */
     "error": string;
+
+    /**
+     * why people can't be recognised
+     */
+    "facesError": string;
 }
 
 /**
@@ -98,6 +103,44 @@ export interface DayItems {
 }
 
 /**
+ * Face is one face in a photo: where it is, and who it is.
+ */
+export interface Face {
+    "id": number;
+    "assetId": number;
+
+    /**
+     * the photo's thumbnail version
+     */
+    "thumb": number;
+    "assetW": number;
+    "assetH": number;
+
+    /**
+     * the box, as fractions of the upright photo
+     */
+    "x": number;
+    "y": number;
+    "w": number;
+    "h": number;
+
+    /**
+     * 0 = not recognised yet
+     */
+    "person": number;
+
+    /**
+     * the person's name; "" = unnamed or nobody
+     */
+    "name": string;
+
+    /**
+     * the user put this face with this person
+     */
+    "byUser": boolean;
+}
+
+/**
  * Filter narrows the grid to a subset of the library.
  */
 export enum Filter {
@@ -142,6 +185,30 @@ export enum Kind {
 };
 
 /**
+ * Person is someone who appears in the photos: a group of faces the AI
+ * found, or the user made, named or not.
+ */
+export interface Person {
+    "id": number;
+
+    /**
+     * "" until the user names them
+     */
+    "name": string;
+    "hidden": boolean;
+
+    /**
+     * visible photos they appear in
+     */
+    "count": number;
+
+    /**
+     * the face to show; ID 0 = none
+     */
+    "cover": Face;
+}
+
+/**
  * Progress is the payload of the index:progress event.
  */
 export interface Progress {
@@ -171,6 +238,11 @@ export interface Progress {
      * assets still waiting for the AI
      */
     "embedding": number;
+
+    /**
+     * assets still waiting for face recognition
+     */
+    "faces": number;
     "errors": number;
     "skipped": number;
     "paused": boolean;
@@ -187,6 +259,11 @@ export interface Progress {
  */
 export interface SearchResult {
     "items": GridItem[] | null;
+
+    /**
+     * people named in the query: results show all of them
+     */
+    "people": string[] | null;
 
     /**
      * photos not yet understood, so not searchable yet
@@ -287,7 +364,7 @@ export enum TagSource {
 
 /**
  * View is what the timeline grid shows: a filter, optionally narrowed to
- * one tag.
+ * one tag or one person.
  */
 export interface View {
     "filter": Filter;
@@ -296,4 +373,9 @@ export interface View {
      * 0 = any
      */
     "tag"?: number;
+
+    /**
+     * 0 = anyone
+     */
+    "person"?: number;
 }

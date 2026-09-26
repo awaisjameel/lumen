@@ -16,7 +16,7 @@ export const RESULTS = 'results'
 export type Scope = { kind: 'timeline'; view: View } | { kind: 'search'; query: string }
 
 export function scopeKey(s: Scope): string {
-  return s.kind === 'search' ? `search:${s.query}` : `view:${s.view.filter}:${s.view.tag ?? 0}`
+  return s.kind === 'search' ? `search:${s.query}` : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}`
 }
 
 /** A position in the library: which day, which asset. Survives items shifting. */
@@ -29,6 +29,7 @@ export interface Sel {
 export interface SearchInfo {
   pending: number // photos the AI hasn't seen yet
   complete: boolean
+  people: string[] // people named in the query
 }
 
 function loadZoom(): number {
@@ -107,7 +108,7 @@ export const useLibrary = defineStore('library', () => {
     if (s.kind === 'search') {
       const r = await engine.search(s.query)
       if (scopeKey(s) !== scopeKey(scope.value)) return // superseded while searching
-      searchInfo.value = { pending: r.pending, complete: r.complete }
+      searchInfo.value = { pending: r.pending, complete: r.complete, people: r.people }
       buckets.value = r.items.length ? [{ day: RESULTS, count: r.items.length }] : []
       days.value = new Map(r.items.length ? [[RESULTS, r.items]] : [])
       fresh.add(RESULTS)

@@ -38,7 +38,9 @@ export function DeleteTag(id: number): $CancellablePromise<void> {
 }
 
 /**
- * Search finds photos matching a description, best match first.
+ * Search finds photos matching a description, best match first. Named
+ * people in it narrow the search to photos of all of them ("Ali at the
+ * beach"); names alone give their photos, newest first.
  */
 export function Search(query: string): $CancellablePromise<core$0.SearchResult> {
     return $Call.ByID(3154275024, query);

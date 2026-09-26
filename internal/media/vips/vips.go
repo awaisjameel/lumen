@@ -97,34 +97,67 @@ static int lumen_thumbs_file(const char *path, int large, int small, int side, l
 	return finish(t, small, side, o);
 }
 
-// lumen_thumbs_pixels does the same for 8-bit RGB(A) pixels decoded
-// elsewhere, applying orientation (EXIF 1..8) itself.
-static int lumen_thumbs_pixels(const void *pix, size_t len, int w, int h, int bands, int orientation,
-		int large, int small, int side, lumen_thumbs *o) {
+// from_pixels wraps 8-bit RGB(A) pixels decoded elsewhere as an image shrunk
+// to at most side and turned upright from orientation (EXIF 1..8). The
+// pixels must outlive the returned (lazy) image's use.
+static VipsImage *from_pixels(const void *pix, size_t len, int w, int h, int bands, int orientation, int side) {
 	VipsImage *in = NULL, *c = NULL, *t = NULL;
 	int err;
 	in = vips_image_new_from_memory(pix, len, w, h, bands, VIPS_FORMAT_UCHAR);
-	if (!in) return -1;
+	if (!in) return NULL;
 	err = vips_copy(in, &c, "interpretation", VIPS_INTERPRETATION_sRGB, NULL);
 	g_object_unref(in);
-	if (err) return -1;
+	if (err) return NULL;
 	vips_image_set_int(c, VIPS_META_ORIENTATION, orientation);
-	err = vips_thumbnail_image(c, &t, large, "height", large, "size", VIPS_SIZE_DOWN, NULL);
+	err = vips_thumbnail_image(c, &t, side, "height", side, "size", VIPS_SIZE_DOWN, NULL);
 	g_object_unref(c);
-	if (err) return -1;
+	return err ? NULL : t;
+}
+
+// lumen_thumbs_pixels does what lumen_thumbs_file does for pixels decoded
+// elsewhere.
+static int lumen_thumbs_pixels(const void *pix, size_t len, int w, int h, int bands, int orientation,
+		int large, int small, int side, lumen_thumbs *o) {
+	VipsImage *t = from_pixels(pix, len, w, h, bands, orientation, large);
+	if (!t) return -1;
 	return finish(t, small, side, o);
+}
+
+// to_rgb renders an image as packed 8-bit RGB into *buf (g_malloc'd). It
+// consumes t.
+static int to_rgb(VipsImage *t, void **buf, size_t *len, int *w, int *h) {
+	t = to_srgb8(t);
+	if (!t) return -1;
+	*w = vips_image_get_width(t);
+	*h = vips_image_get_height(t);
+	*buf = vips_image_write_to_memory(t, len);
+	g_object_unref(t);
+	return *buf ? 0 : -1;
+}
+
+// lumen_rgb_file decodes path upright as RGB, shrinking on load so its long
+// edge is at most side.
+static int lumen_rgb_file(const char *path, int side, void **buf, size_t *len, int *w, int *h) {
+	VipsImage *t = NULL;
+	if (vips_thumbnail(path, &t, side, "height", side, "size", VIPS_SIZE_DOWN, NULL)) return -1;
+	return to_rgb(t, buf, len, w, h);
+}
+
+// lumen_rgb_pixels does the same for pixels decoded elsewhere.
+static int lumen_rgb_pixels(const void *pix, size_t len, int w, int h, int bands, int orientation, int side,
+		void **buf, size_t *olen, int *ow, int *oh) {
+	VipsImage *t = from_pixels(pix, len, w, h, bands, orientation, side);
+	if (!t) return -1;
+	return to_rgb(t, buf, olen, ow, oh);
 }
 
 // lumen_square decodes path squashed to exactly side x side RGB (aspect
 // ignored), as image models expect.
 static int lumen_square(const char *path, int side, void **buf, size_t *len) {
 	VipsImage *t = NULL;
+	int w, h;
 	if (vips_thumbnail(path, &t, side, "height", side, "size", VIPS_SIZE_FORCE, NULL)) return -1;
-	t = to_srgb8(t);
-	if (!t) return -1;
-	*buf = vips_image_write_to_memory(t, len);
-	g_object_unref(t);
-	return *buf ? 0 : -1;
+	return to_rgb(t, buf, len, &w, &h);
 }
 
 // lumen_header reads only the header: the stored (not rotated) size.
@@ -189,8 +222,8 @@ func ThumbnailPixels(pix []byte, w, h, bands, orientation int, s Sizes) (Thumbs,
 	if err := Init(); err != nil {
 		return Thumbs{}, err
 	}
-	if w <= 0 || h <= 0 || (bands != 3 && bands != 4) || len(pix) != w*h*bands {
-		return Thumbs{}, fmt.Errorf("vips: bad pixel buffer (%dx%dx%d, %d bytes)", w, h, bands, len(pix))
+	if err := checkPixels(pix, w, h, bands); err != nil {
+		return Thumbs{}, err
 	}
 	var o C.lumen_thumbs
 	rc := C.lumen_thumbs_pixels(unsafe.Pointer(unsafe.SliceData(pix)), C.size_t(len(pix)), C.int(w), C.int(h),
@@ -219,6 +252,65 @@ func collect(rc C.int, o *C.lumen_thumbs, side int) (Thumbs, error) {
 		return Thumbs{}, errors.New("vips: unexpected square size")
 	}
 	return t, nil
+}
+
+// RGB is packed 8-bit RGB pixels.
+type RGB struct {
+	Pix  []byte // W x H x 3
+	W, H int
+}
+
+// DecodeFile decodes a file upright (EXIF orientation applied), shrunk on
+// load so its long edge is at most side (never enlarged).
+func DecodeFile(path string, side int) (RGB, error) {
+	if err := Init(); err != nil {
+		return RGB{}, err
+	}
+	cpath := C.CString(path)
+	defer C.free(unsafe.Pointer(cpath))
+	var buf unsafe.Pointer
+	var n C.size_t
+	var w, h C.int
+	rc := C.lumen_rgb_file(cpath, C.int(side), &buf, &n, &w, &h)
+	return collectRGB(rc, buf, n, w, h)
+}
+
+// DecodePixels does the same for 8-bit RGB (bands 3) or RGBA (bands 4)
+// pixels, applying an EXIF orientation (1..8).
+func DecodePixels(pix []byte, w, h, bands, orientation, side int) (RGB, error) {
+	if err := Init(); err != nil {
+		return RGB{}, err
+	}
+	if err := checkPixels(pix, w, h, bands); err != nil {
+		return RGB{}, err
+	}
+	var buf unsafe.Pointer
+	var n C.size_t
+	var ow, oh C.int
+	rc := C.lumen_rgb_pixels(unsafe.Pointer(unsafe.SliceData(pix)), C.size_t(len(pix)), C.int(w), C.int(h),
+		C.int(bands), C.int(max(1, min(orientation, 8))), C.int(side), &buf, &n, &ow, &oh)
+	return collectRGB(rc, buf, n, ow, oh)
+}
+
+// collectRGB copies a C RGB buffer into Go memory and frees it.
+func collectRGB(rc C.int, buf unsafe.Pointer, n C.size_t, w, h C.int) (RGB, error) {
+	if buf != nil {
+		defer C.g_free(C.gpointer(buf))
+	}
+	if rc != 0 {
+		return RGB{}, lastError()
+	}
+	if int(n) != int(w)*int(h)*3 {
+		return RGB{}, errors.New("vips: unexpected image size")
+	}
+	return RGB{Pix: C.GoBytes(buf, C.int(n)), W: int(w), H: int(h)}, nil
+}
+
+func checkPixels(pix []byte, w, h, bands int) error {
+	if w <= 0 || h <= 0 || (bands != 3 && bands != 4) || len(pix) != w*h*bands {
+		return fmt.Errorf("vips: bad pixel buffer (%dx%dx%d, %d bytes)", w, h, bands, len(pix))
+	}
+	return nil
 }
 
 // Square returns a file squashed to exactly side x side 8-bit RGB.

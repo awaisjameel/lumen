@@ -18,6 +18,7 @@ import (
 	"lumen/internal/ai"
 	"lumen/internal/core"
 	"lumen/internal/media"
+	"lumen/internal/people"
 	"lumen/internal/scanner"
 	"lumen/internal/search"
 	"lumen/internal/store"
@@ -34,27 +35,37 @@ const (
 	debounce = 2 * time.Second
 	// powerPoll is how often the power source is checked.
 	powerPoll = 20 * time.Second
-	// encoderIdle is how long the image model stays loaded without work.
-	// Loading it on the GPU takes seconds, so short gaps shouldn't unload it.
-	encoderIdle = time.Minute
+	// modelIdle is how long a model stays loaded without work. Loading one
+	// takes a second or two, so short gaps shouldn't unload it.
+	modelIdle = time.Minute
 )
+
+// Models are the AI parts the indexer runs. A nil one (with its error saying
+// why) turns its stage off; the rest of Lumen works without it.
+type Models struct {
+	Search    *search.Engine // image embeddings, search and Things
+	SearchErr error
+	People    *people.Engine // faces and people
+	PeopleErr error
+}
 
 // Indexer owns all background work.
 type Indexer struct {
 	store  *store.Store
 	paths  core.Paths
 	cache  *media.Cache
-	search *search.Engine // nil when the AI can't run (see aiError)
+	search *search.Engine // nil when search can't run (see aiError)
+	people *people.Engine // nil when faces can't be recognised (see facesError)
 	events Events
 
 	scanReqs  chan scanRequest
 	wakeMeta  chan struct{}
 	wakeThum  chan struct{}
 	wakeEmbed chan struct{}
+	wakeFaces chan struct{}
 
-	encMu   sync.Mutex
-	enc     *ai.ImageEncoder // loaded while the AI stage has work
-	encUsed time.Time
+	encoder *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
+	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
 
 	mu          sync.Mutex
 	resume      chan struct{} // closed (and replaced) whenever a hold may have lifted
@@ -64,6 +75,7 @@ type Indexer struct {
 	aiOnBattery bool // the user lets AI work continue on battery
 	aiDevice    string
 	aiError     string
+	facesError  string
 	scanning    bool
 	discovered  int
 	pendingFS   map[string]bool // changed paths waiting for the debounce
@@ -86,22 +98,67 @@ type scanRequest struct {
 	under    string // "" = the whole source
 }
 
-// New builds an indexer. engine is nil when the AI can't run; aiErr says why.
-// Call Start to begin work.
-func New(st *store.Store, paths core.Paths, cache *media.Cache, engine *search.Engine, aiErr error, ev Events) *Indexer {
+// New builds an indexer. Call Start to begin work.
+func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Events) *Indexer {
 	ix := &Indexer{
-		store: st, paths: paths, cache: cache, search: engine, events: ev,
+		store: st, paths: paths, cache: cache, search: m.Search, people: m.People, events: ev,
 		scanReqs:  make(chan scanRequest, 256),
 		wakeMeta:  make(chan struct{}, 1),
 		wakeThum:  make(chan struct{}, 1),
 		wakeEmbed: make(chan struct{}, 1),
+		wakeFaces: make(chan struct{}, 1),
 		resume:    make(chan struct{}),
 		pendingFS: map[string]bool{},
 	}
-	if aiErr != nil {
-		ix.aiError = aiErr.Error()
+	if m.SearchErr != nil {
+		ix.aiError = m.SearchErr.Error()
+	}
+	if m.PeopleErr != nil {
+		ix.facesError = m.PeopleErr.Error()
+	}
+	if m.Search != nil {
+		ix.encoder = &model[*ai.ImageEncoder]{
+			name: "image model", idle: modelIdle,
+			open:  func() (*ai.ImageEncoder, error) { return ai.OpenImageEncoder(m.Search.Model(), ai.GPU) },
+			close: (*ai.ImageEncoder).Close,
+			report: func(enc *ai.ImageEncoder, loaded bool, err error) {
+				ix.setAIState(func() {
+					switch {
+					case err != nil:
+						ix.aiError = err.Error()
+					case loaded:
+						ix.aiError, ix.aiDevice = "", string(enc.Device())
+					default:
+						ix.aiDevice = ""
+					}
+				})
+			},
+		}
+	}
+	if m.People != nil {
+		ix.faces = &model[*ai.Faces]{
+			name: "face models", idle: modelIdle,
+			open:  func() (*ai.Faces, error) { return ai.OpenFaces(m.People.Model(), faceThreads) },
+			close: (*ai.Faces).Close,
+			report: func(_ *ai.Faces, _ bool, err error) {
+				ix.setAIState(func() {
+					ix.facesError = ""
+					if err != nil {
+						ix.facesError = err.Error()
+					}
+				})
+			},
+		}
 	}
 	return ix
+}
+
+// setAIState changes the AI state the progress reports.
+func (ix *Indexer) setAIState(change func()) {
+	ix.mu.Lock()
+	change()
+	ix.mu.Unlock()
+	ix.stale.Store(true)
 }
 
 // versions is the current version of every stage that runs. A finished job
@@ -113,6 +170,9 @@ func (ix *Indexer) versions() map[core.Stage]string {
 	}
 	if ix.search != nil {
 		v[core.StageEmbedding] = ix.search.Model().Version
+	}
+	if ix.people != nil {
+		v[core.StageFaces] = ix.people.Model().Version
 	}
 	return v
 }
@@ -135,7 +195,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	ix.run(func() { ix.scanLoop(ctx) })
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.MetadataResult]{
-			name: core.StageMetadata, batch: 128, wake: ix.wakeMeta, next: ix.wakeThum,
+			name: core.StageMetadata, batch: 128, wake: ix.wakeMeta, next: []chan struct{}{ix.wakeThum},
 			process: eachItem(4, ix.doMetadata),
 			save: func(ctx context.Context, rs []store.MetadataResult) error {
 				return ix.store.SaveMetadata(ctx, media.MetadataVersion, rs)
@@ -144,7 +204,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	})
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.ThumbResult]{
-			name: core.StageThumbnail, batch: 64, wake: ix.wakeThum, next: ix.wakeEmbed,
+			name: core.StageThumbnail, batch: 64, wake: ix.wakeThum, next: []chan struct{}{ix.wakeEmbed, ix.wakeFaces},
 			process: eachItem(max(1, min(runtime.NumCPU()-1, 6)), ix.doThumbnail),
 			save: func(ctx context.Context, rs []store.ThumbResult) error {
 				return ix.store.SaveThumbnails(ctx, media.ThumbnailVersion, rs)
@@ -154,12 +214,21 @@ func (ix *Indexer) Start(ctx context.Context) {
 	if ix.search != nil {
 		ix.run(func() {
 			runStage(ctx, ix, stage[store.EmbedResult]{
-				name: core.StageEmbedding, batch: 64, wake: ix.wakeEmbed,
+				name: core.StageEmbedding, batch: 64, wake: ix.wakeEmbed, model: ix.encoder,
 				process: ix.doEmbeddings,
 				save:    ix.saveEmbeddings,
-				idle:    ix.releaseIdleEncoder,
 			})
 		})
+	}
+	if ix.people != nil {
+		ix.run(func() {
+			runStage(ctx, ix, stage[store.FaceResult]{
+				name: core.StageFaces, batch: 32, wake: ix.wakeFaces, model: ix.faces,
+				process: ix.doFaces,
+				save:    ix.saveFaces,
+			})
+		})
+		ix.run(func() { ix.people.Run(ctx, func() { ix.changed.Store(true) }) })
 	}
 	ix.run(func() { ix.reportLoop(ctx) })
 	ix.run(func() { ix.powerLoop(ctx) })
@@ -178,60 +247,12 @@ func (ix *Indexer) Stop() {
 	}
 	ix.mu.Unlock()
 	ix.wg.Wait()
-	ix.releaseEncoder()
-}
-
-// encoder returns the image model, loading it on first use.
-func (ix *Indexer) encoder() (*ai.ImageEncoder, error) {
-	ix.encMu.Lock()
-	defer ix.encMu.Unlock()
-	ix.encUsed = time.Now()
-	if ix.enc != nil {
-		return ix.enc, nil
+	if ix.encoder != nil {
+		ix.encoder.release()
 	}
-	t := time.Now()
-	enc, err := ai.OpenImageEncoder(ix.search.Model(), ai.GPU)
-	ix.mu.Lock()
-	if err != nil {
-		ix.aiError = err.Error()
-	} else {
-		ix.aiError, ix.aiDevice = "", string(enc.Device())
+	if ix.faces != nil {
+		ix.faces.release()
 	}
-	ix.mu.Unlock()
-	ix.stale.Store(true)
-	if err != nil {
-		return nil, err
-	}
-	slog.Info("image model loaded", "device", enc.Device(), "took", time.Since(t).Round(time.Millisecond))
-	ix.enc = enc
-	return enc, nil
-}
-
-// releaseIdleEncoder frees the image model once it has had no work for a
-// while. The AI stage calls it whenever its queue is empty.
-func (ix *Indexer) releaseIdleEncoder() {
-	ix.encMu.Lock()
-	idle := time.Since(ix.encUsed) >= encoderIdle
-	ix.encMu.Unlock()
-	if idle {
-		ix.releaseEncoder()
-	}
-}
-
-// releaseEncoder frees the image model (hundreds of MB).
-func (ix *Indexer) releaseEncoder() {
-	ix.encMu.Lock()
-	defer ix.encMu.Unlock()
-	if ix.enc == nil {
-		return
-	}
-	ix.enc.Close()
-	ix.enc = nil
-	ix.mu.Lock()
-	ix.aiDevice = ""
-	ix.mu.Unlock()
-	ix.stale.Store(true)
-	slog.Info("image model unloaded (no work)")
 }
 
 func (ix *Indexer) run(fn func()) {
@@ -272,7 +293,7 @@ func (ix *Indexer) SetFocus(from, to string) {
 		a, b = b, a
 	}
 	ix.focus = &store.TimeRange{From: a.Unix(), To: b.AddDate(0, 0, 1).Unix()}
-	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed} {
+	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed, ix.wakeFaces} {
 		nudge(ch)
 	}
 }
@@ -297,11 +318,12 @@ func (ix *Indexer) setHold(change func()) {
 // held reports whether a stage must wait: everything waits while paused, and
 // the AI waits on battery unless the user allows it. Call with mu held.
 func (ix *Indexer) held(stage core.Stage) bool {
-	return ix.paused || (stage == core.StageEmbedding && ix.onBattery && !ix.aiOnBattery)
+	return ix.paused || (stage.AI() && ix.onBattery && !ix.aiOnBattery)
 }
 
-// waitTurn blocks while stage is held. It returns false if ctx ends.
-func (ix *Indexer) waitTurn(ctx context.Context, stage core.Stage) bool {
+// waitTurn blocks while stage is held, meanwhile freeing its model (if
+// any). It returns false if ctx ends.
+func (ix *Indexer) waitTurn(ctx context.Context, stage core.Stage, m releaser) bool {
 	for {
 		ix.mu.Lock()
 		held, resume := ix.held(stage), ix.resume
@@ -309,8 +331,8 @@ func (ix *Indexer) waitTurn(ctx context.Context, stage core.Stage) bool {
 		if !held {
 			return true
 		}
-		if stage == core.StageEmbedding {
-			ix.releaseEncoder() // free the model's memory while waiting
+		if m != nil {
+			m.release()
 		}
 		select {
 		case <-resume:
@@ -538,14 +560,17 @@ func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 	ix.mu.Lock()
 	p := core.Progress{
 		Scanning: ix.scanning, Discovered: ix.discovered, Paused: ix.paused,
-		OnBattery: ix.search != nil && ix.onBattery && !ix.aiOnBattery,
-		AI:        core.AI{Device: ix.aiDevice, Error: ix.aiError},
+		OnBattery: (ix.search != nil || ix.people != nil) && ix.onBattery && !ix.aiOnBattery,
+		AI:        core.AI{Device: ix.aiDevice, Error: ix.aiError, FacesError: ix.facesError},
 	}
 	ix.mu.Unlock()
 	if pending, failed, skipped, err := ix.store.JobCounts(ctx); err == nil {
 		p.Metadata, p.Thumbnail, p.Errors, p.Skipped = pending[core.StageMetadata], pending[core.StageThumbnail], failed, skipped
 		if ix.search != nil {
 			p.Embedding = pending[core.StageEmbedding]
+		}
+		if ix.people != nil {
+			p.Faces = pending[core.StageFaces]
 		}
 	} else if ctx.Err() == nil {
 		slog.Error("count jobs", "err", err)

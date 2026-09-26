@@ -1,15 +1,18 @@
 <script setup lang="ts">
 // The one search box: type a description and press Enter to search by what's
-// in the photos, or pick a matching Thing. Ctrl+F or / focuses it.
+// in the photos (names of people narrow it to them), or pick a matching
+// person or Thing. Ctrl+F or / focuses it.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import type { RouteLocationRaw } from 'vue-router'
 import { engine } from '../bridge'
-import type { Tag } from '../bridge'
+import type { Person, Tag } from '../bridge'
 import { logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { isTyping } from '../shared/keys'
 import { useLibrary } from '../library/store'
+import FaceThumb from '../people/FaceThumb.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,8 +21,21 @@ const lib = useLibrary()
 const input = ref<HTMLInputElement | null>(null)
 const text = ref('')
 const open = ref(false)
-const suggestions = ref<Tag[]>([])
-const active = ref(0) // 0 = "search for …", then one per suggestion
+const people = ref<Person[]>([])
+const things = ref<Tag[]>([])
+const active = ref(0) // index into options
+
+/** What the menu offers: searching for the text, then people, then Things. */
+type Option = { kind: 'search' } | { kind: 'person'; person: Person } | { kind: 'thing'; tag: Tag }
+const options = computed<Option[]>(() =>
+  text.value.trim()
+    ? [
+        { kind: 'search' },
+        ...people.value.map((person): Option => ({ kind: 'person', person })),
+        ...things.value.map((tag): Option => ({ kind: 'thing', tag })),
+      ]
+    : [],
+)
 
 // Show the current query while on the results page.
 watch(
@@ -36,27 +52,30 @@ watch(text, (v) => {
   active.value = 0
   clearTimeout(timer)
   if (!v.trim()) {
-    suggestions.value = []
+    people.value = []
+    things.value = []
     return
   }
   timer = window.setTimeout(async () => {
     const n = ++asked
     try {
-      const s = await engine.suggestTags(v)
-      if (n === asked) suggestions.value = s
+      const [p, s] = await Promise.all([engine.suggestPeople(v), engine.suggestTags(v)])
+      if (n === asked) [people.value, things.value] = [p, s]
     } catch (e) {
       logError(e)
     }
   }, 120)
 })
 
-const options = computed(() => (text.value.trim() ? 1 + suggestions.value.length : 0))
+function close() {
+  open.value = false
+  input.value?.blur()
+}
 
 function search() {
   const q = text.value.trim()
   if (!q) return
-  open.value = false
-  input.value?.blur()
+  close()
   if (route.name === 'search' && route.query.q === q) {
     void lib.setScope({ kind: 'search', query: q }).catch(logError) // search again
   } else {
@@ -64,35 +83,35 @@ function search() {
   }
 }
 
-function pick(tag: Tag) {
-  open.value = false
-  input.value?.blur()
+function go(to: RouteLocationRaw) {
+  close()
   text.value = ''
-  void router.push({ name: 'thing', params: { id: tag.id } })
+  void router.push(to)
 }
 
-function choose() {
-  if (active.value === 0) search()
-  else pick(suggestions.value[active.value - 1])
+function choose(o: Option | undefined) {
+  if (o?.kind === 'search') search()
+  else if (o?.kind === 'person') go({ name: 'person', params: { id: o.person.id } })
+  else if (o?.kind === 'thing') go({ name: 'thing', params: { id: o.tag.id } })
 }
 
 function clear() {
   text.value = ''
-  suggestions.value = []
   if (route.name === 'search') void router.push('/')
   input.value?.focus()
 }
 
 function onKey(e: KeyboardEvent) {
+  const n = options.value.length
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault()
     open.value = true
-    if (options.value) active.value = (active.value + (e.key === 'ArrowDown' ? 1 : options.value - 1)) % options.value
+    if (n) active.value = (active.value + (e.key === 'ArrowDown' ? 1 : n - 1)) % n
   } else if (e.key === 'Enter') {
     e.preventDefault()
-    choose()
+    choose(options.value[active.value])
   } else if (e.key === 'Escape') {
-    if (open.value && options.value) open.value = false
+    if (open.value && n) open.value = false
     else input.value?.blur()
   }
 }
@@ -110,6 +129,13 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKey)
   clearTimeout(timer)
 })
+
+/** The first option of each kind gets a heading above it. */
+function heading(i: number): string {
+  const o = options.value[i]
+  if (o.kind === options.value[i - 1]?.kind) return ''
+  return o.kind === 'person' ? t('search.peopleHeading') : o.kind === 'thing' ? t('search.thingsHeading') : ''
+}
 </script>
 
 <template>
@@ -122,8 +148,8 @@ onBeforeUnmount(() => {
       role="combobox"
       aria-autocomplete="list"
       aria-controls="search-options"
-      :aria-expanded="open && options > 0"
-      :aria-activedescendant="open && options ? `search-opt-${active}` : undefined"
+      :aria-expanded="open && options.length > 0"
+      :aria-activedescendant="open && options.length ? `search-opt-${active}` : undefined"
       :aria-label="t('search.shortcut')"
       :placeholder="t('search.placeholder')"
       :title="t('search.shortcut')"
@@ -137,32 +163,31 @@ onBeforeUnmount(() => {
       <Icon name="close" :size="16" />
     </button>
 
-    <ul v-if="open && options" id="search-options" class="menu" role="listbox" @mousedown.prevent>
-      <li
-        id="search-opt-0"
-        role="option"
-        :aria-selected="active === 0"
-        :class="{ active: active === 0 }"
-        @mouseenter="active = 0"
-        @click="search"
-      >
-        <Icon name="search" :size="16" />
-        <span class="ellipsis">{{ t('search.for', { q: text.trim() }) }}</span>
-      </li>
-      <li v-if="suggestions.length" class="heading" role="presentation">{{ t('search.thingsHeading') }}</li>
-      <li
-        v-for="(s, i) in suggestions"
-        :id="`search-opt-${i + 1}`"
-        :key="s.id"
-        role="option"
-        :aria-selected="active === i + 1"
-        :class="{ active: active === i + 1 }"
-        @mouseenter="active = i + 1"
-        @click="pick(s)"
-      >
-        <Icon name="tag" :size="16" />
-        <span class="ellipsis">{{ s.name }}</span>
-      </li>
+    <ul v-if="open && options.length" id="search-options" class="menu" role="listbox" @mousedown.prevent>
+      <template v-for="(o, i) in options" :key="o.kind === 'person' ? `p${o.person.id}` : o.kind === 'thing' ? `t${o.tag.id}` : 's'">
+        <li v-if="heading(i)" class="heading" role="presentation">{{ heading(i) }}</li>
+        <li
+          :id="`search-opt-${i}`"
+          role="option"
+          :aria-selected="active === i"
+          :class="{ active: active === i }"
+          @mouseenter="active = i"
+          @click="choose(o)"
+        >
+          <template v-if="o.kind === 'search'">
+            <Icon name="search" :size="16" />
+            <span class="ellipsis">{{ t('search.for', { q: text.trim() }) }}</span>
+          </template>
+          <template v-else-if="o.kind === 'person'">
+            <FaceThumb :face="o.person.cover" :size="22" round />
+            <span class="ellipsis">{{ o.person.name }}</span>
+          </template>
+          <template v-else>
+            <Icon name="tag" :size="16" />
+            <span class="ellipsis">{{ o.tag.name }}</span>
+          </template>
+        </li>
+      </template>
     </ul>
   </div>
 </template>

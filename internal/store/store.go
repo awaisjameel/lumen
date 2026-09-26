@@ -134,6 +134,11 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 // never nil, so an empty list reaches the UI as [] rather than null.
 func queryAll[T any](ctx context.Context, db *sql.DB, scan func(*sql.Rows) (T, error), q string, args ...any) ([]T, error) {
 	rows, err := db.QueryContext(ctx, q, args...)
+	return collect(rows, err, scan)
+}
+
+// collect scans every row of a query's result (rows, err) and closes it.
+func collect[T any](rows *sql.Rows, err error, scan func(*sql.Rows) (T, error)) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +153,9 @@ func queryAll[T any](ctx context.Context, db *sql.DB, scan func(*sql.Rows) (T, e
 	}
 	return out, rows.Err()
 }
+
+// likeEscaper escapes text for a LIKE pattern with ESCAPE '\'.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
 
 // isUnique reports whether err is a UNIQUE constraint violation.
 func isUnique(err error) bool {

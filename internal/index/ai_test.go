@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"lumen/internal/ai"
 	"lumen/internal/core"
 	"lumen/internal/media"
+	"lumen/internal/people"
 	"lumen/internal/search"
 	"lumen/internal/store"
 	"lumen/internal/testenv"
@@ -75,7 +77,7 @@ func TestIndexerFindsPhotosByDescription(t *testing.T) {
 	}
 	engine := search.NewEngine(st, m)
 	engine.Start(ctx)
-	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), engine, nil, &fakeEvents{})
+	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{Search: engine}, &fakeEvents{})
 	ix.Start(ctx)
 	defer func() {
 		cancel()
@@ -97,7 +99,7 @@ func TestIndexerFindsPhotosByDescription(t *testing.T) {
 		}
 	}
 	for name := range colours {
-		hits, _, err := engine.Search(ctx, "a plain "+name+" image")
+		hits, _, err := engine.Search(ctx, "a plain "+name+" image", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -105,7 +107,7 @@ func TestIndexerFindsPhotosByDescription(t *testing.T) {
 			t.Errorf("%s: hits %+v, want asset %d first", name, hits, byName[name])
 		}
 	}
-	if hits, _, _ := engine.Search(ctx, "a crowded beach at sunset"); len(hits) != 0 {
+	if hits, _, _ := engine.Search(ctx, "a crowded beach at sunset", nil); len(hits) != 0 {
 		t.Errorf("unrelated query found %d photos", len(hits))
 	}
 
@@ -123,7 +125,7 @@ func TestIndexerFindsPhotosByDescription(t *testing.T) {
 
 func TestBatteryHoldsOnlyTheAI(t *testing.T) {
 	ix := &Indexer{onBattery: true}
-	if !ix.held(core.StageEmbedding) || ix.held(core.StageThumbnail) {
+	if !ix.held(core.StageEmbedding) || !ix.held(core.StageFaces) || ix.held(core.StageThumbnail) {
 		t.Error("on battery: the AI must wait and thumbnails must not")
 	}
 	ix.aiOnBattery = true
@@ -134,4 +136,66 @@ func TestBatteryHoldsOnlyTheAI(t *testing.T) {
 	if !ix.held(core.StageMetadata) {
 		t.Error("paused, yet metadata runs")
 	}
+}
+
+// Real photos of people through the whole pipeline: faces are found, and
+// the people engine groups the ones seen again and again.
+func TestIndexerFindsPeople(t *testing.T) {
+	photos := testenv.FacePhotos(t, 40)
+	rt := testenv.Runtime(t)
+	if err := ai.Init(rt); err != nil {
+		t.Fatal(err)
+	}
+	fm, err := ai.LoadFaceModel(filepath.Join(rt, "models", "faces"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for _, p := range photos {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, filepath.Base(p)), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths := core.PathsIn(t.TempDir())
+	if err := paths.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st.SetBool(ctx, core.SettingAIOnBattery, true) // must not depend on the power source
+	if _, err := st.AddSource(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	engine := people.NewEngine(st, fm)
+	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{People: engine}, &fakeEvents{})
+	ix.Start(ctx)
+	defer func() {
+		cancel()
+		ix.Stop()
+	}()
+	waitIdle(t, ix, len(photos))
+	var found []core.Person
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(time.Second) {
+		if found, _ = st.People(ctx); len(found) > 0 {
+			break
+		}
+	}
+	if len(found) == 0 {
+		t.Fatal("no people found")
+	}
+	for _, p := range found {
+		if p.Cover.ID == 0 || p.Cover.W <= 0 || p.Cover.W > 1 {
+			t.Errorf("person %d has a bad cover: %+v", p.ID, p.Cover)
+		}
+	}
+	t.Logf("%d photos: %d people, largest in %d photos", len(photos), len(found), found[0].Count)
 }

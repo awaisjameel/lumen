@@ -24,7 +24,15 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 - **Things**: about 180 built-in labels, the broad kind of each photo (People, Screenshots, Documents…), labels users add ("Eiffel Tower", found across the library at once), tags users add or remove on any photo (their edits always win), a confidence slider
 - AI work waits while on battery (a setting allows it), and pauses with the rest
 
-Not yet: people, videos (toggle exists; FFmpeg is bundled but unused for video), albums, events, trash, organise-on-disk, the 2 GB cache cap, OCR.
+**Phase 3 (people)** is working:
+
+- **Faces**: YuNet finds faces (with five landmarks) in each photo decoded at 2048 px; each is aligned to SFace's template and turned into a 128-dim identity vector. Both models run on the CPU, loaded only while there is work; a 1,466-photo library took about 45 s on a laptop
+- **People**: faces are grouped by average-linkage clustering (a group's similarity is the dot product of mean vectors, so merging is cheap), incrementally as photos arrive. Two faces in one photo are never one person; blurred or turned-away faces may join someone but never start a new person
+- **User corrections always win**: naming, merging (naming someone with a name already taken asks "same person?"), hiding, "not this person" (never put back), moving faces to someone else or a new person (splitting), choosing their picture. A face placed by the user never moves; a named person is never merged automatically
+- **People view**, a person's photos (their page is the timeline, filtered), a face review that lists the least-alike faces first, people in the details panel ("Who is this?" for faces not recognised yet)
+- **Search by person**: names in a search narrow it to photos of all of them ("Ali and Sara at the beach"); names alone give their photos, newest first. The search box suggests people as you type
+
+Not yet: videos (toggle exists; FFmpeg is bundled but unused for video), albums, events, trash, organise-on-disk, the 2 GB cache cap, OCR.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
@@ -42,7 +50,7 @@ Then, once, from Git Bash:
 scripts/deps.sh   # ~1.2 GB of downloads, pinned and hash-checked, into deps/ (git-ignored)
 ```
 
-It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL) and SigLIP 2, then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, and the text tower's 256k-token table is stored as int8, which takes it from 565 to 369 MB while agreeing with the original at cosine ≥ 0.9996. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`. Nothing is ever downloaded at run time.
+It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2 and the YuNet and SFace face models, then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8, which takes it from 565 to 369 MB while agreeing with the original at cosine ≥ 0.9996, and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`. Nothing is ever downloaded at run time.
 
 Check with `wails3 doctor`.
 
@@ -67,6 +75,7 @@ Handy environment variables:
 - `LUMEN_DATA_DIR`: use another data folder (default `%LOCALAPPDATA%\Lumen`). Handy for a scratch library.
 - `LUMEN_RUNTIME_DIR`: where the DLLs, `ffmpeg\` and `models\` are (default: beside `Lumen.exe`).
 - `LUMEN_DEVTOOLS_PORT`: expose the WebView's DevTools protocol on `127.0.0.1` so UI tests (e.g. puppeteer-core) can drive the real app. Off by default.
+- `LUMEN_FACE_PHOTOS` (tests only): a folder of real photos of people. The face tests run on it and skip without it; keep such photos out of the repo.
 
 ## Layout
 
@@ -78,12 +87,13 @@ internal/scanner     folder walk, hashing, Windows folder watcher
 internal/media       EXIF, filename dates, thumbnails and their cache, perceptual hash
 internal/media/vips  the libvips calls (cgo), one C function per job
 internal/media/wic   Windows Imaging Component decoding (HEIC)
-internal/ai          ONNX Runtime sessions, SigLIP 2 image/text encoders, tokenizer
+internal/ai          ONNX Runtime sessions, SigLIP 2 image/text encoders, tokenizer, face detection/alignment/recognition
 internal/search      in-memory int8 vector index, search, Things vocabulary and tagging
-internal/index       background pipeline: scan loop, stage workers, battery, events
-services/            thin Wails services (LibraryService, SearchService, MediaService)
+internal/people      face clustering (incremental, constrained by the user's corrections), names in searches
+internal/index       background pipeline: scan loop, stage workers, model loading, battery, events
+services/            thin Wails services (LibraryService, SearchService, PeopleService, MediaService)
 frontend/src/bridge  the only place the UI calls the engine
-frontend/src/{library,search,things,onboarding,settings,shared}   UI by feature
+frontend/src/{library,search,things,people,onboarding,settings,shared}   UI by feature
 scripts/             deps.sh (native dependencies), prepare_models.py, env.sh
 spikes/              Phase 0 experiments (own Go module; models in spikes/.cache)
 ```
@@ -91,6 +101,8 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 **Dates.** EXIF dates have no time zone, so every date is stored as "wall-clock seconds": the camera's clock time encoded as UTC (`core.WallClock`). The UI formats everything in UTC, so a photo taken at 23:30 stays on its own day.
 
 **Tags.** A Thing applies to a photo when SigLIP's probability for its best prompt passes the confidence setting (default 0.02; scores from 0.002 up are stored, so the slider needs no re-scan). Generic concepts rarely pass on probability alone, because SigLIP learned from specific web captions, so ten broad kinds of photo are also assigned by best fit. On one real library this found 94% of the people photos, against 16% on probability alone. Prompts were chosen by measuring them on that library.
+
+**People.** Clustering joins groups of faces while their average cosine similarity is at least 0.42 (Phase 0 found every group at that threshold held one person). A new person needs clear faces in three photos: sharpness (variance of the Laplacian of the aligned face) at least 15, head turn at most 0.45 eye distances. On 204 office photos with 1,000 faces, 92% were placed into 28 people, each checked by eye to hold one person; the rest wait, unplaced, for more photos of them. The faces stage and clustering never undo the user: see `internal/people/cluster.go`.
 
 ## Deviations from the plan (so far)
 
@@ -102,4 +114,6 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **Large files are hash-sampled**: files over 64 MB (mostly videos) hash size plus three 4 MB windows instead of every byte.
 - **Folder watching** uses `ReadDirectoryChangesW` directly (fsnotify has no recursive watch on Windows yet).
 - **One writer connection** instead of a writer goroutine: SQLite writes serialise on it, and callers batch hundreds of rows per transaction.
+- **People are clusters, named or not** (no separate `cluster_id`): a new group of faces is an unnamed person, and naming is how the user confirms it. Face vectors live in the `faces` table (float32 BLOBs), not a vector extension.
+- **Faces are decoded at 2048 px** for their stage (not the 1024 px preview): nearly every face is then big enough to recognise. Detecting on tiles as well found only 3% more faces, for five times the work.
 - **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). A trimmed build belongs with video support (Phase 4) and the installer (Phase 6).

@@ -18,6 +18,7 @@ import (
 	"lumen/internal/index"
 	"lumen/internal/media"
 	"lumen/internal/media/vips"
+	"lumen/internal/people"
 	"lumen/internal/search"
 	"lumen/internal/store"
 	"lumen/services"
@@ -55,20 +56,18 @@ func run() error {
 	defer st.Close()
 
 	cache := media.NewCache(paths.ThumbDir, media.Decoders{FFmpeg: paths.FFmpeg()})
-	engine, aiErr := startAI(paths, st)
-	if aiErr != nil {
-		slog.Error("AI unavailable; search and Things are off", "err", aiErr)
-	}
+	models := startAI(paths, st)
 	events := &services.Emitter{}
-	ix := index.New(st, paths, cache, engine, aiErr, events)
+	ix := index.New(st, paths, cache, models, events)
 
 	app := application.New(application.Options{
 		Name:        "Lumen",
 		Description: "Local, private AI photo gallery",
 		Services: []application.Service{
-			application.NewService(&background{ix: ix, search: engine}),
+			application.NewService(&background{ix: ix, search: models.Search}),
 			application.NewService(services.NewLibraryService(st, ix)),
-			application.NewService(services.NewSearchService(st, engine)),
+			application.NewService(services.NewSearchService(st, models.Search)),
+			application.NewService(services.NewPeopleService(st, models.People)),
 			application.NewServiceWithOptions(services.NewMediaService(st, cache),
 				application.ServiceOptions{Route: "/media"}),
 		},
@@ -105,22 +104,38 @@ func run() error {
 	return app.Run()
 }
 
-// startAI loads ONNX Runtime and the SigLIP model description. Models load
-// lazily later; this only fails if they aren't installed or the runtime
-// can't start, in which case Lumen runs without search and Things.
-func startAI(paths core.Paths, st *store.Store) (*search.Engine, error) {
+// startAI loads ONNX Runtime and the model descriptions; the models
+// themselves load when there is work for them. A part that can't start
+// (models missing, runtime failing) is left out with the reason, and Lumen
+// runs without it: search and Things, or people.
+func startAI(paths core.Paths, st *store.Store) index.Models {
+	var m index.Models
 	if err := ai.Init(paths.Runtime); err != nil {
-		return nil, err
+		m.SearchErr, m.PeopleErr = err, err
+	} else {
+		if sm, err := ai.LoadModel(paths.SigLIP()); err != nil {
+			m.SearchErr = err
+		} else {
+			m.Search = search.NewEngine(st, sm)
+		}
+		if fm, err := ai.LoadFaceModel(paths.Faces()); err != nil {
+			m.PeopleErr = err
+		} else {
+			m.People = people.NewEngine(st, fm)
+		}
 	}
-	m, err := ai.LoadModel(paths.SigLIP())
-	if err != nil {
-		return nil, err
+	if m.SearchErr != nil {
+		slog.Error("AI unavailable; search and Things are off", "err", m.SearchErr)
 	}
-	return search.NewEngine(st, m), nil
+	if m.PeopleErr != nil {
+		slog.Error("face models unavailable; people are off", "err", m.PeopleErr)
+	}
+	return m
 }
 
-// background starts the search engine and indexing once the app is running,
-// and stops them cleanly before the database closes.
+// background starts the search engine and indexing (which runs the people
+// engine) once the app is running, and stops them cleanly before the
+// database closes.
 type background struct {
 	ix     *index.Indexer
 	search *search.Engine // nil without AI
@@ -141,8 +156,8 @@ func (b *background) ServiceShutdown() error {
 	b.ix.Stop()
 	if b.search != nil {
 		b.search.Close() // after the indexer: it no longer adds embeddings
-		ai.Shutdown()    // after every model is closed
 	}
+	ai.Shutdown() // after every model is closed
 	return nil
 }
 

@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 ROOT=$PWD
 D=$ROOT/deps
 RT=$D/runtime
-mkdir -p "$D/cache" "$RT/ffmpeg" "$RT/models/siglip2" "$D/src/siglip2"
+mkdir -p "$D/cache" "$RT/ffmpeg" "$D/src/siglip2" "$D/src/faces"
 
 # get URL FILE SHA256: download to deps/cache/FILE unless it is already there
 # with the right hash.
@@ -63,14 +63,29 @@ ln -f "$D/cache/siglip2-tokenizer.json" "$D/src/siglip2/tokenizer.json"
 ln -f "$D/cache/siglip2-vision-fp16.onnx" "$D/src/siglip2/vision_model_fp16.onnx"
 ln -f "$D/cache/siglip2-text-fp16.onnx" "$D/src/siglip2/text_model_fp16.onnx"
 
-M=$RT/models/siglip2
-if [ ! -f "$M/siglip2.json" ] || [ "$ROOT/scripts/prepare_models.py" -nt "$M/siglip2.json" ]; then
+# Faces: YuNet detector (MIT) and SFace recognizer (Apache-2.0), OpenCV Zoo.
+HF=https://huggingface.co/opencv
+YUNET=$HF/face_detection_yunet/resolve/3cc26e7f1014a5ee5d74a42acee58bafc9d0a310
+SFACE=$HF/face_recognition_sface/resolve/3d7082438a6e4551e840c9b2bb60b71e8da4b524
+get $YUNET/face_detection_yunet_2023mar.onnx face-yunet.onnx 8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4
+get $YUNET/LICENSE face-yunet.LICENSE c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958
+get $SFACE/face_recognition_sface_2021dec.onnx face-sface.onnx 0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79
+get $SFACE/LICENSE face-sface.LICENSE cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+for f in yunet.onnx yunet.LICENSE sface.onnx sface.LICENSE; do ln -f "$D/cache/face-$f" "$D/src/faces/$f"; done
+
+# prepare MODEL: scripts/prepare_models.py turns deps/src/MODEL into
+# deps/runtime/models/MODEL, again whenever the script changes.
+prepare() {
+  local out=$RT/models/$1
+  [ -f "$out/$1.json" ] && [ ! "$ROOT/scripts/prepare_models.py" -nt "$out/$1.json" ] && return
   if [ ! -x "$D/venv/Scripts/python" ]; then
     python -m venv "$D/venv"
     "$D/venv/Scripts/python" -m pip install -q onnx==1.23.0 tokenizers==0.23.2 numpy==2.5.3
   fi
-  PYTHONIOENCODING=utf-8 "$D/venv/Scripts/python" "$ROOT/scripts/prepare_models.py" "$D/src/siglip2" "$M"
-fi
+  PYTHONIOENCODING=utf-8 "$D/venv/Scripts/python" "$ROOT/scripts/prepare_models.py" "$1" "$D/src/$1" "$out"
+}
+prepare siglip2
+prepare faces
 
 # Stage the runtime beside the executable (hard links: no copies of 700 MB).
 mkdir -p "$ROOT/bin"

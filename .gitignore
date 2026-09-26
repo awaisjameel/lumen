@@ -19,3 +19,6 @@ deps/
 
 # Python bytecode (scripts/prepare_models.py)
 __pycache__/
+
+# go build . output (the app builds to bin/)
+/lumen.exe

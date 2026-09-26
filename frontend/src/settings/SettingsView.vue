@@ -117,6 +117,9 @@ function setAIOnBattery(on: boolean) {
         <h2>{{ t('settings.ai') }}</h2>
         <p class="muted hint">{{ t('settings.aiHint') }}</p>
         <p class="ai-status">{{ aiStatus }}</p>
+        <p v-if="lib.progress?.ai.facesError" class="ai-status">
+          {{ t('settings.peopleError', { error: lib.progress.ai.facesError }) }}
+        </p>
         <label class="toggle">
           <input
             type="checkbox"

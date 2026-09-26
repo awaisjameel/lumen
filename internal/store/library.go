@@ -38,6 +38,10 @@ func viewSQL(v core.View, minScore float32) (string, []any) {
 		where += " AND id IN (SELECT x.asset_id FROM asset_tags x WHERE x.tag_id = ? AND " + tagApplies + ")"
 		args = append(args, v.Tag, minScore)
 	}
+	if v.Person != 0 {
+		where += " AND id IN (SELECT asset_id FROM faces WHERE person_id = ?)"
+		args = append(args, v.Person)
+	}
 	return where, args
 }
 

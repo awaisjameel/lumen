@@ -197,3 +197,39 @@ func TestParsePPM(t *testing.T) {
 }
 
 func abs(x int) int { return max(x, -x) }
+
+// Decode must give the same upright picture as the thumbnails, so face boxes
+// found in it line up with them.
+func TestDecodeMatchesThumbnail(t *testing.T) {
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, halves(400, 200, red, blue), &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	p := write(t, "rotated.jpg", withOrientation(buf.Bytes(), 6))
+	im, err := Decoders{}.Decode(ctx, p, core.KindPhoto, 6, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if im.W != 150 || im.H != 300 || len(im.Pix) != im.W*im.H*3 {
+		t.Fatalf("decoded %dx%d (%d bytes), want 150x300 upright", im.W, im.H, len(im.Pix))
+	}
+	at := func(x, y int) color.RGBA {
+		o := (y*im.W + x) * 3
+		return color.RGBA{im.Pix[o], im.Pix[o+1], im.Pix[o+2], 255}
+	}
+	if !near(at(75, 40), 220, 30, 30) || !near(at(75, 260), 30, 30, 220) {
+		t.Errorf("not upright: top %v, bottom %v", at(75, 40), at(75, 260))
+	}
+	// Never enlarged.
+	if im, _ := (Decoders{}).Decode(ctx, p, core.KindPhoto, 6, 4000); im.W != 200 || im.H != 400 {
+		t.Errorf("side 4000 gave %dx%d, want the original 200x400", im.W, im.H)
+	}
+	// Pixels decoded outside libvips (BMP here) take the same route.
+	var b bytes.Buffer
+	if err := bmp.Encode(&b, halves(64, 48, red, blue)); err != nil {
+		t.Fatal(err)
+	}
+	if im, err := (Decoders{}).Decode(ctx, write(t, "a.bmp", b.Bytes()), core.KindPhoto, 1, 32); err != nil || im.W != 32 || im.H != 24 {
+		t.Errorf("bmp decoded %dx%d (%v), want 32x24", im.W, im.H, err)
+	}
+}

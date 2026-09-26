@@ -75,8 +75,8 @@ type Hit struct {
 }
 
 // Search returns up to k assets whose cosine similarity to the unit vector
-// q is at least minCos, best first.
-func (x *Index) Search(q []float32, minCos float32, k int) []Hit {
+// q is at least minCos, best first. With allow, only assets it accepts count.
+func (x *Index) Search(q []float32, minCos float32, k int, allow func(id int64) bool) []Hit {
 	qq, qs := Quantize(q)
 	x.mu.RLock()
 	defer x.mu.RUnlock()
@@ -91,7 +91,7 @@ func (x *Index) Search(q []float32, minCos float32, k int) []Hit {
 	for w := range workers {
 		wg.Go(func() {
 			lo, hi := w*chunk, min((w+1)*chunk, n)
-			parts[w] = x.scan(qq, qs, lo, hi, minCos, k)
+			parts[w] = x.scan(qq, qs, lo, hi, minCos, k, allow)
 		})
 	}
 	wg.Wait()
@@ -101,10 +101,13 @@ func (x *Index) Search(q []float32, minCos float32, k int) []Hit {
 }
 
 // scan scores rows [lo, hi) and keeps the best k at or above minCos.
-func (x *Index) scan(q []int8, qs float32, lo, hi int, minCos float32, k int) []Hit {
+func (x *Index) scan(q []int8, qs float32, lo, hi int, minCos float32, k int, allow func(int64) bool) []Hit {
 	var top []Hit
 	floor := minCos
 	for i := lo; i < hi; i++ {
+		if allow != nil && !allow(x.ids[i]) {
+			continue
+		}
 		v := x.vecs[i*x.dim : (i+1)*x.dim]
 		var dot int32
 		for j, a := range v {

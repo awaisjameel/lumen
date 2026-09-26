@@ -338,8 +338,9 @@ func (e *Engine) forget(id int64) {
 }
 
 // Search returns the assets matching a natural-language query, best first.
+// With allow, only assets it accepts are searched (a person's photos).
 // complete is false when more matched than are returned.
-func (e *Engine) Search(ctx context.Context, query string) (hits []Hit, complete bool, err error) {
+func (e *Engine) Search(ctx context.Context, query string, allow func(id int64) bool) (hits []Hit, complete bool, err error) {
 	query = strings.Join(strings.Fields(query), " ")
 	if query == "" {
 		return nil, true, nil
@@ -351,7 +352,7 @@ func (e *Engine) Search(ctx context.Context, query string) (hits []Hit, complete
 	if err != nil {
 		return nil, false, err
 	}
-	hits = e.index.Search(vecs[0], e.model.Cosine(searchFloor), searchLimit+1)
+	hits = e.index.Search(vecs[0], e.model.Cosine(searchFloor), searchLimit+1, allow)
 	if len(hits) == 0 {
 		return nil, true, nil
 	}

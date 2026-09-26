@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { DateSource, engine, TagSource } from '../bridge'
-import type { AssetDetail, AssetTag } from '../bridge'
+import type { AssetDetail, AssetTag, Face } from '../bridge'
 import { errorText, logError } from '../shared/errors'
 import { bytes, dateTime, megapixels } from '../shared/format'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
+import FaceThumb from '../people/FaceThumb.vue'
+import PersonPicker from '../people/PersonPicker.vue'
 import { useLibrary } from './store'
 import type { Sel } from './store'
 
@@ -14,6 +16,7 @@ const props = defineProps<{ sel: Sel | null }>()
 const lib = useLibrary()
 const detail = ref<AssetDetail | null>(null)
 const tags = ref<AssetTag[]>([])
+const faces = ref<Face[]>([])
 const newTag = ref('')
 const error = ref('')
 
@@ -35,21 +38,21 @@ watch(
   { immediate: true },
 )
 
-// Tags: reload when the photo changes, and as the AI works through the
-// library (its tags may arrive while the panel is open).
+// Tags and faces: reload when the photo changes, and as the AI works
+// through the library (they may arrive while the panel is open).
 watch(
   () => [props.sel?.id, lib.progress?.embedding] as const,
-  ([id]) => {
-    if (!id) {
-      tags.value = []
-      return
-    }
-    void loadTags(id)
-  },
+  ([id]) => void loadTags(id),
+  { immediate: true },
+)
+watch(
+  () => [props.sel?.id, lib.progress?.faces] as const,
+  ([id]) => void loadFaces(id),
   { immediate: true },
 )
 
-async function loadTags(id: number) {
+async function loadTags(id: number | undefined) {
+  if (!id) return void (tags.value = [])
   try {
     const got = await engine.assetTags(id)
     if (props.sel?.id === id) tags.value = got
@@ -58,12 +61,25 @@ async function loadTags(id: number) {
   }
 }
 
-/** Change this photo's tags, then show the result (and refresh a Thing's grid). */
-async function editTags(id: number, fn: () => Promise<void>) {
+async function loadFaces(id: number | undefined) {
+  if (!id) return void (faces.value = [])
+  try {
+    const got = await engine.assetFaces(id)
+    if (props.sel?.id === id) faces.value = got
+  } catch (e) {
+    logError(e)
+  }
+}
+
+/**
+ * Change something about this photo, then show the result with reload (and
+ * refresh the grid, which may be a Thing's or a person's).
+ */
+async function edit(fn: () => Promise<unknown>, reload: () => Promise<void>) {
   error.value = ''
   try {
     await fn()
-    await loadTags(id)
+    await reload()
     void lib.refresh().catch(logError)
   } catch (e) {
     error.value = errorText(e)
@@ -74,11 +90,19 @@ function addTag(id: number) {
   const name = newTag.value.trim()
   if (!name) return
   newTag.value = ''
-  void editTags(id, () => engine.tagAsset(id, name))
+  void edit(() => engine.tagAsset(id, name), () => loadTags(id))
 }
 
 function removeTag(id: number, tag: AssetTag) {
-  void editTags(id, () => engine.untagAsset(id, tag.id))
+  void edit(() => engine.untagAsset(id, tag.id), () => loadTags(id))
+}
+
+function nameFace(id: number, face: Face, name: string) {
+  void edit(() => engine.nameFaces([face.id], name), () => loadFaces(id))
+}
+
+function notThem(id: number, face: Face) {
+  void edit(() => engine.rejectFaces(face.person, [face.id]), () => loadFaces(id))
 }
 
 const dateFromText: Record<DateSource, MessageKey> = {
@@ -154,6 +178,28 @@ function showInFolder(id: number) {
           maxlength="60"
           @keydown.enter="addTag(detail.id)"
         />
+      </section>
+
+      <section v-if="faces.length">
+        <h3>{{ t('details.people') }}</h3>
+        <ul class="faces">
+          <li v-for="f in faces" :key="f.id">
+            <FaceThumb :face="f" :size="36" round />
+            <template v-if="f.person">
+              <RouterLink :to="{ name: 'person', params: { id: f.person } }" class="who">
+                {{ f.name || t('person.unnamed') }}
+              </RouterLink>
+              <button
+                class="not"
+                :title="t('details.notThisPerson', { name: f.name || t('person.unnamed') })"
+                @click="notThem(detail.id, f)"
+              >
+                <Icon name="close" :size="12" />
+              </button>
+            </template>
+            <PersonPicker v-else class="who" :placeholder="t('details.whoIsThis')" @pick="(n) => nameFace(detail!.id, f, n)" />
+          </li>
+        </ul>
       </section>
 
       <section>
@@ -295,5 +341,46 @@ p {
 }
 .add-tag:focus {
   border-color: var(--accent);
+}
+.faces {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.faces li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.who {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+  text-decoration: none;
+}
+a.who:hover {
+  text-decoration: underline;
+}
+.not {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.not:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 </style>

@@ -22,10 +22,15 @@ const (
 	StageMetadata  Stage = "metadata"
 	StageThumbnail Stage = "thumbnail" // also produces the perceptual hash
 	StageEmbedding Stage = "embedding" // SigLIP image embedding, plus AI tags
+	StageFaces     Stage = "faces"     // face detection and identity vectors
 )
 
 // Stages lists every stage in pipeline order. A new asset gets a job for each.
-var Stages = []Stage{StageMetadata, StageThumbnail, StageEmbedding}
+var Stages = []Stage{StageMetadata, StageThumbnail, StageEmbedding, StageFaces}
+
+// AI reports whether a stage runs the AI models: heavy work that waits for
+// mains power unless the user allows it on battery.
+func (s Stage) AI() bool { return s == StageEmbedding || s == StageFaces }
 
 // JobStatus is the state of one stage for one asset.
 type JobStatus string
@@ -107,10 +112,11 @@ const (
 )
 
 // View is what the timeline grid shows: a filter, optionally narrowed to
-// one tag.
+// one tag or one person.
 type View struct {
 	Filter Filter `json:"filter"`
-	Tag    int64  `json:"tag,omitempty"` // 0 = any
+	Tag    int64  `json:"tag,omitempty"`    // 0 = any
+	Person int64  `json:"person,omitempty"` // 0 = anyone
 }
 
 // TagKind says where a tag comes from.
@@ -154,8 +160,35 @@ type AssetTag struct {
 // SearchResult is the answer to a natural-language search, best match first.
 type SearchResult struct {
 	Items    []GridItem `json:"items"`
+	People   []string   `json:"people"`   // people named in the query: results show all of them
 	Pending  int        `json:"pending"`  // photos not yet understood, so not searchable yet
 	Complete bool       `json:"complete"` // false: more matched than are shown
+}
+
+// Face is one face in a photo: where it is, and who it is.
+type Face struct {
+	ID      int64   `json:"id"`
+	AssetID int64   `json:"assetId"`
+	Thumb   int     `json:"thumb"` // the photo's thumbnail version
+	AssetW  int     `json:"assetW"`
+	AssetH  int     `json:"assetH"`
+	X       float32 `json:"x"` // the box, as fractions of the upright photo
+	Y       float32 `json:"y"`
+	W       float32 `json:"w"`
+	H       float32 `json:"h"`
+	Person  int64   `json:"person"` // 0 = not recognised yet
+	Name    string  `json:"name"`   // the person's name; "" = unnamed or nobody
+	ByUser  bool    `json:"byUser"` // the user put this face with this person
+}
+
+// Person is someone who appears in the photos: a group of faces the AI
+// found, or the user made, named or not.
+type Person struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"` // "" until the user names them
+	Hidden bool   `json:"hidden"`
+	Count  int    `json:"count"` // visible photos they appear in
+	Cover  Face   `json:"cover"` // the face to show; ID 0 = none
 }
 
 // DayBucket is how many visible assets were taken on one calendar day.
@@ -197,6 +230,7 @@ type Progress struct {
 	Metadata   int  `json:"metadata"`   // assets still waiting for metadata
 	Thumbnail  int  `json:"thumbnail"`  // assets still waiting for thumbnails
 	Embedding  int  `json:"embedding"`  // assets still waiting for the AI
+	Faces      int  `json:"faces"`      // assets still waiting for face recognition
 	Errors     int  `json:"errors"`
 	Skipped    int  `json:"skipped"`
 	Paused     bool `json:"paused"`
@@ -206,8 +240,9 @@ type Progress struct {
 
 // AI is the state of the on-device models.
 type AI struct {
-	Device string `json:"device"` // "gpu" or "cpu" while the image model is loaded, else ""
-	Error  string `json:"error"`  // why the AI can't run (models missing, runtime failed)
+	Device     string `json:"device"`     // "gpu" or "cpu" while the image model is loaded, else ""
+	Error      string `json:"error"`      // why search and Things can't run (models missing, runtime failed)
+	FacesError string `json:"facesError"` // why people can't be recognised
 }
 
 // WallClock converts t to "wall-clock seconds": the local date and time as it

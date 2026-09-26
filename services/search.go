@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"lumen/internal/core"
+	"lumen/internal/people"
 	"lumen/internal/search"
 	"lumen/internal/store"
 )
@@ -23,18 +24,42 @@ func NewSearchService(st *store.Store, engine *search.Engine) *SearchService {
 	return &SearchService{store: st, engine: engine}
 }
 
-// Search finds photos matching a description, best match first.
+// Search finds photos matching a description, best match first. Named
+// people in it narrow the search to photos of all of them ("Ali at the
+// beach"); names alone give their photos, newest first.
 func (s *SearchService) Search(ctx context.Context, query string) (core.SearchResult, error) {
-	if s.engine == nil {
-		return core.SearchResult{}, ErrNoAI
-	}
-	hits, complete, err := s.engine.Search(ctx, query)
+	named, err := s.store.NamedPeople(ctx)
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	ids := make([]int64, len(hits))
-	for i, h := range hits {
-		ids[i] = h.ID
+	who, names, text := people.FindNames(query, named)
+	var ids []int64
+	complete := true
+	if len(who) > 0 {
+		if ids, err = s.store.PeopleAssets(ctx, who); err != nil {
+			return core.SearchResult{}, err
+		}
+	}
+	if text != "" || len(who) == 0 {
+		if s.engine == nil {
+			return core.SearchResult{}, ErrNoAI
+		}
+		var allow func(int64) bool
+		if len(who) > 0 {
+			theirs := make(map[int64]bool, len(ids))
+			for _, id := range ids {
+				theirs[id] = true
+			}
+			allow = func(id int64) bool { return theirs[id] }
+		}
+		var hits []search.Hit
+		if hits, complete, err = s.engine.Search(ctx, text, allow); err != nil {
+			return core.SearchResult{}, err
+		}
+		ids = make([]int64, len(hits))
+		for i, h := range hits {
+			ids[i] = h.ID
+		}
 	}
 	items, err := s.store.GridItems(ctx, ids)
 	if err != nil {
@@ -44,7 +69,10 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	return core.SearchResult{Items: items, Pending: pending, Complete: complete}, nil
+	if names == nil {
+		names = []string{}
+	}
+	return core.SearchResult{Items: items, People: names, Pending: pending, Complete: complete}, nil
 }
 
 // SuggestTags returns Things whose names contain text, for the search box.

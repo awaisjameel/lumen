@@ -6,9 +6,11 @@ import { engine, Filter, thumbUrl } from '../bridge'
 import type { GridItem } from '../bridge'
 import { logError } from '../shared/errors'
 import { dayLabel } from '../shared/format'
-import { t } from '../shared/i18n'
+import { listFormat, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
+import PersonHeader from '../people/PersonHeader.vue'
+import { usePeople } from '../people/store'
 import SearchBox from '../search/SearchBox.vue'
 import { useThings } from '../things/store'
 import { buildLayout, GAP, move, rowHeight, rowOfItem } from './layout'
@@ -23,13 +25,23 @@ const PAD = 20 // horizontal padding of the grid
 
 const lib = useLibrary()
 const things = useThings()
+const people = usePeople()
 const route = useRoute()
 
 // The route decides what the grid shows: a filter (/, /favourites, /videos),
-// one Thing (/things/:id) or search results (/search?q=…).
+// one Thing (/things/:id), one person (/people/:id) or search results
+// (/search?q=…).
 const scope = computed<Scope>(() => {
   if (route.name === 'search') return { kind: 'search', query: String(route.query.q ?? '').trim() }
-  return { kind: 'timeline', view: { filter: route.meta.filter ?? Filter.FilterAll, tag: Number(route.params.id) || 0 } }
+  const id = Number(route.params.id) || 0
+  return {
+    kind: 'timeline',
+    view: {
+      filter: route.meta.filter ?? Filter.FilterAll,
+      tag: route.name === 'thing' ? id : 0,
+      person: route.name === 'person' ? id : 0,
+    },
+  }
 })
 watch(
   () => scopeKey(scope.value),
@@ -44,6 +56,14 @@ const titles: Record<Filter, MessageKey> = {
 }
 
 const tagId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.tag ?? 0) : 0))
+const personId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.person ?? 0) : 0))
+watch(
+  personId,
+  (id) => {
+    if (id && !people.byId.has(id)) void people.load().catch(logError)
+  },
+  { immediate: true },
+)
 watch(
   tagId,
   (id) => {
@@ -56,6 +76,7 @@ const title = computed(() => {
   const s = scope.value
   if (s.kind === 'search') return `“${s.query}”`
   if (tagId.value) return things.byId.get(tagId.value)?.name ?? ''
+  if (personId.value) return people.byId.get(personId.value)?.name || t('person.unnamed')
   return t(titles[s.view.filter])
 })
 
@@ -206,12 +227,15 @@ watch(
 
 const aiError = computed(() => lib.progress?.ai.error ?? '')
 const empty = computed(() => lib.timelineLoaded && lib.buckets.length === 0)
+// A search can take seconds (the first one loads the text model): say so.
+const searching = computed(() => lib.isSearch && !lib.timelineLoaded)
 const emptyText = computed((): [string, string] => {
   const s = scope.value
   if (s.kind === 'search') {
     return aiError.value ? [t('search.unavailable'), aiError.value] : [t('search.none'), t('search.noneHint')]
   }
   if (tagId.value) return [t('things.viewEmpty'), t('things.viewEmptyHint')]
+  if (personId.value) return [t('person.empty'), t('person.emptyHint')]
   const keys: [MessageKey, MessageKey] =
     s.view.filter === Filter.FilterFavourites
       ? ['favourites.empty', 'favourites.emptyHint']
@@ -234,6 +258,7 @@ const searchNotes = computed(() => {
   const info = lib.searchInfo
   if (!lib.isSearch || !info) return []
   const notes: string[] = []
+  if (info.people.length) notes.push(t('search.withPeople', { names: listFormat.format(info.people) }))
   if (!info.complete) notes.push(t('search.more', { n: lib.total }))
   if (info.pending) notes.push(t('search.pending', { n: info.pending }))
   return notes
@@ -244,7 +269,8 @@ const searchNotes = computed(() => {
   <div class="library">
     <section class="main">
       <header class="topbar">
-        <div class="heading">
+        <PersonHeader v-if="personId" :id="personId" />
+        <div v-else class="heading">
           <h1 :title="title">{{ title }}</h1>
           <span v-if="countText" class="count">{{ countText }}</span>
         </div>
@@ -284,7 +310,11 @@ const searchNotes = computed(() => {
           @scroll.passive="onScroll"
           @keydown="onKey"
         >
-          <div v-if="empty" class="empty">
+          <div v-if="searching" class="empty" role="status">
+            <Icon name="search" :size="40" />
+            <h2>{{ t('search.searching') }}</h2>
+          </div>
+          <div v-else-if="empty" class="empty">
             <Icon :name="lib.isSearch ? 'search' : 'photos'" :size="40" />
             <h2>{{ emptyText[0] }}</h2>
             <p class="muted">{{ emptyText[1] }}</p>
