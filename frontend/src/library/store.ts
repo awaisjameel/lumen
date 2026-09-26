@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, triggerRef } from 'vue'
-import { engine, Filter, onLibraryChanged, onProgress } from '../bridge'
+import { engine, Filter, onLibraryChanged, onProgress, TAG_CONFIDENCE_DEFAULT } from '../bridge'
 import type { DayBucket, GridItem, Progress, Settings, Source, View } from '../bridge'
 import { logError } from '../shared/errors'
 
@@ -50,7 +50,7 @@ function loadZoom(): number {
 export const useLibrary = defineStore('library', () => {
   const ready = ref(false)
   const sources = ref<Source[]>([])
-  const settings = ref<Settings>({ videos: false, aiOnBattery: false, tagConfidence: 0.02 })
+  const settings = ref<Settings>({ videos: false, aiOnBattery: false, tagConfidence: TAG_CONFIDENCE_DEFAULT })
   const progress = ref<Progress | null>(null)
 
   const scope = ref<Scope>({ kind: 'timeline', view: { filter: Filter.FilterAll } })
@@ -157,7 +157,7 @@ export const useLibrary = defineStore('library', () => {
       const next = new Map(days.value)
       const inSpan = new Set(missing)
       for (const d of got) {
-        next.set(d.day, d.items ?? [])
+        next.set(d.day, d.items)
         fresh.add(d.day)
         inSpan.delete(d.day)
       }

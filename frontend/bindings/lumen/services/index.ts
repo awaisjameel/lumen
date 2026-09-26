@@ -7,7 +7,3 @@ export {
     LibraryService,
     SearchService
 };
-
-export type {
-    Settings
-} from "./models.js";

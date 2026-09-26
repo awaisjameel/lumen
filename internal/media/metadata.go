@@ -3,7 +3,6 @@
 package media
 
 import (
-	"fmt"
 	"image"
 	"io"
 	"math"
@@ -64,7 +63,7 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 	// imagemeta (needed for HEIC) silently returns nothing for some real JPEGs,
 	// e.g. GoPro files. goexif reads those, so it backs it up for JPEG/TIFF.
 	if m.TakenAt.IsZero() && m.Camera == "" && goexifFormats[strings.ToLower(filepath.Ext(path))] {
-		if _, err := f.Seek(0, 0); err == nil {
+		if _, err := f.Seek(0, io.SeekStart); err == nil {
 			fillFromGoexif(f, &m)
 		}
 	}
@@ -72,7 +71,7 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 	// No size in the EXIF: read the image header, with Go for the common
 	// formats and libvips for the rest (AVIF, HEIC).
 	if m.Width == 0 || m.Height == 0 {
-		if _, err := f.Seek(0, 0); err == nil {
+		if _, err := f.Seek(0, io.SeekStart); err == nil {
 			if cfg, _, err := image.DecodeConfig(f); err == nil {
 				m.Width, m.Height = cfg.Width, cfg.Height
 			}
@@ -180,9 +179,4 @@ func GuessDate(name string, mtime time.Time) (wallClock int64, from core.DateSou
 		return t.Unix(), core.DateFromFilename // already wall-clock (built in UTC)
 	}
 	return core.WallClock(mtime.Local()), core.DateFromFile
-}
-
-// String helps when logging.
-func (m Metadata) String() string {
-	return fmt.Sprintf("%s %dx%d o%d %q", m.TakenAt.Format(time.DateTime), m.Width, m.Height, m.Orientation, m.Camera)
 }

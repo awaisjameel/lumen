@@ -63,7 +63,11 @@ func TestIndexerFindsPhotosByDescription(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// Skip learning the ~200 built-in Things; this test teaches its own.
-	if err := st.SetFloat(ctx, core.SettingVocabulary, search.VocabularyVersion); err != nil {
+	if err := st.SetInt(ctx, core.SettingVocabulary, search.VocabularyVersion); err != nil {
+		t.Fatal(err)
+	}
+	// The AI waits for mains power by default; this test must not depend on it.
+	if err := st.SetBool(ctx, core.SettingAIOnBattery, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.AddSource(ctx, photos); err != nil {

@@ -16,3 +16,6 @@ spikes/*.local
 
 # Native dependencies and prepared models (scripts/deps.sh)
 deps/
+
+# Python bytecode (scripts/prepare_models.py)
+__pycache__/

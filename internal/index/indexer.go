@@ -258,7 +258,7 @@ func (ix *Indexer) RescanAll() {
 }
 
 // SetFocus tells the indexer which days the user is looking at (YYYY-MM-DD,
-// inclusive), so thumbnails for them are made first.
+// inclusive), so every stage does them first.
 func (ix *Indexer) SetFocus(from, to string) {
 	a, err1 := time.Parse(time.DateOnly, from)
 	b, err2 := time.Parse(time.DateOnly, to)
@@ -272,7 +272,9 @@ func (ix *Indexer) SetFocus(from, to string) {
 		a, b = b, a
 	}
 	ix.focus = &store.TimeRange{From: a.Unix(), To: b.AddDate(0, 0, 1).Unix()}
-	nudge(ix.wakeThum)
+	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed} {
+		nudge(ch)
+	}
 }
 
 // SetPaused pauses or resumes the stage workers (scanning keeps going; it is cheap).

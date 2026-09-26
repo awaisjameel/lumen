@@ -16,13 +16,13 @@ const ffmpegTimeout = time.Minute
 
 // ffmpegDecode decodes an image with FFmpeg into 8-bit RGB, scaled so its
 // long edge is at most maxSide (never upscaled). Rotation is not applied.
-func ffmpegDecode(exe, path string, maxSide int) (pix []byte, w, h int, err error) {
+func ffmpegDecode(ctx context.Context, exe, path string, maxSide int) (pix []byte, w, h int, err error) {
 	scale := fmt.Sprintf("scale='min(iw,%d)':'min(ih,%d)':force_original_aspect_ratio=decrease", maxSide, maxSide)
 	// iPhone photos are a grid of tiles that FFmpeg assembles as a stream
 	// group; other files are a single stream. Try the grid first.
-	out, err := runFFmpeg(exe, "-noautorotate", "-i", path, "-filter_complex", "[0:g:0]"+scale+"[o]", "-map", "[o]")
+	out, err := runFFmpeg(ctx, exe, "-noautorotate", "-i", path, "-filter_complex", "[0:g:0]"+scale+"[o]", "-map", "[o]")
 	if err != nil {
-		out, err = runFFmpeg(exe, "-noautorotate", "-i", path, "-map", "0:v:0", "-vf", scale)
+		out, err = runFFmpeg(ctx, exe, "-noautorotate", "-i", path, "-map", "0:v:0", "-vf", scale)
 	}
 	if err != nil {
 		return nil, 0, 0, err
@@ -31,8 +31,8 @@ func ffmpegDecode(exe, path string, maxSide int) (pix []byte, w, h int, err erro
 }
 
 // runFFmpeg runs ffmpeg with args plus "write one frame as PPM to stdout".
-func runFFmpeg(exe string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), ffmpegTimeout)
+func runFFmpeg(ctx context.Context, exe string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, ffmpegTimeout)
 	defer cancel()
 	args = append([]string{"-v", "error", "-nostdin", "-hide_banner"}, args...)
 	args = append(args, "-frames:v", "1", "-f", "image2pipe", "-c:v", "ppm", "-pix_fmt", "rgb24", "-")
@@ -85,8 +85,6 @@ func parsePPM(b []byte) (pix []byte, w, h int, err error) {
 func isSpace(c byte) bool { return c == ' ' || c == '\n' || c == '\r' || c == '\t' }
 
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return strings.TrimSpace(s[:i])
-	}
-	return s
+	line, _, _ := strings.Cut(s, "\n")
+	return strings.TrimSpace(line)
 }

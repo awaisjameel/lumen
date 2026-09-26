@@ -81,10 +81,10 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 
 // eachItem turns a per-file function into a batch processor that runs it on
 // a pool of workers. On shutdown it only finishes the files already started.
-func eachItem[R any](workers int, fn func(store.JobItem) R) func(context.Context, []store.JobItem) ([]R, error) {
+func eachItem[R any](workers int, fn func(context.Context, store.JobItem) R) func(context.Context, []store.JobItem) ([]R, error) {
 	return func(ctx context.Context, items []store.JobItem) ([]R, error) {
 		results := make([]R, len(items))
-		parallel(ctx, len(items), workers, func(i int) { results[i] = fn(items[i]) })
+		parallel(ctx, len(items), workers, func(i int) { results[i] = fn(ctx, items[i]) })
 		return results, nil
 	}
 }
@@ -126,7 +126,7 @@ func (ix *Indexer) fetch(ctx context.Context, stage core.Stage, n int) ([]store.
 	return ix.store.PendingJobs(ctx, stage, nil, n)
 }
 
-func (ix *Indexer) doMetadata(j store.JobItem) (r store.MetadataResult) {
+func (ix *Indexer) doMetadata(_ context.Context, j store.JobItem) (r store.MetadataResult) {
 	r.AssetID = j.AssetID
 	defer recoverInto(&r.Err, j.Path)
 	m, err := media.ReadMetadata(j.Path, j.Kind)
@@ -141,10 +141,10 @@ func (ix *Indexer) doMetadata(j store.JobItem) (r store.MetadataResult) {
 	return r
 }
 
-func (ix *Indexer) doThumbnail(j store.JobItem) (r store.ThumbResult) {
+func (ix *Indexer) doThumbnail(ctx context.Context, j store.JobItem) (r store.ThumbResult) {
 	r.AssetID = j.AssetID
 	defer recoverInto(&r.Err, j.Path)
-	t, err := ix.cache.Thumbs.Thumbnail(j.Path, j.Kind, j.Orientation)
+	t, err := ix.cache.Thumbs.Thumbnail(ctx, j.Path, j.Kind, j.Orientation)
 	switch {
 	case errors.Is(err, media.ErrUnsupported):
 		r.Skipped = true
@@ -185,7 +185,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 			return
 		}
 		orig := media.Original{Path: j.Path, Kind: j.Kind, Orientation: j.Orientation}
-		switch err := ix.cache.Ensure(j.AssetID, core.ThumbLarge, orig); {
+		switch err := ix.cache.Ensure(ctx, j.AssetID, core.ThumbLarge, orig); {
 		case errors.Is(err, media.ErrUnsupported):
 			r.Skipped = true
 			return

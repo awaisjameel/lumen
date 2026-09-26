@@ -46,6 +46,8 @@ It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, F
 
 Check with `wails3 doctor`.
 
+Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), whatever `core.autocrlf` says.
+
 ## Commands
 
 ```sh

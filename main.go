@@ -17,6 +17,7 @@ import (
 	"lumen/internal/core"
 	"lumen/internal/index"
 	"lumen/internal/media"
+	"lumen/internal/media/vips"
 	"lumen/internal/search"
 	"lumen/internal/store"
 	"lumen/services"
@@ -45,6 +46,7 @@ func run() error {
 		return err
 	}
 	setupLogging(paths)
+	slog.Info("lumen starting", "data", paths.DataDir, "runtime", paths.Runtime, "libvips", vips.Version())
 
 	st, err := store.Open(paths.DBPath)
 	if err != nil {
@@ -166,12 +168,20 @@ func devtoolsArgs() []string {
 	return []string{"--remote-debugging-port=" + port, "--remote-debugging-address=127.0.0.1"}
 }
 
+// maxLogSize is when lumen.log starts over (the previous one is kept as
+// lumen.old.log), so years of use never grow it without bound.
+const maxLogSize = 10 << 20
+
 // setupLogging writes to %LOCALAPPDATA%\Lumen\lumen.log (local only, never
 // uploaded), and to stderr when there is a console (dev builds). The file
 // stays open until the process exits, so even the final error from run is
 // recorded.
 func setupLogging(paths core.Paths) {
-	f, err := os.OpenFile(filepath.Join(paths.DataDir, "lumen.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	name := filepath.Join(paths.DataDir, "lumen.log")
+	if fi, err := os.Stat(name); err == nil && fi.Size() > maxLogSize {
+		_ = os.Rename(name, filepath.Join(paths.DataDir, "lumen.old.log"))
+	}
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		slog.Warn("no log file; logging to stderr only", "err", err)
 		return

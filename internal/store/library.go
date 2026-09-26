@@ -18,21 +18,10 @@ var ErrNotFound = errors.New("not found")
 // list. AI tags count from minScore up.
 func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float32) ([]core.DayBucket, error) {
 	where, args := viewSQL(v, minScore)
-	rows, err := s.r.QueryContext(ctx, `SELECT strftime('%Y-%m-%d', taken_at, 'unixepoch') AS day, count(*)
+	return queryAll(ctx, s.r, func(r *sql.Rows) (b core.DayBucket, err error) {
+		return b, r.Scan(&b.Day, &b.Count)
+	}, `SELECT strftime('%Y-%m-%d', taken_at, 'unixepoch') AS day, count(*)
 		FROM assets WHERE `+where+` GROUP BY day ORDER BY day DESC`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []core.DayBucket
-	for rows.Next() {
-		var b core.DayBucket
-		if err := rows.Scan(&b.Day, &b.Count); err != nil {
-			return nil, err
-		}
-		out = append(out, b)
-	}
-	return out, rows.Err()
 }
 
 // viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
@@ -102,7 +91,7 @@ func gridFields(it *core.GridItem) []any {
 // (search results arrive best match first).
 func (s *Store) GridItems(ctx context.Context, ids []int64) ([]core.GridItem, error) {
 	if len(ids) == 0 {
-		return nil, nil
+		return []core.GridItem{}, nil
 	}
 	list, err := json.Marshal(ids)
 	if err != nil {

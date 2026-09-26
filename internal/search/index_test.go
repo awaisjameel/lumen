@@ -95,8 +95,8 @@ func TestPutReplaces(t *testing.T) {
 	x.Put(7, []int8{127, 0}, 1.0/127)
 	x.Put(7, []int8{0, 127}, 1.0/127)
 	x.Put(8, []int8{1}, 1) // wrong size: ignored
-	if x.Len() != 1 || !x.Has(7) || x.Has(8) {
-		t.Fatalf("len %d", x.Len())
+	if x.Len() != 1 {
+		t.Fatalf("len %d, want 1", x.Len())
 	}
 	if h := x.Search([]float32{0, 1}, 0.5, 5); len(h) != 1 || h[0].ID != 7 {
 		t.Fatalf("hits %+v", h)

@@ -251,7 +251,7 @@ func TestEmbeddingsAndTags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateTag(ctx, "ali's BIRTHDAY", core.TagManual, nil); err != ErrTagExists {
+	if _, err := st.CreateTag(ctx, "ali's BIRTHDAY", core.TagManual, nil); !errors.Is(err, ErrTagExists) {
 		t.Fatalf("duplicate name: %v", err)
 	}
 	st.TagAsset(ctx, b, id)
@@ -282,6 +282,40 @@ func TestEmbeddingsAndTags(t *testing.T) {
 	}
 	if _, kind, err := st.TagByName(ctx, "dogs"); err != nil || kind != core.TagManual {
 		t.Fatalf("dogs = %v %v, want kept as manual", kind, err)
+	}
+
+	// A tag deleted after the AI scored it is skipped, not a failed batch.
+	label, _ := st.CreateTag(ctx, "Kites", core.TagLabel, []string{"a kite"})
+	if err := st.DeleteTag(ctx, label); err != nil {
+		t.Fatal(err)
+	}
+	err = st.SaveEmbeddings(ctx, "m", []EmbedResult{{AssetID: b, Vec: []int8{1, 1}, Scale: 1,
+		Tags: []TagScore{{label, 0.9}, {auto[0].ID, 0.9}}}})
+	if err != nil {
+		t.Fatalf("save with a deleted tag: %v", err)
+	}
+	// b keeps the user's Dogs and gains Beaches; the deleted Kites is gone.
+	if tags, _ = st.AssetTags(ctx, b, 0.5); len(tags) != 2 || tags[1].ID != auto[0].ID {
+		t.Fatalf("tags after save = %+v", tags)
+	}
+}
+
+func TestEmptyListsAreNotNil(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	srcs, err := st.ListSources(ctx)
+	if err != nil || srcs == nil {
+		t.Fatalf("sources = %#v (%v), want an empty list", srcs, err)
+	}
+	if tags, _ := st.SearchTags(ctx, " ", 5); tags == nil {
+		t.Fatal("tag search = nil, want an empty list")
+	}
+}
+
+func TestIntSettingReadsOlderFloat(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	st.SetFloat(ctx, core.SettingVocabulary, 3) // how earlier versions stored it
+	if v, err := st.Int(ctx, core.SettingVocabulary, 0); err != nil || v != 3 {
+		t.Fatalf("int = %d (%v), want 3", v, err)
 	}
 }
 

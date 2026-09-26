@@ -59,7 +59,7 @@ func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int
 			http.NotFound(w, r)
 			return
 		}
-		if err := m.cache.Ensure(id, size, media.Original{Path: f.Path, Kind: f.Kind, Orientation: f.Orientation}); err != nil {
+		if err := m.cache.Ensure(r.Context(), id, size, media.Original{Path: f.Path, Kind: f.Kind, Orientation: f.Orientation}); err != nil {
 			http.NotFound(w, r)
 			return
 		}

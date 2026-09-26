@@ -2,6 +2,7 @@ package media
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"image"
 	"image/color"
@@ -75,6 +76,8 @@ func near(c color.Color, r, g, b uint8) bool {
 	return d(cr, r) && d(cg, g) && d(cb, b)
 }
 
+var ctx = context.Background()
+
 var (
 	red  = color.RGBA{220, 30, 30, 255}
 	blue = color.RGBA{30, 30, 220, 255}
@@ -87,7 +90,7 @@ func TestThumbnailAppliesEXIFOrientation(t *testing.T) {
 	}
 	// 6 = shown rotated 90° clockwise: the left (red) half ends up on top.
 	p := write(t, "rotated.jpg", withOrientation(buf.Bytes(), 6))
-	th, err := Decoders{}.Thumbnail(p, core.KindPhoto, 6)
+	th, err := Decoders{}.Thumbnail(ctx, p, core.KindPhoto, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +112,7 @@ func TestThumbnailFlattensTransparencyOntoWhite(t *testing.T) {
 	if err := png.Encode(&buf, img); err != nil {
 		t.Fatal(err)
 	}
-	th, err := Decoders{}.Thumbnail(write(t, "alpha.png", buf.Bytes()), core.KindPhoto, 1)
+	th, err := Decoders{}.Thumbnail(ctx, write(t, "alpha.png", buf.Bytes()), core.KindPhoto, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,31 +130,31 @@ func TestThumbnailBMPAndHash(t *testing.T) {
 	if err := bmp.Encode(&b, halves(64, 48, blue, red)); err != nil {
 		t.Fatal(err)
 	}
-	ta, err := Decoders{}.Thumbnail(write(t, "a.bmp", a.Bytes()), core.KindPhoto, 1)
+	ta, err := Decoders{}.Thumbnail(ctx, write(t, "a.bmp", a.Bytes()), core.KindPhoto, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tb, err := Decoders{}.Thumbnail(write(t, "b.bmp", b.Bytes()), core.KindPhoto, 1)
+	tb, err := Decoders{}.Thumbnail(ctx, write(t, "b.bmp", b.Bytes()), core.KindPhoto, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := decodeJPEG(t, ta.Large).Bounds(); got.Dx() != 64 || got.Dy() != 48 {
 		t.Errorf("large is %v, want 64x48", got)
 	}
-	again, _ := Decoders{}.Thumbnail(write(t, "a2.bmp", a.Bytes()), core.KindPhoto, 1)
+	again, _ := Decoders{}.Thumbnail(ctx, write(t, "a2.bmp", a.Bytes()), core.KindPhoto, 1)
 	if ta.PHash != again.PHash || ta.PHash == tb.PHash {
 		t.Errorf("hashes: %x %x %x (want first two equal, third different)", ta.PHash, again.PHash, tb.PHash)
 	}
 }
 
 func TestThumbnailRejectsVideosAndBrokenFiles(t *testing.T) {
-	if _, err := (Decoders{}).Thumbnail("clip.mp4", core.KindVideo, 1); err != ErrUnsupported {
+	if _, err := (Decoders{}).Thumbnail(ctx, "clip.mp4", core.KindVideo, 1); err != ErrUnsupported {
 		t.Errorf("video: got %v, want ErrUnsupported", err)
 	}
-	if _, err := (Decoders{}).Thumbnail(write(t, "junk.jpg", []byte("not an image")), core.KindPhoto, 1); err == nil {
+	if _, err := (Decoders{}).Thumbnail(ctx, write(t, "junk.jpg", []byte("not an image")), core.KindPhoto, 1); err == nil {
 		t.Error("junk: want an error")
 	}
-	if _, err := (Decoders{}).Thumbnail(filepath.Join(t.TempDir(), "gone.png"), core.KindPhoto, 1); err == nil {
+	if _, err := (Decoders{}).Thumbnail(ctx, filepath.Join(t.TempDir(), "gone.png"), core.KindPhoto, 1); err == nil {
 		t.Error("missing file: want an error")
 	}
 }
@@ -161,7 +164,7 @@ func TestHEIC(t *testing.T) {
 	ff := testenv.File(t, "ffmpeg", "ffmpeg.exe")
 	for _, p := range samples {
 		t.Run(filepath.Base(p), func(t *testing.T) {
-			th, err := Decoders{FFmpeg: ff}.Thumbnail(p, core.KindPhoto, 1)
+			th, err := Decoders{FFmpeg: ff}.Thumbnail(ctx, p, core.KindPhoto, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -170,7 +173,7 @@ func TestHEIC(t *testing.T) {
 				t.Errorf("large is %v", big)
 			}
 			// FFmpeg alone (the fallback when WIC can't) must agree on the shape.
-			pix, w, h, err := ffmpegDecode(ff, p, core.ThumbLarge)
+			pix, w, h, err := ffmpegDecode(ctx, ff, p, core.ThumbLarge)
 			if err != nil {
 				t.Fatal(err)
 			}

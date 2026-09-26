@@ -44,9 +44,6 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	if items == nil {
-		items = []core.GridItem{}
-	}
 	return core.SearchResult{Items: items, Pending: pending, Complete: complete}, nil
 }
 
@@ -57,11 +54,11 @@ func (s *SearchService) SuggestTags(ctx context.Context, text string) ([]core.Ta
 
 // Things lists every tag with its count and cover, most used first.
 func (s *SearchService) Things(ctx context.Context) ([]core.Tag, error) {
-	min, err := tagConfidence(ctx, s.store)
+	minScore, err := tagConfidence(ctx, s.store)
 	if err != nil {
 		return nil, err
 	}
-	return s.store.Things(ctx, min)
+	return s.store.Things(ctx, minScore)
 }
 
 // CreateLabel adds a Thing for the AI to look for, and finds it across the
@@ -96,11 +93,11 @@ func (s *SearchService) SetTagHidden(ctx context.Context, id int64, hidden bool)
 
 // AssetTags lists the tags on one photo.
 func (s *SearchService) AssetTags(ctx context.Context, assetID int64) ([]core.AssetTag, error) {
-	min, err := tagConfidence(ctx, s.store)
+	minScore, err := tagConfidence(ctx, s.store)
 	if err != nil {
 		return nil, err
 	}
-	return s.store.AssetTags(ctx, assetID, min)
+	return s.store.AssetTags(ctx, assetID, minScore)
 }
 
 // TagAsset puts a tag on a photo by name, creating the tag if it's new.

@@ -1,7 +1,7 @@
 """Turn the downloaded SigLIP 2 files into what Lumen ships.
 
 Run by scripts/deps.sh (which pins and verifies the inputs). Reads
-deps/src/siglip2 and writes deps/models/siglip2:
+deps/src/siglip2 and writes deps/runtime/models/siglip2:
 
   vision.onnx     fp16 image tower, input fixed to BATCH x 3 x 224 x 224 so
                   DirectML can compile the whole graph; only pooler_output kept

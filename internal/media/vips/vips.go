@@ -142,6 +142,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"unsafe"
 )
@@ -256,15 +257,7 @@ func Size(path string) (w, h int, err error) {
 func lastError() error {
 	msg := C.lumen_error()
 	defer C.g_free(C.gpointer(msg))
-	return errors.New("vips: " + trim(C.GoString(msg)))
-}
-
-// trim keeps the first line of libvips' error log, which is the useful one.
-func trim(s string) string {
-	for i, r := range s {
-		if r == '\n' {
-			return s[:i]
-		}
-	}
-	return s
+	// The first line of libvips' error log is the useful one.
+	first, _, _ := strings.Cut(C.GoString(msg), "\n")
+	return errors.New("vips: " + first)
 }

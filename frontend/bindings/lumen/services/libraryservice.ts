@@ -14,10 +14,6 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as core$0 from "../internal/core/models.js";
 
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: Unused imports
-import * as $models from "./models.js";
-
 /**
  * AddSources adds folders and starts scanning them. Folders already inside
  * the library are skipped silently.
@@ -115,7 +111,7 @@ export function SetVideos(on: boolean): $CancellablePromise<void> {
 /**
  * Settings returns the user's settings.
  */
-export function Settings(): $CancellablePromise<$models.Settings> {
+export function Settings(): $CancellablePromise<core$0.Settings> {
     return $Call.ByID(2574705872);
 }
 

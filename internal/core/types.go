@@ -48,6 +48,13 @@ const (
 	SettingVocabulary    = "vocabulary_version" // int: built-in Things last synced
 )
 
+// Settings are the user-facing preferences.
+type Settings struct {
+	Videos        bool    `json:"videos"`
+	AIOnBattery   bool    `json:"aiOnBattery"`
+	TagConfidence float64 `json:"tagConfidence"` // TagConfidenceMin..Max
+}
+
 // Tag confidence: the default, and the range the setting may take. The
 // lower bound is also the lowest score stored, so the slider never needs a
 // re-scan.

@@ -18,6 +18,7 @@ export type {
     GridItem,
     Progress,
     SearchResult,
+    Settings,
     Source,
     Tag,
     View

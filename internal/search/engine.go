@@ -3,7 +3,6 @@ package search
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -100,7 +99,10 @@ func (e *Engine) Start(ctx context.Context) {
 			}
 			return
 		}
-		slog.Info("search ready", "images", e.index.Len(), "things", len(e.labels), "took", time.Since(t).Round(time.Millisecond))
+		e.labelsMu.RLock()
+		things := len(e.labels)
+		e.labelsMu.RUnlock()
+		slog.Info("search ready", "images", e.index.Len(), "things", things, "took", time.Since(t).Round(time.Millisecond))
 	}()
 }
 
@@ -138,8 +140,8 @@ func (e *Engine) load(ctx context.Context) error {
 // syncVocabulary writes the built-in Things into the database when this
 // version of Lumen changed them, and reports whether it did.
 func (e *Engine) syncVocabulary(ctx context.Context) (bool, error) {
-	have, err := e.store.Float(ctx, core.SettingVocabulary, 0)
-	if err != nil || int(have) == VocabularyVersion {
+	have, err := e.store.Int(ctx, core.SettingVocabulary, 0)
+	if err != nil || have == VocabularyVersion {
 		return false, err
 	}
 	labels := make([]store.VocabLabel, len(Vocabulary))
@@ -149,7 +151,7 @@ func (e *Engine) syncVocabulary(ctx context.Context) (bool, error) {
 	if err := e.store.SyncVocabulary(ctx, labels); err != nil {
 		return false, err
 	}
-	return true, e.store.SetFloat(ctx, core.SettingVocabulary, VocabularyVersion)
+	return true, e.store.SetInt(ctx, core.SettingVocabulary, VocabularyVersion)
 }
 
 // loadLabels reads every AI-applied tag and embeds the prompts of any that
@@ -303,22 +305,33 @@ func (e *Engine) CreateLabel(ctx context.Context, name string) (int64, error) {
 		return 0, err
 	}
 	vecs, err := e.embedPrompts(ctx, id, prompts)
-	l := label{id: id, vecs: vecs}
 	if err == nil {
+		// Photos the indexer embeds from now on are scored against the new
+		// Thing as they arrive; rescore covers those already indexed.
+		l := label{id: id, vecs: vecs}
+		e.labelsMu.Lock()
+		e.labels = append(e.labels, l)
+		e.labelsMu.Unlock()
 		err = e.rescore(ctx, l)
 	}
 	if err != nil {
+		e.forget(id)
 		_ = e.store.DeleteTag(ctx, id) // don't leave a half-made Thing behind
 		return 0, err
 	}
-	e.labelsMu.Lock()
-	e.labels = append(e.labels, l)
-	e.labelsMu.Unlock()
 	return id, nil
 }
 
-// ForgetLabel stops scoring a deleted tag.
+// ForgetLabel stops scoring a deleted tag. It waits for a load in progress,
+// which might otherwise bring the tag back.
 func (e *Engine) ForgetLabel(id int64) {
+	if e.started.Load() {
+		<-e.loaded
+	}
+	e.forget(id)
+}
+
+func (e *Engine) forget(id int64) {
 	e.labelsMu.Lock()
 	defer e.labelsMu.Unlock()
 	e.labels = slices.DeleteFunc(e.labels, func(l label) bool { return l.id == id })
@@ -423,10 +436,6 @@ func (e *Engine) closeText() {
 		e.text = nil
 	}
 }
-
-// ErrNoModel means the SigLIP model files are missing, so search and Things
-// are unavailable.
-var ErrNoModel = errors.New("the AI model is not installed")
 
 func split(flat []float32, dim int) [][]float32 {
 	out := make([][]float32, 0, len(flat)/dim)

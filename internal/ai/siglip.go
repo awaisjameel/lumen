@@ -91,8 +91,12 @@ func (e *ImageEncoder) open(device Device) error {
 	return nil
 }
 
-// Device reports where the model is running.
-func (e *ImageEncoder) Device() Device { return e.s.device }
+// Device reports where the model is running (it can move to the CPU).
+func (e *ImageEncoder) Device() Device {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.s.device
+}
 
 // BatchSize is how many images Encode takes at most.
 func (e *ImageEncoder) BatchSize() int { return e.m.Batch }
@@ -134,7 +138,7 @@ func (e *ImageEncoder) Encode(images [][]byte) ([][]float32, error) {
 	if err != nil && e.s.device == GPU {
 		// A GPU can go away (driver update, device removed): carry on on the CPU.
 		slog.Warn("image model failed on the GPU; switching to the CPU", "err", err)
-		e.s.close()
+		e.s.close() // if the CPU fails to load too, later runs report errClosed
 		if oerr := e.open(CPU); oerr != nil {
 			return nil, oerr
 		}

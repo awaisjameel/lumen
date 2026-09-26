@@ -200,6 +200,19 @@ export interface SearchResult {
 }
 
 /**
+ * Settings are the user-facing preferences.
+ */
+export interface Settings {
+    "videos": boolean;
+    "aiOnBattery": boolean;
+
+    /**
+     * TagConfidenceMin..Max
+     */
+    "tagConfidence": number;
+}
+
+/**
  * Source is a folder the user asked Lumen to watch.
  */
 export interface Source {

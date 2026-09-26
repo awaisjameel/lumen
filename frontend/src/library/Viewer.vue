@@ -8,6 +8,7 @@ import { orFallback } from '../shared/errors'
 import { dateTime } from '../shared/format'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
+import { isTyping } from '../shared/keys'
 import { useLibrary } from './store'
 import DetailsPanel from './DetailsPanel.vue'
 
@@ -40,6 +41,8 @@ function close() {
 
 function onKey(e: KeyboardEvent) {
   if (e.ctrlKey || e.altKey || e.metaKey) return
+  // Typing in the details panel (adding a tag): only Escape still closes.
+  if (isTyping(e) && e.key !== 'Escape') return
   switch (e.key) {
     case 'Escape':
       close()

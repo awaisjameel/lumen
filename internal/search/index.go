@@ -68,14 +68,6 @@ func (x *Index) Len() int {
 	return len(x.ids)
 }
 
-// Has reports whether id has a vector.
-func (x *Index) Has(id int64) bool {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	_, ok := x.pos[id]
-	return ok
-}
-
 // Hit is one asset and its cosine similarity to the query.
 type Hit struct {
 	ID    int64

@@ -158,8 +158,8 @@ function showInFolder(id: number) {
 
       <section>
         <h3>{{ t('details.files') }}</h3>
-        <p v-if="(detail.paths?.length ?? 0) > 1" class="muted small">
-          {{ t('details.copies', { n: detail.paths!.length }) }}
+        <p v-if="detail.paths.length > 1" class="muted small">
+          {{ t('details.copies', { n: detail.paths.length }) }}
         </p>
         <p v-for="p in detail.paths" :key="p" class="path" :title="p">{{ p }}</p>
       </section>

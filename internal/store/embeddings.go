@@ -131,10 +131,12 @@ func (a *aiTagStmts) close() {
 	a.add.Close()
 }
 
-// prepareAddAI inserts an AI tag unless the user already decided about that
-// tag on that asset.
+// prepareAddAI inserts an AI tag (asset, tag, score) unless the user already
+// decided about that tag on that asset. A tag deleted since it was scored is
+// skipped rather than failing the whole batch.
 func prepareAddAI(ctx context.Context, tx *sql.Tx) (*sql.Stmt, error) {
-	return tx.PrepareContext(ctx, `INSERT INTO asset_tags (asset_id, tag_id, source, score) VALUES (?, ?, 'ai', ?)
+	return tx.PrepareContext(ctx, `INSERT INTO asset_tags (asset_id, tag_id, source, score)
+		SELECT ?1, id, 'ai', ?3 FROM tags WHERE id = ?2
 		ON CONFLICT (asset_id, tag_id) DO NOTHING`)
 }
 
@@ -167,19 +169,4 @@ func (s *Store) CountAwaitingAI(ctx context.Context) (int, error) {
 	err := s.r.QueryRowContext(ctx, `SELECT count(*) FROM asset_jobs j JOIN assets a ON a.id = j.asset_id
 		WHERE j.stage = 'embedding' AND j.status = 'pending' AND `+visibleAs("a")).Scan(&n)
 	return n, err
-}
-
-func int8Bytes(v []int8) []byte {
-	b := make([]byte, len(v))
-	for i, x := range v {
-		b[i] = byte(x)
-	}
-	return b
-}
-
-func bytesInt8(dst []int8, b []byte) []int8 {
-	for _, x := range b {
-		dst = append(dst, int8(x))
-	}
-	return dst
 }

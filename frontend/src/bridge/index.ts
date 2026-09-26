@@ -4,26 +4,35 @@
 
 import { Events } from '@wailsio/runtime'
 import { LibraryService, SearchService } from '../../bindings/lumen/services'
-import type { Settings } from '../../bindings/lumen/services'
 import { DateSource, Filter, Kind, TagKind, TagSource } from '../../bindings/lumen/internal/core'
 import type {
-  AssetDetail,
+  AssetDetail as RawAssetDetail,
   AssetTag,
   DayBucket,
-  DayItems,
+  DayItems as RawDayItems,
   GridItem,
   Progress,
   SearchResult,
+  Settings,
   Source,
   Tag,
   View,
 } from '../../bindings/lumen/internal/core'
 
 export { DateSource, Filter, Kind, TagKind, TagSource }
-export type { AssetDetail, AssetTag, DayBucket, DayItems, GridItem, Progress, Settings, Source, Tag, View }
+export type { AssetTag, DayBucket, GridItem, Progress, Settings, Source, Tag, View }
 
-/** A search's results (never null, unlike the raw binding). */
-export type SearchResults = Omit<SearchResult, 'items'> & { items: GridItem[] }
+// Go sends an empty list as null; the generated types say so. These are the
+// same types with their lists made non-null, which this file guarantees, so
+// the rest of the UI never checks.
+type NonNullLists<T, K extends keyof T> = Omit<T, K> & { [P in K]-?: NonNullable<T[P]> }
+
+/** A photo's details. */
+export type AssetDetail = NonNullLists<RawAssetDetail, 'paths'>
+/** One day of the grid. */
+export type DayItems = NonNullLists<RawDayItems, 'items'>
+/** A search's results, best first. */
+export type SearchResults = NonNullLists<SearchResult, 'items'>
 
 // Thumbnail sizes (longest edge). Must match core.ThumbSmall / core.ThumbLarge;
 // the media route is plain HTTP, so they are not part of the generated bindings.
@@ -31,7 +40,9 @@ export const THUMB_SMALL = 256
 export const THUMB_LARGE = 1024
 export type ThumbSize = typeof THUMB_SMALL | typeof THUMB_LARGE
 
-// Tag confidence range. Must match core.TagConfidenceMin / Max.
+// Tag confidence: default and range. Must match core.TagConfidenceDefault /
+// Min / Max (constants are not part of the generated bindings).
+export const TAG_CONFIDENCE_DEFAULT = 0.02
 export const TAG_CONFIDENCE_MIN = 0.002
 export const TAG_CONFIDENCE_MAX = 0.3
 
@@ -45,10 +56,13 @@ export const engine = {
 
   timeline: async (view: View): Promise<DayBucket[]> => (await LibraryService.Timeline(view)) ?? [],
   days: async (from: string, to: string, view: View): Promise<DayItems[]> =>
-    (await LibraryService.Days(from, to, view)) ?? [],
+    ((await LibraryService.Days(from, to, view)) ?? []).map((d) => ({ ...d, items: d.items ?? [] })),
   focus: (from: string, to: string): Promise<void> => LibraryService.Focus(from, to),
 
-  asset: (id: number): Promise<AssetDetail> => LibraryService.Asset(id),
+  asset: async (id: number): Promise<AssetDetail> => {
+    const d = await LibraryService.Asset(id)
+    return { ...d, paths: d.paths ?? [] }
+  },
   setFavourite: (id: number, fav: boolean): Promise<void> => LibraryService.SetFavourite(id, fav),
   showInFolder: (id: number): Promise<void> => LibraryService.ShowInFolder(id),
 

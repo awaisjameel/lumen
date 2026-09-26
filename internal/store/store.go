@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
 )
 
 //go:embed migrations/*.sql
@@ -130,6 +130,31 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	return tx.Commit()
 }
 
+// queryAll runs a read query and scans every row with scan. The result is
+// never nil, so an empty list reaches the UI as [] rather than null.
+func queryAll[T any](ctx context.Context, db *sql.DB, scan func(*sql.Rows) (T, error), q string, args ...any) ([]T, error) {
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []T{}
+	for rows.Next() {
+		v, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// isUnique reports whether err is a UNIQUE constraint violation.
+func isUnique(err error) bool {
+	var se sqlite3.Error
+	return errors.As(err, &se) && se.ExtendedCode == sqlite3.ErrConstraintUnique
+}
+
 // visible is the WHERE clause of the assets_timeline partial index.
 const visible = "hidden = 0 AND trashed_at IS NULL AND missing_since IS NULL"
 
@@ -189,4 +214,23 @@ func (s *Store) Float(ctx context.Context, key string, def float64) (float64, er
 // SetFloat stores a number setting.
 func (s *Store) SetFloat(ctx context.Context, key string, v float64) error {
 	return s.setSetting(ctx, key, strconv.FormatFloat(v, 'g', -1, 64))
+}
+
+// Int returns a whole-number setting, or def if it has never been set (or
+// is unreadable).
+func (s *Store) Int(ctx context.Context, key string, def int) (int, error) {
+	v, ok, err := s.setting(ctx, key)
+	if !ok {
+		return def, err
+	}
+	n, perr := strconv.Atoi(v)
+	if perr != nil {
+		return def, nil
+	}
+	return n, nil
+}
+
+// SetInt stores a whole-number setting.
+func (s *Store) SetInt(ctx context.Context, key string, v int) error {
+	return s.setSetting(ctx, key, strconv.Itoa(v))
 }

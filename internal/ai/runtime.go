@@ -15,7 +15,6 @@ import (
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
-	"golang.org/x/sys/windows"
 )
 
 var (
@@ -32,10 +31,8 @@ func Init(dir string) error {
 		return initErr
 	}
 	initDir = dir
-	// Windows ships an older DirectML.dll in System32 that the normal DLL
-	// search can find first; loading ours by full path makes ONNX Runtime use
-	// it. Without it only the CPU is available, which still works.
-	if _, err := windows.LoadLibraryEx(filepath.Join(dir, "DirectML.dll"), 0, windows.LOAD_WITH_ALTERED_SEARCH_PATH); err != nil {
+	// Without DirectML only the CPU is available, which still works.
+	if err := preloadDirectML(dir); err != nil {
 		slog.Warn("DirectML unavailable; models will run on the CPU", "err", err)
 	}
 	ort.SetSharedLibraryPath(filepath.Join(dir, "onnxruntime.dll"))
@@ -115,7 +112,7 @@ func openSession(path string, device Device, threads int) (*session, error) {
 		return nil, fmt.Errorf("read model %s: %w", filepath.Base(path), err)
 	}
 	if len(in) != 1 || len(out) == 0 {
-		return nil, fmt.Errorf("model %s: want one input, got %d", filepath.Base(path), len(in))
+		return nil, fmt.Errorf("model %s: want one input and an output, got %d and %d", filepath.Base(path), len(in), len(out))
 	}
 	// Prepared models have one output; a raw export also has the hidden
 	// states, and only the pooled embedding is wanted.
@@ -132,8 +129,14 @@ func openSession(path string, device Device, threads int) (*session, error) {
 	return &session{s: s, device: device}, nil
 }
 
+// errClosed means the model was freed (or failed to reload after a GPU error).
+var errClosed = errors.New("model is not loaded")
+
 // run feeds one input and returns the float32 output's data (copied) and shape.
 func (s *session) run(in ort.Value) ([]float32, ort.Shape, error) {
+	if s == nil || s.s == nil {
+		return nil, nil, errClosed
+	}
 	outs := []ort.Value{nil} // ONNX Runtime allocates the output
 	if err := s.s.Run([]ort.Value{in}, outs); err != nil {
 		return nil, nil, err

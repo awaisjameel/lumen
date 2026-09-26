@@ -17,20 +17,9 @@ var ErrAlreadyCovered = errors.New("this folder is already part of your library"
 
 // ListSources returns every source folder, alphabetically.
 func (s *Store) ListSources(ctx context.Context) ([]core.Source, error) {
-	rows, err := s.r.QueryContext(ctx, "SELECT id, path, enabled FROM sources ORDER BY path")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []core.Source
-	for rows.Next() {
-		var src core.Source
-		if err := rows.Scan(&src.ID, &src.Path, &src.Enabled); err != nil {
-			return nil, err
-		}
-		out = append(out, src)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.r, func(r *sql.Rows) (src core.Source, err error) {
+		return src, r.Scan(&src.ID, &src.Path, &src.Enabled)
+	}, "SELECT id, path, enabled FROM sources ORDER BY path")
 }
 
 // AddSource registers a folder. Sources never overlap: adding a folder inside

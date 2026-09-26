@@ -49,21 +49,9 @@ func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeR
 	}
 	q += " ORDER BY a.taken_at DESC LIMIT ?"
 	args = append(args, limit)
-
-	rows, err := s.r.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []JobItem
-	for rows.Next() {
-		var j JobItem
-		if err := rows.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation); err != nil {
-			return nil, err
-		}
-		out = append(out, j)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
+		return j, r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation)
+	}, q, args...)
 }
 
 // MetadataResult is the outcome of the metadata stage for one asset.

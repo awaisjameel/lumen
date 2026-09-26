@@ -1,0 +1,15 @@
+# Sources are LF on every machine, whatever core.autocrlf says: gofmt, bash
+# (scripts/*.sh) and the embedded SQL migrations all expect it.
+* text=auto eol=lf
+
+# Windows batch files need CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets: never touch.
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.pyc binary

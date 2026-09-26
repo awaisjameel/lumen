@@ -2,10 +2,12 @@ package media
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"image"
 	"image/draw"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,7 +50,9 @@ type Thumbs struct {
 
 // Thumbnailer turns an original file into upright thumbnails.
 type Thumbnailer interface {
-	Thumbnail(path string, kind core.Kind, orientation int) (Thumbs, error)
+	// Thumbnail decodes path (a photo or video of kind) upright; ctx cancels
+	// a slow external decoder.
+	Thumbnail(ctx context.Context, path string, kind core.Kind, orientation int) (Thumbs, error)
 }
 
 // Decoders is the production Thumbnailer. Everything ends in the same libvips
@@ -61,7 +65,7 @@ type Decoders struct {
 	FFmpeg string // ffmpeg.exe, for HEIC when WIC can't decode it; "" = none
 }
 
-func (d Decoders) Thumbnail(path string, kind core.Kind, orientation int) (Thumbs, error) {
+func (d Decoders) Thumbnail(ctx context.Context, path string, kind core.Kind, orientation int) (Thumbs, error) {
 	if kind != core.KindPhoto {
 		return Thumbs{}, ErrUnsupported // video frames arrive with FFmpeg video support
 	}
@@ -69,7 +73,7 @@ func (d Decoders) Thumbnail(path string, kind core.Kind, orientation int) (Thumb
 	var err error
 	switch ext := strings.ToLower(filepath.Ext(path)); ext {
 	case ".heic", ".heif":
-		t, err = d.heif(path, orientation)
+		t, err = d.heif(ctx, path, orientation)
 	case ".bmp":
 		t, err = goDecode(path)
 	default:
@@ -87,7 +91,7 @@ func (d Decoders) Thumbnail(path string, kind core.Kind, orientation int) (Thumb
 
 // heif decodes HEIC/HEIF. Neither decoder applies the file's rotation, so
 // the EXIF orientation (which matches it in camera files) is applied here.
-func (d Decoders) heif(path string, orientation int) (vips.Thumbs, error) {
+func (d Decoders) heif(ctx context.Context, path string, orientation int) (vips.Thumbs, error) {
 	pix, w, h, werr := wic.Decode(path, core.ThumbLarge)
 	if werr == nil {
 		return vips.ThumbnailPixels(pix, w, h, 4, orientation, sizes)
@@ -95,7 +99,7 @@ func (d Decoders) heif(path string, orientation int) (vips.Thumbs, error) {
 	if d.FFmpeg == "" {
 		return vips.Thumbs{}, ErrUnsupported
 	}
-	pix, w, h, ferr := ffmpegDecode(d.FFmpeg, path, core.ThumbLarge)
+	pix, w, h, ferr := ffmpegDecode(ctx, d.FFmpeg, path, core.ThumbLarge)
 	if ferr != nil {
 		return vips.Thumbs{}, fmt.Errorf("decode HEIC: %v; %w", werr, ferr)
 	}
@@ -118,7 +122,7 @@ func goDecode(path string) (vips.Thumbs, error) {
 	if cfg.Width*cfg.Height > maxPixels {
 		return vips.Thumbs{}, fmt.Errorf("image is too large (%dx%d)", cfg.Width, cfg.Height)
 	}
-	if _, err := f.Seek(0, 0); err != nil {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return vips.Thumbs{}, err
 	}
 	br.Reset(f)

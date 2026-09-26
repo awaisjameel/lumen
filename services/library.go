@@ -44,13 +44,6 @@ func (e *Emitter) LibraryChanged(visible int) {
 	}
 }
 
-// Settings are the user-facing toggles.
-type Settings struct {
-	Videos        bool    `json:"videos"`
-	AIOnBattery   bool    `json:"aiOnBattery"`
-	TagConfidence float64 `json:"tagConfidence"` // core.TagConfidenceMin..Max
-}
-
 // LibraryService is everything about browsing and managing the library.
 type LibraryService struct {
 	store *store.Store
@@ -138,20 +131,20 @@ func (s *LibraryService) Rescan() { s.ix.RescanAll() }
 
 // Timeline returns the view's asset counts per day, newest first.
 func (s *LibraryService) Timeline(ctx context.Context, view core.View) ([]core.DayBucket, error) {
-	min, err := tagConfidence(ctx, s.store)
+	minScore, err := tagConfidence(ctx, s.store)
 	if err != nil {
 		return nil, err
 	}
-	return s.store.DayBuckets(ctx, view, min)
+	return s.store.DayBuckets(ctx, view, minScore)
 }
 
 // Days returns the view's grid items for the days from..to (YYYY-MM-DD, inclusive).
 func (s *LibraryService) Days(ctx context.Context, from, to string, view core.View) ([]core.DayItems, error) {
-	min, err := tagConfidence(ctx, s.store)
+	minScore, err := tagConfidence(ctx, s.store)
 	if err != nil {
 		return nil, err
 	}
-	return s.store.DayItems(ctx, from, to, view, min)
+	return s.store.DayItems(ctx, from, to, view, minScore)
 }
 
 // Focus tells the indexer which days are on screen so they are processed first.
@@ -187,17 +180,17 @@ func (s *LibraryService) Progress(ctx context.Context) core.Progress { return s.
 func (s *LibraryService) SetPaused(paused bool) { s.ix.SetPaused(paused) }
 
 // Settings returns the user's settings.
-func (s *LibraryService) Settings(ctx context.Context) (Settings, error) {
+func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 	videos, err := s.store.Bool(ctx, core.SettingVideos, false)
 	if err != nil {
-		return Settings{}, err
+		return core.Settings{}, err
 	}
 	battery, err := s.store.Bool(ctx, core.SettingAIOnBattery, false)
 	if err != nil {
-		return Settings{}, err
+		return core.Settings{}, err
 	}
 	conf, err := tagConfidence(ctx, s.store)
-	return Settings{Videos: videos, AIOnBattery: battery, TagConfidence: float64(conf)}, err
+	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: float64(conf)}, err
 }
 
 // SetAIOnBattery lets the AI keep working on battery power (it waits for

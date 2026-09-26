@@ -8,6 +8,7 @@ import type { Tag } from '../bridge'
 import { logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
+import { isTyping } from '../shared/keys'
 import { useLibrary } from '../library/store'
 
 const route = useRoute()
@@ -98,8 +99,7 @@ function onKey(e: KeyboardEvent) {
 
 // Ctrl+F or "/" from anywhere (except while typing elsewhere).
 function onGlobalKey(e: KeyboardEvent) {
-  const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
-  if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !typing)) {
+  if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !isTyping(e))) {
     e.preventDefault()
     input.value?.focus()
     input.value?.select()
