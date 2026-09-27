@@ -86,10 +86,10 @@ func (s *Store) DayItems(ctx context.Context, from, to string, v core.View, minS
 
 // gridColumns are the columns a core.GridItem needs besides its id, in
 // gridFields order.
-const gridColumns = "COALESCE(width, 0), COALESCE(height, 0), kind = 'video', favourite, thumb_version"
+const gridColumns = "COALESCE(width, 0), COALESCE(height, 0), kind = 'video', COALESCE(duration_ms, 0), favourite, thumb_version"
 
 func gridFields(it *core.GridItem) []any {
-	return []any{&it.W, &it.H, &it.Video, &it.Favourite, &it.Thumb}
+	return []any{&it.W, &it.H, &it.Video, &it.Duration, &it.Favourite, &it.Thumb}
 }
 
 // GridItems returns the visible assets among ids, in the order given
@@ -133,10 +133,14 @@ func (s *Store) AssetDetail(ctx context.Context, id int64) (core.AssetDetail, er
 	var d core.AssetDetail
 	var w, h sql.NullInt64
 	var camera sql.NullString
+	var duration sql.NullInt64
+	var videoCodec, audioCodec sql.NullString
 	var lat, lon sql.NullFloat64
-	err := s.r.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon, favourite
+	err := s.r.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon, favourite,
+		duration_ms, video_codec, audio_codec
 		FROM assets WHERE id = ? AND missing_since IS NULL`, id).
-		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.Favourite)
+		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.Favourite,
+			&duration, &videoCodec, &audioCodec)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -148,6 +152,10 @@ func (s *Store) AssetDetail(ctx context.Context, id int64) (core.AssetDetail, er
 		d.Lat, d.Lon = &lat.Float64, &lon.Float64
 	}
 	d.WebNative = core.WebNative(d.Ext)
+	if d.Kind == core.KindVideo {
+		d.Video = &core.Video{Duration: duration.Int64, Codec: videoCodec.String, Audio: audioCodec.String,
+			Play: core.PlaybackOf(d.Ext, videoCodec.String, audioCodec.String)}
+	}
 
 	rows, err := s.r.QueryContext(ctx, "SELECT path, size FROM files WHERE asset_id = ? ORDER BY path", id)
 	if err != nil {
@@ -171,14 +179,18 @@ type MediaFile struct {
 	Kind         core.Kind
 	Orientation  int
 	ThumbVersion int
+	VideoCodec   string
+	AudioCodec   string
+	Duration     int64
 }
 
 // AssetFile returns the first file on disk for an asset.
 func (s *Store) AssetFile(ctx context.Context, id int64) (MediaFile, error) {
 	var m MediaFile
-	err := s.r.QueryRowContext(ctx, `SELECT f.path, a.ext, a.kind, a.orientation, a.thumb_version
+	err := s.r.QueryRowContext(ctx, `SELECT f.path, a.ext, a.kind, a.orientation, a.thumb_version,
+		COALESCE(a.video_codec, ''), COALESCE(a.audio_codec, ''), COALESCE(a.duration_ms, 0)
 		FROM assets a JOIN files f ON f.asset_id = a.id WHERE a.id = ? LIMIT 1`, id).
-		Scan(&m.Path, &m.Ext, &m.Kind, &m.Orientation, &m.ThumbVersion)
+		Scan(&m.Path, &m.Ext, &m.Kind, &m.Orientation, &m.ThumbVersion, &m.VideoCodec, &m.AudioCodec, &m.Duration)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, ErrNotFound
 	}

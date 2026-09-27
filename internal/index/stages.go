@@ -1,10 +1,12 @@
 package index
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"time"
 
@@ -110,10 +112,14 @@ func (ix *Indexer) fetch(ctx context.Context, stage core.Stage, n int) ([]store.
 	return ix.store.PendingJobs(ctx, stage, nil, n)
 }
 
-func (ix *Indexer) doMetadata(_ context.Context, j store.JobItem) (r store.MetadataResult) {
+func (ix *Indexer) doMetadata(ctx context.Context, j store.JobItem) (r store.MetadataResult) {
 	r.AssetID = j.AssetID
 	defer recoverInto(&r.Err, j.Path)
-	m, err := media.ReadMetadata(j.Path, j.Kind)
+	m, err := ix.cache.Decoder.Metadata(ctx, j.Path, j.Kind)
+	if errors.Is(err, media.ErrUnsupported) {
+		r.Skipped = true
+		return r
+	}
 	if err != nil {
 		r.Err = err.Error()
 		return r
@@ -122,6 +128,7 @@ func (ix *Indexer) doMetadata(_ context.Context, j store.JobItem) (r store.Metad
 		r.TakenAt = core.WallClock(m.TakenAt)
 	}
 	r.Width, r.Height, r.Orientation, r.Camera, r.Lat, r.Lon = m.Width, m.Height, m.Orientation, m.Camera, m.Lat, m.Lon
+	r.Duration, r.VideoCodec, r.AudioCodec = m.Duration, m.VideoCodec, m.AudioCodec
 	return r
 }
 
@@ -169,7 +176,6 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 		r.AssetID = j.AssetID
 		defer recoverInto(&r.Err, j.Path)
 		if j.Kind != core.KindPhoto {
-			r.Skipped = true // video frames arrive with video support
 			return
 		}
 		orig := media.Original{Path: j.Path, Kind: j.Kind, Orientation: j.Orientation}
@@ -214,8 +220,82 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 			results[i].Tags = ix.search.Tags(vecs[k])
 		}
 	}
+	for i, j := range items {
+		if j.Kind == core.KindVideo {
+			if err := ix.embedVideo(ctx, j, enc, side, &results[i]); err != nil {
+				return nil, err
+			}
+		}
+	}
 	ix.setAIState(func() { ix.aiDevice = string(enc.Device()) }) // it may have moved to the CPU
 	return results, nil
+}
+
+// embedVideo keeps each sampled moment searchable and stores a normalised
+// mean for the existing asset-level tag and search paths.
+func (ix *Indexer) embedVideo(ctx context.Context, j store.JobItem, enc *ai.ImageEncoder, side int,
+	r *store.EmbedResult) error {
+	var inputs [][]byte
+	var times []int64
+	seen := map[int64]bool{}
+	err := ix.cache.Decoder.Frames(ctx, j.Path, media.SampleCount(j.Duration), core.ThumbLarge, func(f media.Frame) error {
+		if seen[f.At] {
+			return nil
+		}
+		px, err := media.ModelInputPixels(f.Image, side)
+		if err == nil {
+			seen[f.At] = true
+			inputs = append(inputs, px)
+			times = append(times, f.At)
+		}
+		return err
+	})
+	switch {
+	case errors.Is(err, media.ErrUnsupported):
+		r.Skipped = true
+		return nil
+	case err != nil:
+		r.Err = err.Error()
+		//nolint:nilerr // per-file decoding failures are recorded in the job result
+		return nil
+	case len(inputs) == 0:
+		r.Skipped = true
+		return nil
+	}
+	mean := make([]float32, ix.search.Model().Dim)
+	tags := map[int64]float32{}
+	for lo := 0; lo < len(inputs); lo += enc.BatchSize() {
+		vecs, err := enc.Encode(inputs[lo:min(lo+enc.BatchSize(), len(inputs))])
+		if err != nil {
+			return err
+		}
+		for k, v := range vecs {
+			q, scale := search.Quantize(v)
+			r.Frames = append(r.Frames, store.FrameEmbedding{At: times[lo+k], Vec: q, Scale: scale})
+			for d, x := range v {
+				mean[d] += x
+			}
+			for _, t := range ix.search.Tags(v) {
+				tags[t.TagID] = max(tags[t.TagID], t.Score)
+			}
+		}
+	}
+	var norm float64
+	for _, x := range mean {
+		norm += float64(x) * float64(x)
+	}
+	if norm > 0 {
+		for d := range mean {
+			mean[d] /= float32(math.Sqrt(norm))
+		}
+	}
+	r.Vec, r.Scale = search.Quantize(mean)
+	for id, score := range tags {
+		r.Tags = append(r.Tags, store.TagScore{TagID: id, Score: score})
+	}
+	slices.SortFunc(r.Tags, func(a, b store.TagScore) int { return cmp.Compare(b.Score, a.Score) })
+	r.Tags = r.Tags[:min(len(r.Tags), 12)]
+	return nil
 }
 
 // saveEmbeddings stores a batch, then makes it searchable.
@@ -226,6 +306,9 @@ func (ix *Indexer) saveEmbeddings(ctx context.Context, rs []store.EmbedResult) e
 	for _, r := range rs {
 		if r.Vec != nil {
 			ix.search.Add(r.AssetID, r.Vec, r.Scale)
+			if r.Frames != nil {
+				ix.search.AddVideo(r.AssetID, r.Frames)
+			}
 		}
 	}
 	return nil
@@ -255,32 +338,41 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 		r := &results[i]
 		r.AssetID = j.AssetID
 		defer recoverInto(&r.Err, j.Path)
-		im, err := ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
-		switch {
-		case errors.Is(err, media.ErrUnsupported):
+		process := func(im media.Image, at int64) error {
+			found, err := faces.Detect(im.Pix, im.W, im.H, faceMinScore)
+			if err != nil {
+				return err
+			}
+			found = slices.DeleteFunc(found, func(f ai.Face) bool { return min(f.W, f.H) < faceMinSide })
+			ids, err := faces.Embed(im.Pix, im.W, im.H, found)
+			if err != nil {
+				return err
+			}
+			w, h := float64(im.W), float64(im.H)
+			for k, f := range found {
+				r.Faces = append(r.Faces, store.DetectedFace{
+					Frame: at,
+					X:     float32(f.X / w), Y: float32(f.Y / h), W: float32(f.W / w), H: float32(f.H / h),
+					Score: f.Score, Sharpness: ids[k].Sharpness, Yaw: f.Yaw(), Vec: ids[k].Vec,
+				})
+			}
+			return nil
+		}
+		var err error
+		if j.Kind == core.KindVideo {
+			err = ix.cache.Decoder.Frames(ctx, j.Path, media.SampleCount(j.Duration), faceSide,
+				func(f media.Frame) error { return process(f.Image, f.At) })
+		} else {
+			var im media.Image
+			im, err = ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
+			if err == nil {
+				err = process(im, 0)
+			}
+		}
+		if errors.Is(err, media.ErrUnsupported) {
 			r.Skipped = true
-			return
-		case err != nil:
+		} else if err != nil {
 			r.Err = err.Error()
-			return
-		}
-		found, err := faces.Detect(im.Pix, im.W, im.H, faceMinScore)
-		if err != nil {
-			r.Err = err.Error()
-			return
-		}
-		found = slices.DeleteFunc(found, func(f ai.Face) bool { return min(f.W, f.H) < faceMinSide })
-		ids, err := faces.Embed(im.Pix, im.W, im.H, found)
-		if err != nil {
-			r.Err = err.Error()
-			return
-		}
-		w, h := float64(im.W), float64(im.H)
-		for k, f := range found {
-			r.Faces = append(r.Faces, store.DetectedFace{
-				X: float32(f.X / w), Y: float32(f.Y / h), W: float32(f.W / w), H: float32(f.H / h),
-				Score: f.Score, Sharpness: ids[k].Sharpness, Yaw: f.Yaw(), Vec: ids[k].Vec,
-			})
 		}
 	})
 	if ctx.Err() != nil {

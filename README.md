@@ -32,7 +32,13 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 - **People view**, a person's photos (their page is the timeline, filtered), a face review that lists the least-alike faces first, people in the details panel ("Who is this?" for faces not recognised yet)
 - **Search by person**: names in a search narrow it to photos of all of them ("Ali and Sara at the beach"); names alone give their photos, newest first. The search box suggests people as you type
 
-Not yet: videos (toggle exists; FFmpeg is bundled but unused for video), albums, events, trash, organise-on-disk, the 2 GB cache cap, OCR.
+**Phase 4 (videos)** is working:
+
+- Videos are included when the user enables them in Settings. Bundled FFmpeg and ffprobe read capture date, dimensions, duration, codecs, camera, and location without changing the original file.
+- Indexing makes a poster and a 4×4 hover preview sprite. SigLIP 2 and face recognition sample video frames (about one per five seconds, at most 24). Search results jump to the best matching moment.
+- The viewer plays supported files directly and converts other codecs to H.264/AAC while playing. Seeking a converted video starts a new stream at that point; converted copies are not kept on disk.
+
+Not yet: albums, events, trash, organise-on-disk, the 2 GB cache cap, OCR.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
@@ -131,4 +137,4 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **One writer connection** instead of a writer goroutine: SQLite writes serialise on it, and callers batch hundreds of rows per transaction.
 - **People are clusters, named or not** (no separate `cluster_id`): a new group of faces is an unnamed person, and naming is how the user confirms it. Face vectors live in the `faces` table (float32 BLOBs), not a vector extension.
 - **Faces are decoded at 2048 px** for their stage (not the 1024 px preview): nearly every face is then big enough to recognise. Detecting on tiles as well found only 3% more faces, for five times the work.
-- **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). A trimmed build belongs with video support (Phase 4) and the installer (Phase 6).
+- **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). Trim it when packaging the installer (Phase 6), after the video decoder and encoder set is finalized.

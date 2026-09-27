@@ -156,6 +156,11 @@ const en = {
   'viewer.prev': 'Previous',
   'viewer.next': 'Next',
   'viewer.noPreview': 'No preview for this format yet',
+  'viewer.seek': 'Seek video',
+  'viewer.videoFailed': 'This video could not be played.',
+  'details.duration': 'Duration',
+  'details.videoCodec': 'Video codec',
+  'details.audioCodec': 'Audio codec',
 
   'settings.title': 'Settings',
   'settings.folders': 'Folders',
@@ -165,7 +170,8 @@ const en = {
   'settings.remove': 'Remove',
   'settings.rescan': 'Check for changes now',
   'settings.videos': 'Include videos',
-  'settings.videosHint': 'Off by default. Video support is limited until video processing arrives.',
+  'settings.videosHint':
+    'Off by default because indexing videos takes more time. All processing stays on this computer.',
   'settings.indexing': 'Background work',
   'settings.pause': 'Pause indexing',
   'settings.ai': 'Search, Things and People',

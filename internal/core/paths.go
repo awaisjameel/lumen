@@ -60,6 +60,14 @@ func (p Paths) FFmpeg() string {
 	return filepath.Join(p.Runtime, "ffmpeg", "ffmpeg.exe")
 }
 
+// FFprobe is the bundled ffprobe.exe ("" if there is no runtime folder).
+func (p Paths) FFprobe() string {
+	if p.Runtime == "" {
+		return ""
+	}
+	return filepath.Join(p.Runtime, "ffmpeg", "ffprobe.exe")
+}
+
 // SigLIP is the folder holding the SigLIP 2 model files.
 func (p Paths) SigLIP() string { return filepath.Join(p.Runtime, "models", "siglip2") }
 

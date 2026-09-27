@@ -36,6 +36,7 @@ type Engine struct {
 	store *store.Store
 	model ai.Model
 	index *Index
+	video *videoIndex
 
 	started atomic.Bool
 	loaded  chan struct{} // closed once Start has loaded the index and labels
@@ -79,7 +80,7 @@ func newLabel(t store.AutoTag, vecs [][]float32) label {
 
 // NewEngine prepares an engine for model. Call Start before use.
 func NewEngine(st *store.Store, m ai.Model) *Engine {
-	return &Engine{store: st, model: m, index: NewIndex(m.Dim), loaded: make(chan struct{}),
+	return &Engine{store: st, model: m, index: NewIndex(m.Dim), video: newVideoIndex(m.Dim), loaded: make(chan struct{}),
 		queries: map[string][]float32{}}
 }
 
@@ -133,6 +134,11 @@ func (e *Engine) load(ctx context.Context) error {
 	}
 	if err := e.store.Embeddings(ctx, e.model.Version, e.index.Put); err != nil {
 		return fmt.Errorf("load embeddings: %w", err)
+	}
+	if err := e.store.VideoEmbeddings(ctx, e.model.Version, func(id, at int64, q []int8, scale float32) {
+		e.video.add(id, at, q, scale)
+	}); err != nil {
+		return fmt.Errorf("load video embeddings: %w", err)
 	}
 	return e.loadLabels(ctx, changed)
 }
@@ -240,6 +246,9 @@ func (e *Engine) rescore(ctx context.Context, l label) error {
 
 // Add puts a new image embedding into the index (after it is saved).
 func (e *Engine) Add(id int64, q []int8, scale float32) { e.index.Put(id, q, scale) }
+
+// AddVideo replaces the searchable moments of one video after they are saved.
+func (e *Engine) AddVideo(id int64, frames []store.FrameEmbedding) { e.video.replace(id, frames) }
 
 // Indexed is how many images are searchable.
 func (e *Engine) Indexed() int { return e.index.Len() }
@@ -352,7 +361,21 @@ func (e *Engine) Search(ctx context.Context, query string, allow func(id int64) 
 	if err != nil {
 		return nil, false, err
 	}
-	hits = e.index.Search(vecs[0], e.model.Cosine(searchFloor), searchLimit+1, allow)
+	floor := e.model.Cosine(searchFloor)
+	best := map[int64]Hit{}
+	for _, h := range e.index.Search(vecs[0], floor, searchLimit+1, allow) {
+		best[h.ID] = h
+	}
+	for _, h := range e.video.search(vecs[0], floor, searchLimit+1, allow) {
+		if old, ok := best[h.ID]; !ok || h.Score > old.Score {
+			best[h.ID] = h
+		}
+	}
+	for _, h := range best {
+		hits = append(hits, h)
+	}
+	slices.SortFunc(hits, byScore)
+	hits = hits[:min(len(hits), searchLimit+1)]
 	if len(hits) == 0 {
 		return nil, true, nil
 	}

@@ -57,7 +57,7 @@ func run() error {
 	}
 	defer st.Close()
 
-	cache := media.NewCache(paths.ThumbDir, media.Decoders{FFmpeg: paths.FFmpeg()})
+	cache := media.NewCache(paths.ThumbDir, media.Decoders{FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe()})
 	models := startAI(paths, st)
 	events := &services.Emitter{}
 	ix := index.New(st, paths, cache, models, events)

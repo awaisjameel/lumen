@@ -48,12 +48,13 @@ get https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsof
 [ -f "$RT/onnxruntime.dll" ] || unzip -q -o -j "$D/cache/ort-dml.nupkg" 'runtimes/win-x64/native/*.dll' -d "$RT"
 [ -f "$RT/DirectML.dll" ] || unzip -q -o -j "$D/cache/directml.nupkg" 'bin/x64-win/DirectML.dll' -d "$RT"
 
-# FFmpeg 9.0 (LGPL, shared). Only ffmpeg.exe and the libraries it loads ship.
-# BtbN prunes old autobuilds: if this 404s, pin a newer one and its hash.
+# FFmpeg 9.0 (LGPL, shared). Only ffmpeg.exe, ffprobe.exe and the libraries
+# they load ship. BtbN prunes old autobuilds: if this 404s, pin a newer one
+# and its hash.
 get https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-26-13-03/ffmpeg-n9.0.2-10-g51c4a23d74-win64-lgpl-shared-9.0.zip \
   ffmpeg.zip 8f3a5190804eed8c0f4927dbac688bcc35a1d2b9c36d7bf9a4386ec7bd1627ed
-if [ ! -f "$RT/ffmpeg/ffmpeg.exe" ]; then
-  unzip -q -o -j "$D/cache/ffmpeg.zip" '*/bin/ffmpeg.exe' '*/bin/*.dll' '*/LICENSE.txt' -d "$RT/ffmpeg"
+if [ ! -f "$RT/ffmpeg/ffmpeg.exe" ] || [ ! -f "$RT/ffmpeg/ffprobe.exe" ]; then
+  unzip -q -o -j "$D/cache/ffmpeg.zip" '*/bin/ffmpeg.exe' '*/bin/ffprobe.exe' '*/bin/*.dll' '*/LICENSE.txt' -d "$RT/ffmpeg"
 fi
 
 # SigLIP 2 base (Apache-2.0): fp16 ONNX towers and the Gemma tokenizer.

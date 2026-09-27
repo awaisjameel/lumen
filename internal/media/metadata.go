@@ -28,6 +28,9 @@ type Metadata struct {
 	Orientation int // EXIF 1..8
 	Camera      string
 	Lat, Lon    *float64
+	Duration    int64  // a video's length, ms
+	VideoCodec  string // a video's codecs, as FFmpeg names them
+	AudioCodec  string // "" = silent
 }
 
 // ReadMetadata reads capture date, size, orientation, camera and GPS. A file
@@ -36,7 +39,7 @@ type Metadata struct {
 func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 	m := Metadata{Orientation: 1}
 	if kind != core.KindPhoto {
-		return m, nil // video metadata arrives with FFmpeg (Phase 4)
+		return m, nil // videos: see Decoders.Metadata
 	}
 	f, err := os.Open(path)
 	if err != nil {

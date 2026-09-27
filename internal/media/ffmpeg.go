@@ -1,12 +1,12 @@
 package media
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
-	"strconv"
+	"io"
 	"strings"
 	"time"
 )
@@ -36,48 +36,25 @@ func runFFmpeg(ctx context.Context, exe string, args ...string) ([]byte, error) 
 	defer cancel()
 	args = append([]string{"-v", "error", "-nostdin", "-hide_banner"}, args...)
 	args = append(args, "-frames:v", "1", "-f", "image2pipe", "-c:v", "ppm", "-pix_fmt", "rgb24", "-")
-	cmd := exec.CommandContext(ctx, exe, args...)
-	hideWindow(cmd)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("ffmpeg: %s", firstLine(msg))
-		}
-		return nil, fmt.Errorf("ffmpeg: %w", err)
+	var stdout bytes.Buffer
+	if err := runTool(ctx, exe, &stdout, args...); err != nil {
+		return nil, err
 	}
 	return stdout.Bytes(), nil
 }
 
-// parsePPM reads a binary PPM (P6, 8-bit), the format FFmpeg writes above.
+// parsePPM reads a buffer holding exactly one PPM image.
 func parsePPM(b []byte) (pix []byte, w, h int, err error) {
-	var fields []int
-	i := 2
-	if !bytes.HasPrefix(b, []byte("P6")) {
-		return nil, 0, 0, errors.New("ffmpeg: output is not a PPM image")
+	r := bufio.NewReader(bytes.NewReader(b))
+	pix, w, h, err = readPPM(r)
+	switch {
+	case errors.Is(err, io.EOF):
+		return nil, 0, 0, errors.New("ffmpeg: no image")
+	case err != nil:
+		return nil, 0, 0, err
 	}
-	for len(fields) < 3 {
-		for i < len(b) && isSpace(b[i]) {
-			i++
-		}
-		j := i
-		for j < len(b) && b[j] >= '0' && b[j] <= '9' {
-			j++
-		}
-		n, err := strconv.Atoi(string(b[i:j]))
-		if err != nil {
-			return nil, 0, 0, errors.New("ffmpeg: malformed PPM header")
-		}
-		fields = append(fields, n)
-		i = j
-	}
-	w, h = fields[0], fields[1]
-	if fields[2] != 255 || i >= len(b) || !isSpace(b[i]) {
-		return nil, 0, 0, errors.New("ffmpeg: unsupported PPM")
-	}
-	pix = b[i+1:]
-	if w <= 0 || h <= 0 || len(pix) != w*h*3 {
-		return nil, 0, 0, fmt.Errorf("ffmpeg: PPM is %dx%d but holds %d bytes", w, h, len(pix))
+	if _, err := r.ReadByte(); err == nil {
+		return nil, 0, 0, errors.New("ffmpeg: more than one image")
 	}
 	return pix, w, h, nil
 }

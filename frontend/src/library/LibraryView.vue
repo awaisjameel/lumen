@@ -5,7 +5,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { engine, Filter, thumbUrl } from '../bridge'
 import type { GridItem } from '../bridge'
 import { logError } from '../shared/errors'
-import { dayLabel } from '../shared/format'
+import { dayLabel, duration } from '../shared/format'
 import { listFormat, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import EmptyState from '../shared/EmptyState.vue'
@@ -21,6 +21,7 @@ import type { Scope, Sel } from './store'
 import TimelineScrubber from './TimelineScrubber.vue'
 import DetailsPanel from './DetailsPanel.vue'
 import Viewer from './Viewer.vue'
+import VideoThumb from './VideoThumb.vue'
 
 const PAD = 20 // horizontal padding of the grid
 
@@ -346,8 +347,9 @@ const searchNotes = computed(() => {
                   @click="select(v.row.day, it)"
                   @dblclick="open(v.row.day, it)"
                 >
+                  <VideoThumb v-if="it?.v && it.t" :item="it" :cell="layout.cell" />
                   <img
-                    v-if="it && it.t"
+                    v-else-if="it && it.t"
                     :src="thumbUrl(it.id, it.t)"
                     loading="lazy"
                     decoding="async"
@@ -356,6 +358,7 @@ const searchNotes = computed(() => {
                   />
                   <span v-else class="ph" />
                   <span v-if="it?.v" class="badge video"><Icon name="video" :size="16" /></span>
+                  <span v-if="it?.v && it.d" class="badge duration">{{ duration(it.d) }}</span>
                   <span v-if="it?.f" class="badge fav"><Icon name="heart-filled" :size="16" /></span>
                 </button>
               </div>
@@ -511,6 +514,14 @@ const searchNotes = computed(() => {
 .badge.fav {
   bottom: 6px;
   left: 6px;
+}
+.badge.duration {
+  right: 5px;
+  bottom: 5px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: rgb(0 0 0 / 0.68);
+  font-size: 11px;
 }
 .overlay {
   position: absolute;

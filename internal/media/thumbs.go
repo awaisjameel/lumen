@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/draw"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,15 +23,18 @@ import (
 // Versions recorded with each finished job of the stages this package
 // serves. Change one when that stage's output would change (a better decoder,
 // a fix); the indexer then re-runs just that stage.
+// Photos and videos have their own, as different code serves them.
 const (
-	MetadataVersion  = "imagemeta-1.1+goexif+vips-1"
-	ThumbnailVersion = "vips-8.18-1"
+	MetadataVersion       = "imagemeta-1.1+goexif+vips-1"
+	ThumbnailVersion      = "vips-8.18-1"
+	VideoMetadataVersion  = "ffprobe-9.0-1"
+	VideoThumbnailVersion = "ffmpeg-9.0+vips-8.18-1"
 )
 
-// ErrUnsupported means this machine cannot decode the file: a video frame
-// before video support, or HEIC with neither the HEVC extension nor FFmpeg.
-// Jobs that hit it are marked skipped, not failed, and re-run when the
-// thumbnail stage's version changes.
+// ErrUnsupported means this machine cannot decode the file: HEIC with
+// neither the HEVC extension nor FFmpeg, a video without FFmpeg, or a
+// "video" with no picture. Jobs that hit it are marked skipped, not failed,
+// and re-run when their stage's version changes.
 var ErrUnsupported = errors.New("format not supported")
 
 // maxPixels guards the in-memory decoders against decompression bombs.
@@ -46,6 +50,7 @@ var sizes = vips.Sizes{Large: core.ThumbLarge, Small: core.ThumbSmall, Square: h
 type Thumbs struct {
 	Small, Large []byte // JPEG, longest edge core.ThumbSmall / core.ThumbLarge
 	PHash        uint64 // 64-bit perceptual hash of the upright image
+	Sprite       []byte // a video's hover preview (see core.SpriteCols); nil for photos
 }
 
 // Image is decoded 8-bit RGB pixels, row by row.
@@ -54,11 +59,20 @@ type Image struct {
 	W, H int
 }
 
-// Decoder turns original files into upright thumbnails, and into pixels for
-// the models. ctx cancels a slow external decoder.
+// Decoder reads original files: what they say about themselves, upright
+// thumbnails, and pixels for the models. ctx cancels a slow external decoder.
 type Decoder interface {
+	// Metadata reads capture date, size, place and the like.
+	Metadata(ctx context.Context, path string, kind core.Kind) (Metadata, error)
+	// Thumbnail makes both thumbnail sizes and the perceptual hash, and a
+	// video's sprite.
 	Thumbnail(ctx context.Context, path string, kind core.Kind, orientation int) (Thumbs, error)
+	// Decode returns a photo upright, at most side on its long edge.
 	Decode(ctx context.Context, path string, kind core.Kind, orientation, side int) (Image, error)
+	// Frames samples up to n frames spread over a video (see Decoders.Frames).
+	Frames(ctx context.Context, path string, n, side int, fn func(Frame) error) error
+	// FrameAt returns the video frame at ms, at most side on its long edge.
+	FrameAt(ctx context.Context, path string, at int64, side int) (Image, error)
 }
 
 // Decoders is the production Decoder.
@@ -67,17 +81,39 @@ type Decoder interface {
 //
 //   - HEIC/HEIF: Windows' own decoder (WIC), else FFmpeg
 //   - BMP: Go (the libvips build ships without ImageMagick)
+//   - videos: FFmpeg, which also turns them upright
 //   - everything else (JPEG, PNG, WebP, GIF, TIFF, AVIF): libvips, shrinking on load
 //
 // Thumbnails and Decode share that routing, so a face box found in a Decode
 // image lands on the same spot of the thumbnail.
 type Decoders struct {
-	FFmpeg string // ffmpeg.exe, for HEIC when WIC can't decode it; "" = none
+	FFmpeg  string // ffmpeg.exe, for videos, and HEIC when WIC can't decode it; "" = none
+	FFprobe string // ffprobe.exe, for videos; "" = none
+}
+
+// Metadata reads what a file says about itself: EXIF for photos, the
+// container's tags for videos.
+func (d Decoders) Metadata(ctx context.Context, path string, kind core.Kind) (Metadata, error) {
+	if kind != core.KindVideo {
+		return ReadMetadata(path, kind)
+	}
+	v, err := d.probe(ctx, path)
+	if err != nil {
+		return Metadata{Orientation: 1}, err
+	}
+	return Metadata{
+		TakenAt: v.TakenAt, Width: v.Width, Height: v.Height, Orientation: 1, Camera: v.Camera, Lat: v.Lat, Lon: v.Lon,
+		Duration: v.Duration, VideoCodec: v.Codec, AudioCodec: v.Audio,
+	}, nil
 }
 
 // Thumbnail decodes a file once into both thumbnail sizes and its
-// perceptual hash, upright.
+// perceptual hash, upright. A video's come from its first clear frame, and
+// it also gets a sprite.
 func (d Decoders) Thumbnail(ctx context.Context, path string, kind core.Kind, orientation int) (Thumbs, error) {
+	if kind == core.KindVideo {
+		return d.videoThumbnail(ctx, path)
+	}
 	src, err := d.open(ctx, path, kind, orientation, core.ThumbLarge)
 	if err != nil {
 		return Thumbs{}, err
@@ -100,7 +136,7 @@ func (d Decoders) Thumbnail(ctx context.Context, path string, kind core.Kind, or
 
 // Decode returns a photo upright as 8-bit RGB, shrunk so its long edge is at
 // most side (never enlarged), for the models that need more detail than the
-// thumbnails hold.
+// thumbnails hold. Videos are read with Frames instead.
 func (d Decoders) Decode(ctx context.Context, path string, kind core.Kind, orientation, side int) (Image, error) {
 	src, err := d.open(ctx, path, kind, orientation, side)
 	if err != nil {
@@ -129,7 +165,7 @@ type source struct {
 // most maxSide on their long edge where the decoder can shrink.
 func (d Decoders) open(ctx context.Context, path string, kind core.Kind, orientation, maxSide int) (source, error) {
 	if kind != core.KindPhoto {
-		return source{}, ErrUnsupported // video frames arrive with FFmpeg video support
+		return source{}, ErrUnsupported // videos: see Frames
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".heic", ".heif":
@@ -200,7 +236,105 @@ func perceptualHash(rgb []byte) (uint64, error) {
 	return uint64(ph), nil
 }
 
+// A video's poster is its first frame with at least posterContrast (the
+// standard deviation of its brightness, 0..255): black or faded openings are
+// skipped. A video with none uses its most contrasted frame.
+const posterContrast = 16
+
+// videoThumbnail makes a video's thumbnails from one pass over its frames:
+// the poster, and the sprite of core.SpriteCols x core.SpriteRows frames.
+func (d Decoders) videoThumbnail(ctx context.Context, path string) (Thumbs, error) {
+	var tiles []tile
+	var poster Image
+	best, found := -1.0, false
+	v, err := d.frames(ctx, path, core.SpriteCols*core.SpriteRows, core.ThumbLarge, func(f Frame) error {
+		small, err := vips.DecodePixels(f.Pix, f.W, f.H, 3, 1, core.ThumbSmall)
+		if err != nil {
+			return err
+		}
+		tiles = append(tiles, tile{at: f.At, RGB: small})
+		if c := contrast(small); !found && c > best {
+			poster, best, found = f.Image, c, c >= posterContrast
+		}
+		return nil
+	})
+	if err != nil {
+		return Thumbs{}, err
+	}
+	if len(tiles) == 0 {
+		return Thumbs{}, errors.New("ffmpeg: the video has no frames")
+	}
+	t, err := vips.ThumbnailPixels(poster.Pix, poster.W, poster.H, 3, 1, sizes)
+	if err != nil {
+		return Thumbs{}, err
+	}
+	ph, err := perceptualHash(t.Square)
+	if err != nil {
+		return Thumbs{}, err
+	}
+	sprite, err := makeSprite(tiles, v.Duration)
+	if err != nil {
+		return Thumbs{}, err
+	}
+	return Thumbs{Small: t.Small, Large: t.Large, PHash: ph, Sprite: sprite}, nil
+}
+
+// tile is one small frame of a video, for its sprite.
+type tile struct {
+	at int64 // ms
+	vips.RGB
+}
+
+// contrast is the standard deviation of an image's brightness.
+func contrast(im vips.RGB) float64 {
+	var sum, sq float64
+	n := 0
+	for i := 0; i+2 < len(im.Pix); i += 3 {
+		y := 0.299*float64(im.Pix[i]) + 0.587*float64(im.Pix[i+1]) + 0.114*float64(im.Pix[i+2])
+		sum += y
+		sq += y * y
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	mean := sum / float64(n)
+	return math.Sqrt(max(0, sq/float64(n)-mean*mean))
+}
+
+// makeSprite lays frames out as a video's sprite: each cell shows the frame
+// nearest its point in the video (cells are spread evenly over duration), so
+// a video with few keyframes repeats some. All tiles have one size, as they
+// come from one pass.
+func makeSprite(tiles []tile, duration int64) ([]byte, error) {
+	cols, rows := core.SpriteCols, core.SpriteRows
+	tw, th := tiles[0].W, tiles[0].H
+	w := cols * tw
+	pix := make([]byte, w*rows*th*3)
+	for cell := range cols * rows {
+		at := (2*int64(cell) + 1) * duration / int64(2*cols*rows)
+		t := tiles[0]
+		for _, c := range tiles[1:] {
+			if c.W == tw && c.H == th && abs64(c.at-at) < abs64(t.at-at) {
+				t = c
+			}
+		}
+		x0, y0 := (cell%cols)*tw, (cell/cols)*th
+		for y := range th {
+			copy(pix[((y0+y)*w+x0)*3:], t.Pix[y*tw*3:(y+1)*tw*3])
+		}
+	}
+	return vips.JPEG(pix, w, rows*th, 75)
+}
+
+func abs64(x int64) int64 { return max(x, -x) }
+
 // ModelInput returns an image file squashed to side x side 8-bit RGB, the
 // input image models expect. It is meant for thumbnails, which are already
 // upright JPEGs, so it is fast.
 func ModelInput(path string, side int) ([]byte, error) { return vips.Square(path, side) }
+
+// ModelInputPixels does the same for pixels, e.g. a video frame.
+func ModelInputPixels(im Image, side int) ([]byte, error) {
+	return vips.SquarePixels(im.Pix, im.W, im.H, side)
+}

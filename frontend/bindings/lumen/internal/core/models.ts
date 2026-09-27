@@ -44,9 +44,14 @@ export interface AssetDetail {
     "ext": string;
 
     /**
-     * the WebView can show the original directly
+     * a photo the WebView can show directly
      */
     "webNative": boolean;
+
+    /**
+     * nil for photos
+     */
+    "video": Video | null;
 }
 
 /**
@@ -106,7 +111,7 @@ export interface DayItems {
 }
 
 /**
- * Face is one face in a photo: where it is, and who it is.
+ * Face is one face in a photo or video: where it is, and who it is.
  */
 export interface Face {
     "id": number;
@@ -120,7 +125,17 @@ export interface Face {
     "assetH": number;
 
     /**
-     * the box, as fractions of the upright photo
+     * the face is in a video's frame, not its thumbnail
+     */
+    "video": boolean;
+
+    /**
+     * which frame of a video, ms; 0 for photos
+     */
+    "frame": number;
+
+    /**
+     * the box, as fractions of the upright photo or frame
      */
     "x": number;
     "y": number;
@@ -169,12 +184,22 @@ export interface GridItem {
     "w": number;
     "h": number;
     "v"?: boolean;
+
+    /**
+     * a video's length, ms
+     */
+    "d"?: number;
     "f"?: boolean;
 
     /**
      * thumbnail version; 0 = not made yet
      */
     "t": number;
+
+    /**
+     * search results: the best-matching moment of a video, ms
+     */
+    "at"?: number;
 }
 
 /**
@@ -216,6 +241,33 @@ export interface Person {
      */
     "cover": Face;
 }
+
+/**
+ * Playback says how the viewer plays a video.
+ */
+export enum Playback {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The ways a video can play.
+     *
+     * the WebView plays the file itself
+     */
+    PlayDirect = "direct",
+
+    /**
+     * directly where the WebView decodes HEVC, else as PlayConvert
+     */
+    PlayHEVC = "hevc",
+
+    /**
+     * Lumen converts it to H.264 while it plays
+     */
+    PlayConvert = "convert",
+};
 
 /**
  * Progress is the payload of the index:progress event.
@@ -375,6 +427,27 @@ export enum TagSource {
      */
     TagRejected = "rejected",
 };
+
+/**
+ * Video is what the details panel and the player need to know about a video.
+ */
+export interface Video {
+    /**
+     * ms
+     */
+    "duration": number;
+
+    /**
+     * FFmpeg's name for the picture's codec, e.g. "h264", "hevc"
+     */
+    "codec": string;
+
+    /**
+     * the sound's codec; "" = silent
+     */
+    "audio": string;
+    "play": Playback;
+}
 
 /**
  * View is what the timeline grid shows: a filter, optionally narrowed to

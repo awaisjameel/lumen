@@ -37,6 +37,7 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	}
 	who, names, text := people.FindNames(query, named)
 	var ids []int64
+	var moments map[int64]int64
 	var waitFor []core.Stage // stages whose photos can't be found yet
 	complete := true
 	if len(who) > 0 {
@@ -65,13 +66,18 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 			return core.SearchResult{}, err
 		}
 		ids = make([]int64, len(hits))
+		moments = make(map[int64]int64, len(hits))
 		for i, h := range hits {
 			ids[i] = h.ID
+			moments[h.ID] = h.At
 		}
 	}
 	items, err := s.store.GridItems(ctx, ids)
 	if err != nil {
 		return core.SearchResult{}, err
+	}
+	for i := range items {
+		items[i].At = moments[items[i].ID]
 	}
 	pending, err := s.store.CountPending(ctx, waitFor...)
 	if err != nil {

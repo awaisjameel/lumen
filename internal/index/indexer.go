@@ -165,14 +165,14 @@ func (ix *Indexer) setAIState(change func()) {
 // with another version re-runs.
 func (ix *Indexer) versions() map[core.Stage]string {
 	v := map[core.Stage]string{
-		core.StageMetadata:  media.MetadataVersion,
-		core.StageThumbnail: media.ThumbnailVersion,
+		core.StageMetadata:  media.MetadataVersion + "+" + media.VideoMetadataVersion,
+		core.StageThumbnail: media.ThumbnailVersion + "+" + media.VideoThumbnailVersion,
 	}
 	if ix.search != nil {
-		v[core.StageEmbedding] = ix.search.Model().Version
+		v[core.StageEmbedding] = ix.search.Model().Version + "+video-frames-1"
 	}
 	if ix.people != nil {
-		v[core.StageFaces] = ix.people.Model().Version
+		v[core.StageFaces] = ix.people.Model().Version + "+video-frames-1"
 	}
 	return v
 }
@@ -198,7 +198,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 			name: core.StageMetadata, batch: 128, wake: ix.wakeMeta, next: []chan struct{}{ix.wakeThum},
 			process: eachItem(4, ix.doMetadata),
 			save: func(ctx context.Context, rs []store.MetadataResult) error {
-				return ix.store.SaveMetadata(ctx, media.MetadataVersion, rs)
+				return ix.store.SaveMetadata(ctx, media.MetadataVersion+"+"+media.VideoMetadataVersion, rs)
 			},
 		})
 	})
@@ -207,7 +207,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 			name: core.StageThumbnail, batch: 64, wake: ix.wakeThum, next: []chan struct{}{ix.wakeEmbed, ix.wakeFaces},
 			process: eachItem(max(1, min(runtime.NumCPU()-1, 6)), ix.doThumbnail),
 			save: func(ctx context.Context, rs []store.ThumbResult) error {
-				return ix.store.SaveThumbnails(ctx, media.ThumbnailVersion, rs)
+				return ix.store.SaveThumbnails(ctx, media.ThumbnailVersion+"+"+media.VideoThumbnailVersion, rs)
 			},
 		})
 	})

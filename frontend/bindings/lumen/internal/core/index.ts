@@ -5,6 +5,7 @@ export {
     DateSource,
     Filter,
     Kind,
+    Playback,
     TagKind,
     TagSource
 } from "./models.js";
@@ -23,5 +24,6 @@ export type {
     Settings,
     Source,
     Tag,
+    Video,
     View
 } from "./models.js";

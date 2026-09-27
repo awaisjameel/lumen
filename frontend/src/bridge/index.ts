@@ -4,7 +4,7 @@
 
 import { Events } from '@wailsio/runtime'
 import { LibraryService, PeopleService, SearchService } from '../../bindings/lumen/services'
-import { DateSource, Filter, Kind, TagKind, TagSource } from '../../bindings/lumen/internal/core'
+import { DateSource, Filter, Kind, Playback, TagKind, TagSource } from '../../bindings/lumen/internal/core'
 import type {
   AssetDetail as RawAssetDetail,
   AssetTag,
@@ -21,7 +21,7 @@ import type {
   View,
 } from '../../bindings/lumen/internal/core'
 
-export { DateSource, Filter, Kind, TagKind, TagSource }
+export { DateSource, Filter, Kind, Playback, TagKind, TagSource }
 export type { AssetTag, DayBucket, Face, GridItem, Person, Progress, Settings, Source, Tag, View }
 
 // Go sends an empty list as null; the generated types say so. These are the
@@ -40,6 +40,8 @@ export type SearchResults = NonNullLists<SearchResult, 'items' | 'people'>
 // the media route is plain HTTP, so they are not part of the generated bindings.
 export const THUMB_SMALL = 256
 export const THUMB_LARGE = 1024
+export const SPRITE_COLS = 4
+export const SPRITE_ROWS = 4
 export type ThumbSize = typeof THUMB_SMALL | typeof THUMB_LARGE
 
 // Tag confidence: default and range. Must match core.TagConfidenceDefault /
@@ -123,4 +125,16 @@ export function thumbUrl(id: number, version: number, size: ThumbSize = THUMB_SM
 /** The original file, for formats the WebView can display. */
 export function originalUrl(id: number): string {
   return `/media/original/${id}`
+}
+
+export function spriteUrl(id: number, version: number): string {
+  return `/media/sprite/${id}?v=${version}`
+}
+
+export function playUrl(id: number, at = 0): string {
+  return `/media/play/${id}?at=${Math.max(0, Math.round(at))}`
+}
+
+export function frameUrl(id: number, at: number): string {
+  return `/media/frame/${id}/${Math.max(0, Math.round(at))}`
 }

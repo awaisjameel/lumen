@@ -1,6 +1,8 @@
 package services
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +17,7 @@ import (
 // grid loads thumbnails like ordinary <img> URLs (no base64, browser-cached):
 //
 //	/media/thumb/{id}/{256|1024}?v={thumbVersion}
+//	/media/sprite/{id}?v={thumbVersion}
 //	/media/original/{id}   (only formats the WebView can display)
 type MediaService struct {
 	store *store.Store
@@ -46,9 +49,87 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		m.serveThumb(w, r, id, size)
 	case "original":
 		m.serveOriginal(w, r, id)
+	case "sprite":
+		m.serveSprite(w, r, id)
+	case "play":
+		m.servePlay(w, r, id)
+	case "frame":
+		m.serveFrame(w, r, id, parts)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (m *MediaService) serveFrame(w http.ResponseWriter, r *http.Request, id int64, parts []string) {
+	if len(parts) != 3 {
+		http.NotFound(w, r)
+		return
+	}
+	at, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || at < 0 {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := m.store.AssetFile(r.Context(), id)
+	if err != nil || f.Kind != core.KindVideo || (f.Duration > 0 && at > f.Duration) {
+		http.NotFound(w, r)
+		return
+	}
+	path, err := m.cache.EnsureFrame(r.Context(), id, at, f.Path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	http.ServeFile(w, r, path)
+}
+
+func (m *MediaService) servePlay(w http.ResponseWriter, r *http.Request, id int64) {
+	f, err := m.store.AssetFile(r.Context(), id)
+	if err != nil || f.Kind != core.KindVideo {
+		http.NotFound(w, r)
+		return
+	}
+	decoder, ok := m.cache.Decoder.(media.Decoders)
+	if !ok || decoder.FFmpeg == "" {
+		http.Error(w, "video conversion unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	at, err := strconv.ParseInt(r.URL.Query().Get("at"), 10, 64)
+	if r.URL.Query().Has("at") && (err != nil || at < 0) {
+		http.Error(w, "invalid time", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method == http.MethodHead {
+		return
+	}
+	if err := decoder.StreamMP4(r.Context(), f.Path, at, w); err != nil && !errors.Is(err, r.Context().Err()) {
+		slog.Warn("video conversion stopped", "asset", id, "err", err)
+	}
+}
+
+func (m *MediaService) serveSprite(w http.ResponseWriter, r *http.Request, id int64) {
+	f, err := m.store.AssetFile(r.Context(), id)
+	if err != nil || f.Kind != core.KindVideo || f.ThumbVersion == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	path := m.cache.SpritePath(id)
+	if _, err := os.Stat(path); err != nil {
+		if err := m.cache.EnsureSprite(r.Context(), id,
+			media.Original{Path: f.Path, Kind: f.Kind, Orientation: f.Orientation}); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+	}
+	if r.URL.Query().Has("v") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	http.ServeFile(w, r, path)
 }
 
 func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int64, size int) {
@@ -74,7 +155,8 @@ func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int
 
 func (m *MediaService) serveOriginal(w http.ResponseWriter, r *http.Request, id int64) {
 	f, err := m.store.AssetFile(r.Context(), id)
-	if err != nil || !core.WebNative(f.Ext) {
+	if err != nil || (f.Kind == core.KindPhoto && !core.WebNative(f.Ext)) ||
+		(f.Kind == core.KindVideo && core.PlaybackOf(f.Ext, f.VideoCodec, f.AudioCodec) == core.PlayConvert) {
 		http.NotFound(w, r)
 		return
 	}

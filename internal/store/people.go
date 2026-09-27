@@ -18,13 +18,15 @@ var ErrPersonExists = errors.New("someone already has that name")
 // asset a and person p.
 const (
 	faceColumns = `f.id, f.asset_id, a.thumb_version, COALESCE(a.width, 0), COALESCE(a.height, 0),
+		a.kind = 'video', f.at_ms,
 		f.x, f.y, f.w, f.h, COALESCE(f.person_id, 0), COALESCE(p.name, ''), COALESCE(f.assigned_by = 'user', 0)`
 	faceFrom   = ` FROM faces f JOIN assets a ON a.id = f.asset_id LEFT JOIN people p ON p.id = f.person_id`
 	faceSelect = "SELECT " + faceColumns + faceFrom
 )
 
 func scanFace(r *sql.Rows) (f core.Face, err error) {
-	err = r.Scan(&f.ID, &f.AssetID, &f.Thumb, &f.AssetW, &f.AssetH, &f.X, &f.Y, &f.W, &f.H, &f.Person, &f.Name, &f.ByUser)
+	err = r.Scan(&f.ID, &f.AssetID, &f.Thumb, &f.AssetW, &f.AssetH, &f.Video, &f.Frame,
+		&f.X, &f.Y, &f.W, &f.H, &f.Person, &f.Name, &f.ByUser)
 	return f, err
 }
 
@@ -95,7 +97,7 @@ func (s *Store) PersonFaces(ctx context.Context, id int64) (faces []core.Face, v
 	}
 	rows, err := queryAll(ctx, s.r, func(r *sql.Rows) (x row, err error) {
 		var vec []byte
-		err = r.Scan(&x.f.ID, &x.f.AssetID, &x.f.Thumb, &x.f.AssetW, &x.f.AssetH, &x.f.X, &x.f.Y, &x.f.W, &x.f.H,
+		err = r.Scan(&x.f.ID, &x.f.AssetID, &x.f.Thumb, &x.f.AssetW, &x.f.AssetH, &x.f.Video, &x.f.Frame, &x.f.X, &x.f.Y, &x.f.W, &x.f.H,
 			&x.f.Person, &x.f.Name, &x.f.ByUser, &vec)
 		x.vec = bytesFloat32(vec)
 		return x, err

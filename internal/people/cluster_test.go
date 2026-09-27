@@ -120,6 +120,25 @@ func TestTwoFacesInOnePhotoAreTwoPeople(t *testing.T) {
 	}
 }
 
+func TestVideoFacesAreConstrainedPerFrame(t *testing.T) {
+	w := newWorld(33, 1)
+	faces := w.faces(0, 4)
+	for i := range faces {
+		faces[i].Person = 7
+	}
+	a, b := w.face(0, 500), w.face(0, 500)
+	a.Frame, b.Frame = 1000, 6000
+	got := Cluster(Input{Faces: append(faces, a, b), People: []store.ClusterPerson{{ID: 7}}}, DefaultParams)
+	if got.Assign[a.ID] != 7 || got.Assign[b.ID] != 7 {
+		t.Fatalf("faces at different moments of a video should join their person: %+v", got)
+	}
+	b.Frame = a.Frame
+	got = Cluster(Input{Faces: append(faces, a, b), People: []store.ClusterPerson{{ID: 7}}}, DefaultParams)
+	if len(got.Assign) != 1 {
+		t.Fatalf("two faces in one frame cannot be one person: %+v", got)
+	}
+}
+
 func TestRejectedFaceStaysOut(t *testing.T) {
 	w := newWorld(4, 1)
 	faces := w.faces(0, 5)

@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import { DateSource, engine, TagSource } from '../bridge'
 import type { AssetDetail, AssetTag, Face } from '../bridge'
 import { errorText, logError } from '../shared/errors'
-import { bytes, dateTime, megapixels } from '../shared/format'
+import { bytes, dateTime, duration, megapixels } from '../shared/format'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
@@ -158,6 +158,13 @@ function showInFolder(id: number) {
           {{ detail.width }} × {{ detail.height }} · {{ megapixels(detail.width, detail.height) }} ·
           {{ bytes(detail.size) }}
         </p>
+      </section>
+
+      <section v-if="detail.video">
+        <h3>{{ t('details.duration') }}</h3>
+        <p>{{ duration(detail.video.duration) }}</p>
+        <p v-if="detail.video.codec" class="muted small">{{ t('details.videoCodec') }}: {{ detail.video.codec }}</p>
+        <p v-if="detail.video.audio" class="muted small">{{ t('details.audioCodec') }}: {{ detail.video.audio }}</p>
       </section>
 
       <section v-if="detail.camera">

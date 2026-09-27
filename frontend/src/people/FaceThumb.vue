@@ -3,7 +3,7 @@
 // face box, widened by a margin, fills a square. The small thumbnail is used
 // when it has enough pixels for the size shown, else the large one.
 import { computed } from 'vue'
-import { THUMB_LARGE, THUMB_SMALL, thumbUrl } from '../bridge'
+import { frameUrl, THUMB_LARGE, THUMB_SMALL, thumbUrl } from '../bridge'
 import type { Face } from '../bridge'
 import Icon from '../shared/Icon.vue'
 
@@ -23,7 +23,7 @@ const style = computed(() => {
   const shown = Math.max(w, h) * scale // the whole photo's long edge, as drawn
   const thumb = shown <= THUMB_SMALL * 1.25 ? THUMB_SMALL : THUMB_LARGE
   return {
-    backgroundImage: `url("${thumbUrl(f.assetId, f.thumb, thumb)}")`,
+    backgroundImage: `url("${f.video ? frameUrl(f.assetId, f.frame) : thumbUrl(f.assetId, f.thumb, thumb)}")`,
     backgroundSize: `${w * scale}px ${h * scale}px`,
     backgroundPosition: `${props.size / 2 - cx}px ${props.size / 2 - cy}px`,
   }

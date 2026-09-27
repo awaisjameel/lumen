@@ -60,3 +60,12 @@ export function bytes(n: number): string {
 export function megapixels(w: number, h: number): string {
   return `${((w * h) / 1e6).toFixed(1)} MP`
 }
+
+/** Video time in milliseconds as m:ss or h:mm:ss. */
+export function duration(ms: number): string {
+  const seconds = Math.floor(Math.max(0, ms) / 1000)
+  const s = String(seconds % 60).padStart(2, '0')
+  const m = String(Math.floor(seconds / 60) % 60).padStart(2, '0')
+  const h = Math.floor(seconds / 3600)
+  return h ? `${h}:${m}:${s}` : `${Math.floor(seconds / 60)}:${s}`
+}

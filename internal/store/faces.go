@@ -12,6 +12,7 @@ import (
 
 // DetectedFace is one face the faces stage found.
 type DetectedFace struct {
+	Frame      int64   // video frame time in ms; 0 for photos
 	X, Y, W, H float32 // box, as fractions of the upright photo
 	Score      float32 // detection confidence
 	Sharpness  float32 // detail in the aligned face (ai.Identity)
@@ -36,19 +37,19 @@ func (s *Store) SaveFaces(ctx context.Context, model string, rs []FaceResult) er
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := time.Now().Unix()
-		old, err := tx.PrepareContext(ctx, "SELECT id, x, y, w, h FROM faces WHERE asset_id = ?")
+		old, err := tx.PrepareContext(ctx, "SELECT id, at_ms, x, y, w, h FROM faces WHERE asset_id = ?")
 		if err != nil {
 			return err
 		}
 		defer old.Close()
-		upd, err := tx.PrepareContext(ctx, `UPDATE faces SET x = ?, y = ?, w = ?, h = ?, score = ?, sharpness = ?, yaw = ?,
+		upd, err := tx.PrepareContext(ctx, `UPDATE faces SET at_ms = ?, x = ?, y = ?, w = ?, h = ?, score = ?, sharpness = ?, yaw = ?,
 			model = ?, vec = ? WHERE id = ?`)
 		if err != nil {
 			return err
 		}
 		defer upd.Close()
-		ins, err := tx.PrepareContext(ctx, `INSERT INTO faces (asset_id, x, y, w, h, score, sharpness, yaw, model, vec)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		ins, err := tx.PrepareContext(ctx, `INSERT INTO faces (asset_id, at_ms, x, y, w, h, score, sharpness, yaw, model, vec)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
 			return err
 		}
@@ -68,7 +69,7 @@ func (s *Store) SaveFaces(ctx context.Context, model string, rs []FaceResult) er
 			if r.Err == "" && !r.Skipped {
 				rows, err := old.QueryContext(ctx, r.AssetID)
 				before, err := collect(rows, err, func(rows *sql.Rows) (f storedBox, err error) {
-					err = rows.Scan(&f.id, &f.X, &f.Y, &f.W, &f.H)
+					err = rows.Scan(&f.id, &f.Frame, &f.X, &f.Y, &f.W, &f.H)
 					return f, err
 				})
 				if err != nil {
@@ -78,9 +79,9 @@ func (s *Store) SaveFaces(ctx context.Context, model string, rs []FaceResult) er
 				for i, f := range r.Faces {
 					var err error
 					if id := took[i]; id != 0 {
-						_, err = upd.ExecContext(ctx, f.X, f.Y, f.W, f.H, f.Score, f.Sharpness, f.Yaw, model, float32Bytes(f.Vec), id)
+						_, err = upd.ExecContext(ctx, f.Frame, f.X, f.Y, f.W, f.H, f.Score, f.Sharpness, f.Yaw, model, float32Bytes(f.Vec), id)
 					} else {
-						_, err = ins.ExecContext(ctx, r.AssetID, f.X, f.Y, f.W, f.H, f.Score, f.Sharpness, f.Yaw, model, float32Bytes(f.Vec))
+						_, err = ins.ExecContext(ctx, r.AssetID, f.Frame, f.X, f.Y, f.W, f.H, f.Score, f.Sharpness, f.Yaw, model, float32Bytes(f.Vec))
 					}
 					if err != nil {
 						return err
@@ -94,7 +95,7 @@ func (s *Store) SaveFaces(ctx context.Context, model string, rs []FaceResult) er
 					}
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageFaces, model, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageFaces, model+"+video-frames-1", jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}
@@ -106,7 +107,8 @@ func (s *Store) SaveFaces(ctx context.Context, model string, rs []FaceResult) er
 type box struct{ X, Y, W, H float32 }
 
 type storedBox struct {
-	id int64
+	id    int64
+	Frame int64
 	box
 }
 
@@ -122,6 +124,9 @@ func matchFaces(before []storedBox, now []DetectedFace) []int64 {
 	var pairs []pair
 	for i, f := range now {
 		for _, b := range before {
+			if f.Frame-b.Frame > 1000 || b.Frame-f.Frame > 1000 {
+				continue
+			}
 			if v := overlap(b.box, box{f.X, f.Y, f.W, f.H}); v >= 0.5 {
 				pairs = append(pairs, pair{i, b.id, v})
 			}
@@ -151,6 +156,7 @@ func overlap(a, b box) float32 {
 // ClusterFace is a face as clustering sees it.
 type ClusterFace struct {
 	ID, AssetID int64
+	Frame       int64   // sampled video frame; 0 for photos
 	Person      int64   // 0 = nobody yet
 	ByUser      bool    // the user put it with Person: it never moves
 	Sharpness   float32 // see DetectedFace
@@ -172,10 +178,10 @@ type Rejection struct{ Face, Person int64 }
 func (s *Store) ClusterData(ctx context.Context, model string) ([]ClusterFace, []ClusterPerson, []Rejection, error) {
 	faces, err := queryAll(ctx, s.r, func(r *sql.Rows) (f ClusterFace, err error) {
 		var vec []byte
-		err = r.Scan(&f.ID, &f.AssetID, &f.Person, &f.ByUser, &f.Sharpness, &f.Yaw, &vec)
+		err = r.Scan(&f.ID, &f.AssetID, &f.Frame, &f.Person, &f.ByUser, &f.Sharpness, &f.Yaw, &vec)
 		f.Vec = bytesFloat32(vec)
 		return f, err
-	}, `SELECT f.id, f.asset_id, COALESCE(f.person_id, 0), COALESCE(f.assigned_by = 'user', 0), f.sharpness, f.yaw, f.vec
+	}, `SELECT f.id, f.asset_id, f.at_ms, COALESCE(f.person_id, 0), COALESCE(f.assigned_by = 'user', 0), f.sharpness, f.yaw, f.vec
 		FROM faces f JOIN assets a ON a.id = f.asset_id
 		WHERE f.model = ? AND `+visibleA+` ORDER BY f.id`, model)
 	if err != nil {

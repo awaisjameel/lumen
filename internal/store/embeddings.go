@@ -19,9 +19,17 @@ type EmbedResult struct {
 	AssetID int64
 	Vec     []int8 // int8 embedding; the vector is Vec * Scale
 	Scale   float32
-	Tags    []TagScore // replaces the asset's AI tags
+	Tags    []TagScore       // replaces the asset's AI tags
+	Frames  []FrameEmbedding // one vector per sampled video frame; nil for photos
 	Err     string
 	Skipped bool // nothing to embed (a video, or no thumbnail can be made)
+}
+
+// FrameEmbedding is one searchable moment of a video.
+type FrameEmbedding struct {
+	At    int64
+	Vec   []int8
+	Scale float32
 }
 
 // SaveEmbeddings stores a batch of embeddings with their AI tags and closes
@@ -39,6 +47,17 @@ func (s *Store) SaveEmbeddings(ctx context.Context, model string, rs []EmbedResu
 			return err
 		}
 		defer emb.Close()
+		delFrames, err := tx.PrepareContext(ctx, "DELETE FROM video_embeddings WHERE asset_id = ?")
+		if err != nil {
+			return err
+		}
+		defer delFrames.Close()
+		addFrame, err := tx.PrepareContext(ctx, `INSERT INTO video_embeddings (asset_id, at_ms, model, scale, vec)
+			VALUES (?, ?, ?, ?, ?)`)
+		if err != nil {
+			return err
+		}
+		defer addFrame.Close()
 		tags, err := prepareAITags(ctx, tx)
 		if err != nil {
 			return err
@@ -54,16 +73,46 @@ func (s *Store) SaveEmbeddings(ctx context.Context, model string, rs []EmbedResu
 				if _, err := emb.ExecContext(ctx, r.AssetID, model, r.Scale, int8Bytes(r.Vec)); err != nil {
 					return err
 				}
+				if _, err := delFrames.ExecContext(ctx, r.AssetID); err != nil {
+					return err
+				}
+				for _, frame := range r.Frames {
+					if _, err := addFrame.ExecContext(ctx, r.AssetID, frame.At, model, frame.Scale, int8Bytes(frame.Vec)); err != nil {
+						return err
+					}
+				}
 				if err := tags.set(ctx, r.AssetID, r.Tags); err != nil {
 					return err
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageEmbedding, model, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageEmbedding, model+"+video-frames-1", jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// VideoEmbeddings visits the persisted frame vectors for the current model.
+func (s *Store) VideoEmbeddings(ctx context.Context, model string, fn func(assetID, at int64, vec []int8, scale float32)) error {
+	rows, err := s.r.QueryContext(ctx, `SELECT asset_id, at_ms, scale, vec FROM video_embeddings
+		WHERE model = ? ORDER BY asset_id, at_ms`, model)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var raw sql.RawBytes
+	var vec []int8
+	for rows.Next() {
+		var id, at int64
+		var scale float32
+		if err := rows.Scan(&id, &at, &scale, &raw); err != nil {
+			return err
+		}
+		vec = bytesInt8(vec[:0], raw)
+		fn(id, at, vec, scale)
+	}
+	return rows.Err()
 }
 
 // AssetTagSet is the complete set of AI tags for one asset.

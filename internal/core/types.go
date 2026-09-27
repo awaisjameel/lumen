@@ -42,8 +42,8 @@ const (
 	JobPending JobStatus = "pending"
 	JobDone    JobStatus = "done"
 	JobError   JobStatus = "error"
-	// JobSkipped means this machine can't process the file (e.g. a video
-	// before video support, or HEIC without a decoder). Not a failure: it
+	// JobSkipped means this machine can't process the file (e.g. HEIC
+	// without a decoder, or a "video" with no picture). Not a failure: it
 	// re-runs when the stage's version changes.
 	JobSkipped JobStatus = "skipped"
 )
@@ -88,6 +88,15 @@ const (
 	ThumbLarge = 1024 // viewer preview
 )
 
+// A video's hover preview (its "sprite") is one JPEG of SpriteCols x
+// SpriteRows frames spread evenly over its length, left to right then top to
+// bottom, each at most ThumbSmall on its long edge. frontend/src/bridge
+// mirrors it.
+const (
+	SpriteCols = 4
+	SpriteRows = 4
+)
+
 // Source is a folder the user asked Lumen to watch.
 type Source struct {
 	ID      int64  `json:"id"`
@@ -102,8 +111,10 @@ type GridItem struct {
 	W         int   `json:"w"`
 	H         int   `json:"h"`
 	Video     bool  `json:"v,omitempty"`
+	Duration  int64 `json:"d,omitempty"` // a video's length, ms
 	Favourite bool  `json:"f,omitempty"`
-	Thumb     int   `json:"t"` // thumbnail version; 0 = not made yet
+	Thumb     int   `json:"t"`            // thumbnail version; 0 = not made yet
+	At        int64 `json:"at,omitempty"` // search results: the best-matching moment of a video, ms
 }
 
 // Filter narrows the grid to a subset of the library.
@@ -172,14 +183,16 @@ type SearchResult struct {
 	Complete bool       `json:"complete"` // false: more matched than are shown
 }
 
-// Face is one face in a photo: where it is, and who it is.
+// Face is one face in a photo or video: where it is, and who it is.
 type Face struct {
 	ID      int64   `json:"id"`
 	AssetID int64   `json:"assetId"`
 	Thumb   int     `json:"thumb"` // the photo's thumbnail version
 	AssetW  int     `json:"assetW"`
 	AssetH  int     `json:"assetH"`
-	X       float32 `json:"x"` // the box, as fractions of the upright photo
+	Video   bool    `json:"video"` // the face is in a video's frame, not its thumbnail
+	Frame   int64   `json:"frame"` // which frame of a video, ms; 0 for photos
+	X       float32 `json:"x"`     // the box, as fractions of the upright photo or frame
 	Y       float32 `json:"y"`
 	W       float32 `json:"w"`
 	H       float32 `json:"h"`
@@ -226,8 +239,57 @@ type AssetDetail struct {
 	Paths     []string   `json:"paths"`
 	Size      int64      `json:"size"`
 	Ext       string     `json:"ext"`
-	WebNative bool       `json:"webNative"` // the WebView can show the original directly
+	WebNative bool       `json:"webNative"` // a photo the WebView can show directly
+	Video     *Video     `json:"video"`     // nil for photos
 }
+
+// Video is what the details panel and the player need to know about a video.
+type Video struct {
+	Duration int64    `json:"duration"` // ms
+	Codec    string   `json:"codec"`    // FFmpeg's name for the picture's codec, e.g. "h264", "hevc"
+	Audio    string   `json:"audio"`    // the sound's codec; "" = silent
+	Play     Playback `json:"play"`
+}
+
+// Playback says how the viewer plays a video.
+type Playback string
+
+// The ways a video can play.
+const (
+	PlayDirect  Playback = "direct"  // the WebView plays the file itself
+	PlayHEVC    Playback = "hevc"    // directly where the WebView decodes HEVC, else as PlayConvert
+	PlayConvert Playback = "convert" // Lumen converts it to H.264 while it plays
+)
+
+// PlaybackOf decides how a video with this extension and these codecs (FFmpeg
+// names; audio "" = none) plays: directly when the WebView supports the
+// container and both codecs, else converted.
+func PlaybackOf(ext, video, audio string) Playback {
+	switch strings.ToLower(ext) {
+	case ".mp4", ".m4v", ".mov":
+		if !mp4Audio[audio] {
+			return PlayConvert
+		}
+		switch video {
+		case "h264", "vp9", "av1":
+			return PlayDirect
+		case "hevc":
+			return PlayHEVC
+		}
+	case ".webm":
+		if webmVideo[video] && webmAudio[audio] {
+			return PlayDirect
+		}
+	}
+	return PlayConvert
+}
+
+// Codecs WebView2 plays in each container (Chromium's lists).
+var (
+	mp4Audio  = map[string]bool{"": true, "aac": true, "mp3": true, "opus": true, "flac": true}
+	webmVideo = map[string]bool{"vp8": true, "vp9": true, "av1": true}
+	webmAudio = map[string]bool{"": true, "opus": true, "vorbis": true}
+)
 
 // Progress is the payload of the index:progress event.
 type Progress struct {
@@ -273,11 +335,11 @@ var (
 		".mp4": true, ".m4v": true, ".mov": true, ".avi": true, ".mkv": true,
 		".webm": true, ".3gp": true, ".wmv": true, ".mts": true, ".m2ts": true,
 	}
-	// Formats WebView2 renders natively, so the viewer can show the original.
+	// Photo formats WebView2 renders natively, so the viewer can show the
+	// original. (Videos: see PlaybackOf.)
 	webNativeExts = map[string]bool{
 		".jpg": true, ".jpeg": true, ".jpe": true, ".png": true, ".gif": true,
-		".webp": true, ".bmp": true, ".avif": true, ".mp4": true, ".webm": true,
-		".m4v": true,
+		".webp": true, ".bmp": true, ".avif": true,
 	}
 )
 
@@ -293,5 +355,5 @@ func KindOf(path string) Kind {
 	return ""
 }
 
-// WebNative reports whether the WebView can display a file of this extension.
+// WebNative reports whether the WebView can display a photo of this extension.
 func WebNative(ext string) bool { return webNativeExts[strings.ToLower(ext)] }

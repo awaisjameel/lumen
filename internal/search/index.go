@@ -61,6 +61,27 @@ func (x *Index) Put(id int64, q []int8, scale float32) {
 	x.vecs = append(x.vecs, q...)
 }
 
+// Delete removes a vector, keeping the index packed for parallel scans.
+func (x *Index) Delete(id int64) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	i, ok := x.pos[id]
+	if !ok {
+		return
+	}
+	last := len(x.ids) - 1
+	if i != last {
+		x.ids[i] = x.ids[last]
+		x.scales[i] = x.scales[last]
+		copy(x.vecs[i*x.dim:(i+1)*x.dim], x.vecs[last*x.dim:(last+1)*x.dim])
+		x.pos[x.ids[i]] = i
+	}
+	x.ids = x.ids[:last]
+	x.scales = x.scales[:last]
+	x.vecs = x.vecs[:last*x.dim]
+	delete(x.pos, id)
+}
+
 // Len is how many vectors the index holds.
 func (x *Index) Len() int {
 	x.mu.RLock()
@@ -72,6 +93,7 @@ func (x *Index) Len() int {
 type Hit struct {
 	ID    int64
 	Score float32
+	At    int64 // ms of the best matching video frame; 0 for photos
 }
 
 // Search returns up to k assets whose cosine similarity to the unit vector
@@ -112,7 +134,7 @@ func (x *Index) scan(q []int8, qs float32, lo, hi int, minCos float32, k int, al
 		if s < floor {
 			continue
 		}
-		top = append(top, Hit{x.ids[i], s})
+		top = append(top, Hit{ID: x.ids[i], Score: s})
 		if len(top) >= 2*k {
 			// Keep the best k; anything below the k-th can't make it now.
 			slices.SortFunc(top, byScore)

@@ -83,15 +83,17 @@ type Input struct {
 type group struct {
 	sum     []float32
 	n       int
-	faces   []int            // indexes into clustering.faces, unplaced ones only
-	assets  map[int64]bool   // photos the group's faces are in
-	persons []int64          // existing people in the group
-	rejects map[int64]bool   // people a face in the group was rejected from
-	named   bool             // holds a confirmed person
-	links   map[int]struct{} // groups it may merge with
-	version int              // bumped on every change, to spot stale queue entries
-	dead    bool             // merged into another group
+	faces   []int              // indexes into clustering.faces, unplaced ones only
+	assets  map[facePlace]bool // photos or video frames the group's faces are in
+	persons []int64            // existing people in the group
+	rejects map[int64]bool     // people a face in the group was rejected from
+	named   bool               // holds a confirmed person
+	links   map[int]struct{}   // groups it may merge with
+	version int                // bumped on every change, to spot stale queue entries
+	dead    bool               // merged into another group
 }
+
+type facePlace struct{ asset, frame int64 }
 
 type clustering struct {
 	faces   []store.ClusterFace
@@ -117,7 +119,7 @@ func newClustering(faces []store.ClusterFace, people []store.ClusterPerson, reje
 		if f.Person == 0 || !ok {
 			gi = len(c.groups)
 			c.groups = append(c.groups, &group{sum: make([]float32, len(f.Vec)),
-				assets: map[int64]bool{}, rejects: map[int64]bool{}, links: map[int]struct{}{}})
+				assets: map[facePlace]bool{}, rejects: map[int64]bool{}, links: map[int]struct{}{}})
 			if f.Person != 0 {
 				byPerson[f.Person] = gi
 				c.groups[gi].persons = []int64{f.Person}
@@ -132,7 +134,7 @@ func newClustering(faces []store.ClusterFace, people []store.ClusterPerson, reje
 		}
 		add(g.sum, f.Vec)
 		g.n++
-		g.assets[f.AssetID] = true
+		g.assets[facePlace{f.AssetID, f.Frame}] = true
 		for _, p := range rejected[f.ID] {
 			g.rejects[p] = true
 		}

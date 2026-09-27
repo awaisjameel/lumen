@@ -16,6 +16,7 @@ type JobItem struct {
 	Kind        core.Kind
 	Ext         string
 	Orientation int
+	Duration    int64
 }
 
 // TimeRange limits a job query to assets taken in [From, To) (wall-clock seconds).
@@ -36,7 +37,7 @@ var waitsFor = map[core.Stage]core.Stage{
 // whatever the user is looking at first. An asset whose previous stage is
 // still pending is left for later.
 func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeRange, limit int) ([]JobItem, error) {
-	q := `SELECT a.id, f.path, a.kind, a.ext, a.orientation
+	q := `SELECT a.id, f.path, a.kind, a.ext, a.orientation, COALESCE(a.duration_ms, 0)
 		FROM asset_jobs j
 		JOIN assets a ON a.id = j.asset_id
 		JOIN files f ON f.id = (SELECT id FROM files WHERE asset_id = a.id LIMIT 1)
@@ -54,7 +55,7 @@ func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeR
 	q += " ORDER BY a.taken_at DESC LIMIT ?"
 	args = append(args, limit)
 	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
-		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation)
+		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration)
 		return j, err
 	}, q, args...)
 }
@@ -68,7 +69,11 @@ type MetadataResult struct {
 	Orientation int
 	Camera      string
 	Lat, Lon    *float64
+	Duration    int64
+	VideoCodec  string
+	AudioCodec  string
 	Err         string
+	Skipped     bool
 }
 
 // ThumbResult is the outcome of the thumbnail stage for one asset.
@@ -110,8 +115,9 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 				taken_at = CASE WHEN ?1 > 0 THEN ?1 ELSE taken_at END,
 				date_from = CASE WHEN ?1 > 0 THEN 'exif' ELSE date_from END,
 				width = NULLIF(?2, 0), height = NULLIF(?3, 0), orientation = ?4,
-				camera = NULLIF(?5, ''), lat = ?6, lon = ?7
-			WHERE id = ?8`)
+				camera = NULLIF(?5, ''), lat = ?6, lon = ?7,
+				duration_ms = NULLIF(?8, 0), video_codec = NULLIF(?9, ''), audio_codec = NULLIF(?10, '')
+			WHERE id = ?11`)
 		if err != nil {
 			return err
 		}
@@ -122,13 +128,13 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 		}
 		defer job.Close()
 		for _, r := range rs {
-			if r.Err == "" {
+			if r.Err == "" && !r.Skipped {
 				if _, err := upd.ExecContext(ctx, r.TakenAt, r.Width, r.Height, max(r.Orientation, 1),
-					r.Camera, r.Lat, r.Lon, r.AssetID); err != nil {
+					r.Camera, r.Lat, r.Lon, r.Duration, r.VideoCodec, r.AudioCodec, r.AssetID); err != nil {
 					return err
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageMetadata, version, jobStatus(r.Err, false), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageMetadata, version, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}

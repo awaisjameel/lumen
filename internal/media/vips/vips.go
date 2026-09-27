@@ -97,17 +97,25 @@ static int lumen_thumbs_file(const char *path, int large, int small, int side, l
 	return finish(t, small, side, o);
 }
 
-// from_pixels wraps 8-bit RGB(A) pixels decoded elsewhere as an image shrunk
-// to at most side and turned upright from orientation (EXIF 1..8). The
-// pixels must outlive the returned (lazy) image's use.
-static VipsImage *from_pixels(const void *pix, size_t len, int w, int h, int bands, int orientation, int side) {
-	VipsImage *in = NULL, *c = NULL, *t = NULL;
+// wrap_pixels wraps 8-bit RGB(A) pixels decoded elsewhere as an sRGB image.
+// The pixels must outlive the returned (lazy) image's use.
+static VipsImage *wrap_pixels(const void *pix, size_t len, int w, int h, int bands) {
+	VipsImage *in = NULL, *c = NULL;
 	int err;
 	in = vips_image_new_from_memory(pix, len, w, h, bands, VIPS_FORMAT_UCHAR);
 	if (!in) return NULL;
 	err = vips_copy(in, &c, "interpretation", VIPS_INTERPRETATION_sRGB, NULL);
 	g_object_unref(in);
-	if (err) return NULL;
+	return err ? NULL : c;
+}
+
+// from_pixels wraps pixels (see wrap_pixels) shrunk to at most side and
+// turned upright from orientation (EXIF 1..8).
+static VipsImage *from_pixels(const void *pix, size_t len, int w, int h, int bands, int orientation, int side) {
+	VipsImage *c = NULL, *t = NULL;
+	int err;
+	c = wrap_pixels(pix, len, w, h, bands);
+	if (!c) return NULL;
 	vips_image_set_int(c, VIPS_META_ORIENTATION, orientation);
 	err = vips_thumbnail_image(c, &t, side, "height", side, "size", VIPS_SIZE_DOWN, NULL);
 	g_object_unref(c);
@@ -157,6 +165,30 @@ static int lumen_square(const char *path, int side, void **buf, size_t *len, int
 	VipsImage *t = NULL;
 	if (vips_thumbnail(path, &t, side, "height", side, "size", VIPS_SIZE_FORCE, NULL)) return -1;
 	return to_rgb(t, buf, len, w, h);
+}
+
+// lumen_square_pixels squashes RGB pixels to exactly side x side (aspect
+// ignored), as lumen_square does for files.
+static int lumen_square_pixels(const void *pix, size_t len, int w, int h, int side,
+		void **buf, size_t *olen, int *ow, int *oh) {
+	VipsImage *c = NULL, *t = NULL;
+	int err;
+	c = wrap_pixels(pix, len, w, h, 3);
+	if (!c) return -1;
+	err = vips_thumbnail_image(c, &t, side, "height", side, "size", VIPS_SIZE_FORCE, NULL);
+	g_object_unref(c);
+	if (err) return -1;
+	return to_rgb(t, buf, olen, ow, oh);
+}
+
+// lumen_jpeg_pixels encodes RGB pixels as a JPEG of quality q.
+static int lumen_jpeg_pixels(const void *pix, size_t len, int w, int h, int q, void **buf, size_t *olen) {
+	VipsImage *c = wrap_pixels(pix, len, w, h, 3);
+	int err;
+	if (!c) return -1;
+	err = save_jpeg(c, q, buf, olen);
+	g_object_unref(c);
+	return err;
 }
 
 // lumen_header reads only the header: the stored (not rotated) size.
@@ -328,6 +360,48 @@ func Square(path string, side int) ([]byte, error) {
 		err = errors.New("vips: unexpected square size")
 	}
 	return im.Pix, err
+}
+
+// SquarePixels squashes 8-bit RGB pixels to exactly side x side (aspect
+// ignored), as Square does for a file.
+func SquarePixels(pix []byte, w, h, side int) ([]byte, error) {
+	if err := Init(); err != nil {
+		return nil, err
+	}
+	if err := checkPixels(pix, w, h, 3); err != nil {
+		return nil, err
+	}
+	var buf unsafe.Pointer
+	var n C.size_t
+	var ow, oh C.int
+	rc := C.lumen_square_pixels(unsafe.Pointer(unsafe.SliceData(pix)), C.size_t(len(pix)), C.int(w), C.int(h),
+		C.int(side), &buf, &n, &ow, &oh)
+	im, err := collectRGB(rc, buf, n, ow, oh)
+	if err == nil && (im.W != side || im.H != side) {
+		err = errors.New("vips: unexpected square size")
+	}
+	return im.Pix, err
+}
+
+// JPEG encodes 8-bit RGB pixels as a JPEG of the given quality (1..100).
+func JPEG(pix []byte, w, h, quality int) ([]byte, error) {
+	if err := Init(); err != nil {
+		return nil, err
+	}
+	if err := checkPixels(pix, w, h, 3); err != nil {
+		return nil, err
+	}
+	var buf unsafe.Pointer
+	var n C.size_t
+	rc := C.lumen_jpeg_pixels(unsafe.Pointer(unsafe.SliceData(pix)), C.size_t(len(pix)), C.int(w), C.int(h),
+		C.int(quality), &buf, &n)
+	if buf != nil {
+		defer C.g_free(C.gpointer(buf))
+	}
+	if rc != 0 {
+		return nil, lastError()
+	}
+	return C.GoBytes(buf, C.int(n)), nil
 }
 
 // Size reads a file's stored pixel size from its header, without decoding.
