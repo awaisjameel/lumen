@@ -13,6 +13,23 @@ import (
 // ErrNotFound is returned when an asset does not exist or is not visible.
 var ErrNotFound = errors.New("not found")
 
+// UnavailableAssets identifies stored vectors that must not compete for search
+// results. Keep their embeddings so restored sources become searchable again.
+func (s *Store) UnavailableAssets(ctx context.Context) (map[int64]bool, error) {
+	ids, err := queryAll(ctx, s.r, func(r *sql.Rows) (id int64, err error) {
+		err = r.Scan(&id)
+		return id, err
+	}, "SELECT id FROM assets WHERE NOT ("+visible+")")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
+}
+
 // DayBuckets counts the view's assets per calendar day, newest day first.
 // The grid builds its entire layout, and the timeline scrubber, from this
 // list. AI tags count from minScore up.

@@ -85,7 +85,7 @@ func (s *Store) SaveEmbeddings(ctx context.Context, model string, rs []EmbedResu
 					return err
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageEmbedding, model+"+video-frames-1", jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageEmbedding, model+core.VideoFramesVersion, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}

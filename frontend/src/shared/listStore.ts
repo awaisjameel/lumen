@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
-import type { Ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 
 /**
  * A store holding one list from the engine (Things, People), loaded on
@@ -8,17 +7,23 @@ import type { Ref } from 'vue'
  */
 export function defineListStore<T extends { id: number }>(id: string, fetch: () => Promise<T[]>) {
   return defineStore(id, () => {
-    const list = ref([]) as Ref<T[]>
+    const list = shallowRef<T[]>([])
     const loaded = ref(false)
     const byId = computed(() => new Map(list.value.map((x) => [x.id, x])))
 
     let loading: Promise<void> | null = null
-    /** (Re)load the list; concurrent calls share one request. */
+    let revision = 0
+    /** Coalesce refreshes, including edits made during an in-flight read. */
     function load(): Promise<void> {
+      revision++
       loading ??= (async () => {
         try {
-          list.value = await fetch()
-          loaded.value = true
+          for (;;) {
+            const requested = revision
+            list.value = await fetch()
+            loaded.value = true
+            if (requested === revision) break
+          }
         } finally {
           loading = null
         }

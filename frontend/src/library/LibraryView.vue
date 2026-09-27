@@ -235,7 +235,7 @@ watch(
 const aiError = computed(() => lib.progress?.ai.error ?? '')
 const empty = computed(() => lib.timelineLoaded && lib.buckets.length === 0)
 // A search can take seconds (the first one loads the text model): say so.
-const searching = computed(() => lib.isSearch && !lib.timelineLoaded)
+const searching = computed(() => lib.isSearch && !lib.timelineLoaded && !lib.loadError)
 const emptyText = computed((): [string, string] => {
   const s = scope.value
   if (s.kind === 'search') {
@@ -317,7 +317,14 @@ const searchNotes = computed(() => {
           @scroll.passive="onScroll"
           @keydown="onKey"
         >
-          <EmptyState v-if="searching" class="overlay" role="status" icon="search" :title="t('search.searching')" />
+          <EmptyState v-if="lib.loadError" class="overlay" role="alert" icon="image-off" :title="lib.loadError" />
+          <EmptyState
+            v-else-if="searching"
+            class="overlay"
+            role="status"
+            icon="search"
+            :title="t('search.searching')"
+          />
           <EmptyState
             v-else-if="empty"
             class="overlay"

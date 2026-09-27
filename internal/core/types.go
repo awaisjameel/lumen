@@ -30,6 +30,9 @@ const (
 // Stages lists every stage in pipeline order. A new asset gets a job for each.
 var Stages = []Stage{StageMetadata, StageThumbnail, StageEmbedding, StageFaces}
 
+// VideoFramesVersion tracks the sampling pipeline shared by both AI stages.
+const VideoFramesVersion = "+video-frames-1"
+
 // AI reports whether a stage runs the AI models: heavy work that waits for
 // mains power unless the user allows it on battery.
 func (s Stage) AI() bool { return s == StageEmbedding || s == StageFaces }

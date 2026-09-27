@@ -30,7 +30,7 @@ type Label struct {
 
 // VocabularyVersion changes whenever Vocabulary does, so existing libraries
 // pick up new or re-worded labels (and are re-tagged) on the next start.
-const VocabularyVersion = 3
+const VocabularyVersion = 4 // recompute video tags from moments instead of mean vectors
 
 // onScreen is the floor for things judged inside screenshots.
 const onScreen = 0.05

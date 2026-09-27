@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs every check on the code: formatting, linters and type checks for Go,
-# the frontend, the Python model script and these shell scripts. It runs
+# Runs static checks for Go, the frontend, the Python model script and these
+# shell scripts, plus frontend regression tests. It runs
 # them all, then fails if any failed, so one run shows every problem.
 #
 #   scripts/lint.sh          check
@@ -41,6 +41,7 @@ step "go: golangci-lint (gofmt, goimports, vet, staticcheck and more)" "$T/golan
 step "go: deadcode" bash -c "out=\$('$T/deadcode' -test ${GO[*]}) && [ -z \"\$out\" ] || { echo \"\$out\"; false; }"
 step "go: govulncheck" "$T/govulncheck" "${GO[@]}"
 step "frontend: vue-tsc, eslint, prettier" npm --prefix frontend run -s check
+step "frontend: regression tests" npm --prefix frontend run -s test
 step "python: ruff" bash -c "'$T/ruff' check --quiet && '$T/ruff' format --check --quiet"
 step "shell: shellcheck" "$T/shellcheck" -x scripts/*.sh
 

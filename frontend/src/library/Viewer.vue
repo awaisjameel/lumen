@@ -50,9 +50,10 @@ watch(
 )
 
 async function go(dir: 1 | -1) {
-  if (!lib.viewer) return
-  const next = await lib.neighbour(lib.viewer, dir)
-  if (next) lib.viewer = next
+  const from = lib.viewer
+  if (!from) return
+  const next = await lib.neighbour(from, dir)
+  if (next && lib.viewer === from) lib.viewer = next
 }
 
 function close() {
@@ -66,7 +67,7 @@ function videoReady() {
 }
 
 function videoTime() {
-  if (video.value) videoPosition.value = videoStart.value + video.value.currentTime * 1000
+  if (video.value) videoPosition.value = (converting.value ? videoStart.value : 0) + video.value.currentTime * 1000
 }
 
 function seekVideo(e: Event) {
@@ -171,7 +172,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
           @error="videoError"
         />
         <p v-if="videoFailed" class="video-error" role="alert">{{ t('viewer.videoFailed') }}</p>
-        <template v-else>
+        <template v-else-if="!detail?.video">
           <img
             v-if="lib.viewerItem.t"
             v-show="!originalReady"

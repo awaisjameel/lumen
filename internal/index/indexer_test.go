@@ -24,6 +24,33 @@ type fakeEvents struct{ changed atomic.Int32 }
 func (*fakeEvents) Progress(core.Progress) {}
 func (f *fakeEvents) LibraryChanged(int)   { f.changed.Add(1) }
 
+func TestDeletedDottedFolderTriggersReconciliation(t *testing.T) {
+	paths := core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	photos := t.TempDir()
+	src, err := st.AddSource(t.Context(), photos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	ix.rootCtx, ix.cancel = context.WithCancel(t.Context())
+	defer ix.Stop()
+	ix.onFSChange(filepath.Join(photos, "Trip.v1"))
+	ix.flushFSChanges()
+	select {
+	case req := <-ix.scanReqs:
+		if req.sourceID != src.ID || req.under != "" {
+			t.Fatalf("wrong rescan: %+v", req)
+		}
+	default:
+		t.Fatal("deleted dotted folder was ignored")
+	}
+}
+
 func writeJPEG(t *testing.T, path string, w, h int, c color.RGBA) {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))

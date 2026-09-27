@@ -95,7 +95,7 @@ func (s *Store) SaveFaces(ctx context.Context, model string, rs []FaceResult) er
 					}
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageFaces, model+"+video-frames-1", jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageFaces, model+core.VideoFramesVersion, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}
@@ -218,7 +218,8 @@ type Merge struct{ From, Into int64 }
 func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		assign, err := tx.PrepareContext(ctx, `UPDATE faces SET person_id = ?1, assigned_by = 'auto'
-			WHERE id = ?2 AND person_id IS NULL AND EXISTS (SELECT 1 FROM people WHERE id = ?1)`)
+			WHERE id = ?2 AND person_id IS NULL AND EXISTS (SELECT 1 FROM people WHERE id = ?1)
+			AND NOT EXISTS (SELECT 1 FROM face_rejections WHERE face_id = ?2 AND person_id = ?1)`)
 		if err != nil {
 			return err
 		}
@@ -245,7 +246,10 @@ func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 			var ok bool
 			err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM people WHERE id = ?1 AND name IS NULL
 					AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = ?1 AND assigned_by = 'user'))
-				AND EXISTS (SELECT 1 FROM people WHERE id = ?2)`, m.From, m.Into).Scan(&ok)
+				AND EXISTS (SELECT 1 FROM people WHERE id = ?2)
+				AND NOT EXISTS (SELECT 1 FROM face_rejections r JOIN faces f ON f.id = r.face_id
+					WHERE (f.person_id = ?1 AND r.person_id = ?2)
+					   OR (f.person_id = ?2 AND r.person_id = ?1))`, m.From, m.Into).Scan(&ok)
 			if err != nil {
 				return err
 			}

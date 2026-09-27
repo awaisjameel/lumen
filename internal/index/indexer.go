@@ -169,10 +169,10 @@ func (ix *Indexer) versions() map[core.Stage]string {
 		core.StageThumbnail: media.ThumbnailVersion + "+" + media.VideoThumbnailVersion,
 	}
 	if ix.search != nil {
-		v[core.StageEmbedding] = ix.search.Model().Version + "+video-frames-1"
+		v[core.StageEmbedding] = ix.search.Model().Version + core.VideoFramesVersion
 	}
 	if ix.people != nil {
-		v[core.StageFaces] = ix.people.Model().Version + "+video-frames-1"
+		v[core.StageFaces] = ix.people.Model().Version + core.VideoFramesVersion
 	}
 	return v
 }
@@ -461,9 +461,11 @@ func (ix *Indexer) onFSChange(path string) {
 		return
 	}
 	if ext := filepath.Ext(path); ext != "" && core.KindOf(path) == "" {
-		if fi, err := os.Stat(path); err != nil || !fi.IsDir() {
+		if fi, err := os.Stat(path); (err == nil && !fi.IsDir()) || (err != nil && !os.IsNotExist(err)) {
 			return // not media, not a folder
 		}
+		// A deleted dotted folder cannot be distinguished from a non-media
+		// file here. Reconcile its parent so its photos leave the library.
 	}
 	ix.mu.Lock()
 	defer ix.mu.Unlock()

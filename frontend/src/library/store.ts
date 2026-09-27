@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, triggerRef } from 'vue'
 import { engine, Filter, onLibraryChanged, onProgress, TAG_CONFIDENCE_DEFAULT } from '../bridge'
 import type { DayBucket, GridItem, Progress, Settings, Source, View } from '../bridge'
-import { logError } from '../shared/errors'
+import { errorText, logError } from '../shared/errors'
 
 const ZOOM_KEY = 'lumen.zoom'
 export const ZOOM_MIN = 96
@@ -57,12 +57,16 @@ export const useLibrary = defineStore('library', () => {
   const scope = ref<Scope>({ kind: 'timeline', view: { filter: Filter.FilterAll } })
   const buckets = ref<DayBucket[]>([])
   const timelineLoaded = ref(false)
+  const loadError = ref('')
   const searchInfo = ref<SearchInfo | null>(null)
 
   // day -> items. A shallowRef plus triggerRef keeps big maps cheap.
   const days = shallowRef(new Map<string, GridItem[]>())
   const fresh = new Set<string>() // days loaded since the last change
-  const inflight = new Set<string>()
+  const inflight = new Map<string, symbol>()
+  let generation = 0 // changes even when returning to a previously visited scope
+  let loadRequest = 0
+  let dayRevision = 0
 
   const selected = ref<Sel | null>(null)
   const viewer = ref<Sel | null>(null)
@@ -105,19 +109,28 @@ export const useLibrary = defineStore('library', () => {
   /** Load the current scope's groups (and, for a search, its results). */
   async function load() {
     const s = scope.value
-    if (s.kind === 'search') {
-      const r = await engine.search(s.query)
-      if (scopeKey(s) !== scopeKey(scope.value)) return // superseded while searching
-      searchInfo.value = { pending: r.pending, complete: r.complete, people: r.people }
-      buckets.value = r.items.length ? [{ day: RESULTS, count: r.items.length }] : []
-      days.value = new Map(r.items.length ? [[RESULTS, r.items]] : [])
-      fresh.add(RESULTS)
-    } else {
-      const b = await engine.timeline(s.view)
-      if (scopeKey(s) !== scopeKey(scope.value)) return
-      buckets.value = b
+    const current = generation
+    const request = ++loadRequest
+    loadError.value = ''
+    try {
+      if (s.kind === 'search') {
+        const r = await engine.search(s.query)
+        if (current !== generation || request !== loadRequest) return
+        searchInfo.value = { pending: r.pending, complete: r.complete, people: r.people }
+        buckets.value = r.items.length ? [{ day: RESULTS, count: r.items.length }] : []
+        days.value = new Map(r.items.length ? [[RESULTS, r.items]] : [])
+        fresh.add(RESULTS)
+      } else {
+        const b = await engine.timeline(s.view)
+        if (current !== generation || request !== loadRequest) return
+        buckets.value = b
+      }
+      timelineLoaded.value = true
+    } catch (e) {
+      if (current !== generation || request !== loadRequest) return
+      loadError.value = errorText(e)
+      throw e
     }
-    timelineLoaded.value = true
   }
 
   /**
@@ -126,14 +139,21 @@ export const useLibrary = defineStore('library', () => {
    * looks would be jarring); searching again picks up new photos.
    */
   let refreshing: Promise<void> | null = null
+  let refreshRevision = 0
   async function refresh() {
     if (isSearch.value) return
+    dayRevision++
+    fresh.clear()
+    refreshRevision++
     if (refreshing) return refreshing
     refreshing = (async () => {
       try {
-        await load()
-        fresh.clear()
-        triggerRef(days) // the view re-requests what it shows
+        for (;;) {
+          const revision = refreshRevision
+          await load()
+          triggerRef(days) // the view re-requests what it shows
+          if (revision === refreshRevision || isSearch.value) break
+        }
       } finally {
         refreshing = null
       }
@@ -148,16 +168,20 @@ export const useLibrary = defineStore('library', () => {
   async function ensureDays(want: string[]) {
     const s = scope.value
     if (s.kind === 'search') return // results arrive all at once
+    const current = generation
+    const revision = dayRevision
+    const request = Symbol()
     const missing = want.filter((d) => !fresh.has(d) && !inflight.has(d)).sort()
     const [from, to] = [missing[0], missing.at(-1)]
     if (from === undefined || to === undefined) return
-    missing.forEach((d) => inflight.add(d))
+    missing.forEach((d) => inflight.set(d, request))
     try {
       const got = await engine.days(from, to, s.view)
-      if (scopeKey(s) !== scopeKey(scope.value)) return // the view changed while loading
+      if (current !== generation || revision !== dayRevision) return
       const next = new Map(days.value)
       const inSpan = new Set(missing)
       for (const d of got) {
+        if (!inSpan.has(d.day)) continue // another request owns intervening days
         next.set(d.day, d.items)
         fresh.add(d.day)
         inSpan.delete(d.day)
@@ -170,7 +194,10 @@ export const useLibrary = defineStore('library', () => {
     } catch (e) {
       logError(e)
     } finally {
-      missing.forEach((d) => inflight.delete(d))
+      missing.forEach((d) => {
+        if (inflight.get(d) === request) inflight.delete(d)
+      })
+      if (current === generation && revision !== dayRevision) triggerRef(days)
     }
   }
 
@@ -193,6 +220,9 @@ export const useLibrary = defineStore('library', () => {
   async function setScope(s: Scope) {
     if (scopeKey(s) === scopeKey(scope.value) && timelineLoaded.value && s.kind !== 'search') return
     scope.value = s
+    generation++
+    dayRevision++
+    inflight.clear()
     selected.value = null
     viewer.value = null
     searchInfo.value = null
@@ -244,6 +274,7 @@ export const useLibrary = defineStore('library', () => {
     scope,
     buckets,
     timelineLoaded,
+    loadError,
     searchInfo,
     days,
     selected,

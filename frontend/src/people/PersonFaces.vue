@@ -28,16 +28,23 @@ const name = computed(() => person.value?.name || t('person.unnamed'))
 const count = computed(() => selected.value.size)
 
 async function load() {
-  const [p, f] = await Promise.all([engine.person(id.value), engine.personFaces(id.value)])
+  const requested = id.value
+  const [p, f] = await Promise.all([engine.person(requested), engine.personFaces(requested)])
+  if (requested !== id.value) return
   person.value = p
   faces.value = f
   selected.value = new Set([...selected.value].filter((x) => f.some((y) => y.id === x)))
 }
 watch(
   id,
-  () => {
+  (requested) => {
+    person.value = null
+    faces.value = []
+    error.value = ''
     selected.value = new Set()
-    load().catch((e: unknown) => (error.value = errorText(e)))
+    load().catch((e: unknown) => {
+      if (requested === id.value) error.value = errorText(e)
+    })
   },
   { immediate: true },
 )
@@ -52,14 +59,18 @@ function toggle(f: Face) {
 async function act(fn: (ids: number[]) => Promise<unknown>) {
   if (!count.value || busy.value) return
   busy.value = true
+  const requested = id.value
   error.value = ''
   try {
     await fn([...selected.value])
-    selected.value = new Set()
     void people.load().catch(logError)
-    await load().catch(async () => router.replace({ name: 'people' })) // nothing left of them
+    if (requested !== id.value) return
+    selected.value = new Set()
+    await load().catch(async () => {
+      if (requested === id.value) await router.replace({ name: 'people' }) // nothing left of them
+    })
   } catch (e) {
-    error.value = errorText(e)
+    if (requested === id.value) error.value = errorText(e)
   } finally {
     busy.value = false
   }

@@ -44,17 +44,24 @@ const confidencePos = computed(() =>
   Math.round((100 * Math.log(lib.settings.tagConfidence / TAG_CONFIDENCE_MIN)) / span),
 )
 let saveTimer = 0
+let pendingConfidence: number | null = null
+function saveConfidence() {
+  clearTimeout(saveTimer)
+  if (pendingConfidence === null) return
+  const value = pendingConfidence
+  pendingConfidence = null
+  engine
+    .setTagConfidence(value)
+    .then(() => lib.refresh())
+    .catch((e: unknown) => (error.value = errorText(e)))
+}
 function onConfidence(pos: number) {
   lib.settings.tagConfidence = TAG_CONFIDENCE_MIN * Math.exp((span * pos) / 100)
+  pendingConfidence = lib.settings.tagConfidence
   clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(() => {
-    engine
-      .setTagConfidence(lib.settings.tagConfidence)
-      .then(() => lib.refresh())
-      .catch((e: unknown) => (error.value = errorText(e)))
-  }, 250)
+  saveTimer = window.setTimeout(saveConfidence, 250)
 }
-onBeforeUnmount(() => clearTimeout(saveTimer))
+onBeforeUnmount(saveConfidence)
 
 function setAIOnBattery(on: boolean) {
   lib.settings.aiOnBattery = on

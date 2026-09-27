@@ -25,7 +25,7 @@ import (
 // a fix); the indexer then re-runs just that stage.
 // Photos and videos have their own, as different code serves them.
 const (
-	MetadataVersion       = "imagemeta-1.1+goexif+vips-1"
+	MetadataVersion       = "imagemeta-1.1+goexif+vips-2" // also persist capture dates before 1970
 	ThumbnailVersion      = "vips-8.18-1"
 	VideoMetadataVersion  = "ffprobe-9.0-1"
 	VideoThumbnailVersion = "ffmpeg-9.0+vips-8.18-1"

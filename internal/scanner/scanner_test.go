@@ -5,7 +5,23 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"lumen/internal/store"
 )
+
+func TestUnreadablePathsAreNotDeletionCandidates(t *testing.T) {
+	known := map[string]store.FileStat{
+		`c:\photos\private\a.jpg`:      {ID: 1},
+		`c:\photos\private\trip\b.jpg`: {ID: 2},
+		`c:\photos\private2\c.jpg`:     {ID: 3},
+		`c:\photos\locked.jpg`:         {ID: 4},
+	}
+	preserveKnown(known, `C:\Photos\Private`)
+	preserveKnown(known, `C:\Photos\Locked.jpg`)
+	if len(known) != 1 || known[`c:\photos\private2\c.jpg`].ID != 3 {
+		t.Fatalf("wrong deletion candidates after unreadable paths: %+v", known)
+	}
+}
 
 func TestFingerprintIdentifiesContent(t *testing.T) {
 	dir := t.TempDir()

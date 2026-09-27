@@ -44,7 +44,7 @@ Not yet: albums, events, trash, organise-on-disk, the 2 GB cache cap, OCR.
 
 ## Setup (Windows)
 
-Needs Go 1.27, Node 22+, a C compiler for cgo, Git Bash, and Python 3 (only to prepare the models). Toolchain used:
+Needs Go 1.27, Node 22.22.2+ / 24.15+ / 26+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, and Python 3 (only to prepare the models). Toolchain used:
 
 - Go 1.27.1 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
 - User environment: `CGO_ENABLED=1`, `CC=clang`, `CXX=clang++`
@@ -64,7 +64,7 @@ Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), what
 
 ## Code quality
 
-`scripts/lint.sh` runs every check and fails if any does; `scripts/lint.sh --fix` first applies every automatic fix. Each tool is pinned and configured in the repository:
+`scripts/lint.sh` runs the static checks and frontend regression tests and fails if any does; `scripts/lint.sh --fix` first applies every automatic fix. Each tool is pinned and configured in the repository:
 
 | Code | Formatting | Linting | Config |
 | --- | --- | --- | --- |
@@ -83,12 +83,21 @@ Editors do the same on save: `.editorconfig` sets line endings and indentation, 
 wails3 dev                    # run with hot reload
 wails3 build                  # production build -> bin/Lumen.exe
 source scripts/env.sh         # before go test / vet / run: puts deps/runtime (libvips) on PATH
-go test -race ./internal/...  # engine tests, with the race detector (AI tests use deps/runtime)
+go test -race ./internal/... ./services/... # engine and HTTP service tests (AI tests use deps/runtime)
 scripts/lint.sh               # every formatter, linter and type check (--fix applies fixes first)
 cd frontend && npm run check  # the frontend's alone: vue-tsc, ESLint, Prettier (lint:fix and format fix)
+npm run test                 # Vitest: async store, viewer and settings regressions
 ```
 
 Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates, which only build for their own platforms.
+
+Before moving between implementation phases, also regenerate the bindings with
+`wails3 generate bindings -ts -i`, check `git diff -- frontend/bindings`, and run
+`wails3 build`. The frontend must finish building before Go embeds `frontend/dist`;
+do not run independent frontend and Go production builds concurrently. Browser
+component tests use jsdom; actual codec playback still needs a browser or WebView
+smoke test. See [the phase 1–4 audit](docs/audit-2026-09-28.md) for findings,
+verification evidence and remaining acceptance limits.
 
 Handy environment variables:
 

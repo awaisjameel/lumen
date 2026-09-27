@@ -112,8 +112,8 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := time.Now().Unix()
 		upd, err := tx.PrepareContext(ctx, `UPDATE assets SET
-				taken_at = CASE WHEN ?1 > 0 THEN ?1 ELSE taken_at END,
-				date_from = CASE WHEN ?1 > 0 THEN 'exif' ELSE date_from END,
+				taken_at = CASE WHEN ?1 != 0 THEN ?1 ELSE taken_at END,
+				date_from = CASE WHEN ?1 != 0 THEN 'exif' ELSE date_from END,
 				width = NULLIF(?2, 0), height = NULLIF(?3, 0), orientation = ?4,
 				camera = NULLIF(?5, ''), lat = ?6, lon = ?7,
 				duration_ms = NULLIF(?8, 0), video_codec = NULLIF(?9, ''), audio_codec = NULLIF(?10, '')

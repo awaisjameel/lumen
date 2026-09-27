@@ -17,10 +17,15 @@ var ErrAlreadyCovered = errors.New("this folder is already part of your library"
 
 // ListSources returns every source folder, alphabetically.
 func (s *Store) ListSources(ctx context.Context) ([]core.Source, error) {
-	return queryAll(ctx, s.r, func(r *sql.Rows) (src core.Source, err error) {
-		err = r.Scan(&src.ID, &src.Path, &src.Enabled)
-		return src, err
-	}, "SELECT id, path, enabled FROM sources ORDER BY path")
+	rows, err := s.r.QueryContext(ctx, sourcesQuery)
+	return collect(rows, err, scanSource)
+}
+
+const sourcesQuery = "SELECT id, path, enabled FROM sources ORDER BY path"
+
+func scanSource(r *sql.Rows) (src core.Source, err error) {
+	err = r.Scan(&src.ID, &src.Path, &src.Enabled)
+	return src, err
 }
 
 // AddSource registers a folder. Sources never overlap: adding a folder inside
@@ -28,18 +33,20 @@ func (s *Store) ListSources(ctx context.Context) ([]core.Source, error) {
 // sources absorbs them (their files move to the new source, nothing is lost).
 func (s *Store) AddSource(ctx context.Context, path string) (core.Source, error) {
 	path = filepath.Clean(path)
-	existing, err := s.ListSources(ctx)
-	if err != nil {
-		return core.Source{}, err
-	}
-	for _, e := range existing {
-		if IsWithin(path, e.Path) {
-			return e, ErrAlreadyCovered
-		}
-	}
-
 	var src core.Source
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		// Check under the writer lock so concurrent additions cannot overlap.
+		rows, err := tx.QueryContext(ctx, sourcesQuery)
+		existing, err := collect(rows, err, scanSource)
+		if err != nil {
+			return err
+		}
+		for _, e := range existing {
+			if IsWithin(path, e.Path) {
+				src = e
+				return ErrAlreadyCovered
+			}
+		}
 		res, err := tx.ExecContext(ctx, "INSERT INTO sources (path, added_at) VALUES (?, ?)", path, time.Now().Unix())
 		if err != nil {
 			return err
@@ -60,7 +67,7 @@ func (s *Store) AddSource(ctx context.Context, path string) (core.Source, error)
 		return nil
 	})
 	if err != nil {
-		return core.Source{}, fmt.Errorf("add source: %w", err)
+		return src, fmt.Errorf("add source: %w", err)
 	}
 	return src, nil
 }

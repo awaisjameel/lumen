@@ -140,7 +140,14 @@ func (e *Engine) load(ctx context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("load video embeddings: %w", err)
 	}
-	return e.loadLabels(ctx, changed)
+	if err := e.loadLabels(ctx, changed); err != nil {
+		return err
+	}
+	if changed {
+		// Stamp only after re-tagging succeeds, so an interrupted upgrade retries.
+		return e.store.SetInt(ctx, core.SettingVocabulary, VocabularyVersion)
+	}
+	return nil
 }
 
 // syncVocabulary writes the built-in Things into the database when this
@@ -157,7 +164,7 @@ func (e *Engine) syncVocabulary(ctx context.Context) (bool, error) {
 	if err := e.store.SyncVocabulary(ctx, labels); err != nil {
 		return false, err
 	}
-	return true, e.store.SetInt(ctx, core.SettingVocabulary, VocabularyVersion)
+	return true, nil
 }
 
 // loadLabels reads every AI-applied tag and embeds the prompts of any that
@@ -214,7 +221,18 @@ func (e *Engine) retag(ctx context.Context) error {
 	t := time.Now()
 	var sets []store.AssetTagSet
 	v := make([]float32, e.model.Dim)
+	videos := map[int64][]store.TagScore{}
+	e.video.each(func(id int64, q []int8, scale float32) {
+		for i, x := range q {
+			v[i] = float32(x) * scale
+		}
+		videos[id] = BestTags(videos[id], e.Tags(v))
+	})
 	e.index.Each(func(id int64, q []int8, scale float32) {
+		if tags, ok := videos[id]; ok {
+			sets = append(sets, store.AssetTagSet{AssetID: id, Tags: tags})
+			return
+		}
 		for i, x := range q {
 			v[i] = float32(x) * scale
 		}
@@ -231,9 +249,19 @@ func (e *Engine) retag(ctx context.Context) error {
 func (e *Engine) rescore(ctx context.Context, l label) error {
 	best := map[int64]float32{}
 	for _, v := range l.vecs {
-		e.index.ScoreAll(v, func(id int64, cos float32) {
+		videos := map[int64]bool{}
+		record := func(id int64, cos float32) {
 			if p := e.model.Probability(cos); p >= max(core.TagConfidenceMin, l.floor) && p > best[id] {
 				best[id] = p
+			}
+		}
+		e.video.scoreAll(v, func(id int64, cos float32) {
+			videos[id] = true
+			record(id, cos)
+		})
+		e.index.ScoreAll(v, func(id int64, cos float32) {
+			if !videos[id] {
+				record(id, cos)
 			}
 		})
 	}
@@ -242,6 +270,32 @@ func (e *Engine) rescore(ctx context.Context, l label) error {
 		scores = append(scores, store.AssetScore{AssetID: id, Score: p})
 	}
 	return e.store.SetTagScores(ctx, l.id, scores)
+}
+
+// BestTags combines sampled frames using each tag's strongest score, with
+// the same limit and ordering used for photos and subsequent re-tagging.
+func BestTags(sets ...[]store.TagScore) []store.TagScore {
+	best := map[int64]float32{}
+	for _, tags := range sets {
+		for _, tag := range tags {
+			best[tag.TagID] = max(best[tag.TagID], tag.Score)
+		}
+	}
+	out := make([]store.TagScore, 0, len(best))
+	for id, score := range best {
+		out = append(out, store.TagScore{TagID: id, Score: score})
+	}
+	return topTags(out)
+}
+
+func topTags(tags []store.TagScore) []store.TagScore {
+	slices.SortFunc(tags, func(a, b store.TagScore) int {
+		if c := cmp.Compare(b.Score, a.Score); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.TagID, b.TagID)
+	})
+	return tags[:min(len(tags), maxTagsPerItem)]
 }
 
 // Add puts a new image embedding into the index (after it is saved).
@@ -297,8 +351,7 @@ func (e *Engine) Tags(v []float32) []store.TagScore {
 			out = append(out, store.TagScore{TagID: l.id, Score: p})
 		}
 	}
-	slices.SortFunc(out, func(a, b store.TagScore) int { return cmp.Compare(b.Score, a.Score) })
-	return out[:min(len(out), maxTagsPerItem)]
+	return topTags(out)
 }
 
 // CreateLabel makes a new Thing the AI looks for (e.g. "Eiffel Tower") and
@@ -361,12 +414,19 @@ func (e *Engine) Search(ctx context.Context, query string, allow func(id int64) 
 	if err != nil {
 		return nil, false, err
 	}
+	unavailable, err := e.store.UnavailableAssets(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	eligible := func(id int64) bool {
+		return !unavailable[id] && (allow == nil || allow(id))
+	}
 	floor := e.model.Cosine(searchFloor)
 	best := map[int64]Hit{}
-	for _, h := range e.index.Search(vecs[0], floor, searchLimit+1, allow) {
+	for _, h := range e.index.Search(vecs[0], floor, searchLimit+1, eligible) {
 		best[h.ID] = h
 	}
-	for _, h := range e.video.search(vecs[0], floor, searchLimit+1, allow) {
+	for _, h := range e.video.search(vecs[0], floor, searchLimit+1, eligible) {
 		if old, ok := best[h.ID]; !ok || h.Score > old.Score {
 			best[h.ID] = h
 		}

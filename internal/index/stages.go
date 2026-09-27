@@ -1,7 +1,6 @@
 package index
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -263,7 +262,6 @@ func (ix *Indexer) embedVideo(ctx context.Context, j store.JobItem, enc *ai.Imag
 		return nil
 	}
 	mean := make([]float32, ix.search.Model().Dim)
-	tags := map[int64]float32{}
 	for lo := 0; lo < len(inputs); lo += enc.BatchSize() {
 		vecs, err := enc.Encode(inputs[lo:min(lo+enc.BatchSize(), len(inputs))])
 		if err != nil {
@@ -275,9 +273,7 @@ func (ix *Indexer) embedVideo(ctx context.Context, j store.JobItem, enc *ai.Imag
 			for d, x := range v {
 				mean[d] += x
 			}
-			for _, t := range ix.search.Tags(v) {
-				tags[t.TagID] = max(tags[t.TagID], t.Score)
-			}
+			r.Tags = search.BestTags(r.Tags, ix.search.Tags(v))
 		}
 	}
 	var norm float64
@@ -290,11 +286,6 @@ func (ix *Indexer) embedVideo(ctx context.Context, j store.JobItem, enc *ai.Imag
 		}
 	}
 	r.Vec, r.Scale = search.Quantize(mean)
-	for id, score := range tags {
-		r.Tags = append(r.Tags, store.TagScore{TagID: id, Score: score})
-	}
-	slices.SortFunc(r.Tags, func(a, b store.TagScore) int { return cmp.Compare(b.Score, a.Score) })
-	r.Tags = r.Tags[:min(len(r.Tags), 12)]
 	return nil
 }
 

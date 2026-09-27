@@ -155,6 +155,9 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 				return err
 			}
 			slog.Debug("skip unreadable", "path", path, "err", err)
+			if !errors.Is(err, fs.ErrNotExist) {
+				preserveKnown(known, path)
+			}
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
 			}
@@ -172,7 +175,10 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 		}
 		info, err := d.Info()
 		if err != nil {
-			return nil //nolint:nilerr // deleted since it was listed: nothing to add
+			if !errors.Is(err, fs.ErrNotExist) {
+				preserveKnown(known, path)
+			}
+			return nil // unavailable since it was listed: nothing to add
 		}
 		res.Seen++
 		if s.OnProgress != nil && res.Seen%500 == 0 {
@@ -215,6 +221,16 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 	}
 	res.Removed = len(gone)
 	return res, nil
+}
+
+// An unreadable path is not evidence of deletion. Remove its entries from
+// the reconciliation candidates while retaining them in the database.
+func preserveKnown(known map[string]store.FileStat, path string) {
+	for key := range known {
+		if store.IsWithin(key, path) {
+			delete(known, key)
+		}
+	}
 }
 
 // skipDir leaves out hidden and system folders, and any folder in skip.

@@ -44,6 +44,21 @@ func (v *videoIndex) replace(asset int64, frames []store.FrameEmbedding) {
 	}
 }
 
+// each visits sampled frames under the read lock. q is valid only in fn.
+func (v *videoIndex) each(fn func(asset int64, q []int8, scale float32)) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	v.index.Each(func(key int64, q []int8, scale float32) {
+		fn(v.frame[key].asset, q, scale)
+	})
+}
+
+func (v *videoIndex) scoreAll(q []float32, fn func(asset int64, cos float32)) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	v.index.ScoreAll(q, func(key int64, cos float32) { fn(v.frame[key].asset, cos) })
+}
+
 func (v *videoIndex) search(q []float32, floor float32, k int, allow func(int64) bool) []Hit {
 	v.mu.RLock()
 	defer v.mu.RUnlock()

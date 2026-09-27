@@ -25,6 +25,7 @@ watch(
   () => [props.sel?.id, lib.itemAt(props.sel)?.f] as const,
   async ([id]) => {
     error.value = ''
+    if (detail.value?.id !== id) detail.value = null
     if (!id) {
       detail.value = null
       return
@@ -33,7 +34,7 @@ watch(
       const d = await engine.asset(id)
       if (props.sel?.id === id) detail.value = d
     } catch (e) {
-      error.value = errorText(e)
+      if (props.sel?.id === id) error.value = errorText(e)
     }
   },
   { immediate: true },
@@ -44,7 +45,12 @@ watch(
 const loadExtras = (id: number | undefined) => Promise.all([loadTags(id), loadFaces(id)])
 watch(
   () => props.sel?.id,
-  (id) => void loadExtras(id),
+  (id) => {
+    tags.value = []
+    faces.value = []
+    newTag.value = ''
+    void loadExtras(id)
+  },
   { immediate: true },
 )
 useLiveReload(() => loadExtras(props.sel?.id))
@@ -80,13 +86,14 @@ async function loadFaces(id: number | undefined) {
  * refresh the grid, which may be a Thing's or a person's).
  */
 async function edit(fn: () => Promise<unknown>, reload: () => Promise<void>) {
+  const requested = props.sel?.id
   error.value = ''
   try {
     await fn()
     await reload()
     void lib.refresh().catch(logError)
   } catch (e) {
-    error.value = errorText(e)
+    if (props.sel?.id === requested) error.value = errorText(e)
   }
 }
 
@@ -130,7 +137,9 @@ const dateFromText: Record<DateSource, MessageKey> = {
 
 function showInFolder(id: number) {
   error.value = ''
-  engine.showInFolder(id).catch((e: unknown) => (error.value = errorText(e)))
+  engine.showInFolder(id).catch((e: unknown) => {
+    if (props.sel?.id === id) error.value = errorText(e)
+  })
 }
 </script>
 
