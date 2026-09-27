@@ -116,8 +116,7 @@ function optionKey(o: Option): string {
 }
 
 /** The first option of each kind gets a heading above it. */
-function heading(i: number): string {
-  const o = options.value[i]
+function heading(o: Option, i: number): string {
   if (o.kind === options.value[i - 1]?.kind) return ''
   return o.kind === 'person' ? t('search.peopleHeading') : o.kind === 'thing' ? t('search.thingsHeading') : ''
 }
@@ -150,7 +149,7 @@ function heading(i: number): string {
 
     <ul v-if="open && options.length" :id="`${id}-list`" class="menu" role="listbox" @mousedown.prevent>
       <template v-for="(o, i) in options" :key="optionKey(o)">
-        <li v-if="heading(i)" class="heading" role="presentation">{{ heading(i) }}</li>
+        <li v-if="heading(o, i)" class="heading" role="presentation">{{ heading(o, i) }}</li>
         <li
           :id="`${id}-${i}`"
           role="option"

@@ -172,7 +172,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 		}
 		info, err := d.Info()
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // deleted since it was listed: nothing to add
 		}
 		res.Seen++
 		if s.OnProgress != nil && res.Seen%500 == 0 {
@@ -260,7 +260,7 @@ func Fingerprint(path string, size int64) ([]byte, error) {
 			if err != nil && !errors.Is(err, io.EOF) {
 				return nil, err
 			}
-			h.Write(buf[:n])
+			_, _ = h.Write(buf[:n]) // hashing into memory never fails
 		}
 	}
 	sum := h.Sum128().Bytes()

@@ -49,7 +49,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 	w.SetMaxOpenConns(1)
-	if err := w.Ping(); err != nil {
+	if err := w.PingContext(context.Background()); err != nil {
 		w.Close()
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -74,7 +74,7 @@ func (s *Store) Close() error {
 	if s.r != nil {
 		s.r.Close()
 	}
-	s.w.Exec("PRAGMA optimize")
+	_, _ = s.w.Exec("PRAGMA optimize") //nolint:noctx // best effort while closing
 	return s.w.Close()
 }
 
@@ -124,7 +124,7 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 		return err
 	}
 	if err := fn(tx); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback() // fn's error is the one that matters
 		return err
 	}
 	return tx.Commit()
@@ -166,10 +166,8 @@ func isUnique(err error) bool {
 // visible is the WHERE clause of the assets_timeline partial index.
 const visible = "hidden = 0 AND trashed_at IS NULL AND missing_since IS NULL"
 
-// visibleAs is visible for the assets table under an alias, for joins.
-func visibleAs(alias string) string {
-	return alias + ".hidden = 0 AND " + alias + ".trashed_at IS NULL AND " + alias + ".missing_since IS NULL"
-}
+// visibleA is visible for the assets table joined as "a".
+const visibleA = "a.hidden = 0 AND a.trashed_at IS NULL AND a.missing_since IS NULL"
 
 // setting reads a raw setting value; ok is false if it has never been set.
 func (s *Store) setting(ctx context.Context, key string) (v string, ok bool, err error) {
@@ -212,11 +210,10 @@ func (s *Store) Float(ctx context.Context, key string, def float64) (float64, er
 	if !ok {
 		return def, err
 	}
-	f, perr := strconv.ParseFloat(v, 64)
-	if perr != nil {
-		return def, nil
+	if f, perr := strconv.ParseFloat(v, 64); perr == nil {
+		return f, nil
 	}
-	return f, nil
+	return def, nil // unreadable: as if never set
 }
 
 // SetFloat stores a number setting.
@@ -231,11 +228,10 @@ func (s *Store) Int(ctx context.Context, key string, def int) (int, error) {
 	if !ok {
 		return def, err
 	}
-	n, perr := strconv.Atoi(v)
-	if perr != nil {
-		return def, nil
+	if n, perr := strconv.Atoi(v); perr == nil {
+		return n, nil
 	}
-	return n, nil
+	return def, nil // unreadable: as if never set
 }
 
 // SetInt stores a whole-number setting.

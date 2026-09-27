@@ -68,7 +68,8 @@ func (s *Store) SaveFaces(ctx context.Context, model string, rs []FaceResult) er
 			if r.Err == "" && !r.Skipped {
 				rows, err := old.QueryContext(ctx, r.AssetID)
 				before, err := collect(rows, err, func(rows *sql.Rows) (f storedBox, err error) {
-					return f, rows.Scan(&f.id, &f.X, &f.Y, &f.W, &f.H)
+					err = rows.Scan(&f.id, &f.X, &f.Y, &f.W, &f.H)
+					return f, err
 				})
 				if err != nil {
 					return err
@@ -176,18 +177,20 @@ func (s *Store) ClusterData(ctx context.Context, model string) ([]ClusterFace, [
 		return f, err
 	}, `SELECT f.id, f.asset_id, COALESCE(f.person_id, 0), COALESCE(f.assigned_by = 'user', 0), f.sharpness, f.yaw, f.vec
 		FROM faces f JOIN assets a ON a.id = f.asset_id
-		WHERE f.model = ? AND `+visibleAs("a")+` ORDER BY f.id`, model)
+		WHERE f.model = ? AND `+visibleA+` ORDER BY f.id`, model)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	people, err := queryAll(ctx, s.r, func(r *sql.Rows) (p ClusterPerson, err error) {
-		return p, r.Scan(&p.ID, &p.Named)
+		err = r.Scan(&p.ID, &p.Named)
+		return p, err
 	}, "SELECT id, name IS NOT NULL FROM people ORDER BY id")
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	rejections, err := queryAll(ctx, s.r, func(r *sql.Rows) (x Rejection, err error) {
-		return x, r.Scan(&x.Face, &x.Person)
+		err = r.Scan(&x.Face, &x.Person)
+		return x, err
 	}, "SELECT face_id, person_id FROM face_rejections")
 	return faces, people, rejections, err
 }

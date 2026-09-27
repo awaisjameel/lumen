@@ -1,3 +1,5 @@
+// Lumen is a local, private AI photo gallery for Windows: a Go engine and a
+// Vue UI in one Wails window. main wires the parts together.
 package main
 
 import (
@@ -142,6 +144,9 @@ type background struct {
 	cancel context.CancelFunc
 }
 
+// ServiceStartup starts the background work (Wails calls it once the app runs).
+//
+//nolint:unparam // the signature is Wails' service interface
 func (b *background) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
 	ctx, b.cancel = context.WithCancel(context.WithoutCancel(ctx))
 	if b.search != nil {
@@ -151,6 +156,9 @@ func (b *background) ServiceStartup(ctx context.Context, _ application.ServiceOp
 	return nil
 }
 
+// ServiceShutdown stops it, before the database closes.
+//
+//nolint:unparam // the signature is Wails' service interface
 func (b *background) ServiceShutdown() error {
 	b.cancel()
 	b.ix.Stop()
@@ -196,7 +204,7 @@ func setupLogging(paths core.Paths) {
 	if fi, err := os.Stat(name); err == nil && fi.Size() > maxLogSize {
 		_ = os.Rename(name, filepath.Join(paths.DataDir, "lumen.old.log"))
 	}
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		slog.Warn("no log file; logging to stderr only", "err", err)
 		return

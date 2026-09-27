@@ -1,3 +1,11 @@
 {
-  "recommendations": ["esbenp.prettier-vscode", "vue.volar", "golang.go", "editorconfig.editorconfig"]
+  "recommendations": [
+    "editorconfig.editorconfig",
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "vue.volar",
+    "golang.go",
+    "charliermarsh.ruff",
+    "timonwong.shellcheck"
+  ]
 }

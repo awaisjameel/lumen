@@ -1,16 +1,38 @@
 {
-  // Format on save with the project's own tools, so saving never fights the
-  // repository's style: Prettier from frontend/node_modules with
-  // frontend/.prettierrc.json, and gofmt (via gopls) for Go.
+  // Format and lint on save with the project's own pinned tools and configs,
+  // so the editor always agrees with scripts/lint.sh:
+  //   frontend: Prettier and ESLint from frontend/node_modules
+  //   Go: gopls (gofmt, goimports) and golangci-lint from deps/tools
+  //   Python: Ruff, shell: ShellCheck, both from deps/tools (scripts/deps.sh)
   "editor.formatOnSave": true,
   "files.eol": "\n",
+
   "prettier.requireConfig": true,
   "prettier.resolveGlobalModules": false,
   "prettier.ignorePath": "frontend/.prettierignore",
   "[typescript][javascript][vue][css][html][json][jsonc]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.codeActionsOnSave": { "source.fixAll.eslint": "explicit" }
   },
+  "eslint.workingDirectories": ["frontend"],
+  "eslint.validate": ["javascript", "typescript", "vue"],
+
   "[go]": {
-    "editor.defaultFormatter": "golang.go"
-  }
+    "editor.defaultFormatter": "golang.go",
+    "editor.codeActionsOnSave": { "source.organizeImports": "explicit" }
+  },
+  "gopls": { "formatting.local": "lumen" },
+  "go.lintTool": "golangci-lint-v2",
+  "go.lintOnSave": "package",
+  "go.alternateTools": { "golangci-lint-v2": "${workspaceFolder}/deps/tools/golangci-lint.exe" },
+
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": { "source.fixAll.ruff": "explicit", "source.organizeImports.ruff": "explicit" }
+  },
+  "ruff.path": ["${workspaceFolder}/deps/tools/ruff.exe"],
+  "ruff.importStrategy": "useBundled",
+
+  "shellcheck.executablePath": "${workspaceFolder}/deps/tools/shellcheck.exe",
+  "shellcheck.useWorkspaceRootAsCwd": true
 }

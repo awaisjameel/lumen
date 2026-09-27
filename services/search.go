@@ -21,6 +21,8 @@ type SearchService struct {
 	faces  bool           // faces are being recognised (the people engine runs)
 }
 
+// NewSearchService returns the search service (engine is nil without the AI;
+// faces is the people engine, if faces are recognised).
 func NewSearchService(st *store.Store, engine *search.Engine, faces *people.Engine) *SearchService {
 	return &SearchService{store: st, engine: engine, faces: faces != nil}
 }

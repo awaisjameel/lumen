@@ -140,7 +140,7 @@ func TestSplitPeopleMergeUnlessBothConfirmed(t *testing.T) {
 	for i := range as {
 		as[i].Person, bs[i].Person = 3, 8
 	}
-	faces := append(as, bs...)
+	faces := slices.Concat(as, bs)
 
 	got := Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 3}, {ID: 8}}}, DefaultParams)
 	if len(got.Merges) != 1 || got.Merges[0] != (store.Merge{From: 8, Into: 3}) {

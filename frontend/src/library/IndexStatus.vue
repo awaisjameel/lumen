@@ -20,7 +20,7 @@ const left = computed(() => preparing.value || understanding.value)
 const busy = computed(() => !!p.value && (p.value.scanning || left.value > 0))
 const fraction = computed(() => {
   const v = p.value
-  if (!v || !v.total) return 0
+  if (!v?.total) return 0
   return Math.min(1, Math.max(0, (v.total - left.value) / v.total))
 })
 

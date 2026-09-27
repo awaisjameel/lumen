@@ -69,7 +69,7 @@ func (p Paths) Faces() string { return filepath.Join(p.Runtime, "models", "faces
 // Ensure creates the data folders if they are missing.
 func (p Paths) Ensure() error {
 	for _, d := range []string{p.DataDir, p.ThumbDir} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
+		if err := os.MkdirAll(d, 0o750); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
 		}
 	}

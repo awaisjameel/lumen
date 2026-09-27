@@ -38,7 +38,7 @@ const marks = computed<Mark[]>(() => {
     if (month === lastMonth) continue
     lastMonth = month
     const row = props.layout.rowOfDay.get(b.day) ?? 0
-    const y = Math.min(h - 8, (props.layout.offsets[row] / scrollRange.value) * h)
+    const y = Math.min(h - 8, ((props.layout.offsets[row] ?? 0) / scrollRange.value) * h)
     const year = b.day.slice(0, 4)
     const isYear = year !== lastYear && y - lastYearY > 22
     if (year !== lastYear && isYear) lastYearY = y
@@ -58,7 +58,8 @@ const hoverLabel = computed(() => {
 })
 
 function yOf(e: PointerEvent): number {
-  const r = track.value!.getBoundingClientRect()
+  if (!track.value) return 0
+  const r = track.value.getBoundingClientRect()
   trackH.value = r.height
   return Math.max(0, Math.min(r.height, e.clientY - r.top))
 }
@@ -69,7 +70,7 @@ function seekTo(y: number) {
 
 function down(e: PointerEvent) {
   dragging.value = true
-  track.value!.setPointerCapture(e.pointerId)
+  track.value?.setPointerCapture(e.pointerId)
   seekTo(yOf(e))
 }
 function moveP(e: PointerEvent) {

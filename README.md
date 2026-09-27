@@ -50,11 +50,26 @@ Then, once, from Git Bash:
 scripts/deps.sh   # ~1.2 GB of downloads, pinned and hash-checked, into deps/ (git-ignored)
 ```
 
-It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2 and the YuNet and SFace face models, then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8, which takes it from 565 to 369 MB while agreeing with the original at cosine ≥ 0.9996, and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`. Nothing is ever downloaded at run time.
+It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2, the YuNet and SFace face models and the linters (into `deps/tools/`), then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8, which takes it from 565 to 369 MB while agreeing with the original at cosine ≥ 0.9996, and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`. Nothing is ever downloaded at run time.
 
 Check with `wails3 doctor`.
 
-Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), whatever `core.autocrlf` says. Formatting is the tools' job, never by hand: gofmt for Go, Prettier for the frontend (`npm run format`, pinned in `package.json`). `.editorconfig` and `.vscode/settings.json` make editors do the same on save (install the recommended extensions).
+Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), whatever `core.autocrlf` says.
+
+## Code quality
+
+`scripts/lint.sh` runs every check and fails if any does; `scripts/lint.sh --fix` first applies every automatic fix. Each tool is pinned and configured in the repository:
+
+| Code | Formatting | Linting | Config |
+| --- | --- | --- | --- |
+| Go | gofmt, goimports | golangci-lint 2.13 (vet, staticcheck, errcheck, gosec, errorlint, revive and more), deadcode, govulncheck | `.golangci.yml` |
+| Frontend | Prettier 3.9 | ESLint 10 with typescript-eslint (strict, type-aware) and eslint-plugin-vue, plus `vue-tsc` | `frontend/eslint.config.js`, `frontend/.prettierrc.json`, `frontend/tsconfig.json` |
+| Python | Ruff | Ruff | `ruff.toml` |
+| Shell | | ShellCheck | |
+
+The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm install`). New tool versions are at least a week old when pinned, matching `frontend/.npmrc`. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line.
+
+Editors do the same on save: `.editorconfig` sets line endings and indentation, and `.vscode/settings.json` runs these formatters and linters from the pinned copies (install the recommended extensions).
 
 ## Commands
 
@@ -63,10 +78,8 @@ wails3 dev                    # run with hot reload
 wails3 build                  # production build -> bin/Lumen.exe
 source scripts/env.sh         # before go test / vet / run: puts deps/runtime (libvips) on PATH
 go test -race ./internal/...  # engine tests, with the race detector (AI tests use deps/runtime)
-go vet . ./internal/... ./services/...
-staticcheck . ./internal/... ./services/...   # go install honnef.co/go/tools/cmd/staticcheck@latest
-cd frontend && npm run typecheck
-cd frontend && npm run format # Prettier (pinned, frontend/.prettierrc.json); format:check only checks
+scripts/lint.sh               # every formatter, linter and type check (--fix applies fixes first)
+cd frontend && npm run check  # the frontend's alone: vue-tsc, ESLint, Prettier (lint:fix and format fix)
 ```
 
 Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates, which only build for their own platforms.

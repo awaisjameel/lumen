@@ -148,12 +148,12 @@ export const useLibrary = defineStore('library', () => {
   async function ensureDays(want: string[]) {
     const s = scope.value
     if (s.kind === 'search') return // results arrive all at once
-    const missing = want.filter((d) => !fresh.has(d) && !inflight.has(d))
-    if (!missing.length) return
-    missing.sort()
+    const missing = want.filter((d) => !fresh.has(d) && !inflight.has(d)).sort()
+    const [from, to] = [missing[0], missing.at(-1)]
+    if (from === undefined || to === undefined) return
     missing.forEach((d) => inflight.add(d))
     try {
-      const got = await engine.days(missing[0], missing[missing.length - 1], s.view)
+      const got = await engine.days(from, to, s.view)
       if (scopeKey(s) !== scopeKey(scope.value)) return // the view changed while loading
       const next = new Map(days.value)
       const inSpan = new Set(missing)
@@ -178,14 +178,15 @@ export const useLibrary = defineStore('library', () => {
   async function neighbour(sel: Sel, dir: 1 | -1): Promise<Sel | null> {
     const list = days.value.get(sel.day) ?? []
     const i = list.findIndex((x) => x.id === sel.id)
-    if (i >= 0 && list[i + dir]) return { day: sel.day, id: list[i + dir].id }
+    const near = i >= 0 ? list[i + dir] : undefined
+    if (near) return { day: sel.day, id: near.id }
     const k = buckets.value.findIndex((b) => b.day === sel.day)
     const nb = buckets.value[k + dir]
     if (k < 0 || !nb) return null
     await ensureDays([nb.day])
     const next = days.value.get(nb.day)
-    if (!next?.length) return null
-    return { day: nb.day, id: (dir > 0 ? next[0] : next[next.length - 1]).id }
+    const edge = dir > 0 ? next?.[0] : next?.at(-1)
+    return edge ? { day: nb.day, id: edge.id } : null
   }
 
   /** Show another scope. Searching again with the same words re-runs the search. */

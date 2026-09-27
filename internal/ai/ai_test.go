@@ -2,6 +2,7 @@ package ai
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -167,12 +168,12 @@ func dot(a, b []float32) float32 {
 // error on every later run, never crash.
 func TestClosedSessionErrors(t *testing.T) {
 	var s *session
-	if _, err := s.run(nil); err != errClosed {
+	if _, err := s.run(nil); !errors.Is(err, errClosed) {
 		t.Errorf("nil session: %v", err)
 	}
 	s = &session{device: GPU}
 	s.close()
-	if _, err := s.run(nil); err != errClosed {
+	if _, err := s.run(nil); !errors.Is(err, errClosed) {
 		t.Errorf("closed session: %v", err)
 	}
 }

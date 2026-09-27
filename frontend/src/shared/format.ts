@@ -18,7 +18,7 @@ const fullFmt = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'full', timeStyle: 
 
 /** "YYYY-MM-DD" -> Date at midnight UTC. */
 function parseDay(day: string): Date {
-  return new Date(day + 'T00:00:00Z')
+  return new Date(`${day}T00:00:00Z`)
 }
 
 /** Local calendar day as YYYY-MM-DD (for "today" comparisons). */

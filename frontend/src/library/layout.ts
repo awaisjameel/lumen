@@ -61,7 +61,7 @@ export function rowAt(layout: Layout, y: number): number {
   let hi = o.length - 1
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1
-    if (o[mid] <= y) lo = mid
+    if ((o[mid] ?? Infinity) <= y) lo = mid
     else hi = mid - 1
   }
   return lo
@@ -83,7 +83,8 @@ export interface Pos {
 export function move(layout: Layout, from: Pos, dir: 'left' | 'right' | 'up' | 'down'): Pos | null {
   const r = rowOfItem(layout, from.day, from.i)
   if (r < 0) return null
-  const row = layout.rows[r] as Extract<Row, { kind: 'cells' }>
+  const row = layout.rows[r]
+  if (row?.kind !== 'cells') return null
   const col = from.i - row.start
 
   if (dir === 'left' || dir === 'right') {
@@ -94,7 +95,7 @@ export function move(layout: Layout, from: Pos, dir: 'left' | 'right' | 'up' | '
     // Cross into the neighbouring day.
     for (let k = r + step; k >= 0 && k < layout.rows.length; k += step) {
       const nr = layout.rows[k]
-      if (nr.kind === 'cells') return { day: nr.day, i: step > 0 ? nr.start : nr.start + nr.n - 1 }
+      if (nr?.kind === 'cells') return { day: nr.day, i: step > 0 ? nr.start : nr.start + nr.n - 1 }
     }
     return null
   }
@@ -102,7 +103,7 @@ export function move(layout: Layout, from: Pos, dir: 'left' | 'right' | 'up' | '
   const step = dir === 'down' ? 1 : -1
   for (let k = r + step; k >= 0 && k < layout.rows.length; k += step) {
     const nr = layout.rows[k]
-    if (nr.kind === 'cells') return { day: nr.day, i: nr.start + Math.min(col, nr.n - 1) }
+    if (nr?.kind === 'cells') return { day: nr.day, i: nr.start + Math.min(col, nr.n - 1) }
   }
   return null
 }

@@ -54,7 +54,8 @@ func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeR
 	q += " ORDER BY a.taken_at DESC LIMIT ?"
 	args = append(args, limit)
 	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
-		return j, r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation)
+		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation)
+		return j, err
 	}, q, args...)
 }
 
@@ -203,7 +204,7 @@ func (s *Store) CountPending(ctx context.Context, stages ...core.Stage) (int, er
 	}
 	var n int
 	err = s.r.QueryRowContext(ctx, `SELECT count(DISTINCT j.asset_id) FROM asset_jobs j JOIN assets a ON a.id = j.asset_id
-		WHERE j.status = 'pending' AND j.stage IN (SELECT value FROM json_each(?)) AND `+visibleAs("a"), string(list)).Scan(&n)
+		WHERE j.status = 'pending' AND j.stage IN (SELECT value FROM json_each(?)) AND `+visibleA, string(list)).Scan(&n)
 	return n, err
 }
 
@@ -235,6 +236,7 @@ func (s *Store) JobCounts(ctx context.Context) (pending map[core.Stage]int, fail
 			skipped += n
 		case core.JobError:
 			failed += n
+		case core.JobDone: // not selected
 		}
 	}
 	return pending, failed, skipped, rows.Err()

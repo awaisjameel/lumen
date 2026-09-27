@@ -143,18 +143,19 @@ type AssetScore struct {
 // used first.
 func (s *Store) Things(ctx context.Context, minScore float32) ([]core.Tag, error) {
 	out, err := queryAll(ctx, s.r, func(r *sql.Rows) (t core.Tag, err error) {
-		return t, r.Scan(&t.ID, &t.Name, &t.Kind, &t.Hidden, &t.Count)
+		err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Hidden, &t.Count)
+		return t, err
 	}, `SELECT t.id, t.name, t.kind, t.hidden, count(a.id)
 		FROM tags t
 		LEFT JOIN asset_tags x ON x.tag_id = t.id AND `+tagApplies+`
-		LEFT JOIN assets a ON a.id = x.asset_id AND `+visibleAs("a")+`
+		LEFT JOIN assets a ON a.id = x.asset_id AND `+visibleA+`
 		GROUP BY t.id ORDER BY count(a.id) DESC, t.name`, minScore)
 	if err != nil {
 		return nil, err
 	}
 	// Covers: the user's own choices first, then the AI's surest match.
 	cover, err := s.r.PrepareContext(ctx, `SELECT a.id, a.thumb_version FROM asset_tags x JOIN assets a ON a.id = x.asset_id
-		WHERE x.tag_id = ? AND `+tagApplies+` AND `+visibleAs("a")+` AND a.thumb_version > 0
+		WHERE x.tag_id = ? AND `+tagApplies+` AND `+visibleA+` AND a.thumb_version > 0
 		ORDER BY x.source = 'user' DESC, x.score DESC LIMIT 1`)
 	if err != nil {
 		return nil, err
@@ -234,7 +235,8 @@ func (s *Store) SetTagHidden(ctx context.Context, id int64, hidden bool) error {
 // minScore up, surest first.
 func (s *Store) AssetTags(ctx context.Context, assetID int64, minScore float32) ([]core.AssetTag, error) {
 	return queryAll(ctx, s.r, func(r *sql.Rows) (t core.AssetTag, err error) {
-		return t, r.Scan(&t.ID, &t.Name, &t.Kind, &t.Source, &t.Score)
+		err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Source, &t.Score)
+		return t, err
 	}, `SELECT t.id, t.name, t.kind, x.source, COALESCE(x.score, 0)
 		FROM asset_tags x JOIN tags t ON t.id = x.tag_id
 		WHERE x.asset_id = ? AND `+tagApplies+`
@@ -273,7 +275,8 @@ func (s *Store) SearchTags(ctx context.Context, text string, limit int) ([]core.
 	}
 	like := "%" + likeEscaper.Replace(text) + "%"
 	return queryAll(ctx, s.r, func(r *sql.Rows) (t core.Tag, err error) {
-		return t, r.Scan(&t.ID, &t.Name, &t.Kind, &t.Hidden)
+		err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Hidden)
+		return t, err
 	}, `SELECT id, name, kind, hidden FROM tags
 		WHERE name LIKE ? ESCAPE '\' AND hidden = 0
 		ORDER BY name LIKE ? ESCAPE '\' DESC, length(name), name LIMIT ?`, like, strings.TrimPrefix(like, "%"), limit)

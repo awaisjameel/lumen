@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -35,15 +36,15 @@ func halves(w, h int, a, b color.Color) *image.RGBA {
 
 // withOrientation inserts a minimal EXIF segment holding only an orientation.
 func withOrientation(jpg []byte, o uint16) []byte {
-	var tiff bytes.Buffer
-	tiff.WriteString("MM\x00\x2a")
-	binary.Write(&tiff, binary.BigEndian, uint32(8)) // first IFD
-	binary.Write(&tiff, binary.BigEndian, uint16(1)) // one entry
-	binary.Write(&tiff, binary.BigEndian, []uint16{0x0112, 3})
-	binary.Write(&tiff, binary.BigEndian, uint32(1)) // count
-	binary.Write(&tiff, binary.BigEndian, []uint16{o, 0})
-	binary.Write(&tiff, binary.BigEndian, uint32(0)) // no next IFD
-	payload := append([]byte("Exif\x00\x00"), tiff.Bytes()...)
+	be := binary.BigEndian
+	tiff := []byte("MM\x00\x2a")
+	tiff = be.AppendUint32(tiff, 8)                          // first IFD
+	tiff = be.AppendUint16(tiff, 1)                          // one entry
+	tiff = be.AppendUint16(be.AppendUint16(tiff, 0x0112), 3) // orientation, a SHORT
+	tiff = be.AppendUint32(tiff, 1)                          // count
+	tiff = be.AppendUint16(be.AppendUint16(tiff, o), 0)
+	tiff = be.AppendUint32(tiff, 0) // no next IFD
+	payload := append([]byte("Exif\x00\x00"), tiff...)
 	seg := []byte{0xFF, 0xE1, 0, 0}
 	binary.BigEndian.PutUint16(seg[2:], uint16(len(payload)+2))
 	out := append([]byte{0xFF, 0xD8}, seg...)
@@ -148,7 +149,7 @@ func TestThumbnailBMPAndHash(t *testing.T) {
 }
 
 func TestThumbnailRejectsVideosAndBrokenFiles(t *testing.T) {
-	if _, err := (Decoders{}).Thumbnail(ctx, "clip.mp4", core.KindVideo, 1); err != ErrUnsupported {
+	if _, err := (Decoders{}).Thumbnail(ctx, "clip.mp4", core.KindVideo, 1); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("video: got %v, want ErrUnsupported", err)
 	}
 	if _, err := (Decoders{}).Thumbnail(ctx, write(t, "junk.jpg", []byte("not an image")), core.KindPhoto, 1); err == nil {

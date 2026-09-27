@@ -32,12 +32,14 @@ func init() {
 // App is set once the application exists; events before that are dropped.
 type Emitter struct{ App *application.App }
 
+// Progress sends the indexing progress.
 func (e *Emitter) Progress(p core.Progress) {
 	if e.App != nil {
 		e.App.Event.Emit(EventProgress, p)
 	}
 }
 
+// LibraryChanged says the library changed, with how many assets are visible.
 func (e *Emitter) LibraryChanged(visible int) {
 	if e.App != nil {
 		e.App.Event.Emit(EventLibraryChanged, visible)
@@ -50,6 +52,7 @@ type LibraryService struct {
 	ix    *index.Indexer
 }
 
+// NewLibraryService returns the library service.
 func NewLibraryService(st *store.Store, ix *index.Indexer) *LibraryService {
 	return &LibraryService{store: st, ix: ix}
 }
@@ -166,7 +169,8 @@ func (s *LibraryService) ShowInFolder(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("explorer.exe", "/select,", f.Path)
+	// Explorer outlives this call (and Lumen), so it gets no deadline.
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), "explorer.exe", "/select,", f.Path)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

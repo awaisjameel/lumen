@@ -74,7 +74,7 @@ func (t *Tokenizer) Encode(text string, n int) []int64 {
 	syms := make([]int32, 0, len(s))
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
-		if id, ok := t.chars[r]; ok && size > 0 && !(r == utf8.RuneError && size == 1) {
+		if id, ok := t.chars[r]; ok && size > 0 && (r != utf8.RuneError || size != 1) {
 			syms = append(syms, id)
 		} else {
 			for _, b := range []byte(s[i : i+size]) {

@@ -46,9 +46,9 @@ func sink(name string, prompts ...string) Label {
 	return Label{Name: name, Prompts: prompts, Exclusive: true, Sink: true}
 }
 
-// sure raises a label's floor (see Label).
-func (l Label) sure(floor float32) Label {
-	l.Floor = floor
+// sure raises a label's floor to onScreen (see Label).
+func (l Label) sure() Label {
+	l.Floor = onScreen
 	return l
 }
 
@@ -227,14 +227,14 @@ var Vocabulary = []Label{
 	thing("Tattoos", "a tattoo"),
 
 	// Documents and screens
-	thing("Chats", "a whatsapp chat", "a text message conversation").sure(onScreen),
-	thing("Receipts", "a receipt", "a till receipt", "a shopping receipt").sure(onScreen),
+	thing("Chats", "a whatsapp chat", "a text message conversation").sure(),
+	thing("Receipts", "a receipt", "a till receipt", "a shopping receipt").sure(),
 	thing("ID cards", "an id card", "a passport"),
 	thing("Tickets", "a ticket", "a boarding pass"),
 	thing("Handwriting", "handwriting", "a handwritten note"),
 	thing("Whiteboards", "a whiteboard"),
-	thing("Charts", "a chart", "a bar chart", "a pie chart", "a graph").sure(onScreen),
-	thing("Spreadsheets", "a spreadsheet", "an excel spreadsheet").sure(onScreen),
+	thing("Charts", "a chart", "a bar chart", "a pie chart", "a graph").sure(),
+	thing("Spreadsheets", "a spreadsheet", "an excel spreadsheet").sure(),
 	thing("Maps", "a map"),
 	thing("Menus", "a restaurant menu"),
 	thing("Signs", "a sign", "a signboard"),

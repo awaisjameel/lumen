@@ -124,7 +124,7 @@ func (f *Faces) Detect(pix []byte, w, h int, minScore float32) ([]Face, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer in.Destroy()
+	defer destroy(in)
 	outs, err := f.det.run(in)
 	if err != nil {
 		return nil, fmt.Errorf("run face detector: %w", err)
@@ -199,7 +199,7 @@ func (f *Faces) Embed(pix []byte, w, h int, faces []Face) ([]Identity, error) {
 			return nil, err
 		}
 		res, err := f.rec.run(in)
-		in.Destroy()
+		destroy(in)
 		if err != nil {
 			return nil, fmt.Errorf("run face recognizer: %w", err)
 		}
@@ -341,7 +341,7 @@ func resample(pix []byte, w, h, dw, dh int) []byte {
 			var r, g, b, n int
 			for yy := y0; yy < y1; yy++ {
 				row := pix[(yy*w+x0)*3 : (yy*w+x1)*3]
-				for i := 0; i < len(row); i += 3 {
+				for i := 0; i+2 < len(row); i += 3 {
 					r, g, b = r+int(row[i]), g+int(row[i+1]), b+int(row[i+2])
 				}
 				n += x1 - x0

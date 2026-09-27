@@ -55,7 +55,7 @@ func watch(ctx context.Context, dir string, onChange func(path string)) (<-chan 
 	released := make(chan struct{})
 	go func() {
 		defer close(released)
-		defer windows.CloseHandle(h)
+		defer windows.CloseHandle(h) //nolint:errcheck // nothing to do if closing fails
 		select {
 		case <-readerDone:
 			return
@@ -64,7 +64,7 @@ func watch(ctx context.Context, dir string, onChange func(path string)) (<-chan 
 		t := time.NewTicker(50 * time.Millisecond)
 		defer t.Stop()
 		for {
-			windows.CancelIoEx(h, nil)
+			_ = windows.CancelIoEx(h, nil) // fails once the read has ended; the loop checks
 			select {
 			case <-readerDone:
 				return

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Source this (Git Bash) before go test, go vet or go run: Lumen links
 # libvips-42.dll, which Windows must find when a binary starts, so
 # deps/runtime goes on PATH. (Built apps find it beside Lumen.exe.)

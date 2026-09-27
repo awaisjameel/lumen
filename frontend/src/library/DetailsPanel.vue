@@ -50,7 +50,10 @@ watch(
 useLiveReload(() => loadExtras(props.sel?.id))
 
 async function loadTags(id: number | undefined) {
-  if (!id) return void (tags.value = [])
+  if (!id) {
+    tags.value = []
+    return
+  }
   try {
     const got = await engine.assetTags(id)
     if (props.sel?.id === id) tags.value = got
@@ -60,7 +63,10 @@ async function loadTags(id: number | undefined) {
 }
 
 async function loadFaces(id: number | undefined) {
-  if (!id) return void (faces.value = [])
+  if (!id) {
+    faces.value = []
+    return
+  }
   try {
     const got = await engine.assetFaces(id)
     if (props.sel?.id === id) faces.value = got

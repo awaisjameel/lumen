@@ -36,7 +36,7 @@ function onKey(e: KeyboardEvent) {
     if (n) active.value = e.key === 'ArrowDown' ? (active.value + 1) % n : (active.value - 1 + n) % n
   } else if (e.key === 'Enter') {
     e.preventDefault()
-    pick(active.value >= 0 ? options.value[active.value].name : text.value)
+    pick(options.value[active.value]?.name ?? text.value) // -1: what was typed
   } else if (e.key === 'Escape' && open.value) {
     e.stopPropagation()
     open.value = false

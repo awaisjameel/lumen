@@ -18,7 +18,8 @@ var ErrAlreadyCovered = errors.New("this folder is already part of your library"
 // ListSources returns every source folder, alphabetically.
 func (s *Store) ListSources(ctx context.Context) ([]core.Source, error) {
 	return queryAll(ctx, s.r, func(r *sql.Rows) (src core.Source, err error) {
-		return src, r.Scan(&src.ID, &src.Path, &src.Enabled)
+		err = r.Scan(&src.ID, &src.Path, &src.Enabled)
+		return src, err
 	}, "SELECT id, path, enabled FROM sources ORDER BY path")
 }
 

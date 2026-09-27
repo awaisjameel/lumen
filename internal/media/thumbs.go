@@ -75,6 +75,8 @@ type Decoders struct {
 	FFmpeg string // ffmpeg.exe, for HEIC when WIC can't decode it; "" = none
 }
 
+// Thumbnail decodes a file once into both thumbnail sizes and its
+// perceptual hash, upright.
 func (d Decoders) Thumbnail(ctx context.Context, path string, kind core.Kind, orientation int) (Thumbs, error) {
 	src, err := d.open(ctx, path, kind, orientation, core.ThumbLarge)
 	if err != nil {
@@ -150,7 +152,7 @@ func (d Decoders) heif(ctx context.Context, path string, orientation, maxSide in
 	}
 	pix, w, h, ferr := ffmpegDecode(ctx, d.FFmpeg, path, maxSide)
 	if ferr != nil {
-		return source{}, fmt.Errorf("decode HEIC: %v; %w", werr, ferr)
+		return source{}, fmt.Errorf("decode HEIC: %w; %w", werr, ferr)
 	}
 	return source{pix: pix, w: w, h: h, bands: 3, orientation: orientation}, nil
 }

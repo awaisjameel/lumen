@@ -67,7 +67,7 @@ async function act(fn: (ids: number[]) => Promise<unknown>) {
 
 const reject = () => act((ids) => engine.rejectFaces(id.value, ids))
 const moveTo = (to: string) => act((ids) => engine.nameFaces(ids, to))
-const useAsCover = () => act(async ([face]) => engine.setPersonCover(id.value, face))
+const useAsCover = () => act(async ([face]) => face !== undefined && engine.setPersonCover(id.value, face))
 </script>
 
 <template>

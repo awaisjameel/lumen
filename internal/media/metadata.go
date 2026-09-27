@@ -142,14 +142,14 @@ func validGPS(lat, lon float64) bool {
 }
 
 // cameraName joins make and model without repeating the make ("Canon Canon EOS R6").
-func cameraName(make, model string) string {
+func cameraName(maker, model string) string {
 	switch {
 	case model == "":
-		return make
-	case make == "" || strings.HasPrefix(strings.ToLower(model), strings.ToLower(make)):
+		return maker
+	case maker == "" || strings.HasPrefix(strings.ToLower(model), strings.ToLower(maker)):
 		return model
 	}
-	return make + " " + model
+	return maker + " " + model
 }
 
 // Filenames that carry a date: IMG_20230514_184502.jpg, PXL_20230514_...,

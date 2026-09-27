@@ -133,10 +133,10 @@ func (e *ImageEncoder) Encode(images [][]byte) ([][]float32, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer in.Destroy()
+	defer destroy(in)
 	out, err := e.s.run(in)
 	if err != nil && e.s.device == GPU {
-		// A GPU can go away (driver update, device removed): carry on on the CPU.
+		// A GPU can go away (driver update, device removed): keep going on the CPU.
 		slog.Warn("image model failed on the GPU; switching to the CPU", "err", err)
 		e.s.close() // if the CPU fails to load too, later runs report errClosed
 		if oerr := e.open(CPU); oerr != nil {
@@ -196,7 +196,7 @@ func (e *TextEncoder) Encode(texts []string) ([][]float32, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer in.Destroy()
+	defer destroy(in)
 	out, err := e.s.run(in)
 	if err != nil {
 		return nil, fmt.Errorf("run text model: %w", err)

@@ -171,7 +171,9 @@ func TestIndexerFindsPeople(t *testing.T) {
 	defer st.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	st.SetBool(ctx, core.SettingAIOnBattery, true) // must not depend on the power source
+	if err := st.SetBool(ctx, core.SettingAIOnBattery, true); err != nil { // must not depend on the power source
+		t.Fatal(err)
+	}
 	if _, err := st.AddSource(ctx, dir); err != nil {
 		t.Fatal(err)
 	}

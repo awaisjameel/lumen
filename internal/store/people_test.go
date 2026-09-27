@@ -14,7 +14,7 @@ func peopleFixture(t *testing.T) (st *Store, ctx context.Context, a, b, c int64)
 	t.Helper()
 	st, ctx = openTest(t), context.Background()
 	src, _ := st.AddSource(ctx, `C:\Photos`)
-	st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b"), item(src.ID, `C:\Photos\c.jpg`, "c")})
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b"), item(src.ID, `C:\Photos\c.jpg`, "c")})))
 	jobs, _ := st.PendingJobs(ctx, core.StageMetadata, nil, 10)
 	a, b, c = jobs[0].AssetID, jobs[1].AssetID, jobs[2].AssetID
 	err := st.SaveFaces(ctx, "f1", []FaceResult{
@@ -123,7 +123,7 @@ func TestClusteringNeverOverridesTheUser(t *testing.T) {
 func TestPeopleEdits(t *testing.T) {
 	st, ctx, a, b, c := peopleFixture(t)
 	fa, fb, fc := facesOf(t, st, a), facesOf(t, st, b), facesOf(t, st, c)
-	st.ApplyClusters(ctx, ClusterChanges{NewPeople: [][]int64{{fa[0].ID}, {fb[0].ID}, {fa[1].ID, fc[0].ID}}})
+	check(t, st.ApplyClusters(ctx, ClusterChanges{NewPeople: [][]int64{{fa[0].ID}, {fb[0].ID}, {fa[1].ID, fc[0].ID}}}))
 	people, _ := st.People(ctx)
 	if len(people) != 3 {
 		t.Fatalf("people = %+v", people)

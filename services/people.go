@@ -16,6 +16,7 @@ type PeopleService struct {
 	engine *people.Engine // nil when faces can't be recognised
 }
 
+// NewPeopleService returns the people service (engine is nil without face models).
 func NewPeopleService(st *store.Store, engine *people.Engine) *PeopleService {
 	return &PeopleService{store: st, engine: engine}
 }

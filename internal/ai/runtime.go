@@ -22,7 +22,7 @@ import (
 var (
 	initMu  sync.Mutex
 	initDir string
-	initErr error
+	errInit error // Init's result, returned again by later calls
 )
 
 // Init loads ONNX Runtime from dir. Later calls return the first result.
@@ -30,7 +30,7 @@ func Init(dir string) error {
 	initMu.Lock()
 	defer initMu.Unlock()
 	if initDir != "" {
-		return initErr
+		return errInit
 	}
 	initDir = dir
 	// Without DirectML only the CPU is available, which still works.
@@ -39,8 +39,8 @@ func Init(dir string) error {
 	}
 	ort.SetSharedLibraryPath(filepath.Join(dir, "onnxruntime.dll"))
 	if err := ort.InitializeEnvironment(ort.WithLogLevelError()); err != nil {
-		initErr = fmt.Errorf("start ONNX Runtime: %w", err)
-		return initErr
+		errInit = fmt.Errorf("start ONNX Runtime: %w", err)
+		return errInit
 	}
 	slog.Info("ONNX Runtime ready", "version", ort.GetVersion())
 	return nil
@@ -50,14 +50,17 @@ func Init(dir string) error {
 func Shutdown() {
 	initMu.Lock()
 	defer initMu.Unlock()
-	if initDir != "" && initErr == nil {
-		ort.DestroyEnvironment()
+	if initDir != "" && errInit == nil {
+		if err := ort.DestroyEnvironment(); err != nil {
+			slog.Warn("stop ONNX Runtime", "err", err)
+		}
 	}
 }
 
 // Device is where a model runs.
 type Device string
 
+// The devices.
 const (
 	GPU Device = "gpu" // DirectML: any DirectX 12 GPU
 	CPU Device = "cpu"
@@ -79,7 +82,7 @@ func openSession(path string, device Device, threads int, outputs ...string) (*s
 	if err != nil {
 		return nil, err
 	}
-	defer opts.Destroy()
+	defer destroy(opts)
 	for _, kv := range [][2]string{
 		// Idle worker threads otherwise busy-wait after every run, starving
 		// libvips and other sessions (10 to 25 times slower in Phase 0).
@@ -157,14 +160,18 @@ func (s *session) run(in ort.Value) ([][]float32, error) {
 		} else if err == nil {
 			err = fmt.Errorf("model output %s is not float32", s.outputs[i])
 		}
-		o.Destroy()
+		destroy(o)
 	}
 	return data, err
 }
 
 func (s *session) close() {
 	if s != nil && s.s != nil {
-		s.s.Destroy()
+		destroy(s.s)
 		s.s = nil
 	}
 }
+
+// destroy frees an ONNX Runtime object. Freeing can't usefully fail, and
+// there is nothing to do if it does, so the error is dropped here, once.
+func destroy(v interface{ Destroy() error }) { _ = v.Destroy() }

@@ -63,7 +63,7 @@ func (c *Cache) Write(id int64, t Thumbs) error {
 // into place.
 func writeAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")

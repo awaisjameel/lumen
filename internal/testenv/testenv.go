@@ -10,11 +10,11 @@ import (
 )
 
 // Root is the repository root (the folder holding go.mod).
-func Root(t testing.TB) string {
-	t.Helper()
+func Root(tb testing.TB) string {
+	tb.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
@@ -22,54 +22,54 @@ func Root(t testing.TB) string {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatal("go.mod not found above the test directory")
+			tb.Fatal("go.mod not found above the test directory")
 		}
 		dir = parent
 	}
 }
 
 // Runtime returns deps/runtime, skipping the test if it is missing.
-func Runtime(t testing.TB) string {
-	t.Helper()
-	dir := filepath.Join(Root(t), "deps", "runtime")
+func Runtime(tb testing.TB) string {
+	tb.Helper()
+	dir := filepath.Join(Root(tb), "deps", "runtime")
 	if _, err := os.Stat(filepath.Join(dir, "models")); err != nil {
-		t.Skip("deps/runtime missing: run scripts/deps.sh")
+		tb.Skip("deps/runtime missing: run scripts/deps.sh")
 	}
 	return dir
 }
 
 // File returns a file inside deps/runtime, skipping the test if it is missing.
-func File(t testing.TB, rel ...string) string {
-	t.Helper()
-	p := filepath.Join(append([]string{Runtime(t)}, rel...)...)
+func File(tb testing.TB, rel ...string) string {
+	tb.Helper()
+	p := filepath.Join(append([]string{Runtime(tb)}, rel...)...)
 	if _, err := os.Stat(p); err != nil {
-		t.Skipf("%s missing: run scripts/deps.sh", p)
+		tb.Skipf("%s missing: run scripts/deps.sh", p)
 	}
 	return p
 }
 
 // HEICSamples returns the public HEIC samples the Phase 0 spikes downloaded
 // (spikes/.cache/heic), skipping the test if there are none.
-func HEICSamples(t testing.TB) []string {
-	t.Helper()
-	paths, _ := filepath.Glob(filepath.Join(Root(t), "spikes", ".cache", "heic", "*.heic"))
+func HEICSamples(tb testing.TB) []string {
+	tb.Helper()
+	paths, _ := filepath.Glob(filepath.Join(Root(tb), "spikes", ".cache", "heic", "*.heic"))
 	if len(paths) == 0 {
-		t.Skip("no HEIC samples: run spikes/fetch.sh")
+		tb.Skip("no HEIC samples: run spikes/fetch.sh")
 	}
 	return paths
 }
 
 // FacePhotos returns the photos in the folder LUMEN_FACE_PHOTOS names (real
 // photos of people, kept out of the repo), skipping the test if it is unset.
-func FacePhotos(t testing.TB, n int) []string {
-	t.Helper()
+func FacePhotos(tb testing.TB, n int) []string {
+	tb.Helper()
 	dir := os.Getenv("LUMEN_FACE_PHOTOS")
 	if dir == "" {
-		t.Skip("LUMEN_FACE_PHOTOS not set: no photos of people to test on")
+		tb.Skip("LUMEN_FACE_PHOTOS not set: no photos of people to test on")
 	}
 	paths, _ := filepath.Glob(filepath.Join(dir, "*.[jJ][pP][gG]"))
 	if len(paths) == 0 {
-		t.Skipf("no JPEGs in %s", dir)
+		tb.Skipf("no JPEGs in %s", dir)
 	}
 	return paths[:min(n, len(paths))]
 }

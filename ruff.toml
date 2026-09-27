@@ -1,0 +1,29 @@
+# Ruff: lint and format for scripts/*.py (model preparation). Pinned and
+# installed by scripts/deps.sh; run through scripts/lint.sh.
+target-version = "py314"
+line-length = 120
+include = ["scripts/**/*.py"]
+
+[lint]
+select = [
+  "E", "W",  # pycodestyle
+  "F",       # pyflakes
+  "I",       # import order
+  "B",       # bugbear: likely bugs
+  "UP",      # pyupgrade: modern syntax
+  "SIM",     # simplifications
+  "C4",      # comprehensions
+  "PTH",     # pathlib over os.path
+  "RET",     # return statements
+  "PL",      # pylint
+  "RUF",     # ruff's own
+  "N",       # naming
+  "S",       # security (bandit)
+]
+ignore = [
+  "PLR2004", # "magic" numbers: model shapes and file-format constants read better inline
+  "S310",    # urllib.urlopen: deps.sh pins what is fetched
+]
+
+[format]
+quote-style = "double"

@@ -24,7 +24,8 @@ const (
 )
 
 func scanFace(r *sql.Rows) (f core.Face, err error) {
-	return f, r.Scan(&f.ID, &f.AssetID, &f.Thumb, &f.AssetW, &f.AssetH, &f.X, &f.Y, &f.W, &f.H, &f.Person, &f.Name, &f.ByUser)
+	err = r.Scan(&f.ID, &f.AssetID, &f.Thumb, &f.AssetW, &f.AssetH, &f.X, &f.Y, &f.W, &f.H, &f.Person, &f.Name, &f.ByUser)
+	return f, err
 }
 
 // clearest orders a person's faces best first for a cover: the user's pick,
@@ -36,7 +37,7 @@ const clearest = `f.id = (SELECT cover_face FROM people WHERE id = f.person_id) 
 // then by how many photos they are in.
 func (s *Store) People(ctx context.Context) ([]core.Person, error) {
 	people, err := queryAll(ctx, s.r, scanPerson, `SELECT p.id, COALESCE(p.name, ''), p.hidden, count(DISTINCT f.asset_id)
-		FROM people p JOIN faces f ON f.person_id = p.id JOIN assets a ON a.id = f.asset_id AND `+visibleAs("a")+`
+		FROM people p JOIN faces f ON f.person_id = p.id JOIN assets a ON a.id = f.asset_id AND `+visibleA+`
 		GROUP BY p.id ORDER BY p.name IS NULL, count(DISTINCT f.asset_id) DESC, p.name, p.id`)
 	if err != nil {
 		return nil, err
@@ -48,7 +49,7 @@ func (s *Store) People(ctx context.Context) ([]core.Person, error) {
 func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 	people, err := queryAll(ctx, s.r, scanPerson, `SELECT p.id, COALESCE(p.name, ''), p.hidden,
 			(SELECT count(DISTINCT f.asset_id) FROM faces f JOIN assets a ON a.id = f.asset_id
-				WHERE f.person_id = p.id AND `+visibleAs("a")+`)
+				WHERE f.person_id = p.id AND `+visibleA+`)
 		FROM people p WHERE p.id = ?`, id)
 	if err != nil {
 		return core.Person{}, err
@@ -60,12 +61,13 @@ func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 }
 
 func scanPerson(r *sql.Rows) (p core.Person, err error) {
-	return p, r.Scan(&p.ID, &p.Name, &p.Hidden, &p.Count)
+	err = r.Scan(&p.ID, &p.Name, &p.Hidden, &p.Count)
+	return p, err
 }
 
 // addCovers picks each person's clearest face with a thumbnail to show.
 func (s *Store) addCovers(ctx context.Context, people []core.Person) error {
-	st, err := s.r.PrepareContext(ctx, faceSelect+` WHERE f.person_id = ? AND `+visibleAs("a")+` AND a.thumb_version > 0
+	st, err := s.r.PrepareContext(ctx, faceSelect+` WHERE f.person_id = ? AND `+visibleA+` AND a.thumb_version > 0
 		ORDER BY `+clearest+` LIMIT 1`)
 	if err != nil {
 		return err
@@ -98,7 +100,7 @@ func (s *Store) PersonFaces(ctx context.Context, id int64) (faces []core.Face, v
 		x.vec = bytesFloat32(vec)
 		return x, err
 	}, "SELECT "+faceColumns+", f.vec"+faceFrom+
-		` WHERE f.person_id = ? AND `+visibleAs("a")+` ORDER BY a.taken_at DESC, f.id`, id)
+		` WHERE f.person_id = ? AND `+visibleA+` ORDER BY a.taken_at DESC, f.id`, id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -118,7 +120,8 @@ func (s *Store) AssetFaces(ctx context.Context, assetID int64) ([]core.Face, err
 // search).
 func (s *Store) NamedPeople(ctx context.Context) ([]core.Person, error) {
 	return queryAll(ctx, s.r, func(r *sql.Rows) (p core.Person, err error) {
-		return p, r.Scan(&p.ID, &p.Name, &p.Hidden)
+		err = r.Scan(&p.ID, &p.Name, &p.Hidden)
+		return p, err
 	}, "SELECT id, name, hidden FROM people WHERE name IS NOT NULL ORDER BY length(name) DESC, name")
 }
 
@@ -129,9 +132,12 @@ func (s *Store) PeopleAssets(ctx context.Context, people []int64) ([]int64, erro
 	if err != nil {
 		return nil, err
 	}
-	return queryAll(ctx, s.r, func(r *sql.Rows) (id int64, err error) { return id, r.Scan(&id) },
+	return queryAll(ctx, s.r, func(r *sql.Rows) (id int64, err error) {
+		err = r.Scan(&id)
+		return id, err
+	},
 		`SELECT f.asset_id FROM faces f JOIN assets a ON a.id = f.asset_id
-		WHERE f.person_id IN (SELECT value FROM json_each(?1)) AND `+visibleAs("a")+`
+		WHERE f.person_id IN (SELECT value FROM json_each(?1)) AND `+visibleA+`
 		GROUP BY f.asset_id HAVING count(DISTINCT f.person_id) = json_array_length(?1)
 		ORDER BY max(a.taken_at) DESC, f.asset_id DESC`, string(list))
 }
@@ -145,7 +151,8 @@ func (s *Store) SearchPeople(ctx context.Context, text string, limit int) ([]cor
 	}
 	like := "%" + likeEscaper.Replace(text) + "%"
 	people, err := queryAll(ctx, s.r, func(r *sql.Rows) (p core.Person, err error) {
-		return p, r.Scan(&p.ID, &p.Name, &p.Hidden)
+		err = r.Scan(&p.ID, &p.Name, &p.Hidden)
+		return p, err
 	}, `SELECT id, name, hidden FROM people WHERE name LIKE ?1 ESCAPE '\' AND hidden = 0
 		ORDER BY name LIKE ?2 ESCAPE '\' DESC, length(name), name LIMIT ?3`, like, strings.TrimPrefix(like, "%"), limit)
 	if err != nil {

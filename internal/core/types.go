@@ -9,6 +9,7 @@ import (
 // Kind is what sort of media an asset is.
 type Kind string
 
+// The kinds of media.
 const (
 	KindPhoto Kind = "photo"
 	KindVideo Kind = "video"
@@ -18,6 +19,7 @@ const (
 // asset_jobs row per stage, so a stage can be re-run on its own later.
 type Stage string
 
+// The stages, in pipeline order.
 const (
 	StageMetadata  Stage = "metadata"
 	StageThumbnail Stage = "thumbnail" // also produces the perceptual hash
@@ -35,6 +37,7 @@ func (s Stage) AI() bool { return s == StageEmbedding || s == StageFaces }
 // JobStatus is the state of one stage for one asset.
 type JobStatus string
 
+// The states a job can be in.
 const (
 	JobPending JobStatus = "pending"
 	JobDone    JobStatus = "done"
@@ -72,6 +75,7 @@ const (
 // DateSource says where an asset's capture date came from, best first.
 type DateSource string
 
+// Where a date can come from.
 const (
 	DateFromEXIF     DateSource = "exif"
 	DateFromFilename DateSource = "filename"
@@ -105,6 +109,7 @@ type GridItem struct {
 // Filter narrows the grid to a subset of the library.
 type Filter string
 
+// The grid filters.
 const (
 	FilterAll        Filter = ""
 	FilterFavourites Filter = "favourites"
@@ -122,6 +127,7 @@ type View struct {
 // TagKind says where a tag comes from.
 type TagKind string
 
+// The kinds of tag.
 const (
 	TagBuiltin TagKind = "builtin" // Lumen's vocabulary; the AI applies it
 	TagLabel   TagKind = "label"   // made by the user; the AI applies it
@@ -131,6 +137,7 @@ const (
 // TagSource says who put a tag on an asset.
 type TagSource string
 
+// Who can put a tag on an asset.
 const (
 	TagByAI     TagSource = "ai"
 	TagByUser   TagSource = "user"

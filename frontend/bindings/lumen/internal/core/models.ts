@@ -73,6 +73,9 @@ export enum DateSource {
      */
     $zero = "",
 
+    /**
+     * Where a date can come from.
+     */
     DateFromEXIF = "exif",
     DateFromFilename = "filename",
 
@@ -149,6 +152,9 @@ export enum Filter {
      */
     $zero = "",
 
+    /**
+     * The grid filters.
+     */
     FilterAll = "",
     FilterFavourites = "favourites",
     FilterVideos = "videos",
@@ -180,6 +186,9 @@ export enum Kind {
      */
     $zero = "",
 
+    /**
+     * The kinds of media.
+     */
     KindPhoto = "photo",
     KindVideo = "video",
 };
@@ -329,6 +338,8 @@ export enum TagKind {
     $zero = "",
 
     /**
+     * The kinds of tag.
+     *
      * Lumen's vocabulary; the AI applies it
      */
     TagBuiltin = "builtin",
@@ -353,6 +364,9 @@ export enum TagSource {
      */
     $zero = "",
 
+    /**
+     * Who can put a tag on an asset.
+     */
     TagByAI = "ai",
     TagByUser = "user",
 

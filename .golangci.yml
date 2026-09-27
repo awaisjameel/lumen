@@ -1,0 +1,132 @@
+# golangci-lint v2 (pinned and installed by scripts/deps.sh; run through
+# scripts/lint.sh). The standard linters plus those that find real bugs in
+# this kind of code: SQL rows and statements left open, errors compared
+# without errors.Is, loop and context mistakes, shadowed builtins. Style is
+# gofmt's and goimports' job.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - asasalint
+    - bidichk
+    - bodyclose
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - gocheckcompilerdirectives
+    - gocritic
+    - gosec
+    - intrange
+    - makezero
+    - mirror
+    - misspell
+    - nakedret
+    - nilerr
+    - noctx
+    - nolintlint
+    - predeclared
+    - reassign
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - thelper
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+
+  settings:
+    errcheck:
+      # Cleanup that can't usefully fail is dropped explicitly (`_ =`) or in
+      # one helper (ai.destroy), so every other unchecked error is a finding.
+      exclude-functions:
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      enabled-tags: [diagnostic, style]
+    gosec:
+      excludes:
+        - G104 # unchecked errors: errcheck's job, with its exclusions
+        - G115 # integer conversions: the ones here reinterpret bits on purpose (int8 vectors, hashes, tokens)
+        - G202 # SQL concatenation: only constant fragments are joined; every value is a bound parameter
+        - G204 # subprocesses from variables: ffmpeg.exe and explorer.exe by design
+        - G304 # files from variables: a photo app opens the user's files
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # memory layout over readability
+        - shadow # `err :=` in an inner scope is idiomatic
+    misspell:
+      locale: UK # the code and UI are written in British English
+      ignore-rules: # American spellings that are names, not prose
+        - color # image/color
+        - initialize # CoInitializeEx
+        - optimize # libvips' optimize_coding
+        - airplane # SigLIP prompts use the words web captions use
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: var-declaration
+        - name: var-naming
+
+  exclusions:
+    presets:
+      - common-false-positives
+      - std-error-handling
+    paths:
+      - build # Wails' platform templates
+      - spikes # Phase 0 experiments, their own module
+      - frontend
+    rules:
+      # Test fixtures: throwaway files, seeded randomness, small conversions.
+      - path: _test\.go
+        linters: [gosec]
+      # cgo rewrites these files; gocritic then reports its generated code.
+      - path: internal/media/(vips|wic)/
+        linters: [gocritic]
+        text: (dupImport|dupSubExpr|uncheckedInlineErr)
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes: [lumen]
+  exclusions:
+    paths:
+      - build
+      - spikes
+      - frontend

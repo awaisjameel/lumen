@@ -1,7 +1,9 @@
 package index
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -30,16 +32,32 @@ func writeJPEG(t *testing.T, path string, w, h int, c color.RGBA) {
 			img.Set(x, y, color.RGBA{c.R, uint8(x), uint8(y), 255})
 		}
 	}
-	os.MkdirAll(filepath.Dir(path), 0o755)
-	f, err := os.Create(path)
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	var err error
+	if filepath.Ext(path) == ".png" {
+		err = png.Encode(&buf, img)
+	} else {
+		err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90})
+	}
+	if err == nil {
+		err = os.WriteFile(path, buf.Bytes(), 0o600)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	if filepath.Ext(path) == ".png" {
-		png.Encode(f, img)
-	} else {
-		jpeg.Encode(f, img, &jpeg.Options{Quality: 90})
+}
+
+// writeFile writes data to path, creating its folder.
+func writeFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -54,12 +72,14 @@ func TestIndexerEndToEnd(t *testing.T) {
 	writeJPEG(t, filepath.Join(photos, "trip", "IMG_20240101_090000.jpg"), 400, 300, color.RGBA{R: 20})
 	writeJPEG(t, filepath.Join(photos, "Screenshot_2024-01-01-10-00-00.png"), 300, 600, color.RGBA{R: 30})
 	writeJPEG(t, filepath.Join(photos, ".hidden", "IMG_20200101_000000.jpg"), 50, 50, color.RGBA{R: 40})
-	os.WriteFile(filepath.Join(photos, "notes.txt"), []byte("not media"), 0o644)
-	os.WriteFile(filepath.Join(photos, "photo.heic"), []byte("not really heic"), 0o644)
+	writeFile(t, filepath.Join(photos, "notes.txt"), []byte("not media"))
+	writeFile(t, filepath.Join(photos, "photo.heic"), []byte("not really heic"))
 	// An exact duplicate in another folder: must become the same asset.
-	data, _ := os.ReadFile(filepath.Join(photos, "trip", "IMG_20240101_090000.jpg"))
-	os.MkdirAll(filepath.Join(photos, "backup"), 0o755)
-	os.WriteFile(filepath.Join(photos, "backup", "copy.jpg"), data, 0o644)
+	data, err := os.ReadFile(filepath.Join(photos, "trip", "IMG_20240101_090000.jpg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(photos, "backup", "copy.jpg"), data)
 
 	st, err := store.Open(paths.DBPath)
 	if err != nil {
@@ -70,7 +90,7 @@ func TestIndexerEndToEnd(t *testing.T) {
 	if _, err := st.AddSource(ctx, photos); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddSource(ctx, filepath.Join(photos, "trip")); err != store.ErrAlreadyCovered {
+	if _, err := st.AddSource(ctx, filepath.Join(photos, "trip")); !errors.Is(err, store.ErrAlreadyCovered) {
 		t.Fatalf("nested source: got %v, want ErrAlreadyCovered", err)
 	}
 

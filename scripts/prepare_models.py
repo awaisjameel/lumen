@@ -35,23 +35,25 @@ from pathlib import Path
 
 import numpy as np
 import onnx
-from onnx import helper, numpy_helper, TensorProto
+from onnx import TensorProto, helper, numpy_helper
 from onnx.utils import Extractor
 from tokenizers import Tokenizer
 
-BATCH = 16        # images per vision run (fixed shape; the engine pads the last batch)
+BATCH = 16  # images per vision run (fixed shape; the engine pads the last batch)
 IMAGE_SIZE = 224
 MAX_TOKENS = 64
 DIM = 768
 # The logit scale and bias live only in the original checkpoint, not the ONNX
 # towers; read them from its safetensors header with HTTP range requests.
-CHECKPOINT = ("https://huggingface.co/google/siglip2-base-patch16-224/resolve/"
-              "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2/model.safetensors")
+CHECKPOINT = (
+    "https://huggingface.co/google/siglip2-base-patch16-224/resolve/"
+    "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2/model.safetensors"
+)
 VERSION = "siglip2-base-p16-224-fp16-1"  # bump when the prepared files change
 
 FACES_VERSION = "yunet-2023mar+sface-2021dec-1"  # bump when the prepared files change
 DETECT_SIZE = 640  # YuNet's input side
-CROP_SIZE = 112    # SFace's aligned face side
+CROP_SIZE = 112  # SFace's aligned face side
 FACE_DIM = 128
 
 
@@ -61,15 +63,21 @@ def siglip2(src: Path, dst: Path, fixtures: Path | None) -> None:
     text(src / "text_model_fp16.onnx", dst / "text.onnx")
     tokenizer(src / "tokenizer.json", dst / "tokenizer.bin", fixtures)
     scale, bias = logit_params()
-    (dst / "siglip2.json").write_text(json.dumps({
-        "version": VERSION,
-        "batch": BATCH,
-        "imageSize": IMAGE_SIZE,
-        "maxTokens": MAX_TOKENS,
-        "dim": DIM,
-        "logitScale": scale,
-        "logitBias": bias,
-    }, indent=2) + "\n")
+    (dst / "siglip2.json").write_text(
+        json.dumps(
+            {
+                "version": VERSION,
+                "batch": BATCH,
+                "imageSize": IMAGE_SIZE,
+                "maxTokens": MAX_TOKENS,
+                "dim": DIM,
+                "logitScale": scale,
+                "logitBias": bias,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     print("prepared", dst)
 
 
@@ -81,7 +89,7 @@ def keep_output(model: onnx.ModelProto, output: str) -> onnx.ModelProto:
 
 def vision(src: Path, dst: Path) -> None:
     m = keep_output(onnx.load(src), "pooler_output")
-    for d, v in zip(m.graph.input[0].type.tensor_type.shape.dim, [BATCH, 3, IMAGE_SIZE, IMAGE_SIZE]):
+    for d, v in zip(m.graph.input[0].type.tensor_type.shape.dim, [BATCH, 3, IMAGE_SIZE, IMAGE_SIZE], strict=True):
         d.ClearField("dim_param")
         d.dim_value = v
     out = m.graph.output[0].type.tensor_type.shape.dim[0]
@@ -108,10 +116,12 @@ def text(src: Path, dst: Path) -> None:
     err = np.abs(q.astype(np.float32) * scale - w).max()
 
     g.initializer.remove(table)
-    g.initializer.extend([
-        numpy_helper.from_array(q, "token_table_q"),
-        numpy_helper.from_array(scale.astype(np.float16), "token_table_scale"),
-    ])
+    g.initializer.extend(
+        [
+            numpy_helper.from_array(q, "token_table_q"),
+            numpy_helper.from_array(scale.astype(np.float16), "token_table_scale"),
+        ]
+    )
     ids = gather.input[1]
     out = gather.output[0]
     idx = list(g.node).index(gather)
@@ -168,10 +178,22 @@ def tokenizer(src: Path, dst: Path, fixtures: Path | None) -> None:
     tok = Tokenizer.from_file(str(src))
     tok.enable_truncation(MAX_TOKENS)
     samples = [
-        "a photo of a dog", "Beach sunset", "people in an office", "screenshot of code",
-        "café résumé 😀 naïve", "Ali at the beach", "  two  spaces ", "Birthday cake with candles",
-        "receipt", "a handwritten note", "東京タワー", "مسجد", "snow-covered mountains at dawn",
-        "WhatsApp image", "3 people", "a very long query " * 20,
+        "a photo of a dog",
+        "Beach sunset",
+        "people in an office",
+        "screenshot of code",
+        "café résumé 😀 naïve",
+        "Ali at the beach",
+        "  two  spaces ",
+        "Birthday cake with candles",
+        "receipt",
+        "a handwritten note",
+        "東京タワー",
+        "مسجد",
+        "snow-covered mountains at dawn",
+        "WhatsApp image",
+        "3 people",
+        "a very long query " * 20,
     ]
     lines = []
     for s in samples:
@@ -201,7 +223,8 @@ def faces(src: Path, dst: Path) -> None:
     dst.mkdir(parents=True, exist_ok=True)
     yunet = onnx.load(src / "yunet.onnx")
     dims = [d.dim_value for d in yunet.graph.input[0].type.tensor_type.shape.dim]
-    assert dims == [1, 3, DETECT_SIZE, DETECT_SIZE], dims
+    if dims != [1, 3, DETECT_SIZE, DETECT_SIZE]:
+        raise SystemExit(f"yunet.onnx: unexpected input shape {dims}")
     onnx.checker.check_model(yunet)
     onnx.save(yunet, dst / "yunet.onnx")
 
@@ -211,7 +234,8 @@ def faces(src: Path, dst: Path) -> None:
     keep = [i for i in g.input if i.name not in weights]
     del g.input[:]
     g.input.extend(keep)
-    assert [i.name for i in g.input] == ["data"], [i.name for i in g.input]
+    if [i.name for i in g.input] != ["data"]:
+        raise SystemExit(f"sface.onnx: unexpected inputs {[i.name for i in g.input]}")
     for t in (g.input[0], g.output[0]):
         d = t.type.tensor_type.shape.dim[0]
         d.ClearField("dim_value")
@@ -221,12 +245,18 @@ def faces(src: Path, dst: Path) -> None:
 
     for name in ("yunet.LICENSE", "sface.LICENSE"):
         (dst / name).write_bytes((src / name).read_bytes())
-    (dst / "faces.json").write_text(json.dumps({
-        "version": FACES_VERSION,
-        "detectSize": DETECT_SIZE,
-        "cropSize": CROP_SIZE,
-        "dim": FACE_DIM,
-    }, indent=2) + "\n")
+    (dst / "faces.json").write_text(
+        json.dumps(
+            {
+                "version": FACES_VERSION,
+                "detectSize": DETECT_SIZE,
+                "cropSize": CROP_SIZE,
+                "dim": FACE_DIM,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     print("prepared", dst)
 
 

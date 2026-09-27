@@ -21,6 +21,7 @@ type MediaService struct {
 	cache *media.Cache
 }
 
+// NewMediaService returns the media service.
 func NewMediaService(st *store.Store, cache *media.Cache) *MediaService {
 	return &MediaService{store: st, cache: cache}
 }

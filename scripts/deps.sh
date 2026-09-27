@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Fetches and prepares everything Lumen needs besides Go and Node: libvips,
-# ONNX Runtime with DirectML, FFmpeg and the SigLIP 2 models. Every download is
-# pinned and checked against its SHA-256. Run from Git Bash; safe to re-run
-# (finished steps are skipped). Needs curl, unzip and Python 3 (model prep only).
+# ONNX Runtime with DirectML, FFmpeg, the SigLIP 2 and face models, and the
+# linters. Every download is pinned and checked against its SHA-256. Run from
+# Git Bash; safe to re-run (finished steps are skipped). Needs curl, unzip,
+# Go and Python 3 (model prep only).
 #
 #   deps/cache/     downloads
 #   deps/vips/      libvips headers and import library (for cgo)
 #   deps/runtime/   exactly what ships beside Lumen.exe (DLLs, ffmpeg/, models/)
+#   deps/tools/     development tools: golangci-lint, deadcode, govulncheck, ruff, shellcheck
 #
 # The last step copies deps/runtime into bin/ (hard links, so it's instant).
 set -euo pipefail
@@ -86,6 +88,31 @@ prepare() {
 }
 prepare siglip2
 prepare faces
+
+# Development tools (never shipped): the linters scripts/lint.sh runs, into
+# deps/tools. golangci-lint is built with this machine's Go (go install
+# checks it against the Go checksum database), so it understands the Go
+# version the project uses.
+T=$D/tools
+mkdir -p "$T"
+get https://github.com/astral-sh/ruff/releases/download/0.16.8/ruff-x86_64-pc-windows-msvc.zip \
+  ruff-0.16.8.zip 7985e06caf14b0077cb68da41edbf812e1d9654fe4c144d72b71138e96350129
+"$T/ruff.exe" --version 2>/dev/null | grep -q '^ruff 0.16.8$' || unzip -q -o -j "$D/cache/ruff-0.16.8.zip" ruff.exe -d "$T"
+get https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.zip \
+  shellcheck-v0.11.0.zip 8a4e35ab0b331c85d73567b12f2a444df187f483e5079ceffa6bda1faa2e740e
+"$T/shellcheck.exe" --version 2>/dev/null | grep -q '^version: 0.11.0$' ||
+  unzip -q -o -j "$D/cache/shellcheck-v0.11.0.zip" shellcheck.exe -d "$T"
+# goinstall BIN MODULE@VERSION: build a Go tool into deps/tools unless that
+# version is already there.
+goinstall() {
+  local bin=$T/$1.exe pkg=$2 want=${2##*@}
+  [ -f "$bin" ] && go version -m "$bin" | grep -q "^[[:space:]]mod[[:space:]].*[[:space:]]${want}[[:space:]]" && return
+  echo "build $1 $want"
+  GOBIN=$T CGO_ENABLED=0 go install "$pkg"
+}
+goinstall golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+goinstall deadcode golang.org/x/tools/cmd/deadcode@v0.50.0
+goinstall govulncheck golang.org/x/vuln/cmd/govulncheck@v1.8.0
 
 # Stage the runtime beside the executable (hard links: no copies of 700 MB).
 mkdir -p "$ROOT/bin"

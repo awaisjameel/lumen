@@ -49,7 +49,7 @@ func TestReopenKeepsSchemaVersion(t *testing.T) {
 			t.Fatal(err)
 		}
 		var v int
-		err = st.r.QueryRow("PRAGMA user_version").Scan(&v)
+		err = st.r.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&v)
 		st.Close()
 		if err != nil || v != latest {
 			t.Fatalf("user_version = %d (%v), want %d", v, err, latest)
@@ -125,7 +125,7 @@ func TestIngestJoinsDuplicatesAndKeepsMovedAssets(t *testing.T) {
 func TestJobsFlowAndRequeue(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
 	src, _ := st.AddSource(ctx, `C:\Photos`)
-	st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.heic`, "a")})
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.heic`, "a")})))
 
 	if n, err := st.CountPending(ctx, core.StageEmbedding, core.StageFaces); err != nil || n != 1 {
 		t.Fatalf("photos waiting for the AI = %d (%v), want 1", n, err)
@@ -165,7 +165,7 @@ func TestJobsFlowAndRequeue(t *testing.T) {
 	}
 
 	// Jobs of an asset whose file is gone neither run nor count as waiting.
-	st.RemoveFiles(ctx, []int64{1})
+	check(t, st.RemoveFiles(ctx, []int64{1}))
 	if pending, _, skipped, _ := st.JobCounts(ctx); pending[core.StageEmbedding] != 0 || skipped != 0 {
 		t.Fatalf("missing asset still counted: %v, %d skipped", pending, skipped)
 	}
@@ -187,7 +187,7 @@ func TestJobsFlowAndRequeue(t *testing.T) {
 func TestEmbeddingsAndTags(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
 	src, _ := st.AddSource(ctx, `C:\Photos`)
-	st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b")})
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b")})))
 	jobs, _ := st.PendingJobs(ctx, core.StageMetadata, nil, 10)
 	a, b := jobs[0].AssetID, jobs[1].AssetID
 
@@ -214,11 +214,11 @@ func TestEmbeddingsAndTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []int8
-	st.Embeddings(ctx, "m", func(id int64, v []int8, scale float32) {
+	check(t, st.Embeddings(ctx, "m", func(id int64, v []int8, scale float32) {
 		if id == a && scale == 0.01 {
 			got = append(got, v...)
 		}
-	})
+	}))
 	if len(got) != 2 || got[0] != 127 || got[1] != -5 {
 		t.Fatalf("embedding round trip: %v", got)
 	}
@@ -244,8 +244,8 @@ func TestEmbeddingsAndTags(t *testing.T) {
 	if err := st.UntagAsset(ctx, a, beach); err != nil {
 		t.Fatal(err)
 	}
-	st.SaveEmbeddings(ctx, "m", []EmbedResult{{AssetID: a, Vec: []int8{1, 1}, Scale: 1, Tags: []TagScore{{beach, 0.9}}}})
-	st.SetTagScores(ctx, beach, []AssetScore{{a, 0.9}, {b, 0.5}})
+	check(t, st.SaveEmbeddings(ctx, "m", []EmbedResult{{AssetID: a, Vec: []int8{1, 1}, Scale: 1, Tags: []TagScore{{beach, 0.9}}}}))
+	check(t, st.SetTagScores(ctx, beach, []AssetScore{{a, 0.9}, {b, 0.5}}))
 	if tags, _ = st.AssetTags(ctx, a, 0.002); len(tags) != 0 {
 		t.Fatalf("rejected tag came back: %+v", tags)
 	}
@@ -261,17 +261,17 @@ func TestEmbeddingsAndTags(t *testing.T) {
 	if _, err := st.CreateTag(ctx, "ali's BIRTHDAY", core.TagManual, nil); !errors.Is(err, ErrTagExists) {
 		t.Fatalf("duplicate name: %v", err)
 	}
-	st.TagAsset(ctx, b, id)
+	check(t, st.TagAsset(ctx, b, id))
 	if tags, _ = st.AssetTags(ctx, b, 0.99); len(tags) != 1 || tags[0].Source != core.TagByUser {
 		t.Fatalf("user tag = %+v", tags)
 	}
-	st.UntagAsset(ctx, b, id)
+	check(t, st.UntagAsset(ctx, b, id))
 	var rows int
-	st.r.QueryRow("SELECT count(*) FROM asset_tags WHERE tag_id = ?", id).Scan(&rows)
+	check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM asset_tags WHERE tag_id = ?", id).Scan(&rows))
 	if rows != 0 {
 		t.Fatalf("manual tag removal left %d rows", rows)
 	}
-	if err := st.DeleteTag(ctx, beach); err != ErrBuiltinTag {
+	if err := st.DeleteTag(ctx, beach); !errors.Is(err, ErrBuiltinTag) {
 		t.Fatalf("deleting a built-in: %v", err)
 	}
 	if found, _ := st.SearchTags(ctx, "BIRTH", 5); len(found) != 1 || found[0].ID != id {
@@ -279,7 +279,7 @@ func TestEmbeddingsAndTags(t *testing.T) {
 	}
 
 	// Vocabulary changes: dropped built-ins go; one the user relied on stays as theirs.
-	st.TagAsset(ctx, b, dogs)
+	check(t, st.TagAsset(ctx, b, dogs))
 	if err := st.SyncVocabulary(ctx, []VocabLabel{{Name: "Beaches", Prompts: []string{"a beach", "the seaside"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestEmptyListsAreNotNil(t *testing.T) {
 
 func TestIntSettingReadsOlderFloat(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
-	st.SetFloat(ctx, core.SettingVocabulary, 3) // how earlier versions stored it
+	check(t, st.SetFloat(ctx, core.SettingVocabulary, 3)) // how earlier versions stored it
 	if v, err := st.Int(ctx, core.SettingVocabulary, 0); err != nil || v != 3 {
 		t.Fatalf("int = %d (%v), want 3", v, err)
 	}
@@ -329,7 +329,7 @@ func TestIntSettingReadsOlderFloat(t *testing.T) {
 func TestGridItemsKeepOrder(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
 	src, _ := st.AddSource(ctx, `C:\Photos`)
-	st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b")})
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b")})))
 	jobs, _ := st.PendingJobs(ctx, core.StageMetadata, nil, 10)
 	a, b := jobs[0].AssetID, jobs[1].AssetID
 	items, err := st.GridItems(ctx, []int64{b, 999, a})
@@ -343,7 +343,7 @@ func TestFloatSetting(t *testing.T) {
 	if v, _ := st.Float(ctx, core.SettingTagConfidence, 0.02); v != 0.02 {
 		t.Fatalf("default = %v", v)
 	}
-	st.SetFloat(ctx, core.SettingTagConfidence, 0.125)
+	check(t, st.SetFloat(ctx, core.SettingTagConfidence, 0.125))
 	if v, _ := st.Float(ctx, core.SettingTagConfidence, 0.02); v != 0.125 {
 		t.Fatalf("stored = %v", v)
 	}
@@ -361,6 +361,17 @@ func TestBoolSetting(t *testing.T) {
 		t.Fatal("stored false, read true")
 	}
 }
+
+// check fails the test on a setup error.
+func check(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// errOf is the error of a (value, error) call, for check.
+func errOf[T any](_ T, err error) error { return err }
 
 func item(sourceID int64, path, content string) IngestItem {
 	return IngestItem{

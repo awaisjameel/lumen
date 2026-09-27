@@ -19,16 +19,17 @@ var ErrNotFound = errors.New("not found")
 func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float32) ([]core.DayBucket, error) {
 	where, args := viewSQL(v, minScore)
 	return queryAll(ctx, s.r, func(r *sql.Rows) (b core.DayBucket, err error) {
-		return b, r.Scan(&b.Day, &b.Count)
+		err = r.Scan(&b.Day, &b.Count)
+		return b, err
 	}, `SELECT strftime('%Y-%m-%d', taken_at, 'unixepoch') AS day, count(*)
 		FROM assets WHERE `+where+` GROUP BY day ORDER BY day DESC`, args...)
 }
 
 // viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
-func viewSQL(v core.View, minScore float32) (string, []any) {
-	where := visible
-	var args []any
+func viewSQL(v core.View, minScore float32) (where string, args []any) {
+	where = visible
 	switch v.Filter {
+	case core.FilterAll:
 	case core.FilterFavourites:
 		where += " AND favourite = 1"
 	case core.FilterVideos:

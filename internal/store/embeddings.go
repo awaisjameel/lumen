@@ -99,23 +99,22 @@ func (s *Store) ReplaceAITags(ctx context.Context, sets []AssetTagSet) error {
 }
 
 // aiTagStmts replaces one asset's AI tags inside a transaction.
-type aiTagStmts struct{ clear, add *sql.Stmt }
+type aiTagStmts struct{ del, add *sql.Stmt }
 
 func prepareAITags(ctx context.Context, tx *sql.Tx) (*aiTagStmts, error) {
-	clear, err := tx.PrepareContext(ctx, "DELETE FROM asset_tags WHERE asset_id = ? AND source = 'ai'")
+	del, err := tx.PrepareContext(ctx, "DELETE FROM asset_tags WHERE asset_id = ? AND source = 'ai'")
 	if err != nil {
 		return nil, err
 	}
-	add, err := prepareAddAI(ctx, tx)
+	add, err := prepareAddAI(ctx, tx) // on failure the transaction ends, closing del
 	if err != nil {
-		clear.Close()
 		return nil, err
 	}
-	return &aiTagStmts{clear: clear, add: add}, nil
+	return &aiTagStmts{del: del, add: add}, nil
 }
 
 func (a *aiTagStmts) set(ctx context.Context, assetID int64, tags []TagScore) error {
-	if _, err := a.clear.ExecContext(ctx, assetID); err != nil {
+	if _, err := a.del.ExecContext(ctx, assetID); err != nil {
 		return err
 	}
 	for _, t := range tags {
@@ -127,8 +126,8 @@ func (a *aiTagStmts) set(ctx context.Context, assetID int64, tags []TagScore) er
 }
 
 func (a *aiTagStmts) close() {
-	a.clear.Close()
-	a.add.Close()
+	_ = a.del.Close()
+	_ = a.add.Close()
 }
 
 // prepareAddAI inserts an AI tag (asset, tag, score) unless the user already

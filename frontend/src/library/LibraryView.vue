@@ -105,7 +105,10 @@ const virtualizer = useVirtualizer(
   computed(() => ({
     count: layout.value.rows.length,
     getScrollElement: () => scroller.value,
-    estimateSize: (i: number) => rowHeight(layout.value.rows[i], layout.value.cell),
+    estimateSize: (i: number) => {
+      const row = layout.value.rows[i]
+      return row ? rowHeight(row, layout.value.cell) : layout.value.cell
+    },
     overscan: 4,
   })),
 )
@@ -122,14 +125,15 @@ interface VisibleRow {
 const visible = computed<VisibleRow[]>(() => {
   const L = layout.value
   const days = lib.days
-  return virtualizer.value.getVirtualItems().map((v) => {
+  return virtualizer.value.getVirtualItems().flatMap((v) => {
     const row = L.rows[v.index]
+    if (!row) return [] // the layout shrank; the virtualizer catches up next tick
     let items: (GridItem | null)[] = []
     if (row.kind === 'cells') {
       const loaded = days.get(row.day)
       items = Array.from({ length: row.n }, (_, k) => loaded?.[row.start + k] ?? null)
     }
-    return { key: `${row.day}:${row.kind === 'cells' ? row.start : 'h'}`, top: v.start, height: v.size, row, items }
+    return [{ key: `${row.day}:${row.kind === 'cells' ? row.start : 'h'}`, top: v.start, height: v.size, row, items }]
   })
 })
 
@@ -139,10 +143,11 @@ watch(
   [visible, () => lib.days],
   () => {
     const days = [...new Set(visible.value.map((v) => v.row.day))]
-    if (!days.length || lib.isSearch) return
+    const [newest, oldest] = [days[0], days.at(-1)]
+    if (newest === undefined || oldest === undefined || lib.isSearch) return
     void lib.ensureDays(days)
     clearTimeout(focusTimer)
-    focusTimer = window.setTimeout(() => void engine.focus(days[days.length - 1], days[0]).catch(logError), 300)
+    focusTimer = window.setTimeout(() => void engine.focus(oldest, newest).catch(logError), 300)
   },
   { flush: 'post' },
 )
