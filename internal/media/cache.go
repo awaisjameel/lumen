@@ -28,7 +28,7 @@ type Cache struct {
 	Dir     string
 	Decoder Decoder
 
-	rebuilding sync.Map       // asset id -> *sync.Mutex while its thumbnails are rebuilt
+	rebuilding [64]sync.Mutex // stable locks also serialise retries after a failed rebuild
 	writing    [64]sync.Mutex // striped by asset id: one writer per asset at a time
 }
 
@@ -153,13 +153,12 @@ func (c *Cache) ensure(ctx context.Context, id int64, path string, orig Original
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	v, _ := c.rebuilding.LoadOrStore(id, &sync.Mutex{})
-	mu := v.(*sync.Mutex)
+	mu := &c.rebuilding[uint64(id)%uint64(len(c.rebuilding))]
 	mu.Lock()
-	defer func() {
-		c.rebuilding.Delete(id) // later callers find the file (or retry afresh)
-		mu.Unlock()
-	}()
+	defer mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if _, err := os.Stat(path); err == nil {
 		return nil // rebuilt by another caller while we waited
 	}

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { engine, Filter, thumbUrl } from '../bridge'
+import { AlbumKind, engine, Filter, thumbUrl } from '../bridge'
 import type { GridItem } from '../bridge'
 import { logError } from '../shared/errors'
 import { dayLabel, duration } from '../shared/format'
@@ -14,6 +14,7 @@ import PersonHeader from '../people/PersonHeader.vue'
 import { usePeople } from '../people/store'
 import SearchBox from '../search/SearchBox.vue'
 import { useThings } from '../things/store'
+import { useAlbums } from '../albums/store'
 import { buildLayout, GAP, move, rowHeight, rowOfItem } from './layout'
 import type { Row } from './layout'
 import { scopeKey, useLibrary, ZOOM_MAX, ZOOM_MIN } from './store'
@@ -28,6 +29,7 @@ const PAD = 20 // horizontal padding of the grid
 const lib = useLibrary()
 const things = useThings()
 const people = usePeople()
+const albums = useAlbums()
 const route = useRoute()
 
 // The route decides what the grid shows: a filter (/, /favourites, /videos),
@@ -42,6 +44,7 @@ const scope = computed<Scope>(() => {
       filter: route.meta.filter ?? Filter.FilterAll,
       tag: route.name === 'thing' ? id : 0,
       person: route.name === 'person' ? id : 0,
+      album: route.name === 'album' ? id : 0,
     },
   }
 })
@@ -59,6 +62,14 @@ const titles: Record<Filter, MessageKey> = {
 
 const tagId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.tag ?? 0) : 0))
 const personId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.person ?? 0) : 0))
+const albumId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.album ?? 0) : 0))
+watch(
+  albumId,
+  (id) => {
+    if (id && !albums.byId.has(id)) void albums.load().catch(logError)
+  },
+  { immediate: true },
+)
 watch(
   personId,
   (id) => {
@@ -79,6 +90,7 @@ const title = computed(() => {
   if (s.kind === 'search') return `“${s.query}”`
   if (tagId.value) return things.byId.get(tagId.value)?.name ?? ''
   if (personId.value) return people.byId.get(personId.value)?.name || t('person.unnamed')
+  if (albumId.value) return albums.byId.get(albumId.value)?.name || t('nav.albums')
   return t(titles[s.view.filter])
 })
 
@@ -224,7 +236,7 @@ async function onKey(e: KeyboardEvent) {
 watch(
   () => lib.viewer,
   (now, before) => {
-    if (!now && before) {
+    if (!now && before && lib.itemAt(before)) {
       lib.selected = before
       scrollIntoView(before)
       scroller.value?.focus()
@@ -243,6 +255,15 @@ const emptyText = computed((): [string, string] => {
   }
   if (tagId.value) return [t('things.viewEmpty'), t('things.viewEmptyHint')]
   if (personId.value) return [t('person.empty'), t('person.emptyHint')]
+  if (albumId.value)
+    return [
+      t('albums.viewEmpty'),
+      t(
+        albums.byId.get(albumId.value)?.kind === AlbumKind.AlbumSmart
+          ? 'albums.smartEmptyHint'
+          : 'albums.manualEmptyHint',
+      ),
+    ]
   const keys: [MessageKey, MessageKey] =
     s.view.filter === Filter.FilterFavourites
       ? ['favourites.empty', 'favourites.emptyHint']

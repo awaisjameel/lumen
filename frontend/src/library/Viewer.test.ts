@@ -88,3 +88,18 @@ it('does not reopen a closed viewer when neighbour loading finishes', async () =
   await flushPromises()
   expect(lib.viewer).toBeNull()
 })
+
+it('ignores details from an earlier visit to the same asset', async () => {
+  let finish!: (value: AssetDetail) => void
+  vi.mocked(engine.asset).mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+  wrapper = mount(Viewer)
+  const lib = useLibrary()
+  lib.viewer = { day: 'results', id: 2 }
+  await flushPromises()
+  lib.viewer = { day: 'results', id: 1 }
+  await flushPromises()
+  expect(wrapper.find('video').exists()).toBe(true)
+  finish({ ...detail, video: null, webNative: true })
+  await flushPromises()
+  expect(wrapper.find('video').exists()).toBe(true)
+})

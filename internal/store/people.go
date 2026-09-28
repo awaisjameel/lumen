@@ -59,7 +59,10 @@ func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 	if len(people) == 0 {
 		return core.Person{}, ErrNotFound
 	}
-	return people[0], s.addCovers(ctx, people)
+	if err := s.addCovers(ctx, people); err != nil {
+		return core.Person{}, err
+	}
+	return people[0], nil
 }
 
 func scanPerson(r *sql.Rows) (p core.Person, err error) {
@@ -279,7 +282,11 @@ func affected(res sql.Result, err error) error {
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err == nil && n == 0 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
 		return ErrNotFound
 	}
 	return nil

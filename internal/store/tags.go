@@ -17,6 +17,8 @@ var (
 	ErrTagExists = errors.New("a tag with that name already exists")
 	// ErrBuiltinTag means the operation only applies to tags the user made.
 	ErrBuiltinTag = errors.New("built-in things can be hidden, not deleted")
+	// ErrTagInAlbum protects a saved rule from dangling or reused tag IDs.
+	ErrTagInAlbum = errors.New("this Thing is used by a smart album; edit that album's rule before deleting it")
 )
 
 // VocabLabel is one built-in Thing, as the vocabulary defines it.
@@ -79,7 +81,8 @@ func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE tags SET kind = 'manual', prompts = NULL, exclusive = 0, model = NULL, vecs = NULL
-			WHERE `+stale+` AND EXISTS (SELECT 1 FROM asset_tags x WHERE x.tag_id = tags.id AND x.source = 'user')`, list); err != nil {
+			WHERE `+stale+` AND (EXISTS (SELECT 1 FROM asset_tags x WHERE x.tag_id = tags.id AND x.source = 'user')
+			OR EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND json_extract(rule_json, '$.tag') = tags.id))`, list); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM tags WHERE `+stale, list)
@@ -212,17 +215,26 @@ func (s *Store) TagByName(ctx context.Context, name string) (int64, core.TagKind
 
 // DeleteTag removes a tag the user made (built-ins can only be hidden).
 func (s *Store) DeleteTag(ctx context.Context, id int64) error {
-	var kind core.TagKind
-	switch err := s.r.QueryRowContext(ctx, "SELECT kind FROM tags WHERE id = ?", id).Scan(&kind); {
-	case errors.Is(err, sql.ErrNoRows):
-		return ErrNotFound
-	case err != nil:
-		return err
-	case kind == core.TagBuiltin:
-		return ErrBuiltinTag
-	}
-	_, err := s.w.ExecContext(ctx, "DELETE FROM tags WHERE id = ?", id)
-	return err
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		var kind core.TagKind
+		switch err := tx.QueryRowContext(ctx, "SELECT kind FROM tags WHERE id = ?", id).Scan(&kind); {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrNotFound
+		case err != nil:
+			return err
+		case kind == core.TagBuiltin:
+			return ErrBuiltinTag
+		}
+		var used bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM albums WHERE kind = 'smart'
+		AND json_extract(rule_json, '$.tag') = ?)`, id).Scan(&used); err != nil {
+			return err
+		}
+		if used {
+			return ErrTagInAlbum
+		}
+		return affected(tx.ExecContext(ctx, "DELETE FROM tags WHERE id = ?", id))
+	})
 }
 
 // SetTagHidden hides a tag from Things, or shows it again.

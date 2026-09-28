@@ -41,13 +41,29 @@ func TestDeletedDottedFolderTriggersReconciliation(t *testing.T) {
 	defer ix.Stop()
 	ix.onFSChange(filepath.Join(photos, "Trip.v1"))
 	ix.flushFSChanges()
-	select {
-	case req := <-ix.scanReqs:
-		if req.sourceID != src.ID || req.under != "" {
-			t.Fatalf("wrong rescan: %+v", req)
-		}
-	default:
+	if ix.pendingScans() != 1 {
 		t.Fatal("deleted dotted folder was ignored")
+	}
+	req, ok := ix.nextScan(t.Context())
+	if !ok || req.sourceID != src.ID || req.under != "" {
+		t.Fatalf("wrong rescan: %+v", req)
+	}
+}
+
+func TestScanQueueCoalescesWithoutDroppingSources(t *testing.T) {
+	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	for id := int64(1); id <= 300; id++ {
+		ix.queueScan(scanRequest{sourceID: id, under: `C:\Photos\one`})
+		ix.queueScan(scanRequest{sourceID: id, under: `C:\Photos\two`})
+	}
+	if n := ix.pendingScans(); n != 300 {
+		t.Fatalf("pending sources = %d, want 300", n)
+	}
+	for id := int64(1); id <= 300; id++ {
+		r, ok := ix.nextScan(t.Context())
+		if !ok || r.sourceID != id || r.under != "" {
+			t.Fatalf("source %d was not fully reconciled: %+v", id, r)
+		}
 	}
 }
 
@@ -202,7 +218,7 @@ func waitIdle(t *testing.T, ix *Indexer, total int) {
 	for time.Now().Before(deadline) {
 		time.Sleep(200 * time.Millisecond)
 		p = ix.Progress(context.Background())
-		if !p.Scanning && p.Metadata == 0 && p.Thumbnail == 0 && p.Embedding == 0 && p.Total == total && len(ix.scanReqs) == 0 {
+		if !p.Scanning && p.Metadata == 0 && p.Thumbnail == 0 && p.Embedding == 0 && p.Total == total && ix.pendingScans() == 0 {
 			return
 		}
 	}

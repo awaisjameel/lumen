@@ -22,6 +22,51 @@ export interface AI {
 }
 
 /**
+ * Album is a manual collection or a saved rule with its current visible count and cover.
+ */
+export interface Album {
+    "id": number;
+    "name": string;
+    "kind": AlbumKind;
+    "rule": AlbumRule;
+    "count": number;
+    "cover": number;
+    "coverThumb": number;
+}
+
+/**
+ * AlbumKind identifies how an album selects its members.
+ */
+export enum AlbumKind {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The supported album kinds.
+     */
+    AlbumManual = "manual",
+    AlbumSmart = "smart",
+};
+
+/**
+ * AlbumRule is a conjunction of optional filters, saved for a smart album.
+ * Dates are inclusive camera-clock calendar days (YYYY-MM-DD).
+ */
+export interface AlbumRule {
+    /**
+     * "" = photos and videos
+     */
+    "kind": Kind;
+    "favourites": boolean;
+    "from": string;
+    "to": string;
+    "tag": number;
+    "person": number;
+}
+
+/**
  * AssetDetail is everything the details panel shows.
  */
 export interface AssetDetail {
@@ -465,4 +510,9 @@ export interface View {
      * 0 = anyone
      */
     "person"?: number;
+
+    /**
+     * 0 = any; excludes other view filters
+     */
+    "album"?: number;
 }

@@ -16,7 +16,9 @@ export const RESULTS = 'results'
 export type Scope = { kind: 'timeline'; view: View } | { kind: 'search'; query: string }
 
 export function scopeKey(s: Scope): string {
-  return s.kind === 'search' ? `search:${s.query}` : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}`
+  return s.kind === 'search'
+    ? `search:${s.query}`
+    : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}:${s.view.album ?? 0}`
 }
 
 /** A position in the library: which day, which asset. Survives items shifting. */
@@ -124,6 +126,10 @@ export const useLibrary = defineStore('library', () => {
         const b = await engine.timeline(s.view)
         if (current !== generation || request !== loadRequest) return
         buckets.value = b
+        const present = new Set(b.map((bucket) => bucket.day))
+        days.value = new Map([...days.value].filter(([day]) => present.has(day)))
+        if (selected.value && !present.has(selected.value.day)) selected.value = null
+        if (viewer.value && !present.has(viewer.value.day)) viewer.value = null
       }
       timelineLoaded.value = true
     } catch (e) {
@@ -191,6 +197,10 @@ export const useLibrary = defineStore('library', () => {
         fresh.add(d)
       }
       days.value = next
+      // A filter edit or source removal can remove the selected item while
+      // leaving its day in place. Do not leave a panel with inactive actions.
+      if (selected.value && missing.includes(selected.value.day) && !itemAt(selected.value)) selected.value = null
+      if (viewer.value && missing.includes(viewer.value.day) && !itemAt(viewer.value)) viewer.value = null
     } catch (e) {
       logError(e)
     } finally {
@@ -258,7 +268,8 @@ export const useLibrary = defineStore('library', () => {
       return
     }
     const s = scope.value
-    if (s.kind === 'timeline' && s.view.filter === Filter.FilterFavourites) await refresh().catch(logError)
+    if (s.kind === 'timeline' && (s.view.filter === Filter.FilterFavourites || !!s.view.album))
+      await refresh().catch(logError)
   }
 
   async function reloadSources() {

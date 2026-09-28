@@ -38,7 +38,12 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 - Indexing makes a poster and a 4×4 hover preview sprite. SigLIP 2 and face recognition sample video frames (about one per five seconds, at most 24). Search results jump to the best matching moment.
 - The viewer plays supported files directly and converts other codecs to H.264/AAC while playing. Seeking a converted video starts a new stream at that point; converted copies are not kept on disk.
 
-Not yet: albums, events, trash, organise-on-disk, the 2 GB cache cap, OCR.
+**Phase 5 (organization) is underway:**
+
+- Manual albums collect photos and videos without moving files. Membership follows an asset when its file is renamed or moved; the Details panel lets you add or remove the selected item.
+- Smart albums save a rule for media kind, favourites, inclusive capture dates, a Thing, and a person. They update from current library metadata and tags. Albums have live counts, covers, rename/edit, and deletion.
+
+Not yet: duplicate review, events, places, trash, organise-on-disk, the 2 GB cache cap, OCR.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
@@ -96,7 +101,7 @@ Before moving between implementation phases, also regenerate the bindings with
 `wails3 build`. The frontend must finish building before Go embeds `frontend/dist`;
 do not run independent frontend and Go production builds concurrently. Browser
 component tests use jsdom; actual codec playback still needs a browser or WebView
-smoke test. See [the phase 1–4 audit](docs/audit-2026-09-28.md) for findings,
+smoke test. See [the current implementation audit](docs/audit-2026-09-28-current.md) for findings,
 verification evidence and remaining acceptance limits.
 
 Handy environment variables:
@@ -124,6 +129,7 @@ internal/parallel    the worker pool loops run on
 services/            thin Wails services (LibraryService, SearchService, PeopleService, MediaService)
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/{library,search,things,people,onboarding,settings,shared}   UI by feature
+frontend/src/albums  manual and smart album browser and rule editor
 scripts/             deps.sh (native dependencies), prepare_models.py, env.sh
 spikes/              Phase 0 experiments (own Go module; models in spikes/.cache)
 ```

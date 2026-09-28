@@ -272,6 +272,8 @@ func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64) error {
 	}
 	for _, q := range []string{
 		"UPDATE faces SET person_id = ?2 WHERE person_id = ?1",
+		`UPDATE albums SET rule_json = json_set(rule_json, '$.person', ?2)
+			WHERE kind = 'smart' AND json_extract(rule_json, '$.person') = ?1`,
 		`UPDATE people SET cover_face = (SELECT cover_face FROM people WHERE id = ?1)
 			WHERE id = ?2 AND cover_face IS NULL`,
 		`INSERT OR IGNORE INTO face_rejections (face_id, person_id)
@@ -291,10 +293,12 @@ func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64) error {
 	return nil
 }
 
-// dropEmptyPeople deletes unnamed people no face belongs to any more. Named
-// people stay: the user may still add photos of them.
+// dropEmptyPeople deletes unnamed people without faces or saved references.
+// Names, album rules and rejections retain identities for future photos.
 func dropEmptyPeople(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `DELETE FROM people WHERE name IS NULL
-		AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = people.id)`)
+		AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = people.id)
+		AND NOT EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND json_extract(rule_json, '$.person') = people.id)
+		AND NOT EXISTS (SELECT 1 FROM face_rejections WHERE person_id = people.id)`)
 	return err
 }

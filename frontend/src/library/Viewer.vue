@@ -21,6 +21,7 @@ const videoMode = ref<Playback>(Playback.PlayConvert)
 const videoStart = ref(0)
 const videoPosition = ref(0)
 const videoFailed = ref(false)
+let detailRequest = 0
 const converting = computed(() => videoMode.value === Playback.PlayConvert)
 const videoSrc = computed(() => {
   const d = detail.value
@@ -30,7 +31,9 @@ const videoSrc = computed(() => {
 
 watch(
   () => lib.viewer?.id,
-  async (id) => {
+  async (id, _old, onCleanup) => {
+    const request = ++detailRequest
+    onCleanup(() => detailRequest++)
     originalReady.value = false
     detail.value = null
     videoStart.value = lib.viewerItem?.at ?? 0
@@ -38,7 +41,7 @@ watch(
     videoFailed.value = false
     if (!id) return
     const d = await orFallback(engine.asset(id), null)
-    if (lib.viewer?.id === id) {
+    if (request === detailRequest) {
       detail.value = d
       if (d?.video) {
         const hevc = document.createElement('video').canPlayType('video/mp4; codecs="hvc1"')

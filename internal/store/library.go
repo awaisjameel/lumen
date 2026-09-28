@@ -34,7 +34,10 @@ func (s *Store) UnavailableAssets(ctx context.Context) (map[int64]bool, error) {
 // The grid builds its entire layout, and the timeline scrubber, from this
 // list. AI tags count from minScore up.
 func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float32) ([]core.DayBucket, error) {
-	where, args := viewSQL(v, minScore)
+	where, args, err := s.viewSQL(ctx, v, minScore)
+	if err != nil {
+		return nil, err
+	}
 	return queryAll(ctx, s.r, func(r *sql.Rows) (b core.DayBucket, err error) {
 		err = r.Scan(&b.Day, &b.Count)
 		return b, err
@@ -43,7 +46,16 @@ func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float32) (
 }
 
 // viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
-func viewSQL(v core.View, minScore float32) (where string, args []any) {
+func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float32) (where string, args []any, err error) {
+	if v.Album != 0 {
+		var a core.Album
+		a, err = s.album(ctx, v.Album)
+		if err != nil {
+			return "", nil, err
+		}
+		where, args = albumPredicate(a, minScore)
+		return where, args, nil
+	}
 	where = visible
 	switch v.Filter {
 	case core.FilterAll:
@@ -60,7 +72,7 @@ func viewSQL(v core.View, minScore float32) (where string, args []any) {
 		where += " AND id IN (SELECT asset_id FROM faces WHERE person_id = ?)"
 		args = append(args, v.Person)
 	}
-	return where, args
+	return where, args, nil
 }
 
 // DayItems returns the view's grid items for the days from..to inclusive
@@ -77,7 +89,10 @@ func (s *Store) DayItems(ctx context.Context, from, to string, v core.View, minS
 	if a.After(b) {
 		a, b = b, a
 	}
-	where, args := viewSQL(v, minScore)
+	where, args, err := s.viewSQL(ctx, v, minScore)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.r.QueryContext(ctx, `SELECT id, taken_at, `+gridColumns+`
 		FROM assets WHERE `+where+` AND taken_at >= ? AND taken_at < ?
 		ORDER BY taken_at DESC, id DESC`, append(args, a.Unix(), b.AddDate(0, 0, 1).Unix())...)

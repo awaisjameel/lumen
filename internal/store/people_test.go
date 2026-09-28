@@ -48,6 +48,36 @@ func facesOf(t *testing.T, st *Store, asset int64) []core.Face {
 	return fs
 }
 
+func TestPersonDetailIncludesChosenCover(t *testing.T) {
+	st, ctx, a, _, _ := peopleFixture(t)
+	f := facesOf(t, st, a)[0].ID
+	id, err := st.NameFaces(ctx, []int64{f}, "Ali")
+	check(t, err)
+	check(t, st.SetPersonCover(ctx, id, f))
+	p, err := st.Person(ctx, id)
+	check(t, err)
+	if p.Cover.ID != f {
+		t.Fatalf("person cover = %d, want %d", p.Cover.ID, f)
+	}
+}
+
+func TestRejectingLastFaceRetainsIdentityAndRejection(t *testing.T) {
+	st, ctx, a, _, _ := peopleFixture(t)
+	f := facesOf(t, st, a)[0].ID
+	id, err := st.NameFaces(ctx, []int64{f}, "")
+	check(t, err)
+	check(t, st.RejectFaces(ctx, id, []int64{f}))
+	check(t, st.ApplyClusters(ctx, ClusterChanges{Assign: map[int64]int64{f: id}}))
+	_, people, rejections, err := st.ClusterData(ctx, "f1")
+	check(t, err)
+	if len(people) != 1 || len(rejections) != 1 || rejections[0].Person != id {
+		t.Fatalf("lost rejected identity: people=%+v rejections=%+v", people, rejections)
+	}
+	if got := facesOf(t, st, a)[0].Person; got != 0 {
+		t.Fatalf("rejected face reassigned to %d", got)
+	}
+}
+
 func TestFacesKeepTheirPersonWhenSeenAgain(t *testing.T) {
 	st, ctx, a, _, _ := peopleFixture(t)
 	before := facesOf(t, st, a)

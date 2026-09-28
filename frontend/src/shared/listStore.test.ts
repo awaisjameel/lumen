@@ -21,3 +21,18 @@ it('reloads after an edit during a pending list request', async () => {
   expect(list.byId.get(1)?.name).toBe('Updated')
   expect(fetch).toHaveBeenCalledTimes(2)
 })
+
+it('retains a queued refresh when the older read fails', async () => {
+  setActivePinia(createPinia())
+  let fail!: (reason: Error) => void
+  const fetch = vi
+    .fn<() => Promise<{ id: number }[]>>()
+    .mockReturnValueOnce(new Promise((_resolve, reject) => (fail = reject)))
+    .mockResolvedValueOnce([{ id: 2 }])
+  const list = defineListStore('retry', fetch)()
+  const first = list.load()
+  const latest = list.load()
+  fail(new Error('interrupted read'))
+  await Promise.all([first, latest])
+  expect(list.list).toEqual([{ id: 2 }])
+})
