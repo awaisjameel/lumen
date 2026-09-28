@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -158,6 +159,11 @@ func (s *LibraryService) Asset(ctx context.Context, id int64) (core.AssetDetail,
 	return s.store.AssetDetail(ctx, id)
 }
 
+// DuplicateGroups returns exact file copies and likely similar photos for review.
+func (s *LibraryService) DuplicateGroups(ctx context.Context) ([]core.DuplicateGroup, error) {
+	return s.store.DuplicateGroups(ctx)
+}
+
 // SetFavourite marks or unmarks a favourite.
 func (s *LibraryService) SetFavourite(ctx context.Context, id int64, fav bool) error {
 	return s.store.SetFavourite(ctx, id, fav)
@@ -203,8 +209,24 @@ func (s *LibraryService) ShowInFolder(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
+	return showInFolder(ctx, f.Path)
+}
+
+// ShowFileInFolder selects a specific registered copy of an asset in Explorer.
+func (s *LibraryService) ShowFileInFolder(ctx context.Context, id int64, path string) error {
+	asset, err := s.store.AssetDetail(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(asset.Paths, path) {
+		return store.ErrNotFound
+	}
+	return showInFolder(ctx, path)
+}
+
+func showInFolder(ctx context.Context, path string) error {
 	// Explorer outlives this call (and Lumen), so it gets no deadline.
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), "explorer.exe", "/select,", f.Path)
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), "explorer.exe", "/select,", path)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

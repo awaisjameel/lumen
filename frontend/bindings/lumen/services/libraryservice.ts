@@ -65,6 +65,13 @@ export function DeleteAlbum(id: number): $CancellablePromise<void> {
 }
 
 /**
+ * DuplicateGroups returns exact file copies and likely similar photos for review.
+ */
+export function DuplicateGroups(): $CancellablePromise<core$0.DuplicateGroup[] | null> {
+    return $Call.ByID(4190914198);
+}
+
+/**
  * Focus tells the indexer which days are on screen so they are processed first.
  */
 export function Focus($from: string, to: string): $CancellablePromise<void> {
@@ -148,6 +155,13 @@ export function SetVideos(on: boolean): $CancellablePromise<void> {
  */
 export function Settings(): $CancellablePromise<core$0.Settings> {
     return $Call.ByID(2574705872);
+}
+
+/**
+ * ShowFileInFolder selects a specific registered copy of an asset in Explorer.
+ */
+export function ShowFileInFolder(id: number, path: string): $CancellablePromise<void> {
+    return $Call.ByID(2635971573, id, path);
 }
 
 /**

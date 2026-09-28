@@ -13,12 +13,14 @@ import (
 	"lumen/internal/store"
 )
 
-// MediaService serves images to the WebView on the app's own origin, so the
+// MediaService serves media to the WebView on the app's own origin, so the
 // grid loads thumbnails like ordinary <img> URLs (no base64, browser-cached):
 //
 //	/media/thumb/{id}/{256|1024}?v={thumbVersion}
 //	/media/sprite/{id}?v={thumbVersion}
 //	/media/original/{id}   (only formats the WebView can display)
+//	/media/play/{id}?at={ms}   (a video converted to H.264/AAC while it plays)
+//	/media/frame/{id}/{ms}     (one video frame, e.g. for a face found in it)
 type MediaService struct {
 	store *store.Store
 	cache *media.Cache

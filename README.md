@@ -42,8 +42,9 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 
 - Manual albums collect photos and videos without moving files. Membership follows an asset when its file is renamed or moved; the Details panel lets you add or remove the selected item.
 - Smart albums save a rule for media kind, favourites, inclusive capture dates, a Thing, and a person. They update from current library metadata and tags. Albums have live counts, covers, rename/edit, and deletion.
+- Duplicates review lists exact file copies and likely similar photos using the existing perceptual hashes. It only suggests matches and opens their folder; files are never changed automatically.
 
-Not yet: duplicate review, events, places, trash, organise-on-disk, the 2 GB cache cap, OCR.
+Not yet: events, places, trash, organise-on-disk, the 2 GB cache cap, OCR.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
@@ -71,12 +72,12 @@ Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), what
 
 `scripts/lint.sh` runs the static checks and frontend regression tests and fails if any does; `scripts/lint.sh --fix` first applies every automatic fix. Each tool is pinned and configured in the repository:
 
-| Code | Formatting | Linting | Config |
-| --- | --- | --- | --- |
-| Go | gofmt, goimports | golangci-lint 2.13 (vet, staticcheck, errcheck, gosec, errorlint, revive and more), deadcode, govulncheck | `.golangci.yml` |
-| Frontend | Prettier 3.9 | ESLint 10 with typescript-eslint (strict, type-aware) and eslint-plugin-vue, plus `vue-tsc` | `frontend/eslint.config.js`, `frontend/.prettierrc.json`, `frontend/tsconfig.json` |
-| Python | Ruff | Ruff | `ruff.toml` |
-| Shell | | ShellCheck | |
+| Code     | Formatting       | Linting                                                                                                   | Config                                                                             |
+| -------- | ---------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Go       | gofmt, goimports | golangci-lint 2.13 (vet, staticcheck, errcheck, gosec, errorlint, revive and more), deadcode, govulncheck | `.golangci.yml`                                                                    |
+| Frontend | Prettier 3.9     | ESLint 10 with typescript-eslint (strict, type-aware) and eslint-plugin-vue, plus `vue-tsc`               | `frontend/eslint.config.js`, `frontend/.prettierrc.json`, `frontend/tsconfig.json` |
+| Python   | Ruff             | Ruff                                                                                                      | `ruff.toml`                                                                        |
+| Shell    |                  | ShellCheck                                                                                                |                                                                                    |
 
 The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm install`). New tool versions are at least a week old when pinned, matching `frontend/.npmrc`. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line.
 
@@ -130,6 +131,7 @@ services/            thin Wails services (LibraryService, SearchService, PeopleS
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/{library,search,things,people,onboarding,settings,shared}   UI by feature
 frontend/src/albums  manual and smart album browser and rule editor
+frontend/src/duplicates  exact-copy and similar-photo review (read-only)
 scripts/             deps.sh (native dependencies), prepare_models.py, env.sh
 spikes/              Phase 0 experiments (own Go module; models in spikes/.cache)
 ```

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { engine, TAG_CONFIDENCE_MAX, TAG_CONFIDENCE_MIN } from '../bridge'
+import { Device, engine, TAG_CONFIDENCE_MAX, TAG_CONFIDENCE_MIN } from '../bridge'
 import { useLibrary } from '../library/store'
 import { errorText, logError, orFallback } from '../shared/errors'
 import { t } from '../shared/i18n'
@@ -32,8 +32,8 @@ const themes: Theme[] = ['system', 'light', 'dark']
 const aiStatus = computed(() => {
   const ai = lib.progress?.ai
   if (ai?.error) return t('settings.aiError', { error: ai.error })
-  if (ai?.device === 'gpu') return t('settings.aiGpu')
-  if (ai?.device === 'cpu') return t('settings.aiCpu')
+  if (ai?.device === Device.DeviceGPU) return t('settings.aiGpu')
+  if (ai?.device === Device.DeviceCPU) return t('settings.aiCpu')
   return t('settings.aiIdle')
 })
 
@@ -192,19 +192,23 @@ function setAIOnBattery(on: boolean) {
   max-width: 720px;
   padding: 4px 0 16px;
 }
+
 section {
   margin-bottom: 32px;
 }
+
 h2 {
   margin: 0 0 4px;
   font: 600 16px var(--font-display);
 }
+
 .hint {
   margin: 0 0 12px;
   display: flex;
   gap: 6px;
   align-items: flex-start;
 }
+
 .list {
   list-style: none;
   margin: 0 0 12px;
@@ -213,29 +217,35 @@ h2 {
   border-radius: var(--radius-l);
   background: var(--surface);
 }
+
 .list:empty {
   display: none;
 }
+
 .list li {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 10px 10px 14px;
 }
+
 .list li + li {
   border-top: 1px solid var(--border);
 }
+
 .path {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .row {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
+
 .toggle {
   display: flex;
   gap: 10px;
@@ -243,21 +253,25 @@ h2 {
   padding: 8px 0;
   cursor: pointer;
 }
+
 .toggle input {
   accent-color: var(--accent);
   width: 16px;
   height: 16px;
   margin-top: 2px;
 }
+
 .toggle small {
   display: block;
 }
+
 .segmented {
   display: inline-flex;
   padding: 3px;
   border-radius: var(--radius-m);
   background: var(--surface-2);
 }
+
 .segmented button {
   height: 30px;
   padding: 0 14px;
@@ -266,22 +280,27 @@ h2 {
   background: transparent;
   cursor: pointer;
 }
+
 .segmented button.on {
   background: var(--surface);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
   font-weight: 600;
 }
+
 .ai-status {
   margin: 0 0 4px;
 }
+
 .advanced {
   margin-top: 8px;
 }
+
 .advanced summary {
   padding: 6px 0;
   color: var(--text-2);
   cursor: pointer;
 }
+
 .slider {
   display: flex;
   flex-direction: column;
@@ -289,10 +308,12 @@ h2 {
   max-width: 420px;
   padding: 8px 0 0;
 }
+
 .slider input {
   margin: 8px 0 2px;
   accent-color: var(--accent);
 }
+
 .ends {
   display: flex;
   justify-content: space-between;

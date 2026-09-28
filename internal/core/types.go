@@ -170,6 +170,33 @@ type Album struct {
 	CoverThumb int       `json:"coverThumb"`
 }
 
+// DuplicateItem is one indexed asset and all of its visible file copies.
+type DuplicateItem struct {
+	ID      int64    `json:"id"`
+	Paths   []string `json:"paths"`
+	Size    int64    `json:"size"` // bytes in one copy
+	Width   int      `json:"width"`
+	Height  int      `json:"height"`
+	Thumb   int      `json:"thumb"`
+	TakenAt int64    `json:"takenAt"` // wall-clock seconds, see WallClock
+}
+
+// DuplicateKind says why assets were grouped for review.
+type DuplicateKind string
+
+// The kinds of duplicate group.
+const (
+	DuplicateExact   DuplicateKind = "exact"   // one asset whose content is in several files
+	DuplicateSimilar DuplicateKind = "similar" // photos whose perceptual hashes nearly match
+)
+
+// DuplicateGroup holds exact file copies or photos that look similar.
+// Similarity is a suggestion for review, never a deletion decision.
+type DuplicateGroup struct {
+	Kind  DuplicateKind   `json:"kind"`
+	Items []DuplicateItem `json:"items"`
+}
+
 // TagKind says where a tag comes from.
 type TagKind string
 
@@ -344,10 +371,19 @@ type Progress struct {
 
 // AI is the state of the on-device models.
 type AI struct {
-	Device     string `json:"device"`     // "gpu" or "cpu" while the image model is loaded, else ""
+	Device     Device `json:"device"`     // while the image model is loaded, else ""
 	Error      string `json:"error"`      // why search and Things can't run (models missing, runtime failed)
 	FacesError string `json:"facesError"` // why people can't be recognised
 }
+
+// Device is where a model runs.
+type Device string
+
+// The devices.
+const (
+	DeviceGPU Device = "gpu" // DirectML: any DirectX 12 GPU
+	DeviceCPU Device = "cpu"
+)
 
 // WallClock converts t to "wall-clock seconds": the local date and time as it
 // read on the camera's clock, encoded as if it were UTC. EXIF dates carry no

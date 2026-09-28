@@ -4,7 +4,17 @@
 
 import { Events } from '@wailsio/runtime'
 import { LibraryService, PeopleService, SearchService } from '../../bindings/lumen/services'
-import { AlbumKind, DateSource, Filter, Kind, Playback, TagKind, TagSource } from '../../bindings/lumen/internal/core'
+import {
+  AlbumKind,
+  DateSource,
+  Device,
+  DuplicateKind,
+  Filter,
+  Kind,
+  Playback,
+  TagKind,
+  TagSource,
+} from '../../bindings/lumen/internal/core'
 import type {
   Album,
   AlbumRule,
@@ -12,6 +22,8 @@ import type {
   AssetTag,
   DayBucket,
   DayItems as RawDayItems,
+  DuplicateGroup as RawDuplicateGroup,
+  DuplicateItem as RawDuplicateItem,
   Face,
   GridItem,
   Person,
@@ -23,7 +35,7 @@ import type {
   View,
 } from '../../bindings/lumen/internal/core'
 
-export { AlbumKind, DateSource, Filter, Kind, Playback, TagKind, TagSource }
+export { AlbumKind, DateSource, Device, DuplicateKind, Filter, Kind, Playback, TagKind, TagSource }
 export type { Album, AlbumRule, AssetTag, DayBucket, Face, GridItem, Person, Progress, Settings, Source, Tag, View }
 
 // Go sends an empty list as null; the generated types say so. These are the
@@ -37,6 +49,10 @@ export type AssetDetail = NonNullLists<RawAssetDetail, 'paths'>
 export type DayItems = NonNullLists<RawDayItems, 'items'>
 /** A search's results, best first. */
 export type SearchResults = NonNullLists<SearchResult, 'items' | 'people'>
+/** One asset in a duplicate group, with all its file paths. */
+export type DuplicateItem = NonNullLists<RawDuplicateItem, 'paths'>
+/** Exact copies or similar photos to review. */
+export type DuplicateGroup = Omit<RawDuplicateGroup, 'items'> & { items: DuplicateItem[] }
 
 // Thumbnail sizes (longest edge). Must match core.ThumbSmall / core.ThumbLarge;
 // the media route is plain HTTP, so they are not part of the generated bindings.
@@ -69,6 +85,11 @@ export const engine = {
     const d = await LibraryService.Asset(id)
     return { ...d, paths: d.paths ?? [] }
   },
+  duplicateGroups: async (): Promise<DuplicateGroup[]> =>
+    ((await LibraryService.DuplicateGroups()) ?? []).map((g) => ({
+      ...g,
+      items: (g.items ?? []).map((it) => ({ ...it, paths: it.paths ?? [] })),
+    })),
   setFavourite: (id: number, fav: boolean): Promise<void> => LibraryService.SetFavourite(id, fav),
   albums: async (): Promise<Album[]> => (await LibraryService.Albums()) ?? [],
   createAlbum: (name: string, kind: AlbumKind, rule: AlbumRule): Promise<number> =>
@@ -79,6 +100,7 @@ export const engine = {
   setAlbumItem: (album: number, asset: number, include: boolean): Promise<void> =>
     LibraryService.SetAlbumItem(album, asset, include),
   showInFolder: (id: number): Promise<void> => LibraryService.ShowInFolder(id),
+  showFileInFolder: (id: number, path: string): Promise<void> => LibraryService.ShowFileInFolder(id, path),
 
   progress: (): Promise<Progress> => LibraryService.Progress(),
   setPaused: (paused: boolean): Promise<void> => LibraryService.SetPaused(paused),

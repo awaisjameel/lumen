@@ -226,7 +226,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 			}
 		}
 	}
-	ix.setAIState(func() { ix.aiDevice = string(enc.Device()) }) // it may have moved to the CPU
+	ix.setAIState(func() { ix.aiDevice = enc.Device() }) // it may have moved to the CPU
 	return results, nil
 }
 

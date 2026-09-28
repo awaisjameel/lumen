@@ -35,6 +35,7 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
         <RouterLink to="/albums" class="nav-item" :class="{ active: route.path.startsWith('/albums') }">
           <Icon name="folder" />{{ t('nav.albums') }}
         </RouterLink>
+        <RouterLink to="/duplicates" class="nav-item"><Icon name="copy" />{{ t('nav.duplicates') }}</RouterLink>
         <RouterLink to="/favourites" class="nav-item"><Icon name="heart" />{{ t('nav.favourites') }}</RouterLink>
         <RouterLink v-if="lib.settings.videos" to="/videos" class="nav-item">
           <Icon name="video" />{{ t('nav.videos') }}

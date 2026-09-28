@@ -6,6 +6,7 @@ import PersonFaces from './people/PersonFaces.vue'
 import SettingsView from './settings/SettingsView.vue'
 import ThingsView from './things/ThingsView.vue'
 import AlbumsView from './albums/AlbumsView.vue'
+import DuplicatesView from './duplicates/DuplicatesView.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -15,8 +16,8 @@ declare module 'vue-router' {
 }
 
 // The grid (LibraryView) serves the timeline routes, one Thing (/things/:id),
-// one person (/people/:id) and search results (/search?q=…); it reads which
-// from the route.
+// one person (/people/:id), one album (/albums/:id) and search results
+// (/search?q=…); it reads which from the route.
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -30,6 +31,7 @@ export const router = createRouter({
     { path: '/things/:id(\\d+)', name: 'thing', component: LibraryView, meta: { filter: Filter.FilterAll } },
     { path: '/albums', name: 'albums', component: AlbumsView },
     { path: '/albums/:id(\\d+)', name: 'album', component: LibraryView, meta: { filter: Filter.FilterAll } },
+    { path: '/duplicates', name: 'duplicates', component: DuplicatesView },
     { path: '/search', name: 'search', component: LibraryView },
     { path: '/settings', name: 'settings', component: SettingsView },
     { path: '/:rest(.*)*', redirect: '/' },

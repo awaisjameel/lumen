@@ -17,6 +17,8 @@ import (
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
+
+	"lumen/internal/core"
 )
 
 var (
@@ -58,12 +60,12 @@ func Shutdown() {
 }
 
 // Device is where a model runs.
-type Device string
+type Device = core.Device
 
 // The devices.
 const (
-	GPU Device = "gpu" // DirectML: any DirectX 12 GPU
-	CPU Device = "cpu"
+	GPU = core.DeviceGPU
+	CPU = core.DeviceCPU
 )
 
 // session is one loaded model: one input, float32 outputs.

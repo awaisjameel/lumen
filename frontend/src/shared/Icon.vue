@@ -27,6 +27,7 @@ export type IconName =
   | 'user'
   | 'pencil'
   | 'check'
+  | 'copy'
 
 const paths: Record<IconName, string> = {
   photos:
@@ -59,6 +60,7 @@ const paths: Record<IconName, string> = {
   user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20a7.5 7.5 0 0 1 15 0',
   pencil: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
   check: 'M5 12.5l4.5 4.5L19 7.5',
+  copy: 'M8 8h11a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2zM16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3',
 }
 </script>
 

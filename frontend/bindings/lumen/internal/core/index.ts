@@ -4,6 +4,8 @@
 export {
     AlbumKind,
     DateSource,
+    Device,
+    DuplicateKind,
     Filter,
     Kind,
     Playback,
@@ -19,6 +21,8 @@ export type {
     AssetTag,
     DayBucket,
     DayItems,
+    DuplicateGroup,
+    DuplicateItem,
     Face,
     GridItem,
     Person,

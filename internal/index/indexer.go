@@ -74,7 +74,7 @@ type Indexer struct {
 	paused      bool
 	onBattery   bool
 	aiOnBattery bool // the user lets AI work continue on battery
-	aiDevice    string
+	aiDevice    core.Device
 	aiError     string
 	facesError  string
 	scanning    bool
@@ -128,7 +128,7 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 					case err != nil:
 						ix.aiError = err.Error()
 					case loaded:
-						ix.aiError, ix.aiDevice = "", string(enc.Device())
+						ix.aiError, ix.aiDevice = "", enc.Device()
 					default:
 						ix.aiDevice = ""
 					}

@@ -138,7 +138,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
   <div ref="root" class="viewer" role="dialog" aria-modal="true" tabindex="-1">
     <div class="stage">
       <header class="bar">
-        <button class="icon-btn" :title="t('viewer.close') + ' (Esc)'" @click="close">
+        <button class="icon-btn" :title="t('common.close') + ' (Esc)'" @click="close">
           <Icon name="close" />
         </button>
         <span class="date">{{ detail ? dateTime(detail.takenAt) : '' }}</span>

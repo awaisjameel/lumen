@@ -15,6 +15,7 @@ const en = {
   'nav.videos': 'Videos',
   'nav.things': 'Things',
   'nav.albums': 'Albums',
+  'nav.duplicates': 'Duplicates',
   'nav.settings': 'Settings',
 
   'search.placeholder': 'Search, e.g. “birthday cake”',
@@ -124,6 +125,21 @@ const en = {
   'albums.smartEmptyHint': 'Edit this album’s rules to include more items.',
   'albums.createForItem': 'New album for this item',
 
+  'duplicates.intro':
+    'Review files with identical content and photos that look alike. Nothing is changed automatically.',
+  'duplicates.exact': 'Exact copies',
+  'duplicates.similar': 'Similar photos',
+  'duplicates.exactHint': 'These file paths contain identical content.',
+  'duplicates.similarHint':
+    'These are suggestions based on the photo previews. Check them before deciding what to keep.',
+  'duplicates.copies': '{n} copies of {size}',
+  'duplicates.empty': 'No duplicates found',
+  'duplicates.emptyHint': 'Results appear as thumbnails finish processing.',
+  'duplicates.showFile': 'Show “{name}” in folder',
+  'duplicates.refresh': 'Check again',
+  'duplicates.loading': 'Checking the library…',
+  'duplicates.preview': 'Preview “{name}”',
+
   'welcome.title': 'Welcome to Lumen',
   'welcome.question': 'Which folders hold your photos and videos?',
   'welcome.none': 'We couldn’t find the usual photo folders. Add one to get started.',
@@ -170,7 +186,6 @@ const en = {
   'details.location': 'Location',
   'details.files': 'Files',
   'details.copies': '{n} identical copies',
-  'details.showInFolder': 'Show in folder',
   'details.tags': 'Tags',
   'details.noTags': 'No tags yet.',
   'details.addTag': 'Add a tag…',
@@ -183,7 +198,6 @@ const en = {
   'details.favourite': 'Favourite',
   'details.unfavourite': 'Remove favourite',
 
-  'viewer.close': 'Close',
   'viewer.prev': 'Previous',
   'viewer.next': 'Next',
   'viewer.noPreview': 'No preview for this format yet',
@@ -230,6 +244,8 @@ const en = {
     'Lumen works entirely on this computer. It makes no network connections and collects no data.',
 
   'common.cancel': 'Cancel',
+  'common.close': 'Close',
+  'common.showInFolder': 'Show in folder',
 
   'error.generic': 'Something went wrong: {msg}',
 } as const satisfies Record<string, Message>

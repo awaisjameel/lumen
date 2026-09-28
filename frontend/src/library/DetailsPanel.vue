@@ -223,7 +223,7 @@ function showInFolder(id: number) {
   <aside class="details" :aria-label="t('details.title')">
     <header>
       <h2>{{ t('details.title') }}</h2>
-      <button class="icon-btn" :title="t('viewer.close')" @click="lib.showDetails = false">
+      <button class="icon-btn" :title="t('common.close')" @click="lib.showDetails = false">
         <Icon name="close" :size="18" />
       </button>
     </header>
@@ -353,7 +353,7 @@ function showInFolder(id: number) {
         </button>
         <button class="btn" @click="showInFolder(detail.id)">
           <Icon name="folder" :size="16" />
-          {{ t('details.showInFolder') }}
+          {{ t('common.showInFolder') }}
         </button>
       </div>
       <p v-if="error" class="error small">{{ error }}</p>

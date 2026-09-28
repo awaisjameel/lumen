@@ -6,9 +6,9 @@
  */
 export interface AI {
     /**
-     * "gpu" or "cpu" while the image model is loaded, else ""
+     * while the image model is loaded, else ""
      */
-    "device": string;
+    "device": Device;
 
     /**
      * why search and Things can't run (models missing, runtime failed)
@@ -154,6 +154,76 @@ export interface DayItems {
     "day": string;
     "items": GridItem[] | null;
 }
+
+/**
+ * Device is where a model runs.
+ */
+export enum Device {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The devices.
+     *
+     * DirectML: any DirectX 12 GPU
+     */
+    DeviceGPU = "gpu",
+    DeviceCPU = "cpu",
+};
+
+/**
+ * DuplicateGroup holds exact file copies or photos that look similar.
+ * Similarity is a suggestion for review, never a deletion decision.
+ */
+export interface DuplicateGroup {
+    "kind": DuplicateKind;
+    "items": DuplicateItem[] | null;
+}
+
+/**
+ * DuplicateItem is one indexed asset and all of its visible file copies.
+ */
+export interface DuplicateItem {
+    "id": number;
+    "paths": string[] | null;
+
+    /**
+     * bytes in one copy
+     */
+    "size": number;
+    "width": number;
+    "height": number;
+    "thumb": number;
+
+    /**
+     * wall-clock seconds, see WallClock
+     */
+    "takenAt": number;
+}
+
+/**
+ * DuplicateKind says why assets were grouped for review.
+ */
+export enum DuplicateKind {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The kinds of duplicate group.
+     *
+     * one asset whose content is in several files
+     */
+    DuplicateExact = "exact",
+
+    /**
+     * photos whose perceptual hashes nearly match
+     */
+    DuplicateSimilar = "similar",
+};
 
 /**
  * Face is one face in a photo or video: where it is, and who it is.
