@@ -27,16 +27,28 @@ export interface AI {
 export interface Album {
     "id": number;
     "name": string;
-
-    /**
-     * manual | smart
-     */
-    "kind": string;
+    "kind": AlbumKind;
     "rule": AlbumRule;
     "count": number;
     "cover": number;
     "coverThumb": number;
 }
+
+/**
+ * AlbumKind identifies how an album selects its members.
+ */
+export enum AlbumKind {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The supported album kinds.
+     */
+    AlbumManual = "manual",
+    AlbumSmart = "smart",
+};
 
 /**
  * AlbumRule is a conjunction of optional filters, saved for a smart album.

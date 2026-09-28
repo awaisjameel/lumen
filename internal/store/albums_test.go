@@ -133,3 +133,77 @@ func TestSmartAlbumFollowsPersonCorrections(t *testing.T) {
 		t.Fatalf("after correction = %+v, %v", albums, err)
 	}
 }
+
+func TestSmartAlbumFollowsMergedPerson(t *testing.T) {
+	st, ctx, a, b, _ := peopleFixture(t)
+	from, err := st.NameFaces(ctx, []int64{facesOf(t, st, a)[0].ID}, "First")
+	check(t, err)
+	into, err := st.NameFaces(ctx, []int64{facesOf(t, st, b)[0].ID}, "Second")
+	check(t, err)
+	id, err := st.CreateAlbum(ctx, "Family", core.AlbumSmart, core.AlbumRule{Person: from})
+	check(t, err)
+	check(t, st.MergePeople(ctx, from, into))
+	albums, err := st.Albums(ctx, 0.02)
+	check(t, err)
+	if len(albums) != 1 || albums[0].Rule.Person != into || albums[0].Count != 2 {
+		t.Fatalf("merged album = %+v", albums)
+	}
+	buckets, err := st.DayBuckets(ctx, core.View{Album: id}, 0.02)
+	check(t, err)
+	if len(buckets) != 1 || buckets[0].Count != 2 {
+		t.Fatalf("merged timeline = %+v", buckets)
+	}
+}
+
+func TestSmartAlbumRetainsEmptyUnnamedPerson(t *testing.T) {
+	st, ctx, a, _, _ := peopleFixture(t)
+	face := facesOf(t, st, a)[0].ID
+	person, err := st.NameFaces(ctx, []int64{face}, "")
+	check(t, err)
+	_, err = st.CreateAlbum(ctx, "Someone", core.AlbumSmart, core.AlbumRule{Person: person})
+	check(t, err)
+	// Moving its last face away normally removes an unnamed person.
+	_, err = st.NameFaces(ctx, []int64{face}, "Another person")
+	check(t, err)
+	p, err := st.Person(ctx, person)
+	check(t, err)
+	if p.Count != 0 {
+		t.Fatalf("empty person = %+v", p)
+	}
+}
+
+func TestSmartAlbumProtectsTagReference(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	tag, err := st.CreateTag(ctx, "Trip", core.TagManual, nil)
+	check(t, err)
+	id, err := st.CreateAlbum(ctx, "Trips", core.AlbumSmart, core.AlbumRule{Tag: tag})
+	check(t, err)
+	if err := st.DeleteTag(ctx, tag); !errors.Is(err, ErrTagInAlbum) {
+		t.Fatalf("deleting referenced tag: %v", err)
+	}
+	check(t, st.UpdateAlbum(ctx, id, "Trips", core.AlbumRule{}))
+	check(t, st.DeleteTag(ctx, tag))
+	for _, rule := range []core.AlbumRule{{Tag: tag}, {Person: 999}} {
+		if _, err := st.CreateAlbum(ctx, "Invalid", core.AlbumSmart, rule); !errors.Is(err, ErrInvalidAlbum) {
+			t.Fatalf("creating dangling rule %+v: %v", rule, err)
+		}
+		if err := st.UpdateAlbum(ctx, id, "Invalid", rule); !errors.Is(err, ErrInvalidAlbum) {
+			t.Fatalf("updating dangling rule %+v: %v", rule, err)
+		}
+	}
+}
+
+func TestVocabularyRetainsTagUsedBySmartAlbum(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	check(t, st.SyncVocabulary(ctx, []VocabLabel{{Name: "Old Thing", Prompts: []string{"old"}}}))
+	tag, _, err := st.TagByName(ctx, "Old Thing")
+	check(t, err)
+	_, err = st.CreateAlbum(ctx, "Saved", core.AlbumSmart, core.AlbumRule{Tag: tag})
+	check(t, err)
+	check(t, st.SyncVocabulary(ctx, []VocabLabel{{Name: "New Thing", Prompts: []string{"new"}}}))
+	got, kind, err := st.TagByName(ctx, "Old Thing")
+	check(t, err)
+	if got != tag || kind != core.TagManual {
+		t.Fatalf("retired tag = %d, %s", got, kind)
+	}
+}

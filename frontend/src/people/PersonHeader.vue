@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The top of a person's page: their face, their name (click to change it),
 // how many photos, and what can be done about them.
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { engine } from '../bridge'
 import type { Person } from '../bridge'
@@ -22,17 +22,30 @@ const editing = ref(false)
 const draft = ref('')
 const input = ref<HTMLInputElement | null>(null)
 const error = ref('')
+let revision = 0
+let loadRequest = 0
+onBeforeUnmount(() => {
+  revision++
+  loadRequest++
+})
 
 async function load() {
-  const p = await engine.person(props.id)
-  if (p.id === props.id) person.value = p
+  const request = ++loadRequest
+  try {
+    const p = await engine.person(props.id)
+    if (request === loadRequest) person.value = p
+  } catch (e) {
+    if (request === loadRequest) error.value = errorText(e)
+  }
 }
 watch(
   () => props.id,
   () => {
+    revision++
     person.value = null
     editing.value = false
-    load().catch((e: unknown) => (error.value = errorText(e)))
+    error.value = ''
+    void load()
   },
   { immediate: true },
 )
@@ -51,24 +64,28 @@ async function save() {
   const name = draft.value.trim()
   if (name === (person.value?.name ?? '')) return
   error.value = ''
+  const requested = revision
+  const id = props.id
   try {
-    const shown = await namePerson(props.id, name)
+    const shown = await namePerson(id, name)
     void people.load().catch(logError)
+    if (requested !== revision) return
     if (shown !== null && shown !== props.id) await router.replace({ name: 'person', params: { id: shown } })
     else await load()
   } catch (e) {
-    error.value = errorText(e)
+    if (requested === revision) error.value = errorText(e)
   }
 }
 
 async function toggleHidden() {
   if (!person.value) return
+  const requested = revision
   try {
     await engine.setPersonHidden(props.id, !person.value.hidden)
-    await load()
+    if (requested === revision) await load()
     void people.load().catch(logError)
   } catch (e) {
-    error.value = errorText(e)
+    if (requested === revision) error.value = errorText(e)
   }
 }
 </script>

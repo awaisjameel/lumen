@@ -2,7 +2,7 @@
 // Reviewing who someone is: all their faces, least alike first, so any that
 // aren't them stand out. Selected faces can be taken out ("not them"), moved
 // to someone else or a new person (splitting), or used as their picture.
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { engine } from '../bridge'
 import type { Face, Person } from '../bridge'
@@ -23,27 +23,34 @@ const faces = ref<Face[]>([])
 const selected = ref(new Set<number>())
 const busy = ref(false)
 const error = ref('')
+let revision = 0
+let loadRequest = 0
+onBeforeUnmount(() => {
+  revision++
+  loadRequest++
+})
 
 const name = computed(() => person.value?.name || t('person.unnamed'))
 const count = computed(() => selected.value.size)
 
 async function load() {
-  const requested = id.value
-  const [p, f] = await Promise.all([engine.person(requested), engine.personFaces(requested)])
-  if (requested !== id.value) return
+  const request = ++loadRequest
+  const [p, f] = await Promise.all([engine.person(id.value), engine.personFaces(id.value)])
+  if (request !== loadRequest) return
   person.value = p
   faces.value = f
   selected.value = new Set([...selected.value].filter((x) => f.some((y) => y.id === x)))
 }
 watch(
   id,
-  (requested) => {
+  () => {
+    const requested = ++revision
     person.value = null
     faces.value = []
     error.value = ''
     selected.value = new Set()
     load().catch((e: unknown) => {
-      if (requested === id.value) error.value = errorText(e)
+      if (requested === revision) error.value = errorText(e)
     })
   },
   { immediate: true },
@@ -59,18 +66,18 @@ function toggle(f: Face) {
 async function act(fn: (ids: number[]) => Promise<unknown>) {
   if (!count.value || busy.value) return
   busy.value = true
-  const requested = id.value
+  const requested = revision
   error.value = ''
   try {
     await fn([...selected.value])
     void people.load().catch(logError)
-    if (requested !== id.value) return
+    if (requested !== revision) return
     selected.value = new Set()
     await load().catch(async () => {
-      if (requested === id.value) await router.replace({ name: 'people' }) // nothing left of them
+      if (requested === revision) await router.replace({ name: 'people' }) // nothing left of them
     })
   } catch (e) {
-    if (requested === id.value) error.value = errorText(e)
+    if (requested === revision) error.value = errorText(e)
   } finally {
     busy.value = false
   }

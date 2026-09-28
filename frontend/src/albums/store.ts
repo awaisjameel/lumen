@@ -1,17 +1,5 @@
-import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
 import { engine } from '../bridge'
-import type { Album } from '../bridge'
+import { defineListStore } from '../shared/listStore'
 
-export const useAlbums = defineStore('albums', () => {
-  const list = ref<Album[]>([])
-  const loaded = ref(false)
-  const byId = computed(() => new Map(list.value.map((album) => [album.id, album])))
-
-  async function load() {
-    list.value = await engine.albums()
-    loaded.value = true
-  }
-
-  return { list, loaded, byId, load }
-})
+/** Saved collections with live counts and covers, loaded on demand. */
+export const useAlbums = defineListStore('albums', engine.albums)

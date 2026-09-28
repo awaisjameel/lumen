@@ -173,7 +173,7 @@ func (s *LibraryService) Albums(ctx context.Context) ([]core.Album, error) {
 }
 
 // CreateAlbum saves a new manual album or smart rule.
-func (s *LibraryService) CreateAlbum(ctx context.Context, name, kind string, rule core.AlbumRule) (int64, error) {
+func (s *LibraryService) CreateAlbum(ctx context.Context, name string, kind core.AlbumKind, rule core.AlbumRule) (int64, error) {
 	return s.store.CreateAlbum(ctx, name, kind, rule)
 }
 

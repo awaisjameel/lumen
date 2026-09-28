@@ -101,7 +101,7 @@ Before moving between implementation phases, also regenerate the bindings with
 `wails3 build`. The frontend must finish building before Go embeds `frontend/dist`;
 do not run independent frontend and Go production builds concurrently. Browser
 component tests use jsdom; actual codec playback still needs a browser or WebView
-smoke test. See [the phase 1–4 audit](docs/audit-2026-09-28.md) for findings,
+smoke test. See [the current implementation audit](docs/audit-2026-09-28-current.md) for findings,
 verification evidence and remaining acceptance limits.
 
 Handy environment variables:

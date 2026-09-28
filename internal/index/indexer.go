@@ -58,7 +58,8 @@ type Indexer struct {
 	people *people.Engine // nil when faces can't be recognised (see facesError)
 	events Events
 
-	scanReqs  chan scanRequest
+	scanWake  chan struct{}
+	scanReqs  []scanRequest // protected by mu, at most one pending request per source
 	wakeMeta  chan struct{}
 	wakeThum  chan struct{}
 	wakeEmbed chan struct{}
@@ -102,7 +103,7 @@ type scanRequest struct {
 func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Events) *Indexer {
 	ix := &Indexer{
 		store: st, paths: paths, cache: cache, search: m.Search, people: m.People, events: ev,
-		scanReqs:  make(chan scanRequest, 256),
+		scanWake:  make(chan struct{}, 1),
 		wakeMeta:  make(chan struct{}, 1),
 		wakeThum:  make(chan struct{}, 1),
 		wakeEmbed: make(chan struct{}, 1),
@@ -276,6 +277,7 @@ func (ix *Indexer) RescanAll() {
 		}
 	}
 	ix.restartWatchers(srcs)
+	ix.changed.Store(true) // source removal can change visibility without a scan
 }
 
 // SetFocus tells the indexer which days the user is looking at (YYYY-MM-DD,
@@ -364,11 +366,53 @@ func (ix *Indexer) powerLoop(ctx context.Context) {
 }
 
 func (ix *Indexer) queueScan(r scanRequest) {
-	select {
-	case ix.scanReqs <- r:
-	default:
-		slog.Warn("scan queue full; dropping request", "source", r.sourceID, "under", r.under)
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	for i, pending := range ix.scanReqs {
+		if pending.sourceID != r.sourceID {
+			continue
+		}
+		// A full scan covers every subtree. Disjoint changes widen to the
+		// whole source instead of losing work when a bounded queue fills.
+		switch {
+		case pending.under == "", pending.under == r.under:
+		case r.under == "":
+			ix.scanReqs[i] = r
+		case store.IsWithin(r.under, pending.under):
+		case store.IsWithin(pending.under, r.under):
+			ix.scanReqs[i] = r
+		default:
+			ix.scanReqs[i].under = ""
+		}
+		nudge(ix.scanWake)
+		return
 	}
+	ix.scanReqs = append(ix.scanReqs, r)
+	nudge(ix.scanWake)
+}
+
+func (ix *Indexer) nextScan(ctx context.Context) (scanRequest, bool) {
+	for ctx.Err() == nil {
+		ix.mu.Lock()
+		if len(ix.scanReqs) > 0 {
+			r := ix.scanReqs[0]
+			ix.scanReqs = ix.scanReqs[1:]
+			ix.mu.Unlock()
+			return r, true
+		}
+		ix.mu.Unlock()
+		select {
+		case <-ix.scanWake:
+		case <-ctx.Done():
+		}
+	}
+	return scanRequest{}, false
+}
+
+func (ix *Indexer) pendingScans() int {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	return len(ix.scanReqs)
 }
 
 func (ix *Indexer) scanLoop(ctx context.Context) {
@@ -387,11 +431,9 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 		},
 	}
 	for {
-		var req scanRequest
-		select {
-		case <-ctx.Done():
+		req, ok := ix.nextScan(ctx)
+		if !ok {
 			return
-		case req = <-ix.scanReqs:
 		}
 		srcs, err := ix.store.ListSources(ctx)
 		if err != nil {

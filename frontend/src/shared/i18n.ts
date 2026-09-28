@@ -106,6 +106,7 @@ const en = {
   'albums.deleteTitle': 'Delete “{name}”?',
   'albums.deleteText': 'The album will be removed. Your photos and videos stay in the library.',
   'albums.kind': 'Media',
+  'albums.type': 'Album type',
   'albums.anyMedia': 'Photos and videos',
   'albums.photos': 'Photos',
   'albums.videos': 'Videos',

@@ -46,7 +46,7 @@ export function AssetAlbums(id: number): $CancellablePromise<number[] | null> {
 /**
  * CreateAlbum saves a new manual album or smart rule.
  */
-export function CreateAlbum(name: string, kind: string, rule: core$0.AlbumRule): $CancellablePromise<number> {
+export function CreateAlbum(name: string, kind: core$0.AlbumKind, rule: core$0.AlbumRule): $CancellablePromise<number> {
     return $Call.ByID(1673588108, name, kind, rule);
 }
 

@@ -112,4 +112,31 @@ describe('library requests', () => {
     await Promise.all([first, second])
     expect(lib.total).toBe(2)
   })
+
+  it('clears a removed selection and viewer even when their day still contains other items', async () => {
+    const lib = useLibrary()
+    await lib.setScope(favourites)
+    vi.mocked(engine.days).mockResolvedValueOnce(result(1)).mockResolvedValueOnce(result(2))
+    await lib.ensureDays([day])
+    lib.selected = { day, id: 1 }
+    lib.viewer = { day, id: 1 }
+    await lib.refresh()
+    await lib.ensureDays([day])
+    expect(lib.selected).toBeNull()
+    expect(lib.viewer).toBeNull()
+  })
+
+  it('clears the cached day and selection when a filtered day disappears', async () => {
+    const lib = useLibrary()
+    await lib.setScope(favourites)
+    vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+    await lib.ensureDays([day])
+    lib.selected = { day, id: 1 }
+    lib.viewer = { day, id: 1 }
+    vi.mocked(engine.timeline).mockResolvedValueOnce([])
+    await lib.refresh()
+    expect(lib.days.has(day)).toBe(false)
+    expect(lib.selected).toBeNull()
+    expect(lib.viewer).toBeNull()
+  })
 })

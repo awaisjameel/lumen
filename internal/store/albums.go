@@ -47,33 +47,43 @@ func validateAlbumRule(rule core.AlbumRule) error {
 }
 
 // CreateAlbum creates a manual album or a saved smart rule.
-func (s *Store) CreateAlbum(ctx context.Context, name, kind string, rule core.AlbumRule) (int64, error) {
+func (s *Store) CreateAlbum(ctx context.Context, name string, kind core.AlbumKind, rule core.AlbumRule) (int64, error) {
 	name, err := albumName(name)
 	if err != nil {
 		return 0, err
 	}
-	if kind != "manual" && kind != "smart" {
+	if kind != core.AlbumManual && kind != core.AlbumSmart {
 		return 0, fmt.Errorf("%w: unknown album kind", ErrInvalidAlbum)
 	}
 	if err := validateAlbumRule(rule); err != nil {
 		return 0, err
 	}
-	if kind == "manual" {
+	if kind == core.AlbumManual {
 		rule = core.AlbumRule{}
 	}
 	body, err := json.Marshal(rule)
 	if err != nil {
 		return 0, err
 	}
-	result, err := s.w.ExecContext(ctx, `INSERT INTO albums(name, kind, rule_json, created_at) VALUES(?, ?, ?, ?)`,
-		name, kind, string(body), time.Now().Unix())
+	var id int64
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		if err := albumReferences(ctx, tx, rule); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `INSERT INTO albums(name, kind, rule_json, created_at) VALUES(?, ?, ?, ?)`,
+			name, kind, string(body), time.Now().Unix())
+		if err == nil {
+			id, err = result.LastInsertId()
+		}
+		return err
+	})
 	if isUnique(err) {
 		return 0, fmt.Errorf("%w: an album already has that name", ErrInvalidAlbum)
 	}
 	if err != nil {
 		return 0, err
 	}
-	return result.LastInsertId()
+	return id, nil
 }
 
 // UpdateAlbum changes its name and, for smart albums, its rule.
@@ -89,38 +99,43 @@ func (s *Store) UpdateAlbum(ctx context.Context, id int64, name string, rule cor
 	if err != nil {
 		return err
 	}
-	if album.Kind == "manual" {
+	if album.Kind == core.AlbumManual {
 		rule = core.AlbumRule{}
 	}
 	body, err := json.Marshal(rule)
 	if err != nil {
 		return err
 	}
-	result, err := s.w.ExecContext(ctx, `UPDATE albums SET name = ?, rule_json = ? WHERE id = ?`, name, string(body), id)
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		if err := albumReferences(ctx, tx, rule); err != nil {
+			return err
+		}
+		return affected(tx.ExecContext(ctx, `UPDATE albums SET name = ?, rule_json = ? WHERE id = ?`, name, string(body), id))
+	})
 	if isUnique(err) {
 		return fmt.Errorf("%w: an album already has that name", ErrInvalidAlbum)
-	}
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err == nil && n == 0 {
-		return ErrNotFound
 	}
 	return err
 }
 
-// DeleteAlbum removes a collection and its memberships, leaving assets untouched.
-func (s *Store) DeleteAlbum(ctx context.Context, id int64) error {
-	result, err := s.w.ExecContext(ctx, `DELETE FROM albums WHERE id = ?`, id)
+// Validate references in the write transaction so deletion cannot race a save.
+func albumReferences(ctx context.Context, tx *sql.Tx, rule core.AlbumRule) error {
+	var valid bool
+	err := tx.QueryRowContext(ctx, `SELECT
+		(?1 = 0 OR EXISTS (SELECT 1 FROM tags WHERE id = ?1)) AND
+		(?2 = 0 OR EXISTS (SELECT 1 FROM people WHERE id = ?2))`, rule.Tag, rule.Person).Scan(&valid)
 	if err != nil {
 		return err
 	}
-	n, err := result.RowsAffected()
-	if err == nil && n == 0 {
-		return ErrNotFound
+	if !valid {
+		return fmt.Errorf("%w: the selected Thing or person no longer exists", ErrInvalidAlbum)
 	}
-	return err
+	return nil
+}
+
+// DeleteAlbum removes a collection and its memberships, leaving assets untouched.
+func (s *Store) DeleteAlbum(ctx context.Context, id int64) error {
+	return affected(s.w.ExecContext(ctx, `DELETE FROM albums WHERE id = ?`, id))
 }
 
 func (s *Store) album(ctx context.Context, id int64) (core.Album, error) {
@@ -143,31 +158,38 @@ func (s *Store) album(ctx context.Context, id int64) (core.Album, error) {
 // Albums includes live counts and covers. A smart album reacts to new assets,
 // changed metadata, tags and people without maintaining a second membership.
 func (s *Store) Albums(ctx context.Context, minScore float32) ([]core.Album, error) {
-	albums, err := queryAll(ctx, s.r, func(r *sql.Rows) (a core.Album, err error) {
+	// Counts and covers must describe the same snapshot while indexing continues.
+	tx, err := s.r.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }() // releases the snapshot on an earlier error
+	rows, err := tx.QueryContext(ctx, `SELECT id, name, kind, COALESCE(rule_json, '{}') FROM albums ORDER BY name COLLATE NOCASE`)
+	albums, err := collect(rows, err, func(r *sql.Rows) (a core.Album, err error) {
 		var raw string
 		err = r.Scan(&a.ID, &a.Name, &a.Kind, &raw)
 		if err == nil {
 			err = json.Unmarshal([]byte(raw), &a.Rule)
 		}
 		return a, err
-	}, `SELECT id, name, kind, COALESCE(rule_json, '{}') FROM albums ORDER BY name COLLATE NOCASE`)
+	})
 	if err != nil {
 		return nil, err
 	}
 	for i := range albums {
 		where, args := albumPredicate(albums[i], minScore)
-		if err := s.r.QueryRowContext(ctx, `SELECT count(*) FROM assets WHERE `+where, args...).Scan(&albums[i].Count); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM assets WHERE `+where, args...).Scan(&albums[i].Count); err != nil {
 			return nil, err
 		}
 		if albums[i].Count == 0 {
 			continue
 		}
-		if err := s.r.QueryRowContext(ctx, `SELECT id, thumb_version FROM assets WHERE `+where+
+		if err := tx.QueryRowContext(ctx, `SELECT id, thumb_version FROM assets WHERE `+where+
 			` ORDER BY taken_at DESC, id DESC LIMIT 1`, args...).Scan(&albums[i].Cover, &albums[i].CoverThumb); err != nil {
 			return nil, err
 		}
 	}
-	return albums, nil
+	return albums, tx.Commit()
 }
 
 // AssetAlbums returns the manual collections an asset belongs to. Smart albums
@@ -184,32 +206,32 @@ func (s *Store) SetAlbumItem(ctx context.Context, albumID, assetID int64, includ
 	if albumID <= 0 || assetID <= 0 {
 		return ErrNotFound
 	}
-	album, err := s.album(ctx, albumID)
-	if err != nil {
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		var kind core.AlbumKind
+		err := tx.QueryRowContext(ctx, `SELECT kind FROM albums WHERE id = ?
+			AND EXISTS (SELECT 1 FROM assets WHERE id = ?)`, albumID, assetID).Scan(&kind)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if kind != core.AlbumManual {
+			return fmt.Errorf("%w: only manual albums accept items", ErrInvalidAlbum)
+		}
+		if include {
+			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO album_items(album_id, asset_id, added_at) VALUES(?, ?, ?)`, albumID, assetID, time.Now().Unix())
+		} else {
+			_, err = tx.ExecContext(ctx, `DELETE FROM album_items WHERE album_id = ? AND asset_id = ?`, albumID, assetID)
+		}
 		return err
-	}
-	if album.Kind != "manual" {
-		return fmt.Errorf("%w: only manual albums accept items", ErrInvalidAlbum)
-	}
-	var exists bool
-	if err := s.r.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?)`, assetID).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		return ErrNotFound
-	}
-	if include {
-		_, err = s.w.ExecContext(ctx, `INSERT OR IGNORE INTO album_items(album_id, asset_id, added_at) VALUES(?, ?, ?)`, albumID, assetID, time.Now().Unix())
-	} else {
-		_, err = s.w.ExecContext(ctx, `DELETE FROM album_items WHERE album_id = ? AND asset_id = ?`, albumID, assetID)
-	}
-	return err
+	})
 }
 
 // albumPredicate returns a fixed SQL predicate with bound values only.
 func albumPredicate(a core.Album, minScore float32) (where string, args []any) {
 	where, args = visible, []any{}
-	if a.Kind == "manual" {
+	if a.Kind == core.AlbumManual {
 		return where + ` AND id IN (SELECT asset_id FROM album_items WHERE album_id = ?)`, []any{a.ID}
 	}
 	rule := a.Rule

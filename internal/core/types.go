@@ -150,11 +150,20 @@ type AlbumRule struct {
 	Person     int64  `json:"person"`
 }
 
+// AlbumKind identifies how an album selects its members.
+type AlbumKind string
+
+// The supported album kinds.
+const (
+	AlbumManual AlbumKind = "manual"
+	AlbumSmart  AlbumKind = "smart"
+)
+
 // Album is a manual collection or a saved rule with its current visible count and cover.
 type Album struct {
 	ID         int64     `json:"id"`
 	Name       string    `json:"name"`
-	Kind       string    `json:"kind"` // manual | smart
+	Kind       AlbumKind `json:"kind"`
 	Rule       AlbumRule `json:"rule"`
 	Count      int       `json:"count"`
 	Cover      int64     `json:"cover"`

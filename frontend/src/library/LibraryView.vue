@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { engine, Filter, thumbUrl } from '../bridge'
+import { AlbumKind, engine, Filter, thumbUrl } from '../bridge'
 import type { GridItem } from '../bridge'
 import { logError } from '../shared/errors'
 import { dayLabel, duration } from '../shared/format'
@@ -236,7 +236,7 @@ async function onKey(e: KeyboardEvent) {
 watch(
   () => lib.viewer,
   (now, before) => {
-    if (!now && before) {
+    if (!now && before && lib.itemAt(before)) {
       lib.selected = before
       scrollIntoView(before)
       scroller.value?.focus()
@@ -258,7 +258,11 @@ const emptyText = computed((): [string, string] => {
   if (albumId.value)
     return [
       t('albums.viewEmpty'),
-      t(albums.byId.get(albumId.value)?.kind === 'smart' ? 'albums.smartEmptyHint' : 'albums.manualEmptyHint'),
+      t(
+        albums.byId.get(albumId.value)?.kind === AlbumKind.AlbumSmart
+          ? 'albums.smartEmptyHint'
+          : 'albums.manualEmptyHint',
+      ),
     ]
   const keys: [MessageKey, MessageKey] =
     s.view.filter === Filter.FilterFavourites

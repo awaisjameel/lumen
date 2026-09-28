@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { DateSource, engine, Kind, TagSource } from '../bridge'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { AlbumKind, DateSource, engine, Kind, TagSource } from '../bridge'
 import type { AssetDetail, AssetTag, Face } from '../bridge'
 import { errorText, logError } from '../shared/errors'
 import { bytes, dateTime, duration, megapixels } from '../shared/format'
@@ -24,10 +24,25 @@ const newTag = ref('')
 const error = ref('')
 const albumIDs = ref<number[]>([])
 const newAlbum = ref('')
+const creatingAlbum = ref(false)
+const manualAlbums = computed(() => albums.list.filter((a) => a.kind === AlbumKind.AlbumManual))
+let selectionRevision = 0
+let detailRequest = 0
+let tagsRequest = 0
+let facesRequest = 0
+let albumsRequest = 0
+onBeforeUnmount(() => {
+  selectionRevision++
+  detailRequest++
+  tagsRequest++
+  facesRequest++
+  albumsRequest++
+})
 
 watch(
   () => [props.sel?.id, lib.itemAt(props.sel)?.f] as const,
   async ([id]) => {
+    const request = ++detailRequest
     error.value = ''
     if (detail.value?.id !== id) detail.value = null
     if (!id) {
@@ -36,9 +51,9 @@ watch(
     }
     try {
       const d = await engine.asset(id)
-      if (props.sel?.id === id) detail.value = d
+      if (request === detailRequest) detail.value = d
     } catch (e) {
-      if (props.sel?.id === id) error.value = errorText(e)
+      if (request === detailRequest) error.value = errorText(e)
     }
   },
   { immediate: true },
@@ -50,10 +65,12 @@ const loadExtras = (id: number | undefined) => Promise.all([loadTags(id), loadFa
 watch(
   () => props.sel?.id,
   (id) => {
+    selectionRevision++
     tags.value = []
     faces.value = []
     albumIDs.value = []
     newTag.value = ''
+    newAlbum.value = ''
     void loadExtras(id)
   },
   { immediate: true },
@@ -62,13 +79,15 @@ useLiveReload(() => loadExtras(props.sel?.id))
 void albums.load().catch(logError)
 
 async function loadAlbums(id: number | undefined) {
+  if (id !== props.sel?.id) return
+  const request = ++albumsRequest
   if (!id) {
     albumIDs.value = []
     return
   }
   try {
     const got = await engine.assetAlbums(id)
-    if (props.sel?.id === id) albumIDs.value = got
+    if (request === albumsRequest) albumIDs.value = got
   } catch (e) {
     logError(e)
   }
@@ -85,10 +104,12 @@ function toggleAlbum(albumID: number, assetID: number, include: boolean) {
 
 async function createAlbumForItem(assetID: number) {
   const name = newAlbum.value.trim()
-  if (!name) return
+  if (!name || creatingAlbum.value) return
+  const revision = selectionRevision
+  creatingAlbum.value = true
   error.value = ''
   try {
-    const id = await engine.createAlbum(name, 'manual', {
+    const id = await engine.createAlbum(name, AlbumKind.AlbumManual, {
       kind: Kind.$zero,
       favourites: false,
       from: '',
@@ -97,34 +118,40 @@ async function createAlbumForItem(assetID: number) {
       person: 0,
     })
     await engine.setAlbumItem(id, assetID, true)
-    newAlbum.value = ''
+    if (revision === selectionRevision) newAlbum.value = ''
     await Promise.all([loadAlbums(assetID), albums.load()])
   } catch (e) {
-    error.value = errorText(e)
+    if (revision === selectionRevision) error.value = errorText(e)
+  } finally {
+    creatingAlbum.value = false
   }
 }
 
 async function loadTags(id: number | undefined) {
+  if (id !== props.sel?.id) return
+  const request = ++tagsRequest
   if (!id) {
     tags.value = []
     return
   }
   try {
     const got = await engine.assetTags(id)
-    if (props.sel?.id === id) tags.value = got
+    if (request === tagsRequest) tags.value = got
   } catch (e) {
     logError(e)
   }
 }
 
 async function loadFaces(id: number | undefined) {
+  if (id !== props.sel?.id) return
+  const request = ++facesRequest
   if (!id) {
     faces.value = []
     return
   }
   try {
     const got = await engine.assetFaces(id)
-    if (props.sel?.id === id) faces.value = got
+    if (request === facesRequest) faces.value = got
   } catch (e) {
     logError(e)
   }
@@ -135,14 +162,14 @@ async function loadFaces(id: number | undefined) {
  * refresh the grid, which may be a Thing's or a person's).
  */
 async function edit(fn: () => Promise<unknown>, reload: () => Promise<void>) {
-  const requested = props.sel?.id
+  const requested = selectionRevision
   error.value = ''
   try {
     await fn()
     await reload()
     void lib.refresh().catch(logError)
   } catch (e) {
-    if (props.sel?.id === requested) error.value = errorText(e)
+    if (selectionRevision === requested) error.value = errorText(e)
   }
 }
 
@@ -263,7 +290,7 @@ function showInFolder(id: number) {
 
       <section>
         <h3>{{ t('nav.albums') }}</h3>
-        <label v-for="album in albums.list.filter((a) => a.kind === 'manual')" :key="album.id" class="album-option">
+        <label v-for="album in manualAlbums" :key="album.id" class="album-option">
           <input
             type="checkbox"
             :checked="albumIDs.includes(album.id)"
@@ -278,7 +305,7 @@ function showInFolder(id: number) {
             :aria-label="t('albums.createForItem')"
             maxlength="80"
           />
-          <button class="icon-btn" :title="t('albums.createForItem')" :disabled="!newAlbum.trim()">
+          <button class="icon-btn" :title="t('albums.createForItem')" :disabled="creatingAlbum || !newAlbum.trim()">
             <Icon name="plus" :size="16" />
           </button>
         </form>

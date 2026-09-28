@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { engine, Kind, thumbUrl } from '../bridge'
+import { AlbumKind, engine, Kind, thumbUrl } from '../bridge'
 import type { Album, AlbumRule } from '../bridge'
 import { usePeople } from '../people/store'
 import { confirm } from '../shared/confirm'
@@ -19,11 +19,13 @@ const albums = useAlbums()
 const things = useThings()
 const people = usePeople()
 const name = ref('')
-const kind = ref<'manual' | 'smart'>('manual')
+const kind = ref(AlbumKind.AlbumManual)
 const rule = ref<AlbumRule>(emptyRule())
 const editing = ref<number | null>(null)
 const busy = ref(false)
 const error = ref('')
+const active = ref(true)
+onBeforeUnmount(() => (active.value = false))
 
 function emptyRule(): AlbumRule {
   return { kind: Kind.$zero, favourites: false, from: '', to: '', tag: 0, person: 0 }
@@ -39,14 +41,15 @@ useLiveReload(albums.load)
 function reset() {
   editing.value = null
   name.value = ''
-  kind.value = 'manual'
+  kind.value = AlbumKind.AlbumManual
   rule.value = emptyRule()
 }
 
 function edit(album: Album) {
+  if (busy.value) return
   editing.value = album.id
   name.value = album.name
-  kind.value = album.kind as 'manual' | 'smart'
+  kind.value = album.kind
   rule.value = { ...album.rule }
 }
 
@@ -59,6 +62,7 @@ async function save() {
     if (id === null) {
       const created = await engine.createAlbum(name.value, kind.value, rule.value)
       await albums.load()
+      if (!active.value) return
       reset()
       void router.push({ name: 'album', params: { id: created } })
     } else {
@@ -74,6 +78,7 @@ async function save() {
 }
 
 async function remove(album: Album) {
+  if (busy.value) return
   if (!(await confirm(t('albums.deleteTitle', { name: album.name }), t('albums.deleteText'), t('albums.delete'))))
     return
   error.value = ''
@@ -99,7 +104,7 @@ async function remove(album: Album) {
       <form class="editor" @submit.prevent="save">
         <div class="editor-head">
           <h2>{{ editing === null ? t('albums.new') : t('albums.edit') }}</h2>
-          <button v-if="editing !== null" type="button" class="btn subtle" @click="reset">
+          <button v-if="editing !== null" type="button" class="btn subtle" :disabled="busy" @click="reset">
             {{ t('common.cancel') }}
           </button>
         </div>
@@ -111,12 +116,12 @@ async function remove(album: Album) {
             maxlength="80"
             required
           />
-          <select v-if="editing === null" v-model="kind" :aria-label="t('albums.kind')">
-            <option value="manual">{{ t('albums.manual') }}</option>
-            <option value="smart">{{ t('albums.smart') }}</option>
+          <select v-if="editing === null" v-model="kind" :aria-label="t('albums.type')">
+            <option :value="AlbumKind.AlbumManual">{{ t('albums.manual') }}</option>
+            <option :value="AlbumKind.AlbumSmart">{{ t('albums.smart') }}</option>
           </select>
         </div>
-        <div v-if="kind === 'smart'" class="rules">
+        <div v-if="kind === AlbumKind.AlbumSmart" class="rules">
           <label
             >{{ t('albums.kind') }}
             <select v-model="rule.kind">
@@ -153,7 +158,7 @@ async function remove(album: Album) {
 
       <div v-if="albums.list.length" class="cards">
         <div v-for="album in albums.list" :key="album.id" class="card">
-          <RouterLink :to="{ name: 'album', params: { id: album.id } }" class="cover">
+          <RouterLink :to="{ name: 'album', params: { id: album.id } }" class="cover" :aria-label="album.name">
             <img v-if="album.cover" :src="thumbUrl(album.cover, album.coverThumb)" alt="" loading="lazy" />
             <Icon v-else name="folder" :size="36" />
           </RouterLink>
@@ -161,7 +166,7 @@ async function remove(album: Album) {
             <RouterLink :to="{ name: 'album', params: { id: album.id } }">{{ album.name }}</RouterLink>
             <span class="muted"
               >{{ t('status.items', { n: album.count }) }} ·
-              {{ t(album.kind === 'smart' ? 'albums.smart' : 'albums.manual') }}</span
+              {{ t(album.kind === AlbumKind.AlbumSmart ? 'albums.smart' : 'albums.manual') }}</span
             >
           </div>
           <button class="icon-btn" :title="t('albums.edit')" @click="edit(album)">
