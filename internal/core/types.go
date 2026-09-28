@@ -136,6 +136,29 @@ type View struct {
 	Filter Filter `json:"filter"`
 	Tag    int64  `json:"tag,omitempty"`    // 0 = any
 	Person int64  `json:"person,omitempty"` // 0 = anyone
+	Album  int64  `json:"album,omitempty"`  // 0 = any; excludes other view filters
+}
+
+// AlbumRule is a conjunction of optional filters, saved for a smart album.
+// Dates are inclusive camera-clock calendar days (YYYY-MM-DD).
+type AlbumRule struct {
+	Kind       Kind   `json:"kind"` // "" = photos and videos
+	Favourites bool   `json:"favourites"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Tag        int64  `json:"tag"`
+	Person     int64  `json:"person"`
+}
+
+// Album is a manual collection or a saved rule with its current visible count and cover.
+type Album struct {
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	Kind       string    `json:"kind"` // manual | smart
+	Rule       AlbumRule `json:"rule"`
+	Count      int       `json:"count"`
+	Cover      int64     `json:"cover"`
+	CoverThumb int       `json:"coverThumb"`
 }
 
 // TagKind says where a tag comes from.

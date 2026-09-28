@@ -6,6 +6,8 @@ import { Events } from '@wailsio/runtime'
 import { LibraryService, PeopleService, SearchService } from '../../bindings/lumen/services'
 import { DateSource, Filter, Kind, Playback, TagKind, TagSource } from '../../bindings/lumen/internal/core'
 import type {
+  Album,
+  AlbumRule,
   AssetDetail as RawAssetDetail,
   AssetTag,
   DayBucket,
@@ -22,7 +24,7 @@ import type {
 } from '../../bindings/lumen/internal/core'
 
 export { DateSource, Filter, Kind, Playback, TagKind, TagSource }
-export type { AssetTag, DayBucket, Face, GridItem, Person, Progress, Settings, Source, Tag, View }
+export type { Album, AlbumRule, AssetTag, DayBucket, Face, GridItem, Person, Progress, Settings, Source, Tag, View }
 
 // Go sends an empty list as null; the generated types say so. These are the
 // same types with their lists made non-null, which this file guarantees, so
@@ -68,6 +70,14 @@ export const engine = {
     return { ...d, paths: d.paths ?? [] }
   },
   setFavourite: (id: number, fav: boolean): Promise<void> => LibraryService.SetFavourite(id, fav),
+  albums: async (): Promise<Album[]> => (await LibraryService.Albums()) ?? [],
+  createAlbum: (name: string, kind: string, rule: AlbumRule): Promise<number> =>
+    LibraryService.CreateAlbum(name, kind, rule),
+  updateAlbum: (id: number, name: string, rule: AlbumRule): Promise<void> => LibraryService.UpdateAlbum(id, name, rule),
+  deleteAlbum: (id: number): Promise<void> => LibraryService.DeleteAlbum(id),
+  assetAlbums: async (id: number): Promise<number[]> => (await LibraryService.AssetAlbums(id)) ?? [],
+  setAlbumItem: (album: number, asset: number, include: boolean): Promise<void> =>
+    LibraryService.SetAlbumItem(album, asset, include),
   showInFolder: (id: number): Promise<void> => LibraryService.ShowInFolder(id),
 
   progress: (): Promise<Progress> => LibraryService.Progress(),

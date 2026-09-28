@@ -163,6 +163,40 @@ func (s *LibraryService) SetFavourite(ctx context.Context, id int64, fav bool) e
 	return s.store.SetFavourite(ctx, id, fav)
 }
 
+// Albums lists saved collections with their current counts and covers.
+func (s *LibraryService) Albums(ctx context.Context) ([]core.Album, error) {
+	minScore, err := tagConfidence(ctx, s.store)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.Albums(ctx, minScore)
+}
+
+// CreateAlbum saves a new manual album or smart rule.
+func (s *LibraryService) CreateAlbum(ctx context.Context, name, kind string, rule core.AlbumRule) (int64, error) {
+	return s.store.CreateAlbum(ctx, name, kind, rule)
+}
+
+// UpdateAlbum changes an album's name and smart rule.
+func (s *LibraryService) UpdateAlbum(ctx context.Context, id int64, name string, rule core.AlbumRule) error {
+	return s.store.UpdateAlbum(ctx, id, name, rule)
+}
+
+// DeleteAlbum removes an album without touching media files.
+func (s *LibraryService) DeleteAlbum(ctx context.Context, id int64) error {
+	return s.store.DeleteAlbum(ctx, id)
+}
+
+// AssetAlbums lists the manual albums containing an asset.
+func (s *LibraryService) AssetAlbums(ctx context.Context, id int64) ([]int64, error) {
+	return s.store.AssetAlbums(ctx, id)
+}
+
+// SetAlbumItem changes membership in a manual album.
+func (s *LibraryService) SetAlbumItem(ctx context.Context, albumID, assetID int64, include bool) error {
+	return s.store.SetAlbumItem(ctx, albumID, assetID, include)
+}
+
 // ShowInFolder opens Explorer with the asset's file selected.
 func (s *LibraryService) ShowInFolder(ctx context.Context, id int64) error {
 	f, err := s.store.AssetFile(ctx, id)

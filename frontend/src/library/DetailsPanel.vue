@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { DateSource, engine, TagSource } from '../bridge'
+import { DateSource, engine, Kind, TagSource } from '../bridge'
 import type { AssetDetail, AssetTag, Face } from '../bridge'
 import { errorText, logError } from '../shared/errors'
 import { bytes, dateTime, duration, megapixels } from '../shared/format'
@@ -11,15 +11,19 @@ import { useLiveReload } from '../shared/liveReload'
 import FaceThumb from '../people/FaceThumb.vue'
 import PersonPicker from '../people/PersonPicker.vue'
 import { useLibrary } from './store'
+import { useAlbums } from '../albums/store'
 import type { Sel } from './store'
 
 const props = defineProps<{ sel: Sel | null }>()
 const lib = useLibrary()
+const albums = useAlbums()
 const detail = ref<AssetDetail | null>(null)
 const tags = ref<AssetTag[]>([])
 const faces = ref<Face[]>([])
 const newTag = ref('')
 const error = ref('')
+const albumIDs = ref<number[]>([])
+const newAlbum = ref('')
 
 watch(
   () => [props.sel?.id, lib.itemAt(props.sel)?.f] as const,
@@ -42,18 +46,63 @@ watch(
 
 // Tags and faces: load with the photo, and again as the library changes
 // while the panel is open (the AI adds tags, finds faces, groups people).
-const loadExtras = (id: number | undefined) => Promise.all([loadTags(id), loadFaces(id)])
+const loadExtras = (id: number | undefined) => Promise.all([loadTags(id), loadFaces(id), loadAlbums(id)])
 watch(
   () => props.sel?.id,
   (id) => {
     tags.value = []
     faces.value = []
+    albumIDs.value = []
     newTag.value = ''
     void loadExtras(id)
   },
   { immediate: true },
 )
 useLiveReload(() => loadExtras(props.sel?.id))
+void albums.load().catch(logError)
+
+async function loadAlbums(id: number | undefined) {
+  if (!id) {
+    albumIDs.value = []
+    return
+  }
+  try {
+    const got = await engine.assetAlbums(id)
+    if (props.sel?.id === id) albumIDs.value = got
+  } catch (e) {
+    logError(e)
+  }
+}
+
+function toggleAlbum(albumID: number, assetID: number, include: boolean) {
+  void edit(
+    () => engine.setAlbumItem(albumID, assetID, include),
+    async () => {
+      await Promise.all([loadAlbums(assetID), albums.load()])
+    },
+  )
+}
+
+async function createAlbumForItem(assetID: number) {
+  const name = newAlbum.value.trim()
+  if (!name) return
+  error.value = ''
+  try {
+    const id = await engine.createAlbum(name, 'manual', {
+      kind: Kind.$zero,
+      favourites: false,
+      from: '',
+      to: '',
+      tag: 0,
+      person: 0,
+    })
+    await engine.setAlbumItem(id, assetID, true)
+    newAlbum.value = ''
+    await Promise.all([loadAlbums(assetID), albums.load()])
+  } catch (e) {
+    error.value = errorText(e)
+  }
+}
 
 async function loadTags(id: number | undefined) {
   if (!id) {
@@ -212,6 +261,29 @@ function showInFolder(id: number) {
         />
       </section>
 
+      <section>
+        <h3>{{ t('nav.albums') }}</h3>
+        <label v-for="album in albums.list.filter((a) => a.kind === 'manual')" :key="album.id" class="album-option">
+          <input
+            type="checkbox"
+            :checked="albumIDs.includes(album.id)"
+            @change="toggleAlbum(album.id, detail.id, ($event.target as HTMLInputElement).checked)"
+          />
+          {{ album.name }}
+        </label>
+        <form class="album-new" @submit.prevent="createAlbumForItem(detail.id)">
+          <input
+            v-model="newAlbum"
+            :placeholder="t('albums.createForItem')"
+            :aria-label="t('albums.createForItem')"
+            maxlength="80"
+          />
+          <button class="icon-btn" :title="t('albums.createForItem')" :disabled="!newAlbum.trim()">
+            <Icon name="plus" :size="16" />
+          </button>
+        </form>
+      </section>
+
       <section v-if="faces.length">
         <h3>{{ t('details.people') }}</h3>
         <ul class="faces">
@@ -263,6 +335,26 @@ function showInFolder(id: number) {
 </template>
 
 <style scoped>
+.album-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+.album-new {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+}
+.album-new input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+}
 .details {
   width: var(--details-w);
   flex-shrink: 0;

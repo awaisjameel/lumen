@@ -16,7 +16,9 @@ export const RESULTS = 'results'
 export type Scope = { kind: 'timeline'; view: View } | { kind: 'search'; query: string }
 
 export function scopeKey(s: Scope): string {
-  return s.kind === 'search' ? `search:${s.query}` : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}`
+  return s.kind === 'search'
+    ? `search:${s.query}`
+    : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}:${s.view.album ?? 0}`
 }
 
 /** A position in the library: which day, which asset. Survives items shifting. */
@@ -258,7 +260,8 @@ export const useLibrary = defineStore('library', () => {
       return
     }
     const s = scope.value
-    if (s.kind === 'timeline' && s.view.filter === Filter.FilterFavourites) await refresh().catch(logError)
+    if (s.kind === 'timeline' && (s.view.filter === Filter.FilterFavourites || !!s.view.album))
+      await refresh().catch(logError)
   }
 
   async function reloadSources() {

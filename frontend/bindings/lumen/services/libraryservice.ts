@@ -23,6 +23,13 @@ export function AddSources(paths: string[] | null): $CancellablePromise<core$0.S
 }
 
 /**
+ * Albums lists saved collections with their current counts and covers.
+ */
+export function Albums(): $CancellablePromise<core$0.Album[] | null> {
+    return $Call.ByID(4073320501);
+}
+
+/**
  * Asset returns the details for one asset.
  */
 export function Asset(id: number): $CancellablePromise<core$0.AssetDetail> {
@@ -30,10 +37,31 @@ export function Asset(id: number): $CancellablePromise<core$0.AssetDetail> {
 }
 
 /**
+ * AssetAlbums lists the manual albums containing an asset.
+ */
+export function AssetAlbums(id: number): $CancellablePromise<number[] | null> {
+    return $Call.ByID(1963904699, id);
+}
+
+/**
+ * CreateAlbum saves a new manual album or smart rule.
+ */
+export function CreateAlbum(name: string, kind: string, rule: core$0.AlbumRule): $CancellablePromise<number> {
+    return $Call.ByID(1673588108, name, kind, rule);
+}
+
+/**
  * Days returns the view's grid items for the days from..to (YYYY-MM-DD, inclusive).
  */
 export function Days($from: string, to: string, view: core$0.View): $CancellablePromise<core$0.DayItems[] | null> {
     return $Call.ByID(341148162, $from, to, view);
+}
+
+/**
+ * DeleteAlbum removes an album without touching media files.
+ */
+export function DeleteAlbum(id: number): $CancellablePromise<void> {
+    return $Call.ByID(3377060625, id);
 }
 
 /**
@@ -77,6 +105,13 @@ export function Rescan(): $CancellablePromise<void> {
  */
 export function SetAIOnBattery(on: boolean): $CancellablePromise<void> {
     return $Call.ByID(1575093597, on);
+}
+
+/**
+ * SetAlbumItem changes membership in a manual album.
+ */
+export function SetAlbumItem(albumID: number, assetID: number, include: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1841706489, albumID, assetID, include);
 }
 
 /**
@@ -142,4 +177,11 @@ export function SuggestedFolders(): $CancellablePromise<string[] | null> {
  */
 export function Timeline(view: core$0.View): $CancellablePromise<core$0.DayBucket[] | null> {
     return $Call.ByID(636808110, view);
+}
+
+/**
+ * UpdateAlbum changes an album's name and smart rule.
+ */
+export function UpdateAlbum(id: number, name: string, rule: core$0.AlbumRule): $CancellablePromise<void> {
+    return $Call.ByID(2490788795, id, name, rule);
 }

@@ -12,6 +12,8 @@ export {
 
 export type {
     AI,
+    Album,
+    AlbumRule,
     AssetDetail,
     AssetTag,
     DayBucket,

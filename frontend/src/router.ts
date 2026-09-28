@@ -5,6 +5,7 @@ import PeopleView from './people/PeopleView.vue'
 import PersonFaces from './people/PersonFaces.vue'
 import SettingsView from './settings/SettingsView.vue'
 import ThingsView from './things/ThingsView.vue'
+import AlbumsView from './albums/AlbumsView.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -27,6 +28,8 @@ export const router = createRouter({
     { path: '/people/:id(\\d+)/faces', name: 'personFaces', component: PersonFaces },
     { path: '/things', name: 'things', component: ThingsView },
     { path: '/things/:id(\\d+)', name: 'thing', component: LibraryView, meta: { filter: Filter.FilterAll } },
+    { path: '/albums', name: 'albums', component: AlbumsView },
+    { path: '/albums/:id(\\d+)', name: 'album', component: LibraryView, meta: { filter: Filter.FilterAll } },
     { path: '/search', name: 'search', component: LibraryView },
     { path: '/settings', name: 'settings', component: SettingsView },
     { path: '/:rest(.*)*', redirect: '/' },
