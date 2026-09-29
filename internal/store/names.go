@@ -36,7 +36,7 @@ const (
 // for every other letter, run in the writer's transaction before a write.
 func named(ctx context.Context, q querier, table, name string, except int64) (int64, error) {
 	var id int64
-	err := q.QueryRowContext(ctx, "SELECT id FROM "+table+" WHERE fold(name) = ? AND id != ? LIMIT 1",
+	err := q.QueryRowContext(ctx, "SELECT id FROM "+table+" WHERE "+foldName+" = ? AND id != ? LIMIT 1",
 		core.Fold(name), except).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
@@ -44,10 +44,15 @@ func named(ctx context.Context, q querier, table, name string, except int64) (in
 	return id, err
 }
 
+// foldName is fold(name), the column's core.Fold key. fold() is a call into
+// Go for every row, so ASCII names (a byte per character) and NULL use
+// SQLite's lower(), which is what core.Fold does to them.
+const foldName = "(CASE WHEN octet_length(name) != length(name) THEN fold(name) ELSE lower(name) END)"
+
 // nameMatch is the condition for a name column to contain the folded text
 // ?1, and nameFirst orders names starting with it first: suggestions as the
 // user types.
 const (
-	nameMatch = "instr(fold(name), ?1) > 0"
-	nameFirst = "instr(fold(name), ?1) = 1 DESC, length(name), name"
+	nameMatch = "instr(" + foldName + ", ?1) > 0"
+	nameFirst = "instr(" + foldName + ", ?1) = 1 DESC, length(name), name"
 )

@@ -22,7 +22,7 @@ export function scopeKey(s: Scope): string {
     : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}:${s.view.album ?? 0}`
 }
 
-/** Whether a change in the library can change what a timeline view shows. */
+/** Whether a change in the library can change which days and assets a timeline view shows. */
 export function affects(view: View, c: Changes): boolean {
   const album = !!view.album // a smart album can select by anything
   return c.assets || (c.tags && (!!view.tag || album)) || (c.people && (!!view.person || album))
@@ -162,13 +162,19 @@ export const useLibrary = defineStore('library', () => {
   let refreshRevision = 0
   async function refresh(c?: Changes) {
     const s = scope.value
-    if (s.kind === 'search' || (c && !affects(s.view, c))) return
+    if (s.kind === 'search' || (c && !affects(s.view, c) && !c.thumbs)) return
     if (!shown) {
       stale = true // loaded when a grid shows it again
       return
     }
     dayRevision++
     fresh.clear()
+    if (c && !affects(s.view, c)) {
+      // Only thumbnails changed: the days and counts stand, and the view
+      // asks again for the days it shows.
+      triggerRef(days)
+      return
+    }
     refreshRevision++
     if (refreshing) return refreshing
     refreshing = (async () => {
@@ -184,6 +190,11 @@ export const useLibrary = defineStore('library', () => {
       }
     })()
     return refreshing
+  }
+
+  /** Whether any of the days is neither loaded nor on its way. */
+  function needsDays(want: string[]): boolean {
+    return !isSearch.value && want.some((d) => !fresh.has(d) && !inflight.has(d))
   }
 
   /**
@@ -379,6 +390,7 @@ export const useLibrary = defineStore('library', () => {
     selAt,
     init,
     refresh,
+    needsDays,
     ensureDays,
     neighbour,
     setScope,

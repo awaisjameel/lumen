@@ -37,7 +37,7 @@ const aiError = computed(() => lib.progress?.ai.error ?? '')
 const understanding = computed(() => lib.progress?.embedding ?? 0)
 
 onMounted(() => void things.load().catch(logError))
-useLiveReload(things.load, (c) => c.tags || c.assets) // counts grow while the AI works
+useLiveReload(things.load, (c) => c.tags || c.assets || c.thumbs) // counts grow while the AI works
 
 async function create() {
   const n = name.value.trim()

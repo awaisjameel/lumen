@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,6 +37,46 @@ var waitsFor = map[core.Stage][]core.Stage{
 	core.StageFaces:     {core.StageMetadata, core.StageThumbnail},
 }
 
+// unfinished is the SQL list of statuses of a job still to do.
+const unfinished = "('pending', 'waiting')"
+
+// blocked is true for a job of asset_jobs (the outer table) whose earlier
+// stages (waitsFor) are not all finished, NULL for a stage with none.
+var blocked = func() string {
+	var b strings.Builder
+	b.WriteString("CASE asset_jobs.stage")
+	for _, st := range core.Stages {
+		before := waitsFor[st]
+		if len(before) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, " WHEN '%s' THEN EXISTS (SELECT 1 FROM asset_jobs p WHERE p.asset_id = asset_jobs.asset_id"+
+			" AND p.status IN %s AND p.stage IN ('%s'))", st, unfinished, strings.Join(stageNames(before), "', '"))
+	}
+	return b.String() + " END"
+}()
+
+func stageNames(stages []core.Stage) []string {
+	names := make([]string, len(stages))
+	for i, st := range stages {
+		names[i] = string(st)
+	}
+	return names
+}
+
+// settleSQL, completed with a condition on asset_jobs, makes the unfinished
+// jobs it selects 'waiting' while an earlier stage they need is unfinished
+// and 'pending' once none is, so asset_jobs_pending holds only jobs a worker
+// can run. Every change to a job's status is followed by it. Metadata jobs
+// (blocked is NULL) and jobs already right are left alone.
+var settleSQL = `UPDATE asset_jobs SET status = CASE WHEN ` + blocked + ` THEN 'waiting' ELSE 'pending' END
+	WHERE status IN ` + unfinished + ` AND (status = 'waiting') != (` + blocked + `) AND `
+
+func settle(ctx context.Context, tx *sql.Tx, where string, args ...any) error {
+	_, err := tx.ExecContext(ctx, settleSQL+where, args...)
+	return err
+}
+
 // afterMetadata are the stages whose results depend on the orientation
 // metadata reads, so they re-run when it changes.
 var afterMetadata = []core.Stage{core.StageThumbnail, core.StageEmbedding, core.StageFaces}
@@ -49,7 +92,8 @@ const primaryFile = "(SELECT min(id) FROM files WHERE asset_id = a.id)"
 // PendingJobs returns up to limit assets waiting for stage, newest first. With
 // a range, only assets inside it are returned; the indexer uses that to do
 // whatever the user is looking at first. An asset with an earlier stage still
-// pending is left for later. The asset_jobs_pending index gives the order,
+// unfinished is left for later (its job is waiting; the check here only
+// guards against a status left unsettled). The asset_jobs_pending index gives the order,
 // whatever statistics the planner has: sorting the whole backlog for every
 // batch cost a third of a second at 300,000 photos.
 func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeRange, limit int) ([]JobItem, error) {
@@ -61,25 +105,71 @@ func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeR
 }
 
 func pendingJobsQuery(stage core.Stage, within *TimeRange, limit int) (q string, args []any) {
-	q = `SELECT a.id, f.path, a.kind, a.ext, a.orientation, COALESCE(a.duration_ms, 0)
-		FROM asset_jobs j INDEXED BY asset_jobs_pending
-		JOIN assets a ON a.id = j.asset_id
-		JOIN files f ON f.id = ` + primaryFile + `
-		WHERE j.stage = ? AND j.status = 'pending' AND a.` + present
-	args = []any{stage}
-	if before := waitsFor[stage]; len(before) > 0 {
-		q += ` AND NOT EXISTS (SELECT 1 FROM asset_jobs p
-			WHERE p.asset_id = j.asset_id AND p.status = 'pending' AND p.stage IN (` + placeholders(len(before)) + `))`
-		for _, st := range before {
-			args = append(args, st)
-		}
-	}
+	q, args = runnableQuery("asset_jobs j INDEXED BY asset_jobs_pending", nil, stage)
 	if within != nil {
 		q += " AND j.taken_at >= ? AND j.taken_at < ?"
 		args = append(args, within.From, within.To)
 	}
 	q += " ORDER BY j.taken_at DESC, j.asset_id DESC LIMIT ?"
 	return q, append(args, limit)
+}
+
+// runnableQuery selects the jobs of stage a worker can run, as JobItems,
+// from the tables in from (which name the jobs j), with args for from.
+func runnableQuery(from string, fromArgs []any, stage core.Stage) (q string, args []any) {
+	q = `SELECT a.id, f.path, a.kind, a.ext, a.orientation, COALESCE(a.duration_ms, 0)
+		FROM ` + from + `
+		JOIN assets a ON a.id = j.asset_id
+		JOIN files f ON f.id = ` + primaryFile + `
+		WHERE j.stage = ? AND j.status = 'pending' AND a.` + present
+	args = append(slices.Clip(fromArgs), stage)
+	if before := waitsFor[stage]; len(before) > 0 {
+		q += ` AND NOT EXISTS (SELECT 1 FROM asset_jobs p
+			WHERE p.asset_id = j.asset_id AND p.status IN ` + unfinished + ` AND p.stage IN (` + placeholders(len(before)) + `))`
+		for _, st := range before {
+			args = append(args, st)
+		}
+	}
+	return q, args
+}
+
+// PendingJobsOf returns the assets among ids whose job for stage can run now
+// (see PendingJobs), newest first.
+func (s *Store) PendingJobsOf(ctx context.Context, stage core.Stage, ids []int64) ([]JobItem, error) {
+	if len(ids) == 0 {
+		return []JobItem{}, nil
+	}
+	list, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	// CROSS JOIN: look each one up by key, rather than walk the stage's queue.
+	q, args := runnableQuery("json_each(?) ids CROSS JOIN asset_jobs j ON j.asset_id = ids.value", []any{string(list)}, stage)
+	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
+		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration)
+		return j, err
+	}, q+" ORDER BY j.taken_at DESC, j.asset_id DESC", args...)
+}
+
+// Unfinished returns which of ids still have stage to do (pending or waiting).
+func (s *Store) Unfinished(ctx context.Context, stage core.Stage, ids []int64) (map[int64]bool, error) {
+	out := map[int64]bool{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	list, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := queryAll(ctx, s.r, func(r *sql.Rows) (id int64, err error) {
+		err = r.Scan(&id)
+		return id, err
+	}, `SELECT j.asset_id FROM json_each(?) ids CROSS JOIN asset_jobs j ON j.asset_id = ids.value
+		WHERE j.stage = ? AND j.status IN `+unfinished, string(list), stage)
+	for _, id := range rows {
+		out[id] = true
+	}
+	return out, err
 }
 
 // placeholders returns n comma-separated SQL parameters.
@@ -91,14 +181,20 @@ func placeholders(n int) string {
 // jobs that have not yet failed MaxAttempts times: a scan just found their
 // files readable, so a passing cause (an unplugged drive, a locked file) may
 // be gone. It returns how many jobs were requeued.
-func (s *Store) RetryFailed(ctx context.Context, sourceID int64) (int64, error) {
-	res, err := s.w.ExecContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, updated_at = ?
-		WHERE status = 'error' AND attempts < ?
-		AND asset_id IN (SELECT asset_id FROM files WHERE source_id = ?)`, time.Now().Unix(), MaxAttempts, sourceID)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
+func (s *Store) RetryFailed(ctx context.Context, sourceID int64) (n int64, err error) {
+	const ofSource = "asset_id IN (SELECT asset_id FROM files WHERE source_id = ?)"
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, updated_at = ?
+			WHERE status = 'error' AND attempts < ? AND `+ofSource, time.Now().Unix(), MaxAttempts, sourceID)
+		if err != nil {
+			return err
+		}
+		if n, _ = res.RowsAffected(); n == 0 {
+			return nil
+		}
+		return settle(ctx, tx, ofSource, sourceID)
+	})
+	return n, err
 }
 
 // MetadataResult is the outcome of the metadata stage for one asset.
@@ -130,19 +226,24 @@ type ThumbResult struct {
 // has a different version (a better decoder, an upgraded model). Every job
 // records the version that ran it, so only that stage re-runs; other stages
 // and all user edits are untouched. It returns how many jobs were requeued.
-func (s *Store) RequeueOutdated(ctx context.Context, versions map[core.Stage]string) (int64, error) {
-	var total int64
-	for stage, version := range versions {
-		res, err := s.w.ExecContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?
-			WHERE stage = ? AND status != 'pending' AND COALESCE(model_version, '') != ?`,
-			time.Now().Unix(), stage, version)
-		if err != nil {
-			return total, err
+func (s *Store) RequeueOutdated(ctx context.Context, versions map[core.Stage]string) (total int64, err error) {
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		for stage, version := range versions {
+			res, err := tx.ExecContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?
+				WHERE stage = ? AND status NOT IN `+unfinished+` AND COALESCE(model_version, '') != ?`,
+				time.Now().Unix(), stage, version)
+			if err != nil {
+				return err
+			}
+			n, _ := res.RowsAffected()
+			total += n
 		}
-		n, _ := res.RowsAffected()
-		total += n
-	}
-	return total, nil
+		if total == 0 {
+			return nil
+		}
+		return settle(ctx, tx, "1")
+	})
+	return total, err
 }
 
 // SaveMetadata stores a batch of metadata results and closes their jobs,
@@ -171,7 +272,7 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 		// Thumbnails, embeddings and faces made with another orientation are
 		// sideways: redo them (unless they are still waiting anyway).
 		redo, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?1
-			WHERE asset_id = ?2 AND status != 'pending' AND (SELECT orientation FROM assets WHERE id = ?2) != ?3
+			WHERE asset_id = ?2 AND status NOT IN `+unfinished+` AND (SELECT orientation FROM assets WHERE id = ?2) != ?3
 			AND stage IN (`+placeholders(len(afterMetadata))+`)`) // ?4 on, as SQLite numbers them after ?3
 		if err != nil {
 			return err
@@ -239,11 +340,28 @@ func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbRe
 	})
 }
 
-// prepareJobUpdate closes a job (see execJob), counting consecutive failures.
-func prepareJobUpdate(ctx context.Context, tx *sql.Tx) (*sql.Stmt, error) {
-	return tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = ?1, model_version = ?2, error = NULLIF(?3, ''), updated_at = ?4,
+// jobCloser closes jobs (see execJob) in a save's transaction.
+type jobCloser struct {
+	update *sql.Stmt // records the outcome, counting consecutive failures
+	settle *sql.Stmt // then releases the asset's jobs that waited for it
+}
+
+func prepareJobUpdate(ctx context.Context, tx *sql.Tx) (*jobCloser, error) {
+	update, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = ?1, model_version = ?2, error = NULLIF(?3, ''), updated_at = ?4,
 			attempts = CASE WHEN ?1 = 'error' THEN attempts + 1 ELSE 0 END
 		WHERE asset_id = ?5 AND stage = ?6`)
+	if err != nil {
+		return nil, err
+	}
+	settle, err := tx.PrepareContext(ctx, settleSQL+"asset_id = ?")
+	if err != nil {
+		return nil, err // update closes with tx
+	}
+	return &jobCloser{update: update, settle: settle}, nil
+}
+
+func (c *jobCloser) Close() error {
+	return errors.Join(c.update.Close(), c.settle.Close())
 }
 
 func jobStatus(errMsg string, skipped bool) core.JobStatus {
@@ -256,11 +374,28 @@ func jobStatus(errMsg string, skipped bool) core.JobStatus {
 	return core.JobDone
 }
 
-func execJob(ctx context.Context, st *sql.Stmt, assetID int64, stage core.Stage, version string,
+func execJob(ctx context.Context, c *jobCloser, assetID int64, stage core.Stage, version string,
 	status core.JobStatus, errMsg string, now int64) error {
-	_, err := st.ExecContext(ctx, status, version, errMsg, now, assetID, stage)
+	if _, err := c.update.ExecContext(ctx, status, version, errMsg, now, assetID, stage); err != nil {
+		return err
+	}
+	if !hasLaterStages[stage] {
+		return nil
+	}
+	_, err := c.settle.ExecContext(ctx, assetID)
 	return err
 }
+
+// hasLaterStages is true for a stage other stages wait for.
+var hasLaterStages = func() map[core.Stage]bool {
+	m := map[core.Stage]bool{}
+	for _, before := range waitsFor {
+		for _, st := range before {
+			m[st] = true
+		}
+	}
+	return m
+}()
 
 // CountPending returns how many visible assets still wait for any of the
 // stages, so a search can say its results may grow.
@@ -274,18 +409,18 @@ func (s *Store) CountPending(ctx context.Context, stages ...core.Stage) (int, er
 	}
 	var n int
 	err = s.r.QueryRowContext(ctx, `SELECT count(DISTINCT j.asset_id) FROM asset_jobs j JOIN assets a ON a.id = j.asset_id
-		WHERE j.status = 'pending' AND j.stage IN (SELECT value FROM json_each(?)) AND `+visibleA, string(list)).Scan(&n)
+		WHERE j.status IN `+unfinished+` AND j.stage IN (SELECT value FROM json_each(?)) AND `+visibleA, string(list)).Scan(&n)
 	return n, err
 }
 
-// JobCounts returns how many jobs are waiting per stage, and how many failed
+// JobCounts returns how many jobs are still to do per stage, and how many failed
 // or were skipped. It reads only unfinished jobs (the asset_jobs_status
 // index), and ignores assets whose files are gone: their jobs wait, unrun,
 // until the content reappears.
 func (s *Store) JobCounts(ctx context.Context) (pending map[core.Stage]int, failed, skipped int, err error) {
 	rows, err := s.r.QueryContext(ctx, `SELECT j.stage, j.status, count(*) FROM asset_jobs j
 		JOIN assets a ON a.id = j.asset_id
-		WHERE j.status IN ('pending', 'error', 'skipped') AND a.`+present+`
+		WHERE j.status IN ('pending', 'waiting', 'error', 'skipped') AND a.`+present+`
 		GROUP BY j.stage, j.status`)
 	if err != nil {
 		return nil, 0, 0, err
@@ -300,8 +435,8 @@ func (s *Store) JobCounts(ctx context.Context) (pending map[core.Stage]int, fail
 			return nil, 0, 0, err
 		}
 		switch status {
-		case core.JobPending:
-			pending[stage] = n
+		case core.JobPending, core.JobWaiting:
+			pending[stage] += n
 		case core.JobSkipped:
 			skipped += n
 		case core.JobError:

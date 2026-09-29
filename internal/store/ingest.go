@@ -33,8 +33,10 @@ func (s *Store) KnownFiles(ctx context.Context, sourceID int64, under string) (k
 		// A range scan instead of LIKE: every path inside dir sorts between
 		// dir+`\` and dir+`]` (']' is the character after '\'). NOCASE folds
 		// only A-Z, so a folder named in other letters is filtered in Go.
+		// +source_id keeps SQLite on the path range: with ORDER BY id it would
+		// read every file of the source through files_source instead.
 		if isASCII(dir) {
-			q += " AND path >= ? AND path < ?"
+			q = "SELECT id, path, size, mtime FROM files WHERE +source_id = ? AND path >= ? AND path < ?"
 			args = append(args, dir+`\`, dir+`]`)
 		}
 	}
@@ -114,6 +116,11 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 			return err
 		}
 		defer retry.Close()
+		settleAsset, err := tx.PrepareContext(ctx, settleSQL+"asset_id = ?")
+		if err != nil {
+			return err
+		}
+		defer settleAsset.Close()
 		// Until EXIF is read, the best date guess across all copies wins, whatever
 		// order they were found in: a date in a file name beats a modified time,
 		// and an older modified time beats a newer one (copies are usually newer).
@@ -129,8 +136,10 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 			return err
 		}
 		defer insAsset.Close()
-		insJob, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO asset_jobs (asset_id, stage, status, updated_at)
-			VALUES (?, ?, 'pending', ?)`)
+		// Jobs start with the asset's capture time (see migration 0007), and
+		// waiting if an earlier stage has to run first.
+		insJob, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO asset_jobs (asset_id, stage, status, updated_at, taken_at)
+			VALUES (?, ?, ?, ?, ?)`)
 		if err != nil {
 			return err
 		}
@@ -157,8 +166,14 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 				if _, err := revive.ExecContext(ctx, assetID); err != nil {
 					return err
 				}
-				if _, err := retry.ExecContext(ctx, now, assetID, MaxAttempts); err != nil {
+				res, err := retry.ExecContext(ctx, now, assetID, MaxAttempts)
+				if err != nil {
 					return err
+				}
+				if n, _ := res.RowsAffected(); n > 0 {
+					if _, err := settleAsset.ExecContext(ctx, assetID); err != nil {
+						return err
+					}
 				}
 				if _, err := betterGuess.ExecContext(ctx, it.TakenAt, it.DateFrom, assetID); err != nil {
 					return err
@@ -170,7 +185,11 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 				}
 				assetID, _ = res.LastInsertId()
 				for _, st := range core.Stages {
-					if _, err := insJob.ExecContext(ctx, assetID, st, now); err != nil {
+					status := core.JobPending
+					if len(waitsFor[st]) > 0 {
+						status = core.JobWaiting
+					}
+					if _, err := insJob.ExecContext(ctx, assetID, st, status, now, it.TakenAt); err != nil {
 						return err
 					}
 				}

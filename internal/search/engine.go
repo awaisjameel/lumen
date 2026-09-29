@@ -64,6 +64,7 @@ type Engine struct {
 	textUsed time.Time
 	closed   bool                 // Close ran: the text model is never loaded again
 	queries  map[string][]float32 // recent query embeddings
+	shipped  map[string][]float32 // the built-in Things' prompts, encoded when Lumen was built
 
 	unavailableMu sync.Mutex
 	unavailable   map[int64]bool
@@ -103,7 +104,7 @@ func newLabel(t store.AutoTag, vecs [][]float32) label {
 // NewEngine prepares an engine for model. Call Start before use.
 func NewEngine(st *store.Store, m ai.Model) *Engine {
 	return &Engine{store: st, model: m, index: NewIndex(m.Dim), video: newVideoIndex(m.Dim), loaded: make(chan struct{}),
-		queries: map[string][]float32{}}
+		queries: map[string][]float32{}, shipped: shippedVectors(m)}
 }
 
 // Model is the SigLIP model the engine uses.
@@ -550,8 +551,9 @@ func (e *Engine) unavailableAssets(ctx context.Context) (map[int64]bool, error) 
 	return set, nil
 }
 
-// EncodeText embeds texts with the text model, loading it if needed.
-// Single texts (search queries) are cached.
+// EncodeText embeds texts with the text model, loading it if needed: texts
+// Lumen ships the vectors of (see prompts.bin) need no model. Single texts
+// (search queries) are cached.
 func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, error) {
 	e.textMu.Lock()
 	defer e.textMu.Unlock()
@@ -565,6 +567,8 @@ func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, 
 	for i, t := range texts {
 		if v, ok := e.queries[t]; ok {
 			out[i] = v
+		} else if v, ok := e.shipped[t]; ok {
+			out[i] = v
 		} else {
 			todo, at = append(todo, t), append(at, i)
 		}
@@ -572,19 +576,8 @@ func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, 
 	if len(todo) == 0 {
 		return out, nil
 	}
-	if e.text == nil {
-		t := time.Now()
-		te, err := ai.OpenTextEncoder(e.model)
-		if err != nil {
-			return nil, err
-		}
-		e.text = te
-		slog.Info("model loaded", "model", "text model", "took", time.Since(t).Round(time.Millisecond))
-	}
-	if e.textIdle == nil {
-		e.textIdle = time.AfterFunc(textIdle, e.idleText)
-	} else {
-		e.textIdle.Reset(textIdle)
+	if err := e.openText(); err != nil {
+		return nil, err
 	}
 	for lo := 0; lo < len(todo); lo += textBatch {
 		if err := ctx.Err(); err != nil {
@@ -606,6 +599,39 @@ func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, 
 		e.queries[texts[0]] = out[0]
 	}
 	return out, nil
+}
+
+// PrepareSearch loads the text model ahead of a search (the user is about to
+// type one): loading takes seconds, which the first search would otherwise
+// wait for. The model is freed again after textIdle unused.
+func (e *Engine) PrepareSearch() error {
+	e.textMu.Lock()
+	defer e.textMu.Unlock()
+	if e.closed {
+		return ErrClosed
+	}
+	e.textUsed = time.Now()
+	return e.openText()
+}
+
+// openText loads the text model if needed and restarts its idle timer.
+// Call with textMu held.
+func (e *Engine) openText() error {
+	if e.text == nil {
+		t := time.Now()
+		te, err := ai.OpenTextEncoder(e.model)
+		if err != nil {
+			return err
+		}
+		e.text = te
+		slog.Info("model loaded", "model", "text model", "took", time.Since(t).Round(time.Millisecond))
+	}
+	if e.textIdle == nil {
+		e.textIdle = time.AfterFunc(textIdle, e.idleText)
+	} else {
+		e.textIdle.Reset(textIdle)
+	}
+	return nil
 }
 
 // idleText frees the text model once it has been unused for textIdle. The

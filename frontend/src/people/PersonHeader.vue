@@ -52,7 +52,7 @@ watch(
   },
   { immediate: true },
 )
-useLiveReload(load, (c) => c.people || c.assets)
+useLiveReload(load, (c) => c.people || c.assets || c.thumbs)
 
 async function edit() {
   draft.value = person.value?.name ?? ''

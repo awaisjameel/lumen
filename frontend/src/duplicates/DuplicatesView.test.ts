@@ -42,3 +42,43 @@ it('names each similar photo and shows the copy it lists', async () => {
   await wrapper.findAll('.similar-item .btn')[1]?.trigger('click')
   expect(engine.showInFolder).toHaveBeenCalledWith(2, 'C:\\b\\two.jpg')
 })
+
+it('renders a page of groups at a time as the list scrolls', async () => {
+  let seen: IntersectionObserverCallback | undefined
+  const observe = vi.fn()
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      constructor(cb: IntersectionObserverCallback) {
+        seen = cb
+      }
+      observe = observe
+      unobserve = vi.fn()
+      disconnect = vi.fn()
+    },
+  )
+  try {
+    vi.mocked(engine.duplicateGroups).mockResolvedValue(
+      Array.from({ length: 100 }, (_, i) => ({
+        kind: i < 30 ? DuplicateKind.DuplicateExact : DuplicateKind.DuplicateSimilar,
+        items: [photo(2 * i + 1, `C:\\a\\${i}.jpg`), photo(2 * i + 2, `C:\\b\\${i}.jpg`)],
+      })),
+    )
+    wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
+    await flushPromises()
+    // Every exact group first, then the similar ones up to the page.
+    expect(wrapper.findAll('.group')).toHaveLength(40)
+    expect(wrapper.findAll('.group.similar')).toHaveLength(10)
+    expect(observe).toHaveBeenCalled()
+
+    seen?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
+    await flushPromises()
+    expect(wrapper.findAll('.group')).toHaveLength(80)
+    seen?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
+    await flushPromises()
+    expect(wrapper.findAll('.group')).toHaveLength(100)
+    expect(wrapper.find('.more').exists()).toBe(false)
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})

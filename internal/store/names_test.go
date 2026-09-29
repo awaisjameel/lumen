@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -66,5 +67,23 @@ func TestNamesAreUniqueInAnyCase(t *testing.T) {
 	}
 	if err := st.NamePerson(ctx, two, long); !errors.Is(err, ErrInvalidName) {
 		t.Errorf("a %d-letter name: %v, want ErrInvalidName", core.MaxNameLen+1, err)
+	}
+}
+
+// foldName is fold(name) for every name, whichever branch it takes, and
+// NULL for an unnamed person.
+func TestFoldNameIsFold(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	for _, name := range []string{"Summer", "ÉTÉ", "\u212Aelvin", "\u017Fun", "Иван", ""} {
+		var got, want string
+		check(t, st.r.QueryRowContext(ctx, "SELECT "+foldName+", fold(name) FROM (SELECT ? AS name)", name).Scan(&got, &want))
+		if got != want {
+			t.Errorf("foldName(%q) = %q, fold = %q", name, got, want)
+		}
+	}
+	var null sql.NullString
+	check(t, st.r.QueryRowContext(ctx, "SELECT "+foldName+" FROM (SELECT NULL AS name)").Scan(&null))
+	if null.Valid {
+		t.Errorf("foldName(NULL) = %q, want NULL", null.String)
 	}
 }

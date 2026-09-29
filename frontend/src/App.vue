@@ -99,7 +99,7 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
 .nav-item.router-link-exact-active,
 .nav-item.active {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-on-soft);
   font-weight: 600;
 }
 .grow {

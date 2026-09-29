@@ -26,7 +26,7 @@ const facesError = computed(() => lib.progress?.ai.facesError ?? '')
 const looking = computed(() => lib.progress?.faces ?? 0)
 
 onMounted(() => void people.load().catch(logError))
-useLiveReload(people.load, (c) => c.people || c.assets) // new people appear while faces are found
+useLiveReload(people.load, (c) => c.people || c.assets || c.thumbs) // new people appear while faces are found
 
 async function toggleHidden(p: Person) {
   error.value = ''

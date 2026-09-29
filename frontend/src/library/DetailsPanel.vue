@@ -78,7 +78,7 @@ watch(
 )
 useLiveReload(
   () => loadExtras(props.sel?.id),
-  (c) => c.tags || c.people || c.assets,
+  (c) => c.tags || c.people || c.assets || c.thumbs,
 )
 void albums.load().catch(logError)
 

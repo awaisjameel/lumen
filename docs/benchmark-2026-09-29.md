@@ -604,6 +604,80 @@ listed for triage.
   difference lies later in the run or in contention with the UI.
 - **Run count:** two real-app runs per case; treat differences under 10% as noise.
 
+## Fixes applied (same day, uncommitted)
+
+Measured against HEAD (the branch above). The real-app runs used two runs per
+build, alternating builds; the store benchmarks used 5–6 runs, interleaved.
+
+### What changed
+
+| Bottleneck                | Change                                                                                                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Things' text vectors   | The built-in prompts' vectors ship in the binary (`internal/search/prompts.bin`, 595 KB, keyed by model version). `TestShippedPromptVectors -update-prompts` rebuilds it; a test fails when the Vocabulary changes. |
+| 1. First search           | The search box asks the engine to load the text model when it gets focus (`PrepareSearch`).                                                                                                                         |
+| 2. Faces decode again     | The thumbnail stage decodes photos whose faces are still to find at 2048 px, makes the thumbnails from those pixels and keeps up to 16 for the faces stage, which takes them first.                                 |
+| 3. Thumbnail workers      | Half the CPU's threads, at least 6 (10 on this machine).                                                                                                                                                            |
+| 5. Reloads while indexing | Thumbnail saves send `thumbs`, not `assets`: the timeline reloads the days on screen, not its buckets.                                                                                                              |
+| 6. Duplicates             | Groups render 40 at a time as the list scrolls.                                                                                                                                                                     |
+| 7. Days calls             | When the rows within a screen need a day not loaded, days within three screens load in one call.                                                                                                                    |
+| 9. Blocked-stage fetch    | Jobs held back by an earlier stage are `waiting` (migration 0008) and move to `pending` when it saves, so `asset_jobs_pending` holds only runnable jobs.                                                            |
+| Regressions               | `KnownFiles` keeps the path index (`+source_id`); `Ingest` writes `taken_at` with the job and the 0007 triggers gain `WHEN` clauses (in 0008); ASCII names use `lower()` instead of `fold()` in SQL.                |
+| Accessibility             | `--accent-on-soft` (#2560b8, 4.9:1) for accent text on the soft accent; the indexing status panel's notes use `--text-2`.                                                                                           |
+| Albums                    | An empty album skips its cover query.                                                                                                                                                                               |
+
+### Store (100,000 assets)
+
+| Operation                      | Before  | After    | Change | p     |
+| ------------------------------ | ------- | -------- | ------ | ----- |
+| Fetch thumbnail batch, blocked | 67.2 ms | 0.043 ms | −99.9% | 0.002 |
+| Known files of one folder      | 9.57 ms | 0.87 ms  | −90.9% | 0.002 |
+| Ingest 500 new files           | 48.8 ms | 34.8 ms  | −28.7% | 0.008 |
+| Things suggestions ("thi")     | 152 µs  | 58 µs    | −62.2% | 0.002 |
+| People suggestions             | 1.55 ms | 1.58 ms  | ~      | 0.485 |
+| People list                    | 264 ms  | 255 ms   | ~      | 0.818 |
+
+Upgrading a main (v6) library of 100,000 assets to v8 takes 0.64 s fully
+indexed, 2.4 s with every job still to do.
+
+### Real app
+
+| Metric                            | office before | office after | synthetic before | synthetic after |
+| --------------------------------- | ------------- | ------------ | ---------------- | --------------- |
+| "Search ready" on a new library   | 76 s          | 62 ms        | 56 s             | 64 ms           |
+| First thumbnail                   | 13.7 s        | 4.3 s        | 14.1 s           | 5.6 s           |
+| Thumbnails done                   | 16.8 s        | 12.6 s       | 125 s            | 100 s           |
+| Fully indexed ("Up to date")      | 73.5 s        | 48.3 s       | 265 s            | 219 s           |
+| Engine CPU, whole run             | 488 s         | 284 s        | 1,647 s          | 1,491 s         |
+| Peak engine working set           | 2,699 MB      | 2,578 MB     | 2,119 MB         | 1,730 MB        |
+| Timeline reloads while indexing   | 11            | 1            | 58.5             | 9               |
+| Calls during a full scroll        | –             | –            | 786              | 83              |
+| Opening Duplicates while indexing | 46 ms         | 77 ms        | 279 ms           | 54 ms           |
+| Accessibility violations (nodes)  | 16            | 0            | 16               | 0               |
+
+A later single office run of the final build was fully indexed in 31.7 s with
+169 CPU-s. Scrolling, the viewer and warm starts are unchanged within noise.
+
+### Findings that did not hold
+
+- **8. Returning to the Library.** The ~330 ms included the grid's focus call
+  to the engine, sent 300 ms after the view settles. Timed to the grid being
+  filled, the switch takes 40–45 ms on both builds, and no thumbnail is
+  fetched again (they come from the WebView's memory cache). Keeping the grid
+  alive was tried and reverted: it saved nothing measurable.
+- **`ApplyClusters`' check.** Its plans use `faces_by_asset`, with or
+  without statistics.
+- **People list.** Half is counting photos per person, half the 400 cover
+  lookups; evaluating the user's pick once changed nothing.
+
+### Measured, not changed
+
+- **Face models on DirectML:** one worker matched four CPU workers
+  (48 against 45–52 ms per photo on 48 office photos) with far less CPU.
+  Moving needs vector parity with the CPU (clustering mixes both), a CPU
+  fallback, and sharing the GPU with SigLIP.
+- **The details panel's four calls** and **grid cell labels**: cheap enough
+  (0.1 ms per call in the store) not to change.
+
 ## Reproducing
 
 Everything is in `D:\tmp\lumen-bench`:

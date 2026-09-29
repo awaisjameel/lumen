@@ -52,6 +52,13 @@ watch(
 
 watch(text, () => (active.value = 0))
 
+// A search needs the AI's text model, which takes seconds to load: start
+// that as soon as someone is about to type one (a loaded model just stays).
+function onFocus() {
+  open.value = true
+  engine.prepareSearch().catch(logError)
+}
+
 function close() {
   open.value = false
   input.value?.blur()
@@ -142,7 +149,7 @@ function heading(o: Option, i: number): string {
       :title="t('search.shortcut')"
       spellcheck="false"
       autocomplete="off"
-      @focus="open = true"
+      @focus="onFocus"
       @input="open = true"
       @keydown="onKey"
     />

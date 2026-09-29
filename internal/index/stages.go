@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"slices"
 	"time"
 
@@ -129,6 +130,16 @@ func eachItem[R any](workers int, fn func(context.Context, store.JobItem) R) fun
 }
 
 func (ix *Indexer) fetch(ctx context.Context, stage core.Stage, n int) ([]store.JobItem, error) {
+	if stage == core.StageFaces {
+		// Photos the thumbnail stage decoded for faces go first, before
+		// they are dropped.
+		if ids := ix.pixels.ids(); len(ids) > 0 {
+			items, err := ix.store.PendingJobsOf(ctx, stage, ids[:min(len(ids), n)])
+			if err != nil || len(items) > 0 {
+				return items, err
+			}
+		}
+	}
 	ix.mu.Lock()
 	focus := ix.focus
 	ix.mu.Unlock()
@@ -164,10 +175,57 @@ func (ix *Indexer) doMetadata(ctx context.Context, j store.JobItem) (r store.Met
 	return r
 }
 
-func (ix *Indexer) doThumbnail(ctx context.Context, j store.JobItem) (r store.ThumbResult) {
+// thumbnailWorkers is how many files the thumbnail stage decodes at once:
+// half the CPU's threads (libvips runs one per file), at least 6 where there
+// are more, leaving one for the UI. Six on 20 threads left most of them idle.
+var thumbnailWorkers = max(1, min(runtime.NumCPU()-1, max(6, runtime.NumCPU()/2)))
+
+// doThumbnails makes a batch's thumbnails. Photos the faces stage will want
+// next are decoded at faceSide and kept for it (see decoded), with the
+// thumbnails made from those pixels.
+func (ix *Indexer) doThumbnails(ctx context.Context, items []store.JobItem) ([]store.ThumbResult, error) {
+	keep := ix.keepForFaces(ctx, items)
+	return eachItem(thumbnailWorkers, func(ctx context.Context, j store.JobItem) store.ThumbResult {
+		return ix.doThumbnail(ctx, j, keep[j.AssetID])
+	})(ctx, items)
+}
+
+// keepForFaces returns the photos of items whose faces are still to find,
+// while the faces stage can run.
+func (ix *Indexer) keepForFaces(ctx context.Context, items []store.JobItem) map[int64]bool {
+	ix.mu.Lock()
+	off := ix.people == nil || ix.facesError != "" || ix.held(core.StageFaces)
+	ix.mu.Unlock()
+	if off {
+		return nil
+	}
+	var ids []int64
+	for _, j := range items {
+		if j.Kind == core.KindPhoto {
+			ids = append(ids, j.AssetID)
+		}
+	}
+	keep, err := ix.store.Unfinished(ctx, core.StageFaces, ids)
+	if err != nil {
+		slog.Error("find photos waiting for faces", "err", err)
+		return nil
+	}
+	return keep
+}
+
+func (ix *Indexer) doThumbnail(ctx context.Context, j store.JobItem, keep bool) (r store.ThumbResult) {
 	r.AssetID = j.AssetID
 	defer recoverInto(&r.Err, j.Path)
-	t, err := ix.cache.Decoder.Thumbnail(ctx, j.Path, j.Kind, j.Orientation)
+	var t media.Thumbs
+	var err error
+	if keep && ix.pixels.room() {
+		t, _ = ix.thumbnailForFaces(ctx, j)
+	}
+	if t.Large == nil {
+		// Not kept, or that failed: the usual way, whose result or error
+		// is the file's.
+		t, err = ix.cache.Decoder.Thumbnail(ctx, j.Path, j.Kind, j.Orientation)
+	}
 	switch {
 	case errors.Is(err, media.ErrUnsupported):
 		r.Skipped = true
@@ -182,6 +240,20 @@ func (ix *Indexer) doThumbnail(ctx context.Context, j store.JobItem) (r store.Th
 	}
 	r.PHash = &t.PHash
 	return r
+}
+
+// thumbnailForFaces decodes a photo at faceSide, keeps it for the faces
+// stage and makes the thumbnails from it.
+func (ix *Indexer) thumbnailForFaces(ctx context.Context, j store.JobItem) (media.Thumbs, error) {
+	im, err := ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
+	if err != nil {
+		return media.Thumbs{}, err
+	}
+	t, err := media.ThumbsFromImage(im)
+	if err == nil {
+		ix.pixels.put(j.AssetID, j.Orientation, im)
+	}
+	return t, err
 }
 
 // embedWorkers is how many photos have their image model input (read from
@@ -405,8 +477,10 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 			err = ix.cache.Decoder.Frames(ctx, j.Path, media.SampleCount(j.Duration), faceSide,
 				func(f media.Frame) error { return process(f.Image, f.At) })
 		} else {
-			var im media.Image
-			im, err = ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
+			im, ok := ix.pixels.take(j.AssetID, j.Orientation)
+			if !ok {
+				im, err = ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
+			}
 			if err == nil {
 				err = process(im, 0)
 			}

@@ -142,6 +142,21 @@ func (d Decoders) Thumbnail(ctx context.Context, path string, kind core.Kind, or
 	return Thumbs{Small: t.Small, Large: t.Large, PHash: ph}, nil
 }
 
+// ThumbsFromImage makes both thumbnail sizes and the perceptual hash from a
+// photo Decode returned (upright sRGB, at least core.ThumbLarge where the
+// original is), so a photo also wanted as pixels is decoded once.
+func ThumbsFromImage(im Image) (Thumbs, error) {
+	t, err := vips.ThumbnailPixels(im.Pix, im.W, im.H, 3, 1, sizes)
+	if err != nil {
+		return Thumbs{}, err
+	}
+	ph, err := perceptualHash(t.Square)
+	if err != nil {
+		return Thumbs{}, err
+	}
+	return Thumbs{Small: t.Small, Large: t.Large, PHash: ph}, nil
+}
+
 // Decode returns a photo upright as 8-bit RGB, shrunk so its long edge is at
 // most side (never enlarged), for the models that need more detail than the
 // thumbnails hold. Videos are read with Frames instead.

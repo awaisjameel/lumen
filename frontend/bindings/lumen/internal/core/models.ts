@@ -121,9 +121,14 @@ export interface AssetTag {
  */
 export interface Changes {
     /**
-     * assets came, went, or their dates, sizes or thumbnails changed
+     * assets came, went, or their dates or sizes changed
      */
     "assets": boolean;
+
+    /**
+     * only thumbnails (and the perceptual hashes made with them) changed
+     */
+    "thumbs": boolean;
 
     /**
      * the AI tagged assets

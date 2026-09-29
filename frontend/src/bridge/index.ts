@@ -158,6 +158,7 @@ export const engine = {
     return { ...r, items: r.items ?? [], people: r.people ?? [] }
   },
   suggestTags: async (text: string): Promise<Tag[]> => (await SearchService.SuggestTags(text)) ?? [],
+  prepareSearch: (): Promise<void> => SearchService.PrepareSearch(),
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],
   createLabel: (name: string): Promise<number> => SearchService.CreateLabel(name),
   deleteTag: (id: number): Promise<void> => SearchService.DeleteTag(id),

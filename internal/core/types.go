@@ -43,6 +43,9 @@ type JobStatus string
 // The states a job can be in.
 const (
 	JobPending JobStatus = "pending"
+	// JobWaiting is a job held back until an earlier stage it needs is
+	// done: still to do, but not yet runnable.
+	JobWaiting JobStatus = "waiting"
 	JobDone    JobStatus = "done"
 	JobError   JobStatus = "error"
 	// JobSkipped means this machine can't process the file (e.g. HEIC
@@ -378,17 +381,18 @@ type Progress struct {
 // so each view reloads only for what it shows. While the AI works through a
 // big library, tags and people change for hours after the timeline settles.
 type Changes struct {
-	Assets bool `json:"assets"` // assets came, went, or their dates, sizes or thumbnails changed
+	Assets bool `json:"assets"` // assets came, went, or their dates or sizes changed
+	Thumbs bool `json:"thumbs"` // only thumbnails (and the perceptual hashes made with them) changed
 	Tags   bool `json:"tags"`   // the AI tagged assets
 	People bool `json:"people"` // faces were found or grouped into people
 }
 
 // Any reports whether anything changed.
-func (c Changes) Any() bool { return c.Assets || c.Tags || c.People }
+func (c Changes) Any() bool { return c.Assets || c.Thumbs || c.Tags || c.People }
 
 // Merge adds the changes in d.
 func (c Changes) Merge(d Changes) Changes {
-	return Changes{Assets: c.Assets || d.Assets, Tags: c.Tags || d.Tags, People: c.People || d.People}
+	return Changes{Assets: c.Assets || d.Assets, Thumbs: c.Thumbs || d.Thumbs, Tags: c.Tags || d.Tags, People: c.People || d.People}
 }
 
 // AI is the state of the on-device models.

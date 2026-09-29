@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -125,5 +126,90 @@ func TestKnownFilesFoldsCaseLikeWindows(t *testing.T) {
 	check(t, err)
 	if _, ok := known[core.Fold(`C:\Photos\ÉTÉ\a.jpg`)]; !ok || len(known) != 1 || len(extra) != 1 {
 		t.Fatalf("KnownFiles(été) = %v, extra %v; want the file once and its other spelling as extra", known, extra)
+	}
+}
+
+// A job an earlier stage holds back is 'waiting', out of the pending index,
+// and becomes 'pending' once that stage is saved; progress counts both.
+func TestJobsWaitOutsideTheQueueUntilTheirTurn(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a")})))
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 1)
+	check(t, err)
+	id := jobs[0].AssetID
+	want := func(when string, statuses map[core.Stage]core.JobStatus) {
+		t.Helper()
+		for stage, w := range statuses {
+			if s, _ := readJob(t, st, id, stage); s != w {
+				t.Errorf("%s: %s is %s, want %s", when, stage, s, w)
+			}
+		}
+	}
+	want("new", map[core.Stage]core.JobStatus{core.StageMetadata: core.JobPending,
+		core.StageThumbnail: core.JobWaiting, core.StageEmbedding: core.JobWaiting, core.StageFaces: core.JobWaiting})
+	pending, _, _, err := st.JobCounts(ctx)
+	check(t, err)
+	if pending[core.StageFaces] != 1 {
+		t.Errorf("JobCounts = %v, want the waiting faces job counted", pending)
+	}
+	if n, err := st.CountPending(ctx, core.StageEmbedding); err != nil || n != 1 {
+		t.Errorf("CountPending(embedding) = %d, %v; want 1", n, err)
+	}
+
+	check(t, st.SaveMetadata(ctx, "m", []MetadataResult{{AssetID: id, Orientation: 1}}))
+	want("after metadata", map[core.Stage]core.JobStatus{core.StageThumbnail: core.JobPending,
+		core.StageEmbedding: core.JobWaiting, core.StageFaces: core.JobWaiting})
+	// A failed thumbnail doesn't hold the AI stages back: they read the
+	// original and record their own failure.
+	check(t, st.SaveThumbnails(ctx, "t", []ThumbResult{{AssetID: id, Err: "broken"}}))
+	want("after thumbnail", map[core.Stage]core.JobStatus{core.StageEmbedding: core.JobPending, core.StageFaces: core.JobPending})
+
+	// The file is seen again: the thumbnail retries, and the AI stages wait again.
+	check(t, errOf(st.RetryFailed(ctx, src.ID)))
+	want("retry", map[core.Stage]core.JobStatus{core.StageThumbnail: core.JobPending,
+		core.StageEmbedding: core.JobWaiting, core.StageFaces: core.JobWaiting})
+	// A new metadata version holds back everything after it.
+	check(t, st.SaveThumbnails(ctx, "t", []ThumbResult{{AssetID: id}}))
+	check(t, errOf(st.RequeueOutdated(ctx, map[core.Stage]string{core.StageMetadata: "m2"})))
+	want("requeue", map[core.Stage]core.JobStatus{core.StageMetadata: core.JobPending,
+		core.StageThumbnail: core.JobDone, core.StageEmbedding: core.JobWaiting, core.StageFaces: core.JobWaiting})
+	check(t, st.SaveMetadata(ctx, "m2", []MetadataResult{{AssetID: id, Orientation: 1}}))
+	want("metadata again", map[core.Stage]core.JobStatus{core.StageEmbedding: core.JobPending, core.StageFaces: core.JobPending})
+}
+
+// Schema v8 moves jobs a v7 library left pending behind an earlier stage to
+// waiting.
+func TestUpgradeMovesBlockedJobsToWaiting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "library.db")
+	st, err := Open(path)
+	check(t, err)
+	ctx := context.Background()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b")})))
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 2)
+	check(t, err)
+	a, b := jobs[0].AssetID, jobs[1].AssetID
+	check(t, st.SaveMetadata(ctx, "m", []MetadataResult{{AssetID: b, Orientation: 1}}))
+	check(t, errOf(st.w.ExecContext(ctx, "UPDATE asset_jobs SET status = 'pending' WHERE status = 'waiting'")))
+	check(t, errOf(st.w.ExecContext(ctx, "PRAGMA user_version = 7")))
+	check(t, st.Close())
+
+	st, err = Open(path)
+	check(t, err)
+	defer st.Close()
+	for _, c := range []struct {
+		asset int64
+		stage core.Stage
+		want  core.JobStatus
+	}{
+		{a, core.StageMetadata, core.JobPending}, {a, core.StageThumbnail, core.JobWaiting}, {a, core.StageFaces, core.JobWaiting},
+		{b, core.StageThumbnail, core.JobPending}, {b, core.StageEmbedding, core.JobWaiting}, {b, core.StageFaces, core.JobWaiting},
+	} {
+		if s, _ := readJob(t, st, c.asset, c.stage); s != c.want {
+			t.Errorf("asset %d %s is %s, want %s", c.asset, c.stage, s, c.want)
+		}
 	}
 }

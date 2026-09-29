@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Duplicates: exact file copies and similar-looking photos, for review only.
 // Lumen never deletes or moves files; each copy can be shown in Explorer.
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { DuplicateKind, engine, THUMB_LARGE, thumbUrl } from '../bridge'
 import type { DuplicateItem } from '../bridge'
 import SearchBox from '../search/SearchBox.vue'
@@ -22,6 +22,39 @@ const previewDialog = ref<HTMLDialogElement | null>(null)
 const exact = computed(() => duplicates.groups.filter((g) => g.kind === DuplicateKind.DuplicateExact))
 const similar = computed(() => duplicates.groups.filter((g) => g.kind === DuplicateKind.DuplicateSimilar))
 
+// Groups are rendered a page at a time as the list is scrolled (a large
+// library has thousands, and all of them at once took seconds to build and
+// to leave). Exact copies come first, then similar photos.
+const PAGE = 40
+const shown = ref(PAGE)
+const exactShown = computed(() => exact.value.slice(0, shown.value))
+const similarShown = computed(() => similar.value.slice(0, Math.max(0, shown.value - exact.value.length)))
+const more = computed(() => shown.value < duplicates.groups.length)
+const sentinel = ref<HTMLElement | null>(null)
+const observer =
+  typeof IntersectionObserver === 'undefined'
+    ? null
+    : new IntersectionObserver(
+        (entries) => {
+          if (!entries.some((e) => e.isIntersecting)) return
+          shown.value += PAGE
+          // Still in view after the page was added (a tall window): observing
+          // afresh reports it again.
+          void nextTick(() => {
+            if (!sentinel.value) return
+            observer?.unobserve(sentinel.value)
+            observer?.observe(sentinel.value)
+          })
+        },
+        { rootMargin: '800px' },
+      )
+if (!observer) shown.value = Infinity
+watch(sentinel, (el, old) => {
+  if (old) observer?.unobserve(old)
+  if (el) observer?.observe(el)
+})
+onUnmounted(() => observer?.disconnect())
+
 async function refresh() {
   busy.value = true
   error.value = ''
@@ -35,7 +68,7 @@ async function refresh() {
 }
 
 onMounted(() => void refresh())
-useLiveReload(duplicates.load, (c) => c.assets) // groups change as thumbnails are made
+useLiveReload(duplicates.load, (c) => c.assets || c.thumbs) // groups change as thumbnails are made
 
 function filename(path: string): string {
   return path.split(/[\\/]/).pop() || path
@@ -72,10 +105,10 @@ async function openPreview(item: DuplicateItem) {
       <p v-if="error" class="page-error" role="alert">{{ error }}</p>
       <p v-if="busy" class="muted" role="status">{{ t('duplicates.loading') }}</p>
 
-      <section v-if="exact.length" aria-labelledby="exact-title">
+      <section v-if="exactShown.length" aria-labelledby="exact-title">
         <h2 id="exact-title">{{ t('duplicates.exact') }}</h2>
         <p class="muted">{{ t('duplicates.exactHint') }}</p>
-        <div v-for="group in exact" :key="`exact-${group.items[0]?.id}`" class="group">
+        <div v-for="group in exactShown" :key="`exact-${group.items[0]?.id}`" class="group">
           <div v-for="item in group.items" :key="item.id" class="item">
             <button
               class="preview-button"
@@ -109,10 +142,10 @@ async function openPreview(item: DuplicateItem) {
         </div>
       </section>
 
-      <section v-if="similar.length" aria-labelledby="similar-title">
+      <section v-if="similarShown.length" aria-labelledby="similar-title">
         <h2 id="similar-title">{{ t('duplicates.similar') }}</h2>
         <p class="muted">{{ t('duplicates.similarHint') }}</p>
-        <div v-for="group in similar" :key="`similar-${group.items[0]?.id}`" class="group similar">
+        <div v-for="group in similarShown" :key="`similar-${group.items[0]?.id}`" class="group similar">
           <div v-for="item in group.items" :key="item.id" class="similar-item">
             <button
               class="preview-button"
@@ -137,6 +170,7 @@ async function openPreview(item: DuplicateItem) {
           </div>
         </div>
       </section>
+      <div v-if="more" ref="sentinel" class="more" aria-hidden="true" />
 
       <EmptyState
         v-if="duplicates.loaded && !duplicates.groups.length"
@@ -168,6 +202,10 @@ h2 {
   border-radius: var(--radius-m);
   padding: 12px;
   margin: 12px 0;
+}
+
+.more {
+  height: 1px;
 }
 
 .item {

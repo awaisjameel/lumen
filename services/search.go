@@ -104,6 +104,18 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	return core.SearchResult{Items: items, People: names, Pending: pending, Complete: complete, NoAI: noAI}, nil
 }
 
+// PrepareSearch readies the AI for a search the user is starting to type
+// (the search box got focus). It does nothing without the AI.
+func (s *SearchService) PrepareSearch(ctx context.Context) error {
+	if s.engine == nil {
+		return nil
+	}
+	if err := s.engine.Wait(ctx); err != nil {
+		return nil //nolint:nilerr // the search itself reports why the AI can't run
+	}
+	return s.engine.PrepareSearch()
+}
+
 // SuggestTags returns Things whose names contain text, for the search box
 // (their id, name and kind; no counts).
 func (s *SearchService) SuggestTags(ctx context.Context, text string) ([]core.Tag, error) {

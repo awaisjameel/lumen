@@ -157,7 +157,21 @@ const visible = computed<VisibleRow[]>(() => {
   })
 })
 
-// Load the days on screen, and tell the engine to prioritise them.
+/** The days of layout rows from to to (clamped). */
+function daysOfRows(from: number, to: number): string[] {
+  const rows = layout.value.rows
+  const out = new Set<string>()
+  for (let i = Math.max(0, from); i <= Math.min(rows.length - 1, to); i++) {
+    const row = rows[i]
+    if (row) out.add(row.day)
+  }
+  return [...out]
+}
+
+// Load the days on screen, and tell the engine to prioritise them. Days are
+// fetched a few screens at a time: once the rows within a screen of the view
+// need a day not loaded yet, everything within three screens comes in one
+// request (fetching only what was on screen made a request every few rows).
 let focusTimer = 0
 watch(
   [visible, () => lib.days],
@@ -165,7 +179,12 @@ watch(
     const days = [...new Set(visible.value.map((v) => v.row.day))]
     const [newest, oldest] = [days[0], days.at(-1)]
     if (newest === undefined || oldest === undefined || lib.isSearch) return
-    void lib.ensureDays(days)
+    const items = virtualizer.value.getVirtualItems()
+    const first = items[0]?.index ?? 0
+    const last = items.at(-1)?.index ?? first
+    const screen = last - first + 1
+    const near = daysOfRows(first - screen, last + screen)
+    void lib.ensureDays(lib.needsDays(near) ? daysOfRows(first - 3 * screen, last + 3 * screen) : days)
     clearTimeout(focusTimer)
     focusTimer = window.setTimeout(() => void engine.focus(oldest, newest).catch(logError), 300)
   },

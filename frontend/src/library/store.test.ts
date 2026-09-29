@@ -162,6 +162,18 @@ describe('library requests', () => {
     expect(engine.days).toHaveBeenCalledTimes(1)
   })
 
+  it('asks again for the days shown, not the timeline, when only thumbnails changed', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    vi.mocked(engine.days).mockResolvedValue(result(1))
+    await lib.ensureDays([day])
+    await lib.refresh({ assets: false, thumbs: true, tags: false, people: false })
+    expect(engine.timeline).toHaveBeenCalledTimes(1)
+    expect(lib.needsDays([day])).toBe(true)
+    await lib.ensureDays([day])
+    expect(engine.days).toHaveBeenCalledTimes(2)
+  })
+
   it('reloads a scope that changed while no grid showed it, when shown again', async () => {
     const lib = shownLibrary()
     await lib.setScope(all)
@@ -176,10 +188,11 @@ describe('library requests', () => {
 })
 
 describe('what a change affects', () => {
-  const none = { assets: false, tags: false, people: false }
+  const none = { assets: false, thumbs: false, tags: false, people: false }
   it('reloads the timeline only for changes it shows', () => {
     expect(affects(all.view, { ...none, tags: true })).toBe(false)
     expect(affects(all.view, { ...none, assets: true })).toBe(true)
+    expect(affects(all.view, { ...none, thumbs: true })).toBe(false) // the days on screen reload instead
     expect(affects({ filter: Filter.FilterAll, tag: 3 }, { ...none, tags: true })).toBe(true)
     expect(affects({ filter: Filter.FilterAll, person: 3 }, { ...none, tags: true })).toBe(false)
     expect(affects({ filter: Filter.FilterAll, album: 3 }, { ...none, people: true })).toBe(true)

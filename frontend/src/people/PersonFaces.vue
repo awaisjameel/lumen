@@ -57,7 +57,7 @@ watch(
   { immediate: true },
 )
 // Faces join and leave while the AI groups people; the selection keeps.
-useLiveReload(load, (c) => c.people || c.assets)
+useLiveReload(load, (c) => c.people || c.assets || c.thumbs)
 
 function toggle(f: Face) {
   const s = new Set(selected.value)

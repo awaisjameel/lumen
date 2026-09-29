@@ -186,6 +186,9 @@ func (s *Store) Albums(ctx context.Context, minScore float32) ([]core.Album, err
 			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM assets WHERE `+where, args...).Scan(&a.Count); err != nil {
 				return err
 			}
+			if a.Count == 0 {
+				continue // no cover to find
+			}
 			// The newest member that has a thumbnail yet.
 			err := tx.QueryRowContext(ctx, `SELECT id, thumb_version FROM assets WHERE `+where+
 				` AND thumb_version > 0 ORDER BY taken_at DESC, id DESC LIMIT 1`, args...).Scan(&a.Cover, &a.CoverThumb)

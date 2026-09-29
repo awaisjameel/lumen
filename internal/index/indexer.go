@@ -9,7 +9,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -78,6 +77,7 @@ type Indexer struct {
 
 	encoder *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
+	pixels  decoded                  // photos the thumbnail stage decoded for the faces stage
 
 	version map[core.Stage]string // what each running stage's results are made by
 
@@ -155,8 +155,11 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 	if m.People != nil {
 		ix.faces = &model[*ai.Faces]{
 			name: "face models", idle: modelIdle,
-			open:  func() (*ai.Faces, error) { return ai.OpenFaces(m.People.Model(), faceThreads) },
-			close: (*ai.Faces).Close,
+			open: func() (*ai.Faces, error) { return ai.OpenFaces(m.People.Model(), faceThreads) },
+			close: func(f *ai.Faces) {
+				f.Close()
+				ix.pixels.clear() // idle, held or failed: nothing will take them soon
+			},
 			report: func(_ *ai.Faces, _ bool, err error) {
 				ix.setAIState(func() {
 					ix.facesError = ""
@@ -174,6 +177,7 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 // Bits of Indexer.changes, one per field of core.Changes.
 const (
 	changedAssets uint32 = 1 << iota
+	changedThumbs
 	changedTags
 	changedPeople
 )
@@ -183,6 +187,9 @@ func (ix *Indexer) markChanged(c core.Changes) {
 	var bits uint32
 	if c.Assets {
 		bits |= changedAssets
+	}
+	if c.Thumbs {
+		bits |= changedThumbs
 	}
 	if c.Tags {
 		bits |= changedTags
@@ -262,8 +269,8 @@ func (ix *Indexer) Start(ctx context.Context) {
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.ThumbResult]{
 			name: core.StageThumbnail, batch: thumbnailBatch, wake: ix.wakeThum, next: []chan struct{}{ix.wakeEmbed, ix.wakeFaces},
-			changes: core.Changes{Assets: true},
-			process: eachItem(max(1, min(runtime.NumCPU()-1, 6)), ix.doThumbnail),
+			changes: core.Changes{Thumbs: true}, // the timeline's days and counts stay as they are
+			process: ix.doThumbnails,
 			save: func(ctx context.Context, rs []store.ThumbResult) error {
 				return ix.store.SaveThumbnails(ctx, ix.version[core.StageThumbnail], rs)
 			},
@@ -739,7 +746,8 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 		}
 		if bits != 0 {
 			ix.events.LibraryChanged(core.Changes{
-				Assets: bits&changedAssets != 0, Tags: bits&changedTags != 0, People: bits&changedPeople != 0,
+				Assets: bits&changedAssets != 0, Thumbs: bits&changedThumbs != 0,
+				Tags: bits&changedTags != 0, People: bits&changedPeople != 0,
 			})
 		}
 	}

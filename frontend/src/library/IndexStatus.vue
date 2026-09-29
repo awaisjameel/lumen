@@ -122,6 +122,6 @@ function togglePause() {
 }
 .sub {
   margin: 4px 0 0;
-  color: var(--text-3);
+  color: var(--text-2); /* --text-3 is under 4.5:1 on this tinted panel */
 }
 </style>

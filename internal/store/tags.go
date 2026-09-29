@@ -251,7 +251,7 @@ func (s *Store) MakeLabel(ctx context.Context, id int64, prompts []string) error
 func (s *Store) TagByName(ctx context.Context, name string) (int64, core.TagKind, error) {
 	var id int64
 	var kind core.TagKind
-	err := s.r.QueryRowContext(ctx, "SELECT id, kind FROM tags WHERE fold(name) = ?",
+	err := s.r.QueryRowContext(ctx, "SELECT id, kind FROM tags WHERE "+foldName+" = ?",
 		core.Fold(strings.TrimSpace(name))).Scan(&id, &kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, "", ErrNotFound
