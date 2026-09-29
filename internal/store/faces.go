@@ -25,13 +25,14 @@ type FaceResult struct {
 	AssetID int64
 	Faces   []DetectedFace
 	Err     string
-	Skipped bool // nothing to look at (a video, or an undecodable format)
+	Skipped bool // nothing to look at (an undecodable format, or a video without frames)
 }
 
-// SaveFaces stores a batch of face results and closes their jobs. A photo
-// seen again (by a newer model) keeps who is in it: each new face takes over
-// the old face at the same spot, with its person and the user's corrections.
-func (s *Store) SaveFaces(ctx context.Context, model string, rs []FaceResult) error {
+// SaveFaces stores a batch of face results made by model and closes their
+// jobs at the stage's version. A photo seen again (by a newer model) keeps
+// who is in it: each new face takes over the old face at the same spot, with
+// its person and the user's corrections.
+func (s *Store) SaveFaces(ctx context.Context, model, version string, rs []FaceResult) error {
 	if len(rs) == 0 {
 		return nil
 	}
@@ -95,7 +96,7 @@ func (s *Store) SaveFaces(ctx context.Context, model string, rs []FaceResult) er
 					}
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageFaces, model+core.VideoFramesVersion, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageFaces, version, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}
@@ -217,9 +218,14 @@ type Merge struct{ From, Into int64 }
 // are merged away.
 func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
+		// Two faces in one photo (or one video frame) are never one person:
+		// checked again here over every face, as the run saw only visible
+		// photos and the user may have placed a face meanwhile.
 		assign, err := tx.PrepareContext(ctx, `UPDATE faces SET person_id = ?1, assigned_by = 'auto'
 			WHERE id = ?2 AND person_id IS NULL AND EXISTS (SELECT 1 FROM people WHERE id = ?1)
-			AND NOT EXISTS (SELECT 1 FROM face_rejections WHERE face_id = ?2 AND person_id = ?1)`)
+			AND NOT EXISTS (SELECT 1 FROM face_rejections WHERE face_id = ?2 AND person_id = ?1)
+			AND NOT EXISTS (SELECT 1 FROM faces o JOIN faces me ON me.id = ?2
+				WHERE o.person_id = ?1 AND o.asset_id = me.asset_id AND o.at_ms = me.at_ms)`)
 		if err != nil {
 			return err
 		}
@@ -249,7 +255,9 @@ func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 				AND EXISTS (SELECT 1 FROM people WHERE id = ?2)
 				AND NOT EXISTS (SELECT 1 FROM face_rejections r JOIN faces f ON f.id = r.face_id
 					WHERE (f.person_id = ?1 AND r.person_id = ?2)
-					   OR (f.person_id = ?2 AND r.person_id = ?1))`, m.From, m.Into).Scan(&ok)
+					   OR (f.person_id = ?2 AND r.person_id = ?1))
+				AND NOT EXISTS (SELECT 1 FROM faces a JOIN faces b ON b.asset_id = a.asset_id AND b.at_ms = a.at_ms
+					WHERE a.person_id = ?1 AND b.person_id = ?2)`, m.From, m.Into).Scan(&ok)
 			if err != nil {
 				return err
 			}
@@ -273,7 +281,7 @@ func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64) error {
 	for _, q := range []string{
 		"UPDATE faces SET person_id = ?2 WHERE person_id = ?1",
 		`UPDATE albums SET rule_json = json_set(rule_json, '$.person', ?2)
-			WHERE kind = 'smart' AND json_extract(rule_json, '$.person') = ?1`,
+			WHERE kind = 'smart' AND ` + rulePerson + ` = ?1`,
 		`UPDATE people SET cover_face = (SELECT cover_face FROM people WHERE id = ?1)
 			WHERE id = ?2 AND cover_face IS NULL`,
 		`INSERT OR IGNORE INTO face_rejections (face_id, person_id)
@@ -298,7 +306,7 @@ func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64) error {
 func dropEmptyPeople(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `DELETE FROM people WHERE name IS NULL
 		AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = people.id)
-		AND NOT EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND json_extract(rule_json, '$.person') = people.id)
+		AND NOT EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND `+rulePerson+` = people.id)
 		AND NOT EXISTS (SELECT 1 FROM face_rejections WHERE person_id = people.id)`)
 	return err
 }

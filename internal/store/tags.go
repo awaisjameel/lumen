@@ -82,7 +82,7 @@ func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE tags SET kind = 'manual', prompts = NULL, exclusive = 0, model = NULL, vecs = NULL
 			WHERE `+stale+` AND (EXISTS (SELECT 1 FROM asset_tags x WHERE x.tag_id = tags.id AND x.source = 'user')
-			OR EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND json_extract(rule_json, '$.tag') = tags.id))`, list); err != nil {
+			OR EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND `+ruleTag+` = tags.id))`, list); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM tags WHERE `+stale, list)
@@ -145,68 +145,114 @@ type AssetScore struct {
 // counting from minScore up) and the best one to show on its card. Most
 // used first.
 func (s *Store) Things(ctx context.Context, minScore float32) ([]core.Tag, error) {
-	out, err := queryAll(ctx, s.r, func(r *sql.Rows) (t core.Tag, err error) {
-		err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Hidden, &t.Count)
-		return t, err
-	}, `SELECT t.id, t.name, t.kind, t.hidden, count(a.id)
-		FROM tags t
-		LEFT JOIN asset_tags x ON x.tag_id = t.id AND `+tagApplies+`
-		LEFT JOIN assets a ON a.id = x.asset_id AND `+visibleA+`
-		GROUP BY t.id ORDER BY count(a.id) DESC, t.name`, minScore)
+	var out []core.Tag
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		out, err = queryAll(ctx, tx, func(r *sql.Rows) (t core.Tag, err error) {
+			err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Hidden, &t.Count)
+			return t, err
+		}, `SELECT t.id, t.name, t.kind, t.hidden, count(a.id)
+			FROM tags t
+			LEFT JOIN asset_tags x ON x.tag_id = t.id AND `+tagApplies+`
+			LEFT JOIN assets a ON a.id = x.asset_id AND `+visibleA+`
+			GROUP BY t.id ORDER BY count(a.id) DESC, t.name`, minScore)
+		if err != nil {
+			return err
+		}
+		return addTagCovers(ctx, tx, out, minScore)
+	})
+	return out, err
+}
+
+// addTagCovers picks each tag's cover: a photo the user tagged, else the
+// AI's surest. Each probe walks asset_tags_by_tag (tag, source, score) in
+// order and stops at the first photo that can be shown, rather than sorting
+// every row of a tag the whole library carries.
+func addTagCovers(ctx context.Context, tx *sql.Tx, tags []core.Tag, minScore float32) error {
+	const pick = `SELECT a.id, a.thumb_version FROM asset_tags x JOIN assets a ON a.id = x.asset_id
+		WHERE x.tag_id = ?1 AND ` + visibleA + ` AND a.thumb_version > 0 AND `
+	byUser, err := tx.PrepareContext(ctx, pick+`x.source = 'user' LIMIT 1`)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	// Covers: the user's own choices first, then the AI's surest match.
-	cover, err := s.r.PrepareContext(ctx, `SELECT a.id, a.thumb_version FROM asset_tags x JOIN assets a ON a.id = x.asset_id
-		WHERE x.tag_id = ? AND `+tagApplies+` AND `+visibleA+` AND a.thumb_version > 0
-		ORDER BY x.source = 'user' DESC, x.score DESC LIMIT 1`)
+	defer byUser.Close()
+	byAI, err := tx.PrepareContext(ctx, pick+`x.source = 'ai' AND x.score >= ?2 ORDER BY x.score DESC LIMIT 1`)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer cover.Close()
-	for i := range out {
-		if out[i].Count == 0 {
+	defer byAI.Close()
+	for i := range tags {
+		t := &tags[i]
+		if t.Count == 0 {
 			continue
 		}
-		err := cover.QueryRowContext(ctx, out[i].ID, minScore).Scan(&out[i].Cover, &out[i].CoverThumb)
+		err := byUser.QueryRowContext(ctx, t.ID).Scan(&t.Cover, &t.CoverThumb)
+		if errors.Is(err, sql.ErrNoRows) {
+			err = byAI.QueryRowContext(ctx, t.ID, minScore).Scan(&t.Cover, &t.CoverThumb)
+		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
+			return err
 		}
 	}
-	return out, nil
+	return nil
 }
 
 // CreateTag makes a new user tag. A label (TagLabel) has prompts the AI
 // looks for; a manual tag (TagManual) has none.
 func (s *Store) CreateTag(ctx context.Context, name string, kind core.TagKind, prompts []string) (int64, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return 0, errors.New("a tag needs a name")
+	name, err := cleanName(name)
+	if err != nil {
+		return 0, err
 	}
 	var p any
-	if kind == core.TagLabel {
+	switch kind {
+	case core.TagLabel:
 		b, err := json.Marshal(prompts)
 		if err != nil {
 			return 0, err
 		}
 		p = string(b)
+	case core.TagManual:
+	default:
+		return 0, fmt.Errorf("create tag: only labels and manual tags are made by users, not %q", kind)
 	}
-	res, err := s.w.ExecContext(ctx, "INSERT INTO tags (name, kind, prompts, created_at) VALUES (?, ?, ?, ?)",
-		name, kind, p, time.Now().Unix())
+	var id int64
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		switch taken, err := named(ctx, tx, tagNames, name, 0); {
+		case err != nil:
+			return err
+		case taken != 0:
+			return ErrTagExists
+		}
+		res, err := tx.ExecContext(ctx, "INSERT INTO tags (name, kind, prompts, created_at) VALUES (?, ?, ?, ?)",
+			name, kind, p, time.Now().Unix())
+		if err == nil {
+			id, err = res.LastInsertId()
+		}
+		return err
+	})
 	if isUnique(err) {
 		return 0, ErrTagExists
 	}
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
+	return id, err
 }
 
-// TagByName finds a tag by name (case-insensitive).
+// MakeLabel turns a manual tag into a label with prompts, for the AI to look
+// for too. The user's own tags on it stay.
+func (s *Store) MakeLabel(ctx context.Context, id int64, prompts []string) error {
+	b, err := json.Marshal(prompts)
+	if err != nil {
+		return err
+	}
+	return affected(s.w.ExecContext(ctx, `UPDATE tags SET kind = 'label', prompts = ?, model = NULL, vecs = NULL
+		WHERE id = ? AND kind = 'manual'`, string(b), id))
+}
+
+// TagByName finds a tag by name, whatever its case.
 func (s *Store) TagByName(ctx context.Context, name string) (int64, core.TagKind, error) {
 	var id int64
 	var kind core.TagKind
-	err := s.r.QueryRowContext(ctx, "SELECT id, kind FROM tags WHERE name = ?", strings.TrimSpace(name)).Scan(&id, &kind)
+	err := s.r.QueryRowContext(ctx, "SELECT id, kind FROM tags WHERE fold(name) = ?",
+		core.Fold(strings.TrimSpace(name))).Scan(&id, &kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, "", ErrNotFound
 	}
@@ -227,7 +273,7 @@ func (s *Store) DeleteTag(ctx context.Context, id int64) error {
 		}
 		var used bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM albums WHERE kind = 'smart'
-		AND json_extract(rule_json, '$.tag') = ?)`, id).Scan(&used); err != nil {
+		AND `+ruleTag+` = ?)`, id).Scan(&used); err != nil {
 			return err
 		}
 		if used {
@@ -239,8 +285,7 @@ func (s *Store) DeleteTag(ctx context.Context, id int64) error {
 
 // SetTagHidden hides a tag from Things, or shows it again.
 func (s *Store) SetTagHidden(ctx context.Context, id int64, hidden bool) error {
-	_, err := s.w.ExecContext(ctx, "UPDATE tags SET hidden = ? WHERE id = ?", hidden, id)
-	return err
+	return affected(s.w.ExecContext(ctx, "UPDATE tags SET hidden = ? WHERE id = ?", hidden, id))
 }
 
 // AssetTags returns the tags on one asset: the user's, then the AI's from
@@ -258,8 +303,24 @@ func (s *Store) AssetTags(ctx context.Context, assetID int64, minScore float32) 
 // TagAsset puts a tag on an asset as the user's own choice (this also
 // confirms an AI tag, or takes back an earlier removal).
 func (s *Store) TagAsset(ctx context.Context, assetID, tagID int64) error {
-	_, err := s.w.ExecContext(ctx, `INSERT INTO asset_tags (asset_id, tag_id, source) VALUES (?, ?, 'user')
-		ON CONFLICT (asset_id, tag_id) DO UPDATE SET source = 'user'`, assetID, tagID)
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		if err := assetAndTagExist(ctx, tx, assetID, tagID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO asset_tags (asset_id, tag_id, source) VALUES (?, ?, 'user')
+			ON CONFLICT (asset_id, tag_id) DO UPDATE SET source = 'user'`, assetID, tagID)
+		return err
+	})
+}
+
+// assetAndTagExist returns ErrNotFound unless both exist.
+func assetAndTagExist(ctx context.Context, tx *sql.Tx, assetID, tagID int64) error {
+	var ok bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM assets WHERE id = ? AND `+present+`)
+		AND EXISTS (SELECT 1 FROM tags WHERE id = ?)`, assetID, tagID).Scan(&ok)
+	if err == nil && !ok {
+		err = ErrNotFound
+	}
 	return err
 }
 
@@ -267,6 +328,9 @@ func (s *Store) TagAsset(ctx context.Context, assetID, tagID int64) error {
 // is remembered so the AI never puts it back.
 func (s *Store) UntagAsset(ctx context.Context, assetID, tagID int64) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
+		if err := assetAndTagExist(ctx, tx, assetID, tagID); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO asset_tags (asset_id, tag_id, source)
 			SELECT ?1, ?2, 'rejected' FROM tags WHERE id = ?2 AND kind != 'manual'
 			ON CONFLICT (asset_id, tag_id) DO UPDATE SET source = 'rejected'`, assetID, tagID); err != nil {
@@ -278,18 +342,17 @@ func (s *Store) UntagAsset(ctx context.Context, assetID, tagID int64) error {
 	})
 }
 
-// SearchTags returns up to limit tags whose names contain text, for the
-// search box's suggestions, names starting with text first.
+// SearchTags returns up to limit shown tags whose names contain text (in
+// any case), for the search box's suggestions, names starting with text
+// first. Only their id, name and kind are set.
 func (s *Store) SearchTags(ctx context.Context, text string, limit int) ([]core.Tag, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return []core.Tag{}, nil
 	}
-	like := "%" + likeEscaper.Replace(text) + "%"
 	return queryAll(ctx, s.r, func(r *sql.Rows) (t core.Tag, err error) {
 		err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Hidden)
 		return t, err
-	}, `SELECT id, name, kind, hidden FROM tags
-		WHERE name LIKE ? ESCAPE '\' AND hidden = 0
-		ORDER BY name LIKE ? ESCAPE '\' DESC, length(name), name LIMIT ?`, like, strings.TrimPrefix(like, "%"), limit)
+	}, `SELECT id, name, kind, hidden FROM tags WHERE `+nameMatch+` AND hidden = 0
+		ORDER BY `+nameFirst+` LIMIT ?2`, core.Fold(text), limit)
 }

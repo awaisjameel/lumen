@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { engine, Filter } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { DayBucket, DayItems, SearchResults } from '../bridge'
-import { useLibrary } from './store'
+import { affects, useLibrary } from './store'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -24,6 +24,13 @@ const all = { kind: 'timeline', view: { filter: Filter.FilterAll } } as const
 const favourites = { kind: 'timeline', view: { filter: Filter.FilterFavourites } } as const
 const result = (id: number): DayItems[] => [{ day, items: [{ id, w: 100, h: 100, t: 1 }] }]
 
+/** The library store with a grid showing it, as LibraryView does. */
+function shownLibrary() {
+  const lib = useLibrary()
+  lib.attach()
+  return lib
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.mocked(engine.timeline).mockReset().mockResolvedValue(buckets)
@@ -33,7 +40,7 @@ beforeEach(() => {
 
 describe('library requests', () => {
   it('does not let a previous view block or overwrite the same day in a new view', async () => {
-    const lib = useLibrary()
+    const lib = shownLibrary()
     await lib.setScope(all)
     const old = deferred<DayItems[]>()
     vi.mocked(engine.days).mockReturnValueOnce(old.promise).mockResolvedValueOnce(result(2))
@@ -47,7 +54,7 @@ describe('library requests', () => {
   })
 
   it('discards an old response after navigating away and back', async () => {
-    const lib = useLibrary()
+    const lib = shownLibrary()
     await lib.setScope(all)
     const old = deferred<DayItems[]>()
     vi.mocked(engine.days).mockReturnValueOnce(old.promise).mockResolvedValueOnce(result(3))
@@ -61,7 +68,7 @@ describe('library requests', () => {
   })
 
   it('invalidates an in-flight day when the library changes', async () => {
-    const lib = useLibrary()
+    const lib = shownLibrary()
     await lib.setScope(all)
     const old = deferred<DayItems[]>()
     vi.mocked(engine.days).mockReturnValueOnce(old.promise).mockResolvedValueOnce(result(2))
@@ -74,7 +81,7 @@ describe('library requests', () => {
   })
 
   it('keeps the newest repeated search when responses arrive out of order', async () => {
-    const lib = useLibrary()
+    const lib = shownLibrary()
     const old = deferred<SearchResults>()
     vi.mocked(engine.search)
       .mockReturnValueOnce(old.promise)
@@ -83,24 +90,25 @@ describe('library requests', () => {
         people: [],
         pending: 0,
         complete: true,
+        noAI: false,
       })
     const scope = { kind: 'search', query: 'beach' } as const
     const pending = lib.setScope(scope)
     await lib.setScope(scope)
-    old.resolve({ items: result(1)[0]?.items ?? [], people: [], pending: 0, complete: true })
+    old.resolve({ items: result(1)[0]?.items ?? [], people: [], pending: 0, complete: true, noAI: false })
     await pending
     expect(lib.days.get('results')?.[0]?.id).toBe(2)
   })
 
   it('exposes failed searches instead of leaving only an indefinite loading indicator', async () => {
-    const lib = useLibrary()
+    const lib = shownLibrary()
     vi.mocked(engine.search).mockRejectedValueOnce(new Error('model unavailable'))
     await expect(lib.setScope({ kind: 'search', query: 'beach' })).rejects.toThrow('model unavailable')
     expect(lib.loadError).toContain('model unavailable')
   })
 
   it('does not drop a change received while refreshing', async () => {
-    const lib = useLibrary()
+    const lib = shownLibrary()
     await lib.setScope(all)
     const old = deferred<DayBucket[]>()
     vi.mocked(engine.timeline)
@@ -114,7 +122,7 @@ describe('library requests', () => {
   })
 
   it('clears a removed selection and viewer even when their day still contains other items', async () => {
-    const lib = useLibrary()
+    const lib = shownLibrary()
     await lib.setScope(favourites)
     vi.mocked(engine.days).mockResolvedValueOnce(result(1)).mockResolvedValueOnce(result(2))
     await lib.ensureDays([day])
@@ -127,7 +135,7 @@ describe('library requests', () => {
   })
 
   it('clears the cached day and selection when a filtered day disappears', async () => {
-    const lib = useLibrary()
+    const lib = shownLibrary()
     await lib.setScope(favourites)
     vi.mocked(engine.days).mockResolvedValueOnce(result(1))
     await lib.ensureDays([day])
@@ -138,5 +146,42 @@ describe('library requests', () => {
     expect(lib.days.has(day)).toBe(false)
     expect(lib.selected).toBeNull()
     expect(lib.viewer).toBeNull()
+  })
+
+  it('waits for a day already loading instead of giving up on it', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    const old = deferred<DayItems[]>()
+    vi.mocked(engine.days).mockReturnValueOnce(old.promise)
+    const first = lib.ensureDays([day])
+    const second = lib.ensureDays([day]) // e.g. the viewer's next photo while the grid loads it
+    old.resolve(result(1))
+    await second
+    expect(lib.days.get(day)?.[0]?.id).toBe(1)
+    await first
+    expect(engine.days).toHaveBeenCalledTimes(1)
+  })
+
+  it('reloads a scope that changed while no grid showed it, when shown again', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    lib.detach()
+    vi.mocked(engine.timeline).mockResolvedValueOnce([{ day, count: 5 }])
+    await lib.refresh()
+    expect(lib.total).toBe(1) // nothing loaded while hidden
+    lib.attach()
+    await lib.setScope(all)
+    expect(lib.total).toBe(5)
+  })
+})
+
+describe('what a change affects', () => {
+  const none = { assets: false, tags: false, people: false }
+  it('reloads the timeline only for changes it shows', () => {
+    expect(affects(all.view, { ...none, tags: true })).toBe(false)
+    expect(affects(all.view, { ...none, assets: true })).toBe(true)
+    expect(affects({ filter: Filter.FilterAll, tag: 3 }, { ...none, tags: true })).toBe(true)
+    expect(affects({ filter: Filter.FilterAll, person: 3 }, { ...none, tags: true })).toBe(false)
+    expect(affects({ filter: Filter.FilterAll, album: 3 }, { ...none, people: true })).toBe(true)
   })
 })

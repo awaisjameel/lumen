@@ -2,28 +2,39 @@
 // First run: one question, sensible folders pre-ticked, one button.
 import { computed, onMounted, ref } from 'vue'
 import { engine } from '../bridge'
+import { useLibrary } from '../library/store'
 import { errorText, orFallback } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 
-const emit = defineEmits<{ started: [] }>()
-
+const lib = useLibrary()
 const folders = ref<{ path: string; on: boolean }[]>([])
+const loaded = ref(false)
 const busy = ref(false)
 const error = ref('')
 
 onMounted(async () => {
   const suggested = await orFallback(engine.suggestedFolders(), [])
-  folders.value = suggested.map((path) => ({ path, on: true }))
+  // A folder picked while the suggestions were being found stays.
+  for (const path of suggested) add(path)
+  loaded.value = true
 })
 
 const chosen = computed(() => folders.value.filter((f) => f.on).map((f) => f.path))
 
-async function addFolder() {
-  const path = await orFallback(engine.pickFolder(), '')
-  if (!path) return
+function add(path: string) {
   if (!folders.value.some((f) => f.path.toLowerCase() === path.toLowerCase())) {
     folders.value.push({ path, on: true })
+  }
+}
+
+async function addFolder() {
+  error.value = ''
+  try {
+    const path = await engine.pickFolder()
+    if (path) add(path)
+  } catch (e) {
+    error.value = errorText(e)
   }
 }
 
@@ -32,7 +43,7 @@ async function start() {
   error.value = ''
   try {
     await engine.addSources(chosen.value)
-    emit('started')
+    await lib.sourcesChanged() // the library then shows instead of this
   } catch (e) {
     error.value = errorText(e)
   } finally {
@@ -48,8 +59,8 @@ async function start() {
       <h1>{{ t('welcome.title') }}</h1>
       <p class="question">{{ t('welcome.question') }}</p>
 
-      <p v-if="!folders.length" class="muted">{{ t('welcome.none') }}</p>
-      <ul v-else class="folders">
+      <p v-if="loaded && !folders.length" class="muted">{{ t('welcome.none') }}</p>
+      <ul v-if="folders.length" class="folders">
         <li v-for="f in folders" :key="f.path">
           <label>
             <input v-model="f.on" type="checkbox" />
@@ -64,7 +75,7 @@ async function start() {
         {{ t('welcome.addFolder') }}
       </button>
 
-      <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
 
       <button class="btn btn-primary btn-large start" :disabled="!chosen.length || busy" @click="start">
         {{ t('welcome.start') }}
@@ -156,8 +167,5 @@ h1 {
 .privacy svg {
   flex-shrink: 0;
   margin-top: 1px;
-}
-.error {
-  color: var(--danger);
 }
 </style>

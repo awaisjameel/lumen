@@ -9,6 +9,7 @@ import type { Face, Person } from '../bridge'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
+import { useLiveReload } from '../shared/liveReload'
 import FaceThumb from './FaceThumb.vue'
 import PersonPicker from './PersonPicker.vue'
 import { usePeople } from './store'
@@ -55,6 +56,8 @@ watch(
   },
   { immediate: true },
 )
+// Faces join and leave while the AI groups people; the selection keeps.
+useLiveReload(load, (c) => c.people || c.assets)
 
 function toggle(f: Face) {
   const s = new Set(selected.value)
@@ -91,7 +94,12 @@ const useAsCover = () => act(async ([face]) => face !== undefined && engine.setP
 <template>
   <div class="page">
     <header class="topbar back">
-      <RouterLink :to="{ name: 'person', params: { id } }" class="icon-btn" :title="t('faces.back')">
+      <RouterLink
+        :to="{ name: 'person', params: { id } }"
+        class="icon-btn"
+        :title="t('faces.back')"
+        :aria-label="t('faces.back')"
+      >
         <Icon name="chevron-left" />
       </RouterLink>
       <h1>{{ t('faces.title', { name }) }}</h1>
@@ -103,25 +111,26 @@ const useAsCover = () => act(async ([face]) => face !== undefined && engine.setP
         <button class="btn" :disabled="busy" @click="reject">{{ t('faces.notThem', { name }) }}</button>
         <PersonPicker class="move" :placeholder="t('faces.moveTo')" :exclude="id" @pick="moveTo" />
         <button v-if="count === 1" class="btn" :disabled="busy" @click="useAsCover">{{ t('faces.cover') }}</button>
-        <button class="btn subtle" @click="selected = new Set()">{{ t('faces.clear') }}</button>
+        <button class="btn btn-subtle" @click="selected = new Set()">{{ t('faces.clear') }}</button>
       </template>
       <template v-else>
         <span class="muted">{{ t('faces.hint', { name }) }}</span>
-        <button v-if="faces.length" class="btn subtle" @click="selected = new Set(faces.map((f) => f.id))">
+        <button v-if="faces.length" class="btn btn-subtle" @click="selected = new Set(faces.map((f) => f.id))">
           {{ t('faces.selectAll') }}
         </button>
       </template>
     </div>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="error" class="error bar-error" role="alert">{{ error }}</p>
 
     <div class="page-body">
       <div class="grid">
         <button
-          v-for="f in faces"
+          v-for="(f, i) in faces"
           :key="f.id"
           class="tile"
           :class="{ on: selected.has(f.id) }"
           :title="f.byUser ? t('faces.byYou') : undefined"
+          :aria-label="f.byUser ? t('faces.faceByYou', { n: i + 1 }) : t('faces.face', { n: i + 1 })"
           :aria-pressed="selected.has(f.id)"
           @click="toggle(f)"
         >
@@ -156,7 +165,7 @@ const useAsCover = () => act(async ([face]) => face !== undefined && engine.setP
 .move {
   width: 200px;
 }
-.error {
+.bar-error {
   margin: 0 20px 8px;
 }
 .grid {
@@ -166,6 +175,9 @@ const useAsCover = () => act(async ([face]) => face !== undefined && engine.setP
 }
 .tile {
   position: relative;
+  /* Someone can have thousands of faces: tiles off screen are not laid out. */
+  content-visibility: auto;
+  contain-intrinsic-size: 104px 104px;
   padding: 0;
   border: 0;
   border-radius: var(--radius-m);

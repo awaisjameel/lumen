@@ -8,7 +8,7 @@ import (
 )
 
 func TestFindNames(t *testing.T) {
-	named := []core.Person{{ID: 1, Name: "Ali"}, {ID: 2, Name: "Ali Khan"}, {ID: 3, Name: "Sara"}, {ID: 4, Name: "Zoë"}}
+	named := []core.Person{{ID: 1, Name: "Ali"}, {ID: 2, Name: "Ali Khan"}, {ID: 3, Name: "Sara"}, {ID: 4, Name: "Zoë"}, {ID: 5, Name: "Émile"}, {ID: 6, Name: "İbrahim"}}
 	cases := []struct {
 		query string
 		ids   []int64
@@ -21,6 +21,9 @@ func TestFindNames(t *testing.T) {
 		{"Alice in the snow", nil, "Alice in the snow"}, // whole words only
 		{"Zoë's dog", []int64{4}, "'s dog"},
 		{"a dog", nil, "a dog"},
+		{"photos", nil, "photos"},                        // no name: fillers are the search
+		{"ÉMILE at the lake", []int64{5}, "at the lake"}, // any case, any letters
+		{"İbrahim ibrahim", []int64{6}, "ibrahim"},       // İ is its own letter; no panic
 	}
 	for _, c := range cases {
 		ids, _, rest := FindNames(c.query, named)

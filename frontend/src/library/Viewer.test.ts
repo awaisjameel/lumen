@@ -41,14 +41,14 @@ beforeEach(() => {
 afterEach(() => wrapper?.unmount())
 
 it('shows the video without a still image covering playback', async () => {
-  wrapper = mount(Viewer)
+  wrapper = mount(Viewer, { global: { stubs: { teleport: true } } })
   await flushPromises()
   expect(wrapper.find('video').exists()).toBe(true)
   expect(wrapper.find('.media img').exists()).toBe(false)
 })
 
 it('uses the absolute media clock for direct playback from a search moment', async () => {
-  wrapper = mount(Viewer)
+  wrapper = mount(Viewer, { global: { stubs: { teleport: true } } })
   await flushPromises()
   const video = wrapper.get('video')
   await video.trigger('loadedmetadata')
@@ -63,7 +63,7 @@ it('adds the stream offset only for converted playback', async () => {
     ...detail,
     video: { duration: 60000, codec: 'mpeg4', audio: '', play: Playback.PlayConvert },
   })
-  wrapper = mount(Viewer)
+  wrapper = mount(Viewer, { global: { stubs: { teleport: true } } })
   await flushPromises()
   const video = wrapper.get('video')
   video.element.currentTime = 2
@@ -80,7 +80,7 @@ it('does not reopen a closed viewer when neighbour loading finishes', async () =
       finish = resolve
     }),
   )
-  wrapper = mount(Viewer)
+  wrapper = mount(Viewer, { global: { stubs: { teleport: true } } })
   await flushPromises()
   await wrapper.get('.next').trigger('click')
   lib.viewer = null
@@ -92,7 +92,7 @@ it('does not reopen a closed viewer when neighbour loading finishes', async () =
 it('ignores details from an earlier visit to the same asset', async () => {
   let finish!: (value: AssetDetail) => void
   vi.mocked(engine.asset).mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
-  wrapper = mount(Viewer)
+  wrapper = mount(Viewer, { global: { stubs: { teleport: true } } })
   const lib = useLibrary()
   lib.viewer = { day: 'results', id: 2 }
   await flushPromises()
@@ -102,4 +102,26 @@ it('ignores details from an earlier visit to the same asset', async () => {
   finish({ ...detail, video: null, webNative: true })
   await flushPromises()
   expect(wrapper.find('video').exists()).toBe(true)
+})
+
+it('leaves the arrow keys to the seek slider, and Escape to an open menu', async () => {
+  const lib = useLibrary()
+  const neighbour = vi.spyOn(lib, 'neighbour').mockResolvedValue(null)
+  wrapper = mount(Viewer, { global: { stubs: { teleport: true } }, attachTo: document.body })
+  await flushPromises()
+  const slider = wrapper.get('input[type="range"]').element
+  slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+  expect(neighbour).not.toHaveBeenCalled()
+
+  // A control that handles Escape itself (a picker closing its menu) keeps the viewer open.
+  const picker = document.createElement('input')
+  picker.addEventListener('keydown', (e) => e.stopPropagation())
+  wrapper.element.appendChild(picker)
+  picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  expect(lib.viewer).not.toBeNull()
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+  expect(neighbour).toHaveBeenCalledOnce()
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  expect(lib.viewer).toBeNull()
 })

@@ -47,16 +47,21 @@ type Face struct {
 	Landmarks [5][2]float64
 }
 
-// Yaw is how far the face is turned: the nose tip's sideways distance from
-// between the eyes, in eye distances. About 0 facing the camera, 0.3 at
+// Yaw is how far the face is turned: the nose tip's distance from between
+// the eyes along the line through them, in eye distances, so a tilted face
+// that looks at the camera is not taken for a turned one. About 0 facing the camera, 0.3 at
 // three-quarters, above 0.5 in profile, where recognition is unreliable.
 func (f Face) Yaw() float32 {
 	l := f.Landmarks
-	eyes := math.Hypot(l[1][0]-l[0][0], l[1][1]-l[0][1])
-	if eyes == 0 {
+	// The nose's offset from between the eyes, along the line through the
+	// eyes: a face that is only tilted (rolled) has none.
+	ex, ey := l[1][0]-l[0][0], l[1][1]-l[0][1]
+	dx, dy := l[2][0]-(l[0][0]+l[1][0])/2, l[2][1]-(l[0][1]+l[1][1])/2
+	eyes2 := ex*ex + ey*ey
+	if eyes2 == 0 {
 		return 1
 	}
-	return float32(math.Abs(l[2][0]-(l[0][0]+l[1][0])/2) / eyes)
+	return float32(math.Abs(dx*ex+dy*ey) / eyes2)
 }
 
 // Faces finds and recognises faces. YuNet detects them with five landmarks,
@@ -159,12 +164,17 @@ func (f *Faces) Detect(pix []byte, w, h int, minScore float32) ([]Face, error) {
 	return nonMaxSuppress(found, 0.3), nil
 }
 
+// FaceAnalysisVersion is the version of what Lumen computes around the face
+// models (alignment, sharpness, yaw). A change re-runs the faces stage, as a
+// new model does.
+const FaceAnalysisVersion = "2"
+
 // embedBatch is the most faces SFace embeds in one run.
 const embedBatch = 32
 
 // Identity is what recognition makes of one face.
 type Identity struct {
-	Vec []float32 // unit vector; the same person's faces point the same way
+	Vec []float32 // unit vector; the same person's faces point the same way. nil: not recognisable
 	// Sharpness is how much detail the aligned face holds (the variance of
 	// its Laplacian): blurred, dark or enlarged tiny faces score low, and
 	// their vectors are less reliable.
@@ -185,8 +195,8 @@ func (f *Faces) Embed(pix []byte, w, h int, faces []Face) ([]Identity, error) {
 		data := make([]float32, len(batch)*3*plane)
 		sharp := make([]float32, len(batch))
 		for b, fc := range batch {
-			crop := Align(pix, w, h, fc.Landmarks, side)
-			sharp[b] = sharpness(crop, side)
+			crop, inside := align(pix, w, h, fc.Landmarks, side)
+			sharp[b] = sharpness(crop, inside, side)
 			base := b * 3 * plane
 			for i := range plane { // planar RGB, 0..255: SFace normalises itself
 				data[base+i] = float32(crop[3*i])
@@ -216,8 +226,9 @@ func (f *Faces) Embed(pix []byte, w, h int, faces []Face) ([]Identity, error) {
 
 // sharpness is the variance of the Laplacian of an aligned face's
 // brightness, over the face itself (eyes to chin, not the background at the
-// crop's edges).
-func sharpness(crop []byte, side int) float32 {
+// crop's edges). Pixels next to where the photo ends are left out: the hard
+// edge against black would count as detail.
+func sharpness(crop []byte, inside []bool, side int) float32 {
 	g := make([]float64, side*side)
 	for i := range g {
 		g[i] = 0.299*float64(crop[3*i]) + 0.587*float64(crop[3*i+1]) + 0.114*float64(crop[3*i+2])
@@ -226,11 +237,17 @@ func sharpness(crop []byte, side int) float32 {
 	var n int
 	for y := side * 24 / 112; y < side*96/112; y++ {
 		for x := side * 20 / 112; x < side*92/112; x++ {
+			if i := y*side + x; !inside[i] || !inside[i-1] || !inside[i+1] || !inside[i-side] || !inside[i+side] {
+				continue
+			}
 			v := 4*g[y*side+x] - g[y*side+x-1] - g[y*side+x+1] - g[(y-1)*side+x] - g[(y+1)*side+x]
 			sum += v
 			sum2 += v * v
 			n++
 		}
+	}
+	if n == 0 {
+		return 0
 	}
 	mean := sum / float64(n)
 	return float32(sum2/float64(n) - mean*mean)
@@ -247,6 +264,13 @@ var faceTemplate = [5][2]float64{
 // the landmarks onto it. It returns a side x side 8-bit RGB crop. Big faces
 // are averaged over several samples per pixel, so they don't alias.
 func Align(pix []byte, w, h int, lm [5][2]float64, side int) []byte {
+	crop, _ := align(pix, w, h, lm, side)
+	return crop
+}
+
+// align is Align, also reporting which crop pixels come from inside the
+// image (the rest are black), so sharpness can leave out the image's edge.
+func align(pix []byte, w, h int, lm [5][2]float64, side int) (crop []byte, inside []bool) {
 	k := float64(side) / 112
 	var mx, my, tx, ty float64
 	for i := range 5 {
@@ -263,9 +287,9 @@ func Align(pix []byte, w, h int, lm [5][2]float64, side int) []byte {
 		num2 += px*qy - py*qx
 		den += px*px + py*py
 	}
-	out := make([]byte, side*side*3)
+	crop, inside = make([]byte, side*side*3), make([]bool, side*side)
 	if den == 0 {
-		return out
+		return crop, inside
 	}
 	// crop = [a -b; b a] * (image - m) + t, so image = inverse applied to crop.
 	a, b := num1/den, num2/den
@@ -275,21 +299,25 @@ func Align(pix []byte, w, h int, lm [5][2]float64, side int) []byte {
 	for v := range side {
 		for u := range side {
 			var acc [3]float64
+			in := true
 			for sv := range n {
 				for su := range n {
 					du := float64(u) + (float64(su)+0.5)/float64(n) - 0.5 - tx
 					dv := float64(v) + (float64(sv)+0.5)/float64(n) - 0.5 - ty
-					c := bilinear(pix, w, h, inv*(a*du+b*dv)+mx, inv*(-b*du+a*dv)+my)
+					x, y := inv*(a*du+b*dv)+mx, inv*(-b*du+a*dv)+my
+					in = in && x >= 0 && y >= 0 && x <= float64(w-1) && y <= float64(h-1)
+					c := bilinear(pix, w, h, x, y)
 					acc[0], acc[1], acc[2] = acc[0]+c[0], acc[1]+c[1], acc[2]+c[2]
 				}
 			}
 			o := (v*side + u) * 3
 			for ch := range 3 {
-				out[o+ch] = uint8(math.Round(acc[ch] / float64(n*n)))
+				crop[o+ch] = uint8(math.Round(acc[ch] / float64(n*n)))
 			}
+			inside[v*side+u] = in
 		}
 	}
-	return out
+	return crop, inside
 }
 
 // bilinear samples an RGB image at (x, y); outside it is black.

@@ -2,13 +2,13 @@
 // Full-window viewer. Shows the 1024px preview instantly, then swaps in the
 // original when the WebView can display it (JPEG, PNG, WebP, AVIF).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { engine, originalUrl, Playback, playUrl, THUMB_LARGE, thumbUrl } from '../bridge'
+import { engine, originalUrl, Playback, playUrl, THUMB_LARGE, thumbUrl, videoUrl } from '../bridge'
 import type { AssetDetail } from '../bridge'
 import { orFallback } from '../shared/errors'
 import { dateTime, duration } from '../shared/format'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
-import { isTyping } from '../shared/keys'
+import { isTyping, ownsArrows } from '../shared/keys'
 import { useLibrary } from './store'
 import DetailsPanel from './DetailsPanel.vue'
 
@@ -26,7 +26,7 @@ const converting = computed(() => videoMode.value === Playback.PlayConvert)
 const videoSrc = computed(() => {
   const d = detail.value
   if (!d?.video) return ''
-  return converting.value ? playUrl(d.id, videoStart.value) : originalUrl(d.id)
+  return converting.value ? playUrl(d.id, videoStart.value) : videoUrl(d.id)
 })
 
 watch(
@@ -69,14 +69,23 @@ function videoReady() {
   }
 }
 
+// While the seek slider is dragged, playback must not move its thumb back.
+let seeking = false
+
 function videoTime() {
-  if (video.value) videoPosition.value = (converting.value ? videoStart.value : 0) + video.value.currentTime * 1000
+  if (video.value && !seeking)
+    videoPosition.value = (converting.value ? videoStart.value : 0) + video.value.currentTime * 1000
+}
+
+function startSeek() {
+  seeking = true
 }
 
 function seekVideo(e: Event) {
   const target = e.target
   if (!(target instanceof HTMLInputElement)) return
   const at = Number(target.value)
+  seeking = false
   videoPosition.value = at
   if (converting.value) {
     videoStart.value = at // a new stream starts here; no full converted copy is kept
@@ -98,10 +107,15 @@ function onMediaDoubleClick() {
   if (!detail.value?.video) close()
 }
 
+// Listens in the bubble phase, so a control that handles a key itself (a
+// picker closing its menu on Escape) stops it before it reaches the viewer.
 function onKey(e: KeyboardEvent) {
-  if (e.ctrlKey || e.altKey || e.metaKey) return
+  if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return
+  if (document.querySelector('dialog[open]')) return // a confirmation above the viewer owns the keys
   // Typing in the details panel (adding a tag): only Escape still closes.
   if (isTyping(e) && e.key !== 'Escape') return
+  // The seek slider and the video's own controls move with the arrows.
+  if (ownsArrows(e) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
   switch (e.key) {
     case 'Escape':
       close()
@@ -124,106 +138,132 @@ function onKey(e: KeyboardEvent) {
       return
   }
   e.preventDefault()
-  e.stopPropagation()
+}
+
+// A modal: the app behind it can't be tabbed to or clicked while it is open
+// (the viewer is outside it, in <body>; a confirmation can still show).
+function setBehind(inert: boolean) {
+  document.querySelector('.shell')?.toggleAttribute('inert', inert)
 }
 
 onMounted(() => {
-  window.addEventListener('keydown', onKey, true)
+  window.addEventListener('keydown', onKey)
+  setBehind(true)
   root.value?.focus()
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey)
+  setBehind(false)
+})
 </script>
 
 <template>
-  <div ref="root" class="viewer" role="dialog" aria-modal="true" tabindex="-1">
-    <div class="stage">
-      <header class="bar">
-        <button class="icon-btn" :title="t('common.close') + ' (Esc)'" @click="close">
-          <Icon name="close" />
-        </button>
-        <span class="date">{{ detail ? dateTime(detail.takenAt) : '' }}</span>
-        <div class="spacer" />
-        <button
-          class="icon-btn"
-          :aria-pressed="!!lib.viewerItem?.f"
-          :title="t('details.favourite') + ' (F)'"
-          @click="lib.toggleFavourite(lib.viewer)"
-        >
-          <Icon :name="lib.viewerItem?.f ? 'heart-filled' : 'heart'" />
-        </button>
-        <button
-          class="icon-btn"
-          :aria-pressed="lib.showDetails"
-          :title="t('library.info') + ' (I)'"
-          @click="lib.showDetails = !lib.showDetails"
-        >
-          <Icon name="info" />
-        </button>
-      </header>
+  <Teleport to="body">
+    <div
+      ref="root"
+      class="viewer"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="detail ? dateTime(detail.takenAt) : t('viewer.title')"
+      tabindex="-1"
+    >
+      <div class="stage">
+        <header class="bar">
+          <button
+            class="icon-btn"
+            :title="t('common.withKey', { label: t('common.close'), key: 'Esc' })"
+            :aria-label="t('common.close')"
+            @click="close"
+          >
+            <Icon name="close" />
+          </button>
+          <span class="date">{{ detail ? dateTime(detail.takenAt) : '' }}</span>
+          <div class="spacer" />
+          <button
+            class="icon-btn"
+            :aria-pressed="!!lib.viewerItem?.f"
+            :title="t('common.withKey', { label: t('details.favourite'), key: 'F' })"
+            :aria-label="t('details.favourite')"
+            @click="lib.toggleFavourite(lib.viewer)"
+          >
+            <Icon :name="lib.viewerItem?.f ? 'heart-filled' : 'heart'" />
+          </button>
+          <button
+            class="icon-btn"
+            :aria-pressed="lib.showDetails"
+            :title="t('common.withKey', { label: t('library.info'), key: 'I' })"
+            :aria-label="t('library.info')"
+            @click="lib.showDetails = !lib.showDetails"
+          >
+            <Icon name="info" />
+          </button>
+        </header>
 
-      <div v-if="lib.viewerItem" class="media" @dblclick="onMediaDoubleClick">
-        <video
-          v-if="detail?.video && detail.id === lib.viewerItem.id"
-          ref="video"
-          :key="videoSrc"
-          :src="videoSrc"
-          :poster="lib.viewerItem.t ? thumbUrl(detail.id, lib.viewerItem.t, THUMB_LARGE) : undefined"
-          controls
-          autoplay
-          @loadedmetadata="videoReady"
-          @timeupdate="videoTime"
-          @error="videoError"
-        />
-        <p v-if="videoFailed" class="video-error" role="alert">{{ t('viewer.videoFailed') }}</p>
-        <template v-else-if="!detail?.video">
-          <img
-            v-if="lib.viewerItem.t"
-            v-show="!originalReady"
-            :key="'p' + lib.viewerItem.id"
-            class="preview"
-            :src="thumbUrl(lib.viewerItem.id, lib.viewerItem.t, THUMB_LARGE)"
-            alt=""
-            draggable="false"
+        <div v-if="lib.viewerItem" class="media" @dblclick="onMediaDoubleClick">
+          <video
+            v-if="detail?.video && detail.id === lib.viewerItem.id"
+            ref="video"
+            :key="videoSrc"
+            :src="videoSrc"
+            :poster="lib.viewerItem.t ? thumbUrl(detail.id, lib.viewerItem.t, THUMB_LARGE) : undefined"
+            controls
+            autoplay
+            @loadedmetadata="videoReady"
+            @timeupdate="videoTime"
+            @error="videoError"
           />
-          <img
-            v-if="detail?.webNative && detail.id === lib.viewerItem.id"
-            v-show="originalReady"
-            :key="'o' + detail.id"
-            class="original"
-            :src="originalUrl(detail.id)"
-            alt=""
-            draggable="false"
-            @load="originalReady = true"
+          <p v-if="videoFailed" class="video-error" role="alert">{{ t('viewer.videoFailed') }}</p>
+          <template v-else-if="!detail?.video">
+            <img
+              v-if="lib.viewerItem.t"
+              v-show="!originalReady"
+              :key="'p' + lib.viewerItem.id"
+              class="preview"
+              :src="thumbUrl(lib.viewerItem.id, lib.viewerItem.t, THUMB_LARGE)"
+              alt=""
+              draggable="false"
+            />
+            <img
+              v-if="detail?.webNative && detail.id === lib.viewerItem.id"
+              v-show="originalReady"
+              :key="'o' + detail.id"
+              class="original"
+              :src="originalUrl(detail.id)"
+              alt=""
+              draggable="false"
+              @load="originalReady = true"
+            />
+            <div v-if="!lib.viewerItem.t && !detail?.webNative" class="none">
+              <Icon name="image-off" :size="40" />
+              <p>{{ t('viewer.noPreview') }}</p>
+            </div>
+          </template>
+        </div>
+
+        <div v-if="detail?.video && detail.video.duration" class="video-seek">
+          <span>{{ duration(videoPosition) }}</span>
+          <input
+            type="range"
+            min="0"
+            :max="detail.video.duration"
+            :value="videoPosition"
+            :aria-label="t('viewer.seek')"
+            @input="startSeek"
+            @change="seekVideo"
           />
-          <div v-if="!lib.viewerItem.t && !detail?.webNative" class="none">
-            <Icon name="image-off" :size="40" />
-            <p>{{ t('viewer.noPreview') }}</p>
-          </div>
-        </template>
-      </div>
+          <span>{{ duration(detail.video.duration) }}</span>
+        </div>
 
-      <div v-if="detail?.video && detail.video.duration" class="video-seek">
-        <span>{{ duration(videoPosition) }}</span>
-        <input
-          type="range"
-          min="0"
-          :max="detail.video.duration"
-          :value="videoPosition"
-          :aria-label="t('viewer.seek')"
-          @change="seekVideo"
-        />
-        <span>{{ duration(detail.video.duration) }}</span>
+        <button class="nav prev" :title="t('viewer.prev')" :aria-label="t('viewer.prev')" @click="go(-1)">
+          <Icon name="chevron-left" :size="28" />
+        </button>
+        <button class="nav next" :title="t('viewer.next')" :aria-label="t('viewer.next')" @click="go(1)">
+          <Icon name="chevron-right" :size="28" />
+        </button>
       </div>
-
-      <button class="nav prev" :title="t('viewer.prev')" @click="go(-1)">
-        <Icon name="chevron-left" :size="28" />
-      </button>
-      <button class="nav next" :title="t('viewer.next')" @click="go(1)">
-        <Icon name="chevron-right" :size="28" />
-      </button>
+      <DetailsPanel v-if="lib.showDetails" :sel="lib.viewer" class="panel" />
     </div>
-    <DetailsPanel v-if="lib.showDetails" :sel="lib.viewer" class="panel" />
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -233,7 +273,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
   z-index: 50;
   display: flex;
   background: var(--viewer-bg);
-  color: #eee;
+  color: var(--viewer-text);
   outline: none;
 }
 .stage {
@@ -255,15 +295,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
   background: linear-gradient(rgb(0 0 0 / 0.55), transparent);
 }
 .bar .icon-btn {
-  color: #ddd;
+  color: var(--viewer-text);
 }
 .bar .icon-btn:hover {
-  background: rgb(255 255 255 / 0.1);
-  color: #fff;
+  background: var(--viewer-control);
+  color: var(--viewer-text);
 }
 .date {
   font-size: 13px;
-  color: #ccc;
+  color: var(--viewer-text-2);
 }
 .spacer {
   flex: 1;
@@ -293,9 +333,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
   align-items: center;
   gap: 8px;
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   background: rgb(0 0 0 / 0.68);
-  color: white;
+  color: var(--viewer-text);
   font-size: 12px;
 }
 .video-seek input {
@@ -307,14 +347,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
   position: absolute;
   z-index: 3;
   padding: 10px 14px;
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   background: rgb(0 0 0 / 0.8);
 }
 .none {
   display: grid;
   justify-items: center;
   gap: 8px;
-  color: #999;
+  color: var(--viewer-text-2);
 }
 .nav {
   position: absolute;
@@ -327,7 +367,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
   border: 0;
   border-radius: var(--radius-m);
   background: rgb(0 0 0 / 0.25);
-  color: #eee;
+  color: var(--viewer-text);
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.15s;

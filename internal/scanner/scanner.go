@@ -58,9 +58,19 @@ type found struct {
 func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt Options) (Result, error) {
 	root := src.Path
 	if under != "" {
+		if Excluded(src.Path, under, opt.SkipDirs) {
+			return Result{}, nil // a full scan leaves it out too
+		}
 		root = under
 	}
-	known, err := s.Store.KnownFiles(ctx, src.ID, under)
+	// A source can be a junction or symbolic link to its folder (a moved
+	// Pictures folder often is). The walk reads the folder it points to, and
+	// reports paths under the source's own name.
+	walkRoot, ok, err := walkable(root, under == "")
+	if !ok {
+		return Result{}, err
+	}
+	known, extra, err := s.Store.KnownFiles(ctx, src.ID, under)
 	if err != nil {
 		return Result{}, fmt.Errorf("load known files: %w", err)
 	}
@@ -146,12 +156,14 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 		}
 	}()
 
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(walkRoot, func(path string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		isRoot := path == walkRoot
+		path = root + path[len(walkRoot):]
 		if err != nil {
-			if path == root {
+			if isRoot {
 				return err
 			}
 			slog.Debug("skip unreadable", "path", path, "err", err)
@@ -164,14 +176,14 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 			return nil
 		}
 		if d.IsDir() {
-			if path != root && skipDir(path, d, opt.SkipDirs) {
+			if !isRoot && skipDir(path, d, opt.SkipDirs) {
 				return fs.SkipDir
 			}
 			return nil
 		}
 		kind := core.KindOf(path)
-		if kind == "" || (kind == core.KindVideo && !opt.Videos) {
-			return nil
+		if kind == "" || (kind == core.KindVideo && !opt.Videos) || d.Type()&fs.ModeSymlink != 0 {
+			return nil // a link's own size and time say nothing about its target
 		}
 		info, err := d.Info()
 		if err != nil {
@@ -180,11 +192,14 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 			}
 			return nil // unavailable since it was listed: nothing to add
 		}
+		if skipName(d.Name()) || isHiddenOrSystem(info) {
+			return nil // e.g. macOS's "._IMG_0001.JPG" beside the real photo
+		}
 		res.Seen++
 		if s.OnProgress != nil && res.Seen%500 == 0 {
 			s.OnProgress(res.Seen)
 		}
-		key := strings.ToLower(path)
+		key := core.Fold(path)
 		prev, ok := known[key]
 		delete(known, key)
 		if ok && prev.Size == info.Size() && prev.MTime == info.ModTime().UnixNano() {
@@ -210,7 +225,8 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 	}
 
 	// Whatever is left in known was not found on disk.
-	gone := make([]int64, 0, len(known))
+	gone := make([]int64, 0, len(known)+len(extra))
+	gone = append(gone, extra...)
 	for _, st := range known {
 		gone = append(gone, st.ID)
 	}
@@ -227,7 +243,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 // the reconciliation candidates while retaining them in the database.
 func preserveKnown(known map[string]store.FileStat, path string) {
 	for key := range known {
-		if store.IsWithin(key, path) {
+		if core.IsWithin(key, path) {
 			delete(known, key)
 		}
 	}
@@ -235,17 +251,69 @@ func preserveKnown(known map[string]store.FileStat, path string) {
 
 // skipDir leaves out hidden and system folders, and any folder in skip.
 func skipDir(path string, d fs.DirEntry, skip []string) bool {
-	name := d.Name()
-	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "$") ||
-		strings.EqualFold(name, "System Volume Information") {
+	if skipName(d.Name()) || withinAny(path, skip) {
 		return true
 	}
-	for _, s := range skip {
-		if store.IsWithin(path, s) {
+	info, err := d.Info()
+	return err == nil && isHiddenOrSystem(info)
+}
+
+// skipName reports whether a file or folder name marks it as not the user's
+// media: dot names (hidden by convention, and AppleDouble "._" files), "$"
+// names (the recycle bin) and Windows' own folder.
+func skipName(name string) bool {
+	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "$") ||
+		strings.EqualFold(name, "System Volume Information")
+}
+
+func withinAny(path string, dirs []string) bool {
+	for _, d := range dirs {
+		if core.IsWithin(path, d) {
 			return true
 		}
 	}
-	return isHiddenOrSystem(d)
+	return false
+}
+
+// Excluded reports whether a full scan of root would leave path out: some
+// folder between them (or path itself) is hidden, a system folder, or in
+// skip. The indexer checks folder changes with it before scanning them.
+func Excluded(root, path string, skip []string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	cur := root
+	for name := range strings.SplitSeq(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, name)
+		if skipName(name) || withinAny(cur, skip) {
+			return true
+		}
+		// A deleted path has no attributes left; its name rules still apply.
+		if info, err := os.Lstat(cur); err == nil && isHiddenOrSystem(info) {
+			return true
+		}
+	}
+	return false
+}
+
+// walkable returns the folder to walk for root. A source's root that is a
+// junction or link resolves to its target (the walk does not follow links).
+// A linked folder inside a source is not walked (ok is false): the source's
+// full scan does not enter it either.
+func walkable(root string, isSource bool) (walk string, ok bool, err error) {
+	fi, err := os.Lstat(root)
+	if err != nil || fi.IsDir() {
+		return root, true, nil //nolint:nilerr // a missing root fails in the walk itself, which reports it
+	}
+	if !isSource {
+		return "", false, nil
+	}
+	target, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve %s: %w", root, err)
+	}
+	return target, true, nil
 }
 
 // Files up to this size are hashed in full. Bigger ones (videos, mostly) are
@@ -258,7 +326,7 @@ const (
 
 // Fingerprint returns the 16-byte content hash that identifies an asset.
 func Fingerprint(path string, size int64) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := openShared(path)
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
+import { errorText } from './errors'
 
 /**
  * Wraps a read of the engine so at most one runs at a time. Calls made while
@@ -35,17 +36,28 @@ export function coalescedLoad<T>(fetch: () => Promise<T>, apply: (value: T) => v
 
 /**
  * A store holding one list from the engine (Things, People, Albums), loaded on
- * demand, with an index by id.
+ * demand, with an index by id. error says why the last load failed ("" once
+ * one succeeds); load also rejects, for callers that wait on it.
  */
 export function defineListStore<T extends { id: number }>(id: string, fetch: () => Promise<T[]>) {
   return defineStore(id, () => {
     const list = shallowRef<T[]>([])
     const loaded = ref(false)
+    const error = ref('')
     const byId = computed(() => new Map(list.value.map((x) => [x.id, x])))
-    const load = coalescedLoad(fetch, (got) => {
+    const read = coalescedLoad(fetch, (got) => {
       list.value = got
       loaded.value = true
+      error.value = ''
     })
-    return { list, loaded, byId, load }
+    async function load() {
+      try {
+        await read()
+      } catch (e) {
+        error.value = errorText(e)
+        throw e
+      }
+    }
+    return { list, loaded, error, byId, load }
   })
 }

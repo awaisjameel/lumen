@@ -234,3 +234,31 @@ func TestDecodeMatchesThumbnail(t *testing.T) {
 		t.Errorf("bmp decoded %dx%d (%v), want 32x24", im.W, im.H, err)
 	}
 }
+
+// A photo with a wide-gamut profile (Display P3, as iPhones take) must come
+// out as the same colours in sRGB, not its raw values read as sRGB (duller).
+// testdata/red-p3.jpg is pure red stored in P3: raw values about (234, 51, 35).
+func TestWideGamutPhotosAreConvertedToSRGB(t *testing.T) {
+	var d Decoders
+	th, err := d.Thumbnail(ctx, filepath.Join("testdata", "red-p3.jpg"), core.KindPhoto, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := decodeJPEG(t, th.Small).At(8, 8); !nearly(c, 255, 0, 0) {
+		t.Errorf("thumbnail of P3 red is %v, want sRGB red", c)
+	}
+	im, err := d.Decode(ctx, filepath.Join("testdata", "red-p3.jpg"), core.KindPhoto, 1, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if px := im.Pix[(8*im.W+8)*3:]; !nearly(color.RGBA{px[0], px[1], px[2], 255}, 255, 0, 0) {
+		t.Errorf("decoded P3 red is %v, want sRGB red", px[:3])
+	}
+}
+
+// nearly reports whether c is within 12 of (r, g, b) on every channel.
+func nearly(c color.Color, r, g, b uint8) bool {
+	cr, cg, cb, _ := c.RGBA()
+	d := func(x uint32, y uint8) bool { v := int(x>>8) - int(y); return v > -12 && v < 12 }
+	return d(cr, r) && d(cg, g) && d(cb, b)
+}

@@ -49,7 +49,7 @@ func (s *PeopleService) AssetFaces(ctx context.Context, assetID int64) ([]core.F
 
 // SuggestPeople returns named people whose names contain text.
 func (s *PeopleService) SuggestPeople(ctx context.Context, text string) ([]core.Person, error) {
-	return s.store.SearchPeople(ctx, text, 6)
+	return s.store.SearchPeople(ctx, text, suggestions)
 }
 
 // PersonByName returns the id of whoever has that name, or 0. The UI asks

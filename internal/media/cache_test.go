@@ -33,9 +33,41 @@ func TestCacheWritesAreAtomic(t *testing.T) {
 	if len(got) != 64<<10 || !bytes.Equal(got, bytes.Repeat(got[:1], len(got))) {
 		t.Errorf("thumbnail is a mix of writers (%d bytes)", len(got))
 	}
-	left, _ := filepath.Glob(filepath.Join(filepath.Dir(c.Path(7, 256)), "*.tmp"))
+	left, _ := filepath.Glob(filepath.Join(c.tmpDir(), "*"))
 	if len(left) != 0 {
 		t.Errorf("temporary files left behind: %v", left)
+	}
+}
+
+// A crash can leave half-written files and frames of older versions; Sweep
+// clears them, and an empty cached file counts as missing.
+func TestSweepAndEmptyFiles(t *testing.T) {
+	d := &countingDecoder{}
+	c := NewCache(t.TempDir(), d)
+	for _, p := range []string{filepath.Join(c.tmpDir(), "1.jpg.123.tmp"), filepath.Join(c.Dir, "frame-old", "00", "1", "0.jpg")} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(c.Dir, "*")); len(left) != 0 {
+		t.Errorf("Sweep left %v", left)
+	}
+
+	thumb := c.Path(1, core.ThumbSmall)
+	if err := os.MkdirAll(filepath.Dir(thumb), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(thumb, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Ensure(t.Context(), 1, core.ThumbSmall, Original{Path: "photo.jpg", Kind: core.KindPhoto}); err != nil || d.calls != 1 {
+		t.Fatalf("Ensure over an empty file: %v, %d decodes; want it rebuilt", err, d.calls)
 	}
 }
 

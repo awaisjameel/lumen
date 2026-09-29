@@ -25,16 +25,25 @@ static int lumen_init(void) {
 	return 0;
 }
 
+// lumen_error takes libvips' error log (shared by every thread) and clears
+// it in one step, so one file's error never shows under another's name.
 static char *lumen_error(void) {
-	char *s = g_strdup(vips_error_buffer());
-	vips_error_clear();
-	return s;
+	return vips_error_buffer_copy();
 }
 
 // to_srgb8 returns in as 8-bit sRGB with exactly 3 bands, transparency
-// flattened onto white. It always consumes in.
+// flattened onto white. An embedded colour profile (Display P3 from
+// iPhones, Adobe RGB from cameras) is converted from, as the WebView and the
+// AI read the result as sRGB. It always consumes in.
 static VipsImage *to_srgb8(VipsImage *in) {
 	VipsImage *t = NULL;
+	if (vips_image_get_typeof(in, VIPS_META_ICC_NAME)) {
+		if (vips_icc_transform(in, &t, "srgb", "embedded", TRUE, "intent", VIPS_INTENT_RELATIVE, NULL) == 0) {
+			g_object_unref(in); in = t; t = NULL;
+		} else {
+			vips_error_clear(); // a broken profile: use the pixels as they are
+		}
+	}
 	if (vips_image_get_interpretation(in) != VIPS_INTERPRETATION_sRGB) {
 		if (vips_colourspace(in, &t, VIPS_INTERPRETATION_sRGB, NULL)) goto fail;
 		g_object_unref(in); in = t; t = NULL;

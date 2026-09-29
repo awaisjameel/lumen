@@ -21,8 +21,8 @@ import (
 
 type fakeEvents struct{ changed atomic.Int32 }
 
-func (*fakeEvents) Progress(core.Progress) {}
-func (f *fakeEvents) LibraryChanged(int)   { f.changed.Add(1) }
+func (*fakeEvents) Progress(core.Progress)        {}
+func (f *fakeEvents) LibraryChanged(core.Changes) { f.changed.Add(1) }
 
 func TestDeletedDottedFolderTriggersReconciliation(t *testing.T) {
 	paths := core.PathsIn(t.TempDir())

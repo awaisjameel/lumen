@@ -23,6 +23,7 @@ import (
 // Metadata is what the metadata stage extracts from one file.
 type Metadata struct {
 	TakenAt     time.Time // zero if the file has no capture date
+	Modified    time.Time // when its EXIF says it was last saved (not a capture date); zero if unknown
 	Width       int       // as displayed, i.e. after orientation
 	Height      int
 	Orientation int // EXIF 1..8
@@ -47,13 +48,30 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 	}
 	defer f.Close()
 
+	// The pixel size from the image itself: EXIF's can be the size before
+	// an editor cropped it. Go reads the common formats' headers.
+	if cfg, _, err := image.DecodeConfig(f); err == nil {
+		m.Width, m.Height = cfg.Width, cfg.Height
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return m, err
+	}
+
 	ex, exErr := imagemeta.Decode(f)
 	if exErr == nil {
-		m.TakenAt = ex.SelectedDate()
+		// Only the dates of taking the photo; SelectedDate would fall back to
+		// the last time it was saved.
+		m.TakenAt = ex.ExifIFD.GetDateTimeOriginal()
+		if m.TakenAt.IsZero() {
+			m.TakenAt = ex.ExifIFD.GetCreateDate()
+		}
+		m.Modified = ex.ModifyDate()
 		if o := int(ex.IFD0.Orientation); o >= 1 && o <= 8 {
 			m.Orientation = o
 		}
-		m.Width, m.Height = int(ex.ExifIFD.PixelXDimension), int(ex.ExifIFD.PixelYDimension)
+		if m.Width == 0 || m.Height == 0 {
+			m.Width, m.Height = int(ex.ExifIFD.PixelXDimension), int(ex.ExifIFD.PixelYDimension)
+		}
 		if m.Width == 0 || m.Height == 0 {
 			m.Width, m.Height = int(ex.IFD0.ImageWidth), int(ex.IFD0.ImageHeight)
 		}
@@ -71,15 +89,8 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 		}
 	}
 
-	// No size in the EXIF: read the image header, with Go for the common
-	// formats and libvips for the rest (AVIF, HEIC).
-	if m.Width == 0 || m.Height == 0 {
-		if _, err := f.Seek(0, io.SeekStart); err == nil {
-			if cfg, _, err := image.DecodeConfig(f); err == nil {
-				m.Width, m.Height = cfg.Width, cfg.Height
-			}
-		}
-	}
+	// Neither Go nor the EXIF knows the size: libvips reads the header of
+	// the rest (AVIF, HEIC).
 	if m.Width == 0 || m.Height == 0 {
 		if w, h, err := vips.Size(path); err == nil {
 			m.Width, m.Height = w, h
@@ -88,10 +99,20 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 	if m.Orientation >= 5 { // 5..8 are rotated a quarter turn
 		m.Width, m.Height = m.Height, m.Width
 	}
-	if m.TakenAt.Year() < 1900 { // clearly bogus camera clocks
+	if !Plausible(m.TakenAt) {
 		m.TakenAt = time.Time{}
 	}
+	if !Plausible(m.Modified) {
+		m.Modified = time.Time{}
+	}
 	return m, nil
+}
+
+// Plausible reports whether a date read from a file can be when it was
+// taken: from 1900 until a couple of days from now (time zones), not a
+// camera clock that was never set or set wrong.
+func Plausible(t time.Time) bool {
+	return t.Year() >= 1900 && t.Before(time.Now().AddDate(0, 0, 2))
 }
 
 var goexifFormats = map[string]bool{".jpg": true, ".jpeg": true, ".jpe": true, ".tif": true, ".tiff": true}
@@ -102,8 +123,22 @@ func fillFromGoexif(r io.Reader, m *Metadata) {
 	if err != nil {
 		return
 	}
-	if t, err := x.DateTime(); err == nil && m.TakenAt.IsZero() {
-		m.TakenAt = t
+	date := func(n goexif.FieldName) time.Time {
+		if tag, err := x.Get(n); err == nil {
+			if s, err := tag.StringVal(); err == nil {
+				t, _ := time.Parse("2006:01:02 15:04:05", strings.TrimSpace(strings.TrimRight(s, "\x00")))
+				return t // wall-clock time, as imagemeta returns it
+			}
+		}
+		return time.Time{}
+	}
+	if m.TakenAt.IsZero() {
+		if m.TakenAt = date(goexif.DateTimeOriginal); m.TakenAt.IsZero() {
+			m.TakenAt = date(goexif.DateTimeDigitized)
+		}
+	}
+	if m.Modified.IsZero() {
+		m.Modified = date(goexif.DateTime)
 	}
 	str := func(n goexif.FieldName) string {
 		if tag, err := x.Get(n); err == nil {
@@ -169,7 +204,7 @@ func DateFromFilename(name string) (t time.Time, ok bool) {
 	}
 	n := func(s string) int { v, _ := strconv.Atoi(s); return v }
 	t = time.Date(n(m[1]), time.Month(n(m[2])), n(m[3]), n(m[4]), n(m[5]), n(m[6]), 0, time.UTC)
-	if t.Day() != n(m[3]) || t.After(time.Now().AddDate(1, 0, 0)) { // 31 Feb, or the future
+	if t.Day() != n(m[3]) || !Plausible(t) { // 31 February, or the future
 		return time.Time{}, false
 	}
 	return t, true

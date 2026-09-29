@@ -3,6 +3,7 @@ package search
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -28,6 +29,21 @@ const (
 	maxTagsPerItem = 12     // most AI tags stored per asset
 	kindShare      = 0.5    // the best kind applies when its softmax share is above this
 	textIdle       = 5 * time.Minute
+	textBatch      = 32  // prompts embedded per run of the text model
+	queryCache     = 64  // recent query embeddings kept
+	maxQueryRunes  = 500 // a longer query is cut (the model reads 64 tokens anyway)
+	// unavailableTTL is how long the set of assets that must not take up
+	// result slots (hidden, trashed, gone) is reused. A stale set only
+	// costs slots: results are filtered by visibility again when shown.
+	unavailableTTL = 10 * time.Second
+)
+
+var (
+	// ErrNotLoaded means the engine could not load its index or Things;
+	// the error it wraps says why.
+	ErrNotLoaded = errors.New("search could not start")
+	// ErrClosed means the engine was closed (Lumen is shutting down).
+	ErrClosed = errors.New("search has stopped")
 )
 
 // Engine answers searches and scores Things. It owns the in-memory index,
@@ -45,7 +61,13 @@ type Engine struct {
 	textMu   sync.Mutex
 	text     *ai.TextEncoder
 	textIdle *time.Timer
+	textUsed time.Time
+	closed   bool                 // Close ran: the text model is never loaded again
 	queries  map[string][]float32 // recent query embeddings
+
+	unavailableMu sync.Mutex
+	unavailable   map[int64]bool
+	unavailableAt time.Time
 
 	labelsMu sync.RWMutex
 	labels   []label
@@ -107,23 +129,40 @@ func (e *Engine) Start(ctx context.Context) {
 	}()
 }
 
-// Wait blocks until Start has finished loading.
+// Wait blocks until Start has finished loading. A failed load is
+// ErrNotLoaded, wrapping why.
 func (e *Engine) Wait(ctx context.Context) error {
+	done := func() error {
+		if e.loadErr != nil && !errors.Is(e.loadErr, context.Canceled) {
+			return fmt.Errorf("%w: %w", ErrNotLoaded, e.loadErr)
+		}
+		return e.loadErr
+	}
 	select {
 	case <-e.loaded:
-		return e.loadErr
+		return done()
+	default:
+	}
+	if !e.started.Load() {
+		return fmt.Errorf("%w: not started", ErrNotLoaded) // waiting would never end
+	}
+	select {
+	case <-e.loaded:
+		return done()
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-// Close waits for a load in progress to end, then frees the text model.
+// Close waits for a load in progress to end, then frees the text model for
+// good: searches after Close fail with ErrClosed.
 func (e *Engine) Close() {
 	if e.started.Load() {
 		<-e.loaded
 	}
 	e.textMu.Lock()
 	defer e.textMu.Unlock()
+	e.closed = true
 	e.closeText()
 }
 
@@ -246,6 +285,9 @@ func (e *Engine) retag(ctx context.Context) error {
 }
 
 // rescore computes one new (not exclusive) tag for every image in the index.
+// Unlike Tags, it does not hold each image to its maxTagsPerItem best: a
+// Thing the user asked for is kept wherever it scores, until the image is
+// next tagged as a whole.
 func (e *Engine) rescore(ctx context.Context, l label) error {
 	best := map[int64]float32{}
 	for _, v := range l.vecs {
@@ -355,7 +397,9 @@ func (e *Engine) Tags(v []float32) []store.TagScore {
 }
 
 // CreateLabel makes a new Thing the AI looks for (e.g. "Eiffel Tower") and
-// finds it across the library straight away.
+// finds it across the library straight away. A Thing of that name the AI
+// already looks for is returned as it is; one the user only tags by hand is
+// made one the AI looks for too.
 func (e *Engine) CreateLabel(ctx context.Context, name string) (int64, error) {
 	if err := e.Wait(ctx); err != nil {
 		return 0, err
@@ -363,6 +407,14 @@ func (e *Engine) CreateLabel(ctx context.Context, name string) (int64, error) {
 	name = strings.TrimSpace(name)
 	prompts := []string{strings.ToLower(name), "a photo of " + strings.ToLower(name)}
 	id, err := e.store.CreateTag(ctx, name, core.TagLabel, prompts)
+	existed := errors.Is(err, store.ErrTagExists)
+	if existed {
+		var kind core.TagKind
+		if id, kind, err = e.store.TagByName(ctx, name); err != nil || kind != core.TagManual {
+			return id, err
+		}
+		err = e.store.MakeLabel(ctx, id, prompts)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -377,8 +429,20 @@ func (e *Engine) CreateLabel(ctx context.Context, name string) (int64, error) {
 		err = e.rescore(ctx, l)
 	}
 	if err != nil {
+		// Don't leave a half-made Thing behind, even when ctx ended (the
+		// likely cause). A manual tag the user had stays theirs: without
+		// vectors, it is learned again when search next starts.
 		e.forget(id)
-		_ = e.store.DeleteTag(ctx, id) // don't leave a half-made Thing behind
+		cleanup := context.WithoutCancel(ctx)
+		var cerr error
+		if existed {
+			cerr = e.store.SetTagVectors(cleanup, id, "", nil)
+		} else {
+			cerr = e.store.DeleteTag(cleanup, id)
+		}
+		if cerr != nil {
+			slog.Error("undo half-made thing", "tag", id, "err", cerr)
+		}
 		return 0, err
 	}
 	return id, nil
@@ -386,9 +450,12 @@ func (e *Engine) CreateLabel(ctx context.Context, name string) (int64, error) {
 
 // ForgetLabel stops scoring a deleted tag. It waits for a load in progress,
 // which might otherwise bring the tag back.
-func (e *Engine) ForgetLabel(id int64) {
+func (e *Engine) ForgetLabel(ctx context.Context, id int64) {
 	if e.started.Load() {
-		<-e.loaded
+		select {
+		case <-e.loaded:
+		case <-ctx.Done():
+		}
 	}
 	e.forget(id)
 }
@@ -403,7 +470,7 @@ func (e *Engine) forget(id int64) {
 // With allow, only assets it accepts are searched (a person's photos).
 // complete is false when more matched than are returned.
 func (e *Engine) Search(ctx context.Context, query string, allow func(id int64) bool) (hits []Hit, complete bool, err error) {
-	query = strings.Join(strings.Fields(query), " ")
+	query = cleanQuery(query)
 	if query == "" {
 		return nil, true, nil
 	}
@@ -414,7 +481,7 @@ func (e *Engine) Search(ctx context.Context, query string, allow func(id int64) 
 	if err != nil {
 		return nil, false, err
 	}
-	unavailable, err := e.store.UnavailableAssets(ctx)
+	unavailable, err := e.unavailableAssets(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -423,7 +490,11 @@ func (e *Engine) Search(ctx context.Context, query string, allow func(id int64) 
 	}
 	floor := e.model.Cosine(searchFloor)
 	best := map[int64]Hit{}
-	for _, h := range e.index.Search(vecs[0], floor, searchLimit+1, eligible) {
+	// A video is found by its moments, which say where it matches; its mean
+	// vector (kept for photos-only paths) could match where no moment does.
+	videos := e.video.assets()
+	photos := func(id int64) bool { return !videos[id] && eligible(id) }
+	for _, h := range e.index.Search(vecs[0], floor, searchLimit+1, photos) {
 		best[h.ID] = h
 	}
 	for _, h := range e.video.search(vecs[0], floor, searchLimit+1, eligible) {
@@ -448,11 +519,46 @@ func (e *Engine) Search(ctx context.Context, query string, allow func(id int64) 
 	return hits[:min(n, searchLimit)], complete, nil
 }
 
+// cleanQuery collapses a query's spaces and cuts it to maxQueryRunes: a
+// pasted page would take the tokenizer long, and the model reads its start.
+func cleanQuery(query string) string {
+	query = strings.Join(strings.Fields(query), " ")
+	if n := 0; len(query) > maxQueryRunes {
+		for i := range query {
+			if n == maxQueryRunes {
+				return query[:i]
+			}
+			n++
+		}
+	}
+	return query
+}
+
+// unavailableAssets returns the assets that must not take result slots,
+// reusing the set for unavailableTTL.
+func (e *Engine) unavailableAssets(ctx context.Context) (map[int64]bool, error) {
+	e.unavailableMu.Lock()
+	defer e.unavailableMu.Unlock()
+	if e.unavailable != nil && time.Since(e.unavailableAt) < unavailableTTL {
+		return e.unavailable, nil
+	}
+	set, err := e.store.UnavailableAssets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	e.unavailable, e.unavailableAt = set, time.Now()
+	return set, nil
+}
+
 // EncodeText embeds texts with the text model, loading it if needed.
 // Single texts (search queries) are cached.
 func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, error) {
 	e.textMu.Lock()
 	defer e.textMu.Unlock()
+	if e.closed {
+		return nil, ErrClosed
+	}
+	e.textUsed = time.Now()
 	out := make([][]float32, len(texts))
 	var todo []string
 	var at []int
@@ -473,19 +579,18 @@ func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, 
 			return nil, err
 		}
 		e.text = te
-		slog.Info("text model loaded", "took", time.Since(t).Round(time.Millisecond))
+		slog.Info("model loaded", "model", "text model", "took", time.Since(t).Round(time.Millisecond))
 	}
 	if e.textIdle == nil {
 		e.textIdle = time.AfterFunc(textIdle, e.idleText)
 	} else {
 		e.textIdle.Reset(textIdle)
 	}
-	const batch = 32
-	for lo := 0; lo < len(todo); lo += batch {
+	for lo := 0; lo < len(todo); lo += textBatch {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		hi := min(lo+batch, len(todo))
+		hi := min(lo+textBatch, len(todo))
 		vecs, err := e.text.Encode(todo[lo:hi])
 		if err != nil {
 			return nil, err
@@ -495,7 +600,7 @@ func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, 
 		}
 	}
 	if len(texts) == 1 { // a search query, likely repeated; prompts are stored instead
-		if len(e.queries) >= 64 {
+		if len(e.queries) >= queryCache {
 			clear(e.queries)
 		}
 		e.queries[texts[0]] = out[0]
@@ -503,11 +608,20 @@ func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, 
 	return out, nil
 }
 
+// idleText frees the text model once it has been unused for textIdle. The
+// timer can fire while a search holds the lock, so it checks again then.
 func (e *Engine) idleText() {
 	e.textMu.Lock()
 	defer e.textMu.Unlock()
+	if e.text == nil {
+		return
+	}
+	if left := textIdle - time.Since(e.textUsed); left > 0 {
+		e.textIdle.Reset(left)
+		return
+	}
 	e.closeText()
-	slog.Info("text model unloaded (idle)")
+	slog.Info("model unloaded", "model", "text model")
 }
 
 func (e *Engine) closeText() {

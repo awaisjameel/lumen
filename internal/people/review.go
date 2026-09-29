@@ -15,9 +15,14 @@ func OddOnesFirst(faces []core.Face, vecs [][]float32) []core.Face {
 	if len(faces) == 0 {
 		return faces
 	}
+	// Faces made by an earlier face model (during an upgrade) can have
+	// vectors of another length: they don't count towards the mean, and
+	// score as unlike it.
 	mean := make([]float32, len(vecs[0]))
 	for _, v := range vecs {
-		add(mean, v)
+		if len(v) == len(mean) {
+			add(mean, v)
+		}
 	}
 	type scoredFace struct {
 		f core.Face
@@ -25,7 +30,11 @@ func OddOnesFirst(faces []core.Face, vecs [][]float32) []core.Face {
 	}
 	all := make([]scoredFace, len(faces))
 	for i, f := range faces {
-		all[i] = scoredFace{f, ai.Dot(vecs[i], mean)}
+		var score float32
+		if len(vecs[i]) == len(mean) {
+			score = ai.Dot(vecs[i], mean)
+		}
+		all[i] = scoredFace{f, score}
 	}
 	slices.SortStableFunc(all, func(a, b scoredFace) int {
 		if a.f.ByUser != b.f.ByUser {

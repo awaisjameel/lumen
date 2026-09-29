@@ -22,9 +22,12 @@ type Frame struct {
 	Image
 }
 
+// MaxSamples is the most frames of one video the AI looks at.
+const MaxSamples = 24
+
 // SampleCount is how many frames of a video the AI looks at: one every five
-// seconds, at most 24 (so a long video is sampled more sparsely).
-func SampleCount(duration int64) int { return int(max(1, min(24, (duration+4999)/5000))) }
+// seconds, at most MaxSamples (so a long video is sampled more sparsely).
+func SampleCount(duration int64) int { return int(max(1, min(MaxSamples, (duration+4999)/5000))) }
 
 const (
 	// framesTimeout bounds one pass over a video's keyframes (a whole phone
@@ -78,7 +81,7 @@ func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side
 	if keyframes {
 		args = append(args, "-skip_frame", "nokey")
 	} else {
-		sel = fmt.Sprintf("gte(t,%.3f)*(%s)", every, sel)
+		sel = fmt.Sprintf("gte(t,%.3f)*(%s)", v.start+every, sel) // t counts from the stream's start time
 		timeout = fullPassTimeout
 	}
 	if math.IsInf(every, 1) {
@@ -157,6 +160,9 @@ type ffmpegLog struct {
 
 var ptsTime = regexp.MustCompile(`\bpts_time:(-?[0-9.]+)`)
 
+// maxLogLine is the longest ffmpeg log line read: longer ones end the log.
+const maxLogLine = 4 << 20
+
 // readLog starts collecting ffmpeg's log from r.
 func readLog(r io.Reader) *ffmpegLog {
 	l := &ffmpegLog{finished: make(chan struct{})}
@@ -164,6 +170,8 @@ func readLog(r io.Reader) *ffmpegLog {
 	go func() {
 		defer close(l.finished)
 		sc := bufio.NewScanner(r)
+		// ffmpeg prints the file's tags at info level, and one can be long.
+		sc.Buffer(make([]byte, 0, 64<<10), maxLogLine)
 		for sc.Scan() {
 			line := sc.Text()
 			l.mu.Lock()
@@ -230,7 +238,7 @@ func (d Decoders) FrameAt(ctx context.Context, path string, at int64, side int) 
 	if err != nil {
 		return Image{}, err
 	}
-	out, err := runFFmpeg(ctx, d.FFmpeg, "-ss", strconv.FormatFloat(float64(at)/1000, 'f', 3, 64), "-i", path,
+	out, err := runFFmpeg(ctx, d.FFmpeg, "-ss", ssTime(at), "-i", path,
 		"-map", "0:V:0", "-vf", fitFilter(v, side, false))
 	if err != nil {
 		return Image{}, err

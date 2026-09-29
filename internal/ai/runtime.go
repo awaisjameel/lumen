@@ -117,28 +117,67 @@ func openSession(path string, device Device, threads int, outputs ...string) (*s
 			return nil, fmt.Errorf("DirectML: %w", err)
 		}
 	}
-	in, out, err := ort.GetInputOutputInfoWithOptions(path, opts)
+	in, out, err := modelIO(path)
 	if err != nil {
-		return nil, fmt.Errorf("read model %s: %w", filepath.Base(path), err)
-	}
-	if len(in) != 1 || len(out) == 0 {
-		return nil, fmt.Errorf("model %s: want one input and an output, got %d and %d", filepath.Base(path), len(in), len(out))
+		return nil, err
 	}
 	if len(outputs) == 0 {
 		// Prepared models have one output; a raw export also has the hidden
 		// states, and only the pooled embedding is wanted.
-		outputs = []string{out[0].Name}
+		outputs = []string{out[0]}
 		for _, o := range out {
-			if o.Name == "pooler_output" {
-				outputs[0] = o.Name
+			if o == "pooler_output" {
+				outputs[0] = o
 			}
 		}
 	}
-	s, err := ort.NewDynamicAdvancedSession(path, []string{in[0].Name}, outputs, opts)
+	s, err := ort.NewDynamicAdvancedSession(path, []string{in}, outputs, opts)
 	if err != nil {
 		return nil, fmt.Errorf("load model %s: %w", filepath.Base(path), err)
 	}
 	return &session{s: s, device: device, outputs: outputs}, nil
+}
+
+// modelNames caches modelIO's answers by model path.
+var modelNames sync.Map // path -> ioNames
+
+type ioNames struct {
+	in  string
+	out []string
+}
+
+// modelIO returns the name of a model's one input and of its outputs.
+// ONNX Runtime can only tell by loading the model, so each model file is
+// asked once, on the CPU without optimising (the names depend on neither),
+// not on every reload after it was freed for being idle.
+func modelIO(path string) (in string, out []string, err error) {
+	if v, ok := modelNames.Load(path); ok {
+		n := v.(ioNames) // only ioNames are stored
+		return n.in, n.out, nil
+	}
+	// Unoptimised: the quickest session to build, and the full optimisation
+	// level can't build these models at all (see openSession).
+	opts, err := ort.NewSessionOptions()
+	if err != nil {
+		return "", nil, err
+	}
+	defer destroy(opts)
+	if err := opts.SetGraphOptimizationLevel(ort.GraphOptimizationLevelDisableAll); err != nil {
+		return "", nil, err
+	}
+	ins, outs, err := ort.GetInputOutputInfoWithOptions(path, opts)
+	if err != nil {
+		return "", nil, fmt.Errorf("read model %s: %w", filepath.Base(path), err)
+	}
+	if len(ins) != 1 || len(outs) == 0 {
+		return "", nil, fmt.Errorf("model %s: want one input and an output, got %d and %d", filepath.Base(path), len(ins), len(outs))
+	}
+	n := ioNames{in: ins[0].Name}
+	for _, o := range outs {
+		n.out = append(n.out, o.Name)
+	}
+	modelNames.Store(path, n)
+	return n.in, n.out, nil
 }
 
 // errClosed means the model was freed (or failed to reload after a GPU error).
@@ -152,6 +191,11 @@ func (s *session) run(in ort.Value) ([][]float32, error) {
 	}
 	outs := make([]ort.Value, len(s.outputs)) // ONNX Runtime allocates them
 	if err := s.s.Run([]ort.Value{in}, outs); err != nil {
+		for _, o := range outs { // a run can fail after making some of them
+			if o != nil {
+				destroy(o)
+			}
+		}
 		return nil, err
 	}
 	data := make([][]float32, len(outs))

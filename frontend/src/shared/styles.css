@@ -19,7 +19,7 @@
   --accent-hover: light-dark(#2f6cc6, #74acf7);
   --accent-text: light-dark(#ffffff, #0b1526);
   --accent-soft: light-dark(rgb(59 125 221 / 0.14), rgb(91 156 245 / 0.16));
-  --danger: #c4314b;
+  --danger: light-dark(#c4314b, #ff7a8f);
 
   --bg: light-dark(#f5f5f6, #111113);
   --surface: light-dark(#ffffff, #1a1a1d);
@@ -28,10 +28,16 @@
   --border: light-dark(rgb(0 0 0 / 0.09), rgb(255 255 255 / 0.08));
   --text: light-dark(#1b1b1f, #ececef);
   --text-2: light-dark(#5c5c66, #a4a4ad);
-  --text-3: light-dark(#8b8b95, #71717a);
+  --text-3: light-dark(#6c6c76, #8f8f99); /* 4.5:1 on --bg and --surface, for small counts */
   --placeholder: light-dark(#e2e2e6, #1f1f23);
   --shadow: 0 8px 32px light-dark(rgb(0 0 0 / 0.14), rgb(0 0 0 / 0.5));
+  /* The viewer is dark in either theme, as photo viewers are. */
   --viewer-bg: #0c0c0e;
+  --viewer-text: #ececef;
+  --viewer-text-2: #b4b4bc;
+  --viewer-control: rgb(255 255 255 / 0.1);
+  --viewer-control-hover: rgb(255 255 255 / 0.2);
+  --backdrop: rgb(0 0 0 / 0.45);
 }
 
 :root[data-theme='light'] {
@@ -132,6 +138,96 @@ select {
   background: var(--accent-soft);
   color: var(--accent);
 }
+/* A secondary action that shouldn't compete with the content. */
+.btn-subtle {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-2);
+}
+.btn-subtle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Text fields */
+.field {
+  height: 32px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+  color: var(--text);
+  outline: none;
+}
+.field:focus {
+  border-color: var(--accent);
+}
+
+/* Card grids: People, Things, Albums */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+  gap: 18px 14px;
+}
+.card {
+  position: relative;
+  min-width: 0;
+}
+.card.hidden {
+  opacity: 0.5;
+}
+.card-cover {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border-radius: var(--radius-m);
+  overflow: hidden;
+  background: var(--placeholder);
+  color: var(--text-3);
+}
+.card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s ease;
+}
+.card-cover:hover img {
+  transform: scale(1.04);
+}
+.card-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 6px 2px 0;
+}
+.card-name {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.card-count {
+  color: var(--text-3);
+  font-size: 12px;
+}
+/* A card's one action, shown on hover or focus. */
+.card-act {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  background: var(--surface);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.card:hover .card-act,
+.card-act:focus-visible {
+  opacity: 1;
+}
 
 /* Pages: a fixed top bar over a scrolling body */
 .page {
@@ -167,7 +263,21 @@ select {
 .muted {
   color: var(--text-2);
 }
+/* Read by screen readers, not shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .error {
+  color: var(--danger);
+}
+/* An error above a page's content. */
+.page-error {
+  margin: 0 0 8px;
   color: var(--danger);
 }
 

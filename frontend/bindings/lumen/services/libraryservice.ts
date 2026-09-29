@@ -15,8 +15,9 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as core$0 from "../internal/core/models.js";
 
 /**
- * AddSources adds folders and starts scanning them. Folders already inside
- * the library are skipped silently.
+ * AddSources adds folders and starts scanning them, all or none: a folder
+ * that doesn't exist fails the call before any is added. Folders already
+ * inside the library are skipped.
  */
 export function AddSources(paths: string[] | null): $CancellablePromise<core$0.Source[] | null> {
     return $Call.ByID(3692129822, paths);
@@ -44,10 +45,11 @@ export function AssetAlbums(id: number): $CancellablePromise<number[] | null> {
 }
 
 /**
- * CreateAlbum saves a new manual album or smart rule.
+ * CreateAlbum saves a new manual album holding items, or a smart rule (no
+ * items), in one step.
  */
-export function CreateAlbum(name: string, kind: core$0.AlbumKind, rule: core$0.AlbumRule): $CancellablePromise<number> {
-    return $Call.ByID(1673588108, name, kind, rule);
+export function CreateAlbum(name: string, kind: core$0.AlbumKind, rule: core$0.AlbumRule, items: number[] | null): $CancellablePromise<number> {
+    return $Call.ByID(1673588108, name, kind, rule, items);
 }
 
 /**
@@ -158,17 +160,11 @@ export function Settings(): $CancellablePromise<core$0.Settings> {
 }
 
 /**
- * ShowFileInFolder selects a specific registered copy of an asset in Explorer.
+ * ShowInFolder opens Explorer with one of the asset's files selected: path,
+ * which must be one of them, or "" for the first that is there.
  */
-export function ShowFileInFolder(id: number, path: string): $CancellablePromise<void> {
-    return $Call.ByID(2635971573, id, path);
-}
-
-/**
- * ShowInFolder opens Explorer with the asset's file selected.
- */
-export function ShowInFolder(id: number): $CancellablePromise<void> {
-    return $Call.ByID(2897613311, id);
+export function ShowInFolder(id: number, path: string): $CancellablePromise<void> {
+    return $Call.ByID(2897613311, id, path);
 }
 
 /**

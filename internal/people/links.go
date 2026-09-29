@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"runtime"
+	"slices"
 
 	"lumen/internal/ai"
 	"lumen/internal/parallel"
@@ -34,19 +35,23 @@ func NewLinker(p Params) *Linker {
 // Update returns the links of every unplaced face among faces: up to k
 // others each, at least as similar as the threshold. Faces placed since the
 // last call are forgotten (a link to one still counts: it leads to their
-// person).
-func (l *Linker) Update(faces []store.ClusterFace) map[int64][]int64 {
+// person); links to faces no longer among faces (their photo was hidden or
+// is gone) are dropped, and those faces' lists are worked out again. If ctx
+// ends first, nothing is remembered and ctx's error is returned.
+func (l *Linker) Update(ctx context.Context, faces []store.ClusterFace) (map[int64][]int64, error) {
 	var loose []store.ClusterFace
-	isLoose := map[int64]bool{}
+	isLoose := make(map[int64]bool, len(faces))
+	present := make(map[int64]bool, len(faces))
 	for _, f := range faces {
+		present[f.ID] = true
 		if f.Person == 0 {
 			loose = append(loose, f)
 			isLoose[f.ID] = true
 		}
 	}
-	for id := range l.near {
-		if !isLoose[id] {
-			delete(l.near, id)
+	for id, ns := range l.near {
+		if !isLoose[id] || slices.ContainsFunc(ns, func(n near) bool { return !present[n.id] }) {
+			delete(l.near, id) // placed, or lost a neighbour: compared afresh below
 		}
 	}
 	var fresh []int // indexes into loose of faces not seen before
@@ -59,7 +64,7 @@ func (l *Linker) Update(faces []store.ClusterFace) map[int64][]int64 {
 	// also offered to the old face's list afterwards.
 	lists := make([][]near, len(fresh))
 	back := make([][]near, len(fresh)) // (old face, similarity to this new face)
-	parallel.For(context.Background(), len(fresh), runtime.NumCPU(), func(k int) {
+	parallel.For(ctx, len(fresh), runtime.NumCPU(), func(k int) {
 		v := loose[fresh[k]]
 		for _, o := range loose {
 			if o.ID == v.ID {
@@ -75,12 +80,19 @@ func (l *Linker) Update(faces []store.ClusterFace) map[int64][]int64 {
 			}
 		}
 	})
+	if err := ctx.Err(); err != nil {
+		return nil, err // a half-made list would pass for a finished one next time
+	}
 	for k, i := range fresh {
 		l.near[loose[i].ID] = lists[k]
 	}
 	for k, i := range fresh {
+		id := loose[i].ID
 		for _, b := range back[k] {
-			l.near[b.id] = keepTop(l.near[b.id], near{loose[i].ID, b.s}, l.k, byNear)
+			// A face placed and then taken out again can still be listed.
+			if !slices.ContainsFunc(l.near[b.id], func(n near) bool { return n.id == id }) {
+				l.near[b.id] = keepTop(l.near[b.id], near{id, b.s}, l.k, byNear)
+			}
 		}
 	}
 	out := make(map[int64][]int64, len(l.near))
@@ -91,7 +103,7 @@ func (l *Linker) Update(faces []store.ClusterFace) map[int64][]int64 {
 		}
 		out[id] = ids
 	}
-	return out
+	return out, nil
 }
 
 // byNear orders most similar first, ties by ID, so results don't depend on

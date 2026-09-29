@@ -51,6 +51,10 @@ const (
 	JobSkipped JobStatus = "skipped"
 )
 
+// MaxNameLen is the longest name (in characters) a person, Thing or album
+// may have. frontend/src/bridge mirrors it.
+const MaxNameLen = 80
+
 // Settings keys.
 const (
 	SettingVideos        = "videos_enabled"     // bool: index videos too (off by default)
@@ -131,7 +135,7 @@ const (
 )
 
 // View is what the timeline grid shows: a filter, optionally narrowed to
-// one tag or one person.
+// one tag or one person, or one album instead.
 type View struct {
 	Filter Filter `json:"filter"`
 	Tag    int64  `json:"tag,omitempty"`    // 0 = any
@@ -243,6 +247,7 @@ type SearchResult struct {
 	People   []string   `json:"people"`   // people named in the query: results show all of them
 	Pending  int        `json:"pending"`  // photos not yet understood, so not searchable yet
 	Complete bool       `json:"complete"` // false: more matched than are shown
+	NoAI     bool       `json:"noAI"`     // the description could not be searched: the AI isn't available (see AI.Error)
 }
 
 // Face is one face in a photo or video: where it is, and who it is.
@@ -369,6 +374,23 @@ type Progress struct {
 	AI         AI   `json:"ai"`
 }
 
+// Changes says what changed in the library: the payload of library:changed,
+// so each view reloads only for what it shows. While the AI works through a
+// big library, tags and people change for hours after the timeline settles.
+type Changes struct {
+	Assets bool `json:"assets"` // assets came, went, or their dates, sizes or thumbnails changed
+	Tags   bool `json:"tags"`   // the AI tagged assets
+	People bool `json:"people"` // faces were found or grouped into people
+}
+
+// Any reports whether anything changed.
+func (c Changes) Any() bool { return c.Assets || c.Tags || c.People }
+
+// Merge adds the changes in d.
+func (c Changes) Merge(d Changes) Changes {
+	return Changes{Assets: c.Assets || d.Assets, Tags: c.Tags || d.Tags, People: c.People || d.People}
+}
+
 // AI is the state of the on-device models.
 type AI struct {
 	Device     Device `json:"device"`     // while the image model is loaded, else ""
@@ -428,3 +450,20 @@ func KindOf(path string) Kind {
 
 // WebNative reports whether the WebView can display a photo of this extension.
 func WebNative(ext string) bool { return webNativeExts[strings.ToLower(ext)] }
+
+// contentTypes are the MIME types of the files the WebView is sent as they
+// are: photos it displays and videos it plays.
+var contentTypes = map[string]string{
+	".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".jpe": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
+	".webp": "image/webp", ".bmp": "image/bmp", ".avif": "image/avif",
+	".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+}
+
+// ContentType is the MIME type to send a file of this extension as (from
+// Lumen's own table: Windows' registry, which Go would ask, varies by PC).
+func ContentType(ext string) string {
+	if t, ok := contentTypes[strings.ToLower(ext)]; ok {
+		return t
+	}
+	return "application/octet-stream"
+}

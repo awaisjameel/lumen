@@ -20,49 +20,64 @@ var fillers = map[string]bool{
 // FindNames takes the names of named people out of a search query ("Ali at
 // the beach"). It returns who was named, with their names as the query
 // spelled them, and the rest of the query ("at the beach"), which is empty
-// if only fillers remain. Longer names win ("Ali Khan" before "Ali"), and a
-// name only counts as whole words.
+// if only fillers remain beside the names. Longer names win ("Ali Khan"
+// before "Ali"), a name only counts as whole words, and case is ignored as
+// everywhere else (core.Fold).
 func FindNames(query string, named []core.Person) (ids []int64, names []string, rest string) {
 	named = slices.Clone(named)
-	slices.SortStableFunc(named, func(a, b core.Person) int { return cmp.Compare(len(b.Name), len(a.Name)) })
+	slices.SortStableFunc(named, func(a, b core.Person) int {
+		return cmp.Compare(utf8.RuneCountInString(b.Name), utf8.RuneCountInString(a.Name))
+	})
 	rest = query
 	for _, p := range named {
 		if p.Name == "" {
 			continue
 		}
-		if at := wordIndex(rest, p.Name); at >= 0 {
+		if start, end := wordIndex(rest, p.Name); start >= 0 {
 			ids = append(ids, p.ID)
-			names = append(names, rest[at:at+len(p.Name)])
-			rest = rest[:at] + " " + rest[at+len(p.Name):]
+			names = append(names, rest[start:end])
+			rest = rest[:start] + " " + rest[end:]
 		}
 	}
 	words := strings.Fields(rest)
-	if !slices.ContainsFunc(words, func(w string) bool { return !fillers[strings.ToLower(w)] }) {
+	if len(ids) > 0 && !slices.ContainsFunc(words, func(w string) bool { return !fillers[core.Fold(w)] }) {
 		words = nil
 	}
 	return ids, names, strings.Join(words, " ")
 }
 
-// wordIndex finds name in s as whole words, ignoring case; -1 if absent.
-func wordIndex(s, name string) int {
-	ls, ln := strings.ToLower(s), strings.ToLower(name)
-	if len(ls) != len(s) {
-		return -1 // lower-casing changed byte lengths: offsets wouldn't map back
-	}
-	for from := 0; ; {
-		i := strings.Index(ls[from:], ln)
-		if i < 0 {
-			return -1
+// wordIndex finds name in s as whole words, whatever the case, and returns
+// where it starts and ends in s; -1, -1 if it is not there. Letters are
+// compared one by one, so offsets stay right even when a letter's other
+// case has another length in bytes ("İ" and "i").
+func wordIndex(s, name string) (start, end int) {
+	for i := 0; i < len(s); {
+		if j, ok := matchAt(s, i, name); ok {
+			before, _ := utf8.DecodeLastRuneInString(s[:i])
+			after, _ := utf8.DecodeRuneInString(s[j:])
+			if (i == 0 || !isWord(before)) && (j == len(s) || !isWord(after)) {
+				return i, j
+			}
 		}
-		i += from
-		end := i + len(ln)
-		before, _ := utf8.DecodeLastRuneInString(ls[:i])
-		after, _ := utf8.DecodeRuneInString(ls[end:])
-		if (i == 0 || !isWord(before)) && (end == len(ls) || !isWord(after)) {
-			return i
-		}
-		from = i + 1
+		_, size := utf8.DecodeRuneInString(s[i:])
+		i += size
 	}
+	return -1, -1
+}
+
+// matchAt reports whether name is at s[i:], ignoring case, and where it ends.
+func matchAt(s string, i int, name string) (int, bool) {
+	for _, want := range name {
+		if i >= len(s) {
+			return 0, false
+		}
+		got, size := utf8.DecodeRuneInString(s[i:])
+		if core.FoldRune(got) != core.FoldRune(want) {
+			return 0, false
+		}
+		i += size
+	}
+	return i, true
 }
 
 func isWord(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }

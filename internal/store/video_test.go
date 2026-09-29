@@ -39,7 +39,7 @@ func TestVideoMetadataFramesAndSearchPersistence(t *testing.T) {
 		t.Fatalf("grid: %+v, %v", grid, err)
 	}
 	frames := []FrameEmbedding{{At: 1000, Vec: []int8{1, 2}, Scale: 0.01}, {At: 5000, Vec: []int8{3, 4}, Scale: 0.02}}
-	if err := st.SaveEmbeddings(ctx, "m", []EmbedResult{{AssetID: id, Vec: []int8{2, 3}, Scale: 0.01, Frames: frames}}); err != nil {
+	if err := st.SaveEmbeddings(ctx, "m", "m", []EmbedResult{{AssetID: id, Vec: []int8{2, 3}, Scale: 0.01, Frames: frames}}); err != nil {
 		t.Fatal(err)
 	}
 	var got []int64
@@ -50,7 +50,7 @@ func TestVideoMetadataFramesAndSearchPersistence(t *testing.T) {
 	}); err != nil || len(got) != 2 || got[0] != 1000 || got[1] != 5000 {
 		t.Fatalf("frame times: %v, %v", got, err)
 	}
-	if err := st.SaveEmbeddings(ctx, "m", []EmbedResult{{AssetID: id, Vec: []int8{2, 3}, Scale: 0.01,
+	if err := st.SaveEmbeddings(ctx, "m", "m", []EmbedResult{{AssetID: id, Vec: []int8{2, 3}, Scale: 0.01,
 		Frames: frames[:1]}}); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestVideoMetadataFramesAndSearchPersistence(t *testing.T) {
 	}
 	f1, f2 := face(0.2, 1), face(0.2, 1)
 	f1.Frame, f2.Frame = 1000, 5000
-	if err := st.SaveFaces(ctx, "faces", []FaceResult{{AssetID: id, Faces: []DetectedFace{f1, f2}}}); err != nil {
+	if err := st.SaveFaces(ctx, "faces", "faces", []FaceResult{{AssetID: id, Faces: []DetectedFace{f1, f2}}}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := st.AssetFaces(ctx, id)
@@ -69,7 +69,7 @@ func TestVideoMetadataFramesAndSearchPersistence(t *testing.T) {
 		t.Fatalf("video faces: %+v, %v", before, err)
 	}
 	f1.Frame = 1100
-	if err := st.SaveFaces(ctx, "faces", []FaceResult{{AssetID: id, Faces: []DetectedFace{f1, f2}}}); err != nil {
+	if err := st.SaveFaces(ctx, "faces", "faces", []FaceResult{{AssetID: id, Faces: []DetectedFace{f1, f2}}}); err != nil {
 		t.Fatal(err)
 	}
 	after, err := st.AssetFaces(ctx, id)

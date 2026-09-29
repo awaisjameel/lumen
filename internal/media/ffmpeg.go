@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,7 +22,7 @@ func ffmpegDecode(ctx context.Context, exe, path string, maxSide int) (pix []byt
 	// iPhone photos are a grid of tiles that FFmpeg assembles as a stream
 	// group; other files are a single stream. Try the grid first.
 	out, err := runFFmpeg(ctx, exe, "-noautorotate", "-i", path, "-filter_complex", "[0:g:0]"+scale+"[o]", "-map", "[o]")
-	if err != nil {
+	if err != nil && ctx.Err() == nil {
 		out, err = runFFmpeg(ctx, exe, "-noautorotate", "-i", path, "-map", "0:v:0", "-vf", scale)
 	}
 	if err != nil {
@@ -34,14 +35,21 @@ func ffmpegDecode(ctx context.Context, exe, path string, maxSide int) (pix []byt
 func runFFmpeg(ctx context.Context, exe string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, ffmpegTimeout)
 	defer cancel()
-	args = append([]string{"-v", "error", "-nostdin", "-hide_banner"}, args...)
-	args = append(args, "-frames:v", "1", "-f", "image2pipe", "-c:v", "ppm", "-pix_fmt", "rgb24", "-")
+	args = append(ffmpegArgs(args...), "-frames:v", "1", "-f", "image2pipe", "-c:v", "ppm", "-pix_fmt", "rgb24", "-")
 	var stdout bytes.Buffer
 	if err := runTool(ctx, exe, &stdout, args...); err != nil {
 		return nil, err
 	}
 	return stdout.Bytes(), nil
 }
+
+// ffmpegArgs starts an ffmpeg command line: errors only, no prompts, no banner.
+func ffmpegArgs(args ...string) []string {
+	return append([]string{"-v", "error", "-nostdin", "-hide_banner"}, args...)
+}
+
+// ssTime formats ms as the seconds ffmpeg's -ss takes.
+func ssTime(ms int64) string { return strconv.FormatFloat(float64(ms)/1000, 'f', 3, 64) }
 
 // parsePPM reads a buffer holding exactly one PPM image.
 func parsePPM(b []byte) (pix []byte, w, h int, err error) {

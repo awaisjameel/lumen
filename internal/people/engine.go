@@ -69,7 +69,7 @@ func (e *Engine) Run(ctx context.Context, changed func()) {
 			}
 		}
 		deadline.Stop()
-		did, err := e.Recluster(ctx)
+		did, err := e.recluster(ctx)
 		switch {
 		case err != nil && ctx.Err() == nil:
 			slog.Error("group faces", "err", err)
@@ -79,15 +79,18 @@ func (e *Engine) Run(ctx context.Context, changed func()) {
 	}
 }
 
-// Recluster places the faces no one has placed yet, finds new people and
+// recluster places the faces no one has placed yet, finds new people and
 // merges people found twice. It reports whether anything changed.
-func (e *Engine) Recluster(ctx context.Context) (bool, error) {
+func (e *Engine) recluster(ctx context.Context) (bool, error) {
 	t := time.Now()
 	faces, people, rejections, err := e.store.ClusterData(ctx, e.model.Version)
 	if err != nil {
 		return false, err
 	}
-	links := e.links.Update(faces)
+	links, err := e.links.Update(ctx, faces)
+	if err != nil {
+		return false, err
+	}
 	c := Cluster(Input{Faces: faces, People: people, Rejections: rejections, Links: links}, e.params)
 	if len(c.Assign) == 0 && len(c.NewPeople) == 0 && len(c.Merges) == 0 {
 		return false, nil

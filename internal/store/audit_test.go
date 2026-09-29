@@ -45,7 +45,7 @@ func TestConcurrentSourceAdditionsNeverOverlap(t *testing.T) {
 	wg.Wait()
 	sources, err := st.ListSources(ctx)
 	check(t, err)
-	if len(sources) != 1 || !IsWithin(sources[0].Path, `C:\Photos`) || !IsWithin(`C:\Photos`, sources[0].Path) {
+	if len(sources) != 1 || !core.IsWithin(sources[0].Path, `C:\Photos`) || !core.IsWithin(`C:\Photos`, sources[0].Path) {
 		t.Fatalf("overlapping sources: %+v", sources)
 	}
 }

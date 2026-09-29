@@ -35,7 +35,7 @@ async function refresh() {
 }
 
 onMounted(() => void refresh())
-useLiveReload(duplicates.load) // groups change as thumbnails are made
+useLiveReload(duplicates.load, (c) => c.assets) // groups change as thumbnails are made
 
 function filename(path: string): string {
   return path.split(/[\\/]/).pop() || path
@@ -44,7 +44,7 @@ function filename(path: string): string {
 async function showPath(item: DuplicateItem, path: string) {
   error.value = ''
   try {
-    await engine.showFileInFolder(item.id, path)
+    await engine.showInFolder(item.id, path)
   } catch (e) {
     error.value = errorText(e)
   }
@@ -69,7 +69,7 @@ async function openPreview(item: DuplicateItem) {
     </header>
     <div class="page-body">
       <p class="muted">{{ t('duplicates.intro') }}</p>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <p v-if="error" class="page-error" role="alert">{{ error }}</p>
       <p v-if="busy" class="muted" role="status">{{ t('duplicates.loading') }}</p>
 
       <section v-if="exact.length" aria-labelledby="exact-title">
@@ -82,7 +82,8 @@ async function openPreview(item: DuplicateItem) {
               :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
               @click="openPreview(item)"
             >
-              <img :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" />
+              <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
+              <span v-else class="ph" />
             </button>
             <div class="item-info">
               <span class="muted">{{
@@ -95,7 +96,7 @@ async function openPreview(item: DuplicateItem) {
                 <li v-for="path in item.paths" :key="path" :title="path">
                   <span>{{ path }}</span>
                   <button
-                    class="btn subtle"
+                    class="btn btn-subtle"
                     :aria-label="t('duplicates.showFile', { name: path })"
                     @click="showPath(item, path)"
                   >
@@ -118,13 +119,16 @@ async function openPreview(item: DuplicateItem) {
               :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
               @click="openPreview(item)"
             >
-              <img :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" />
+              <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
+              <span v-else class="ph" />
             </button>
             <strong :title="item.paths[0]">{{ filename(item.paths[0] ?? '') }}</strong>
-            <span class="muted">{{ item.width }} × {{ item.height }} · {{ bytes(item.size) }}</span>
+            <span class="muted">{{
+              t('duplicates.photoSize', { w: item.width, h: item.height, size: bytes(item.size) })
+            }}</span>
             <button
               v-if="item.paths[0]"
-              class="btn subtle"
+              class="btn btn-subtle"
               :aria-label="t('duplicates.showFile', { name: item.paths[0] })"
               @click="showPath(item, item.paths[0])"
             >
@@ -184,6 +188,14 @@ h2 {
   border: 0;
   background: transparent;
   cursor: zoom-in;
+}
+/* No thumbnail made yet. */
+.preview-button .ph {
+  display: block;
+  width: 120px;
+  height: 120px;
+  border-radius: var(--radius-m);
+  background: var(--placeholder);
 }
 
 .item-info {
@@ -247,7 +259,7 @@ li .btn {
 }
 
 .preview-dialog::backdrop {
-  background: rgb(0 0 0 / 0.8);
+  background: var(--backdrop);
 }
 
 .preview-dialog > img {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"lumen/internal/core"
 )
@@ -18,33 +19,57 @@ type FileStat struct {
 	MTime int64
 }
 
-// KnownFiles returns the files recorded for a source, keyed by lower-case path.
-// If under is not empty, only files inside that folder are returned.
-func (s *Store) KnownFiles(ctx context.Context, sourceID int64, under string) (map[string]FileStat, error) {
+// KnownFiles returns the files recorded for a source, keyed by core.Fold of
+// their path. If under is not empty, only files inside that folder are
+// returned. Rows that name the same file in another case (left by a folder
+// renamed to another case) are returned as extra: one row per file is kept.
+func (s *Store) KnownFiles(ctx context.Context, sourceID int64, under string) (known map[string]FileStat, extra []int64, err error) {
 	q := "SELECT id, path, size, mtime FROM files WHERE source_id = ?"
 	args := []any{sourceID}
+	var prefix string
 	if under != "" {
-		// A range scan instead of LIKE: every path inside dir sorts between
-		// dir+`\` and dir+`]` (']' is the character after '\').
 		dir := strings.TrimRight(filepath.Clean(under), `\/`)
-		q += " AND path >= ? AND path < ?"
-		args = append(args, dir+`\`, dir+`]`)
+		prefix = core.Fold(dir + `\`)
+		// A range scan instead of LIKE: every path inside dir sorts between
+		// dir+`\` and dir+`]` (']' is the character after '\'). NOCASE folds
+		// only A-Z, so a folder named in other letters is filtered in Go.
+		if isASCII(dir) {
+			q += " AND path >= ? AND path < ?"
+			args = append(args, dir+`\`, dir+`]`)
+		}
 	}
-	rows, err := s.r.QueryContext(ctx, q, args...)
+	rows, err := s.r.QueryContext(ctx, q+" ORDER BY id", args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
-	out := make(map[string]FileStat)
+	known = make(map[string]FileStat)
 	for rows.Next() {
 		var st FileStat
 		var path string
 		if err := rows.Scan(&st.ID, &path, &st.Size, &st.MTime); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		out[strings.ToLower(path)] = st
+		key := core.Fold(path)
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if _, dup := known[key]; dup {
+			extra = append(extra, st.ID)
+			continue
+		}
+		known[key] = st
 	}
-	return out, rows.Err()
+	return known, extra, rows.Err()
+}
+
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // IngestItem is one new or changed file, already hashed by the scanner.
@@ -81,6 +106,14 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 			return err
 		}
 		defer revive.Close()
+		// A file found again (moved, or back on a drive plugged in again) may
+		// be readable now where its jobs failed.
+		retry, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, updated_at = ?
+			WHERE asset_id = ? AND status = 'error' AND attempts < ?`)
+		if err != nil {
+			return err
+		}
+		defer retry.Close()
 		// Until EXIF is read, the best date guess across all copies wins, whatever
 		// order they were found in: a date in a file name beats a modified time,
 		// and an older modified time beats a newer one (copies are usually newer).
@@ -122,6 +155,9 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 			switch err := findAsset.QueryRowContext(ctx, it.Hash).Scan(&assetID); {
 			case err == nil:
 				if _, err := revive.ExecContext(ctx, assetID); err != nil {
+					return err
+				}
+				if _, err := retry.ExecContext(ctx, now, assetID, MaxAttempts); err != nil {
 					return err
 				}
 				if _, err := betterGuess.ExecContext(ctx, it.TakenAt, it.DateFrom, assetID); err != nil {

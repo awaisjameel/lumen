@@ -22,7 +22,7 @@ type EmbedResult struct {
 	Tags    []TagScore       // replaces the asset's AI tags
 	Frames  []FrameEmbedding // one vector per sampled video frame; nil for photos
 	Err     string
-	Skipped bool // nothing to embed (a video, or no thumbnail can be made)
+	Skipped bool // nothing to embed (no thumbnail can be made, or a video without frames)
 }
 
 // FrameEmbedding is one searchable moment of a video.
@@ -32,10 +32,11 @@ type FrameEmbedding struct {
 	Scale float32
 }
 
-// SaveEmbeddings stores a batch of embeddings with their AI tags and closes
-// the jobs, all in one transaction. The user's own tag edits are never
-// touched: an AI tag the user removed stays removed.
-func (s *Store) SaveEmbeddings(ctx context.Context, model string, rs []EmbedResult) error {
+// SaveEmbeddings stores a batch of embeddings made by model with their AI
+// tags and closes the jobs at the stage's version, all in one transaction.
+// The user's own tag edits are never touched: an AI tag the user removed
+// stays removed.
+func (s *Store) SaveEmbeddings(ctx context.Context, model, version string, rs []EmbedResult) error {
 	if len(rs) == 0 {
 		return nil
 	}
@@ -85,7 +86,7 @@ func (s *Store) SaveEmbeddings(ctx context.Context, model string, rs []EmbedResu
 					return err
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageEmbedding, model+core.VideoFramesVersion, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageEmbedding, version, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}
@@ -94,6 +95,7 @@ func (s *Store) SaveEmbeddings(ctx context.Context, model string, rs []EmbedResu
 }
 
 // VideoEmbeddings visits the persisted frame vectors for the current model.
+// vec is reused between calls: fn must copy what it keeps.
 func (s *Store) VideoEmbeddings(ctx context.Context, model string, fn func(assetID, at int64, vec []int8, scale float32)) error {
 	rows, err := s.r.QueryContext(ctx, `SELECT asset_id, at_ms, scale, vec FROM video_embeddings
 		WHERE model = ? ORDER BY asset_id, at_ms`, model)

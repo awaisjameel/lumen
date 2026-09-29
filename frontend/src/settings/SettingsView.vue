@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { Device, engine, TAG_CONFIDENCE_MAX, TAG_CONFIDENCE_MIN } from '../bridge'
+import type { Source } from '../bridge'
 import { useLibrary } from '../library/store'
-import { errorText, logError, orFallback } from '../shared/errors'
+import { confirm } from '../shared/confirm'
+import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { theme } from '../shared/theme'
@@ -11,23 +13,67 @@ import type { Theme } from '../shared/theme'
 const lib = useLibrary()
 const error = ref('')
 
-/** Run an engine call, showing any failure. reload refreshes folders and settings after. */
-async function run(fn: () => Promise<unknown>, reload = true) {
+/** Run an engine call, showing any failure. It reports whether it worked. */
+async function run(fn: () => Promise<unknown>): Promise<boolean> {
   error.value = ''
   try {
     await fn()
-    if (reload) await lib.reloadSources()
+    return true
   } catch (e) {
     error.value = errorText(e)
+    return false
   }
 }
 
+/** A checkbox's new state, from its change event. */
+function checked(e: Event): boolean {
+  return e.target instanceof HTMLInputElement && e.target.checked
+}
+
 async function addFolder() {
-  const path = await orFallback(engine.pickFolder(), '')
-  if (path) await run(() => engine.addSources([path]))
+  error.value = ''
+  let path = ''
+  if (!(await run(async () => (path = await engine.pickFolder())))) return
+  if (path)
+    await run(async () => {
+      await engine.addSources([path])
+      await lib.sourcesChanged()
+    })
+}
+
+async function removeFolder(s: Source) {
+  if (!(await confirm(t('settings.removeTitle', { path: s.path }), t('settings.removeText'), t('settings.remove'))))
+    return
+  await run(async () => {
+    await engine.removeSource(s.id)
+    await lib.sourcesChanged()
+  })
+}
+
+// Settings change at once in the UI and go back if the engine refuses, so
+// a checkbox never shows what isn't so.
+async function setVideos(on: boolean) {
+  lib.settings.videos = on
+  if (!(await run(() => engine.setVideos(on)))) lib.settings.videos = !on
+}
+
+async function setAIOnBattery(on: boolean) {
+  lib.settings.aiOnBattery = on
+  if (!(await run(() => engine.setAIOnBattery(on)))) lib.settings.aiOnBattery = !on
 }
 
 const themes: Theme[] = ['system', 'light', 'dark']
+
+/** Arrow keys move the choice, as in any group of radio buttons. */
+function onThemeKey(e: KeyboardEvent) {
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
+  if (!step) return
+  e.preventDefault()
+  const next = themes[(themes.indexOf(theme.value) + step + themes.length) % themes.length]
+  if (next) theme.value = next
+  const group = e.currentTarget
+  if (group instanceof HTMLElement) group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus()
+}
 
 const aiStatus = computed(() => {
   const ai = lib.progress?.ai
@@ -50,37 +96,29 @@ function saveConfidence() {
   if (pendingConfidence === null) return
   const value = pendingConfidence
   pendingConfidence = null
-  engine
-    .setTagConfidence(value)
-    .then(() => lib.refresh())
-    .catch((e: unknown) => (error.value = errorText(e)))
+  void run(async () => {
+    await engine.setTagConfidence(value)
+    await lib.refresh()
+  })
 }
-function onConfidence(pos: number) {
-  lib.settings.tagConfidence = TAG_CONFIDENCE_MIN * Math.exp((span * pos) / 100)
+function onConfidence(e: Event) {
+  if (!(e.target instanceof HTMLInputElement)) return
+  lib.settings.tagConfidence = TAG_CONFIDENCE_MIN * Math.exp((span * Number(e.target.value)) / 100)
   pendingConfidence = lib.settings.tagConfidence
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(saveConfidence, 250)
 }
 onBeforeUnmount(saveConfidence)
-
-function setAIOnBattery(on: boolean) {
-  lib.settings.aiOnBattery = on
-  engine.setAIOnBattery(on).catch((e: unknown) => {
-    lib.settings.aiOnBattery = !on
-    error.value = errorText(e)
-    logError(e)
-  })
-}
 </script>
 
 <template>
-  <main class="page">
+  <div class="page">
     <header class="topbar">
       <h1>{{ t('settings.title') }}</h1>
     </header>
     <div class="page-body">
       <div class="content">
-        <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
 
         <section>
           <h2>{{ t('settings.folders') }}</h2>
@@ -89,12 +127,14 @@ function setAIOnBattery(on: boolean) {
             <li v-for="s in lib.sources" :key="s.id">
               <Icon name="folder" :size="18" />
               <span class="path" :title="s.path">{{ s.path }}</span>
-              <button class="btn" @click="run(() => engine.removeSource(s.id))">{{ t('settings.remove') }}</button>
+              <button class="btn" :aria-label="t('settings.removeNamed', { path: s.path })" @click="removeFolder(s)">
+                {{ t('settings.remove') }}
+              </button>
             </li>
           </ul>
           <div class="row">
             <button class="btn" @click="addFolder"><Icon name="plus" :size="16" />{{ t('settings.addFolder') }}</button>
-            <button class="btn" @click="run(engine.rescan, false)">
+            <button class="btn" @click="run(engine.rescan)">
               <Icon name="refresh" :size="16" />{{ t('settings.rescan') }}
             </button>
           </div>
@@ -103,22 +143,14 @@ function setAIOnBattery(on: boolean) {
         <section>
           <h2>{{ t('settings.indexing') }}</h2>
           <label class="toggle">
-            <input
-              type="checkbox"
-              :checked="lib.settings.videos"
-              @change="run(() => engine.setVideos(($event.target as HTMLInputElement).checked))"
-            />
+            <input type="checkbox" :checked="lib.settings.videos" @change="setVideos(checked($event))" />
             <span>
               {{ t('settings.videos') }}
               <small class="muted">{{ t('settings.videosHint') }}</small>
             </span>
           </label>
           <label class="toggle">
-            <input
-              type="checkbox"
-              :checked="lib.progress?.paused"
-              @change="run(() => engine.setPaused(($event.target as HTMLInputElement).checked), false)"
-            />
+            <input type="checkbox" :checked="lib.progress?.paused" @change="lib.setPaused(checked($event))" />
             <span>{{ t('settings.pause') }}</span>
           </label>
         </section>
@@ -131,11 +163,7 @@ function setAIOnBattery(on: boolean) {
             {{ t('settings.peopleError', { error: lib.progress.ai.facesError }) }}
           </p>
           <label class="toggle">
-            <input
-              type="checkbox"
-              :checked="lib.settings.aiOnBattery"
-              @change="setAIOnBattery(($event.target as HTMLInputElement).checked)"
-            />
+            <input type="checkbox" :checked="lib.settings.aiOnBattery" @change="setAIOnBattery(checked($event))" />
             <span>
               {{ t('settings.aiOnBattery') }}
               <small class="muted">{{ t('settings.aiOnBatteryHint') }}</small>
@@ -146,14 +174,7 @@ function setAIOnBattery(on: boolean) {
             <div class="slider">
               <label for="confidence">{{ t('settings.confidence') }}</label>
               <small class="muted">{{ t('settings.confidenceHint') }}</small>
-              <input
-                id="confidence"
-                type="range"
-                min="0"
-                max="100"
-                :value="confidencePos"
-                @input="onConfidence(Number(($event.target as HTMLInputElement).value))"
-              />
+              <input id="confidence" type="range" min="0" max="100" :value="confidencePos" @input="onConfidence" />
               <div class="ends muted">
                 <span>{{ t('settings.confidenceMore') }}</span>
                 <span>{{ t('settings.confidenceFewer') }}</span>
@@ -164,12 +185,13 @@ function setAIOnBattery(on: boolean) {
 
         <section>
           <h2>{{ t('settings.appearance') }}</h2>
-          <div class="segmented" role="radiogroup" :aria-label="t('settings.theme')">
+          <div class="segmented" role="radiogroup" :aria-label="t('settings.theme')" @keydown="onThemeKey">
             <button
               v-for="th in themes"
               :key="th"
               role="radio"
               :aria-checked="theme === th"
+              :tabindex="theme === th ? 0 : -1"
               :class="{ on: theme === th }"
               @click="theme = th"
             >
@@ -184,7 +206,7 @@ function setAIOnBattery(on: boolean) {
         </section>
       </div>
     </div>
-  </main>
+  </div>
 </template>
 
 <style scoped>
@@ -276,7 +298,7 @@ h2 {
   height: 30px;
   padding: 0 14px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   background: transparent;
   cursor: pointer;
 }

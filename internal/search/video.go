@@ -4,6 +4,7 @@ import (
 	"slices"
 	"sync"
 
+	"lumen/internal/media"
 	"lumen/internal/store"
 )
 
@@ -23,6 +24,8 @@ func newVideoIndex(dim int) *videoIndex {
 	return &videoIndex{index: NewIndex(dim), frame: map[int64]videoFrame{}, byAsset: map[int64][]int64{}}
 }
 
+// add puts one frame in. Call with mu held (load holds it alone, before
+// the index is shared).
 func (v *videoIndex) add(asset, at int64, q []int8, scale float32) {
 	v.next++
 	key := v.next
@@ -44,6 +47,17 @@ func (v *videoIndex) replace(asset int64, frames []store.FrameEmbedding) {
 	}
 }
 
+// assets returns the videos with searchable moments.
+func (v *videoIndex) assets() map[int64]bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	out := make(map[int64]bool, len(v.byAsset))
+	for id, keys := range v.byAsset {
+		out[id] = len(keys) > 0
+	}
+	return out
+}
+
 // each visits sampled frames under the read lock. q is valid only in fn.
 func (v *videoIndex) each(fn func(asset int64, q []int8, scale float32)) {
 	v.mu.RLock()
@@ -62,9 +76,10 @@ func (v *videoIndex) scoreAll(q []float32, fn func(asset int64, cos float32)) {
 func (v *videoIndex) search(q []float32, floor float32, k int, allow func(int64) bool) []Hit {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	// At most 24 sampled frames belong to one video; this many candidates
-	// therefore includes at least k distinct videos if k exist above floor.
-	frames := v.index.Search(q, floor, k*24, func(key int64) bool {
+	// At most MaxSamples sampled frames belong to one video; this many
+	// candidates therefore includes at least k distinct videos if k exist
+	// above floor.
+	frames := v.index.Search(q, floor, k*media.MaxSamples, func(key int64) bool {
 		return allow == nil || allow(v.frame[key].asset)
 	})
 	best := make(map[int64]Hit, min(k, len(frames)))

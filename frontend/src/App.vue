@@ -8,6 +8,7 @@ import ConfirmDialog from './shared/ConfirmDialog.vue'
 import { errorText } from './shared/errors'
 import Icon from './shared/Icon.vue'
 import { t } from './shared/i18n'
+import Notice from './shared/Notice.vue'
 
 const lib = useLibrary()
 const route = useRoute()
@@ -17,7 +18,7 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
 
 <template>
   <template v-if="lib.ready">
-    <Welcome v-if="!lib.sources.length" @started="lib.reloadSources()" />
+    <Welcome v-if="!lib.sources.length" />
 
     <div v-else class="shell">
       <nav class="sidebar" :aria-label="t('app.name')">
@@ -44,13 +45,14 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
         <IndexStatus />
         <RouterLink to="/settings" class="nav-item"><Icon name="settings" />{{ t('nav.settings') }}</RouterLink>
       </nav>
-      <div class="content">
+      <main class="content">
         <RouterView />
-      </div>
+      </main>
     </div>
   </template>
   <p v-else-if="failed" class="failed" role="alert">{{ failed }}</p>
   <ConfirmDialog />
+  <Notice />
 </template>
 
 <style scoped>

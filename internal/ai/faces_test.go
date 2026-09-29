@@ -168,6 +168,15 @@ func TestYaw(t *testing.T) {
 	if y := turned.Yaw(); y < 0.5 {
 		t.Errorf("turned face yaw %.3f, want > 0.5", y)
 	}
+	// Tilted 60 degrees but looking at the camera: not turned.
+	rolled := front
+	sin, cos := math.Sincos(math.Pi / 3)
+	for i, p := range front.Landmarks {
+		rolled.Landmarks[i] = [2]float64{56 + (p[0]-56)*cos - (p[1]-56)*sin, 56 + (p[0]-56)*sin + (p[1]-56)*cos}
+	}
+	if y := rolled.Yaw(); y > 0.05 {
+		t.Errorf("rolled face yaw %.3f, want about 0", y)
+	}
 }
 
 func BenchmarkAlign(b *testing.B) {

@@ -31,11 +31,16 @@ type duplicateCandidate struct {
 // Similarity compares upright thumbnail pHashes; it never modifies files.
 func (s *Store) DuplicateGroups(ctx context.Context) ([]core.DuplicateGroup, error) {
 	// Candidates and their paths must describe one snapshot while indexing continues.
-	tx, err := s.r.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }() // releases the snapshot on an earlier error
+	var groups []core.DuplicateGroup
+	err := s.read(ctx, func(tx *sql.Tx) error {
+		var err error
+		groups, err = duplicateGroups(ctx, tx)
+		return err
+	})
+	return groups, err
+}
+
+func duplicateGroups(ctx context.Context, tx *sql.Tx) ([]core.DuplicateGroup, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT a.id, COALESCE(a.phash, 0), COALESCE(a.width, 0), COALESCE(a.height, 0),
 		a.thumb_version, a.taken_at,
 		a.kind = ? AND a.phash IS NOT NULL AND a.thumb_version > 0 AND a.width > 0 AND a.height > 0 AS hashed,
@@ -55,10 +60,7 @@ func (s *Store) DuplicateGroups(ctx context.Context) ([]core.DuplicateGroup, err
 	if err != nil {
 		return nil, err
 	}
-	if err := duplicatePaths(ctx, tx, groups); err != nil {
-		return nil, err
-	}
-	return groups, tx.Commit()
+	return groups, duplicatePaths(ctx, tx, groups)
 }
 
 // duplicatePaths fills in each grouped asset's file paths and file size.

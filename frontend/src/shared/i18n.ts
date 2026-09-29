@@ -35,6 +35,8 @@ const en = {
   'search.unavailable': 'Search isn’t available right now',
   'search.peopleHeading': 'People',
   'search.withPeople': 'Photos with {names}.',
+  'search.onlyPeople': 'Only who is in them was searched: the rest needs the on-device AI, which isn’t available.',
+  'search.title': '“{q}”',
 
   'people.intro':
     'Lumen finds the people in your photos, right here on this computer. Name someone once and every photo of them follows.',
@@ -49,9 +51,6 @@ const en = {
   'people.emptyHint': 'Someone appears here once they are clearly in three or more photos.',
   'people.hide': 'Hide from People',
   'people.unhide': 'Show in People',
-  'people.hidden': '{n} hidden',
-  'people.showHidden': 'Show hidden',
-  'people.hideHidden': 'Hide hidden',
 
   'person.unnamed': 'Unnamed person',
   'person.addName': 'Add a name',
@@ -76,6 +75,8 @@ const en = {
   'faces.clear': 'Clear',
   'faces.none': 'No faces left.',
   'faces.byYou': 'Placed by you',
+  'faces.face': 'Face {n}',
+  'faces.faceByYou': 'Face {n}, placed by you',
 
   'things.intro': 'Lumen sorts your photos by what’s in them, right here on this computer.',
   'things.new': 'Look for something new, like “Eiffel Tower”',
@@ -86,9 +87,9 @@ const en = {
   'things.emptyHint': 'Things appear as Lumen understands your photos.',
   'things.hide': 'Hide from Things',
   'things.delete': 'Delete',
-  'things.hidden': '{n} hidden',
-  'things.showHidden': 'Show hidden',
-  'things.hideHidden': 'Hide hidden',
+  'things.deleteNamed': 'Delete “{name}”',
+  'things.deleteTitle': 'Delete “{name}”?',
+  'things.deleteText': 'Lumen stops looking for it, and it comes off every photo. Your photos stay as they are.',
   'things.unhide': 'Show in Things',
   'things.yours': 'Made by you',
   'things.noPhotos': 'No photos yet',
@@ -104,6 +105,9 @@ const en = {
   'albums.save': 'Save changes',
   'albums.edit': 'Edit album',
   'albums.delete': 'Delete album',
+  'albums.editNamed': 'Edit “{name}”',
+  'albums.deleteNamed': 'Delete “{name}”',
+  'albums.summary': '{items} · {kind}',
   'albums.deleteTitle': 'Delete “{name}”?',
   'albums.deleteText': 'The album will be removed. Your photos and videos stay in the library.',
   'albums.kind': 'Media',
@@ -139,6 +143,7 @@ const en = {
   'duplicates.refresh': 'Check again',
   'duplicates.loading': 'Checking the library…',
   'duplicates.preview': 'Preview “{name}”',
+  'duplicates.photoSize': '{w} × {h} · {size}',
 
   'welcome.title': 'Welcome to Lumen',
   'welcome.question': 'Which folders hold your photos and videos?',
@@ -151,6 +156,10 @@ const en = {
   'status.scanning': 'Looking for photos… {n} found',
   'status.preparing': 'Preparing your library… {left} left',
   'status.upToDate': 'Up to date',
+  'status.preparingPhase': 'Preparing your library',
+  'status.understandingPhase': 'Understanding your photos',
+  'status.batteryPhase': 'Waiting for mains power',
+  'status.pausedPhase': 'Indexing paused',
   'status.paused': 'Paused · {left} left',
   'status.pause': 'Pause',
   'status.resume': 'Resume',
@@ -171,12 +180,22 @@ const en = {
   'videos.emptyHint': 'Turn on “Include videos” in Settings to add them to your library.',
   'library.zoom': 'Thumbnail size',
   'library.info': 'Details',
+  'library.photo': 'Photo',
+  'library.video': 'Video',
+  'library.photoOn': 'Photo, {day}',
+  'library.videoOn': 'Video, {day}',
+  'library.favouriteItem': '{item}, favourite',
+
+  'format.megapixels': '{mp} MP',
+  'format.bytes': '{n} B',
 
   'day.today': 'Today',
   'day.yesterday': 'Yesterday',
 
   'details.title': 'Details',
   'details.none': 'Select a photo to see its details.',
+  'details.loading': 'Loading…',
+  'details.dimensions': '{w} × {h} · {mp} · {size}',
   'details.taken': 'Taken',
   'details.dateFrom.exif': 'From the camera',
   'details.dateFrom.filename': 'From the file name',
@@ -198,6 +217,7 @@ const en = {
   'details.favourite': 'Favourite',
   'details.unfavourite': 'Remove favourite',
 
+  'viewer.title': 'Viewer',
   'viewer.prev': 'Previous',
   'viewer.next': 'Next',
   'viewer.noPreview': 'No preview for this format yet',
@@ -213,6 +233,10 @@ const en = {
     'Lumen looks for photos in these folders and keeps watching them for changes. Removing a folder never deletes anything on disk.',
   'settings.addFolder': 'Add a folder…',
   'settings.remove': 'Remove',
+  'settings.removeNamed': 'Remove {path}',
+  'settings.removeTitle': 'Remove {path}?',
+  'settings.removeText':
+    'Its photos leave the library. Nothing is deleted from the disk, and adding the folder again brings back their names, favourites and albums.',
   'settings.rescan': 'Check for changes now',
   'settings.videos': 'Include videos',
   'settings.videosHint':
@@ -245,9 +269,25 @@ const en = {
 
   'common.cancel': 'Cancel',
   'common.close': 'Close',
+  'common.dismiss': 'Dismiss',
   'common.showInFolder': 'Show in folder',
+  'common.showHidden': { one: 'Show 1 hidden', other: 'Show {n} hidden' },
+  'common.hideHidden': 'Hide hidden',
+  'common.withKey': '{label} ({key})',
+  'common.labelValue': '{label}: {value}',
 
   'error.generic': 'Something went wrong: {msg}',
+  'error.notFound': 'That isn’t there any more: it may have been deleted, or its file moved away.',
+  'error.noAI': 'The on-device AI isn’t available on this computer.',
+  'error.invalidName': 'A name must be 1 to {max} characters.',
+  'error.albumExists': 'An album already has that name.',
+  'error.invalidAlbum': 'This album can’t be saved: {why}.',
+  'error.personExists': 'Someone already has that name.',
+  'error.tagExists': 'A Thing already has that name.',
+  'error.builtinTag': 'Lumen’s own Things can be hidden, not deleted.',
+  'error.tagInAlbum': 'A smart album uses this Thing. Change that album’s rule first.',
+  'error.alreadyCovered': 'That folder is already in your library.',
+  'error.folderNotFound': 'That folder can’t be found.',
 } as const satisfies Record<string, Message>
 
 export type MessageKey = keyof typeof en

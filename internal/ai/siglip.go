@@ -110,7 +110,8 @@ var pixelScale = func() (t [256]float32) {
 }()
 
 // Encode embeds up to BatchSize images, each ImageSize x ImageSize 8-bit RGB
-// (media.ModelInput), and returns one unit vector per image.
+// (media.ModelInput), and returns one unit vector per image: nil for an
+// image the model made no usable vector of (see Normalise).
 func (e *ImageEncoder) Encode(images [][]byte) ([][]float32, error) {
 	s, plane := e.m.ImageSize, e.m.ImageSize*e.m.ImageSize
 	if len(images) == 0 || len(images) > e.m.Batch {
@@ -201,7 +202,13 @@ func (e *TextEncoder) Encode(texts []string) ([][]float32, error) {
 	if err != nil {
 		return nil, fmt.Errorf("run text model: %w", err)
 	}
-	return unitRows(out[0], e.m.Dim, len(texts))
+	vecs, err := unitRows(out[0], e.m.Dim, len(texts))
+	for i, v := range vecs {
+		if v == nil && err == nil {
+			err = fmt.Errorf("text model gave no usable vector for %q", texts[i])
+		}
+	}
+	return vecs, err
 }
 
 // Close frees the model.

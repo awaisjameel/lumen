@@ -38,28 +38,36 @@ const clearest = `f.id = (SELECT cover_face FROM people WHERE id = f.person_id) 
 // People lists everyone who appears in a visible photo: named people first,
 // then by how many photos they are in.
 func (s *Store) People(ctx context.Context) ([]core.Person, error) {
-	people, err := queryAll(ctx, s.r, scanPerson, `SELECT p.id, COALESCE(p.name, ''), p.hidden, count(DISTINCT f.asset_id)
-		FROM people p JOIN faces f ON f.person_id = p.id JOIN assets a ON a.id = f.asset_id AND `+visibleA+`
-		GROUP BY p.id ORDER BY p.name IS NULL, count(DISTINCT f.asset_id) DESC, p.name, p.id`)
-	if err != nil {
-		return nil, err
-	}
-	return people, s.addCovers(ctx, people)
+	var people []core.Person
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), p.hidden, count(DISTINCT f.asset_id)
+			FROM people p JOIN faces f ON f.person_id = p.id JOIN assets a ON a.id = f.asset_id AND `+visibleA+`
+			GROUP BY p.id ORDER BY p.name IS NULL, count(DISTINCT f.asset_id) DESC, p.name, p.id`)
+		if err != nil {
+			return err
+		}
+		return addCovers(ctx, tx, people)
+	})
+	return people, err
 }
 
 // Person returns one person, with how many visible photos they are in.
 func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
-	people, err := queryAll(ctx, s.r, scanPerson, `SELECT p.id, COALESCE(p.name, ''), p.hidden,
-			(SELECT count(DISTINCT f.asset_id) FROM faces f JOIN assets a ON a.id = f.asset_id
-				WHERE f.person_id = p.id AND `+visibleA+`)
-		FROM people p WHERE p.id = ?`, id)
+	var people []core.Person
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), p.hidden,
+				(SELECT count(DISTINCT f.asset_id) FROM faces f JOIN assets a ON a.id = f.asset_id
+					WHERE f.person_id = p.id AND `+visibleA+`)
+			FROM people p WHERE p.id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if len(people) == 0 {
+			return ErrNotFound
+		}
+		return addCovers(ctx, tx, people)
+	})
 	if err != nil {
-		return core.Person{}, err
-	}
-	if len(people) == 0 {
-		return core.Person{}, ErrNotFound
-	}
-	if err := s.addCovers(ctx, people); err != nil {
 		return core.Person{}, err
 	}
 	return people[0], nil
@@ -71,8 +79,8 @@ func scanPerson(r *sql.Rows) (p core.Person, err error) {
 }
 
 // addCovers picks each person's clearest face with a thumbnail to show.
-func (s *Store) addCovers(ctx context.Context, people []core.Person) error {
-	st, err := s.r.PrepareContext(ctx, faceSelect+` WHERE f.person_id = ? AND `+visibleA+` AND a.thumb_version > 0
+func addCovers(ctx context.Context, tx *sql.Tx, people []core.Person) error {
+	st, err := tx.PrepareContext(ctx, faceSelect+` WHERE f.person_id = ? AND `+visibleA+` AND a.thumb_version > 0
 		ORDER BY `+clearest+` LIMIT 1`)
 	if err != nil {
 		return err
@@ -148,41 +156,57 @@ func (s *Store) PeopleAssets(ctx context.Context, people []int64) ([]int64, erro
 }
 
 // SearchPeople returns up to limit named, shown people whose names contain
-// text, names starting with it first.
+// text (in any case), names starting with it first. Their counts are not set.
 func (s *Store) SearchPeople(ctx context.Context, text string, limit int) ([]core.Person, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return []core.Person{}, nil
 	}
-	like := "%" + likeEscaper.Replace(text) + "%"
-	people, err := queryAll(ctx, s.r, func(r *sql.Rows) (p core.Person, err error) {
-		err = r.Scan(&p.ID, &p.Name, &p.Hidden)
-		return p, err
-	}, `SELECT id, name, hidden FROM people WHERE name LIKE ?1 ESCAPE '\' AND hidden = 0
-		ORDER BY name LIKE ?2 ESCAPE '\' DESC, length(name), name LIMIT ?3`, like, strings.TrimPrefix(like, "%"), limit)
-	if err != nil {
-		return nil, err
-	}
-	return people, s.addCovers(ctx, people)
+	var people []core.Person
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		people, err = queryAll(ctx, tx, func(r *sql.Rows) (p core.Person, err error) {
+			err = r.Scan(&p.ID, &p.Name, &p.Hidden)
+			return p, err
+		}, `SELECT id, name, hidden FROM people WHERE name IS NOT NULL AND `+nameMatch+` AND hidden = 0
+			ORDER BY `+nameFirst+` LIMIT ?2`, core.Fold(text), limit)
+		if err != nil {
+			return err
+		}
+		return addCovers(ctx, tx, people)
+	})
+	return people, err
 }
 
-// PersonByName finds someone by name (case-insensitive).
+// PersonByName finds someone by name, whatever its case.
 func (s *Store) PersonByName(ctx context.Context, name string) (int64, error) {
-	var id int64
-	err := s.r.QueryRowContext(ctx, "SELECT id FROM people WHERE name = ?", strings.TrimSpace(name)).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrNotFound
+	id, err := named(ctx, s.r, peopleNames, strings.TrimSpace(name), 0)
+	if err == nil && id == 0 {
+		err = ErrNotFound
 	}
 	return id, err
 }
 
-// NamePerson names (or with "", unnames) a person.
+// NamePerson names (or with "", unnames) a person. A name someone else has
+// (in any case) is ErrPersonExists: the user decides whether they are one.
 func (s *Store) NamePerson(ctx context.Context, id int64, name string) error {
-	res, err := s.w.ExecContext(ctx, "UPDATE people SET name = NULLIF(?, '') WHERE id = ?", strings.TrimSpace(name), id)
-	if isUnique(err) {
-		return ErrPersonExists
+	name = strings.TrimSpace(name)
+	if name != "" {
+		var err error
+		if name, err = cleanName(name); err != nil {
+			return err
+		}
 	}
-	return affected(res, err)
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		if name != "" {
+			switch other, err := named(ctx, tx, peopleNames, name, id); {
+			case err != nil:
+				return err
+			case other != 0:
+				return ErrPersonExists
+			}
+		}
+		return affected(tx.ExecContext(ctx, "UPDATE people SET name = NULLIF(?, '') WHERE id = ?", name, id))
+	})
 }
 
 // SetPersonHidden hides a person from People, or shows them again.
@@ -237,13 +261,33 @@ func (s *Store) RejectFaces(ctx context.Context, person int64, faces []int64) er
 // in two).
 func (s *Store) NameFaces(ctx context.Context, faces []int64, name string) (int64, error) {
 	if len(faces) == 0 {
-		return 0, errors.New("no faces to name")
+		return 0, ErrNotFound
 	}
 	name = strings.TrimSpace(name)
+	if name != "" {
+		var err error
+		if name, err = cleanName(name); err != nil {
+			return 0, err
+		}
+	}
 	var person int64
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		err := tx.QueryRowContext(ctx, "SELECT id FROM people WHERE name = ?", name).Scan(&person)
-		if errors.Is(err, sql.ErrNoRows) {
+		list, err := json.Marshal(faces)
+		if err != nil {
+			return err
+		}
+		var all bool
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) = (SELECT count(DISTINCT value) FROM json_each(?1))
+			FROM faces WHERE id IN (SELECT value FROM json_each(?1))`, string(list)).Scan(&all); err != nil {
+			return err
+		}
+		if !all {
+			return ErrNotFound // a face went away (its photo was re-read) since the user saw it
+		}
+		if name != "" {
+			person, err = named(ctx, tx, peopleNames, name, 0)
+		}
+		if err == nil && person == 0 {
 			var res sql.Result
 			res, err = tx.ExecContext(ctx, "INSERT INTO people (name, created_at) VALUES (NULLIF(?, ''), ?)",
 				name, time.Now().Unix())

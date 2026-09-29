@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlbumKind, engine, Kind, thumbUrl } from '../bridge'
+import { AlbumKind, engine, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
 import type { Album, AlbumRule } from '../bridge'
 import { usePeople } from '../people/store'
 import { confirm } from '../shared/confirm'
@@ -12,7 +12,7 @@ import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
 import SearchBox from '../search/SearchBox.vue'
 import { useThings } from '../things/store'
-import { useAlbums } from './store'
+import { emptyRule, useAlbums } from './store'
 
 const router = useRouter()
 const albums = useAlbums()
@@ -27,16 +27,12 @@ const error = ref('')
 const active = ref(true)
 onBeforeUnmount(() => (active.value = false))
 
-function emptyRule(): AlbumRule {
-  return { kind: Kind.$zero, favourites: false, from: '', to: '', tag: 0, person: 0 }
-}
-
 onMounted(() => {
-  void albums.load().catch((e: unknown) => (error.value = errorText(e)))
+  void albums.load().catch(logError)
   void things.load().catch(logError)
   void people.load().catch(logError)
 })
-useLiveReload(albums.load)
+useLiveReload(albums.load) // any change can change a smart album
 
 function reset() {
   editing.value = null
@@ -104,16 +100,17 @@ async function remove(album: Album) {
       <form class="editor" @submit.prevent="save">
         <div class="editor-head">
           <h2>{{ editing === null ? t('albums.new') : t('albums.edit') }}</h2>
-          <button v-if="editing !== null" type="button" class="btn subtle" :disabled="busy" @click="reset">
+          <button v-if="editing !== null" type="button" class="btn btn-subtle" :disabled="busy" @click="reset">
             {{ t('common.cancel') }}
           </button>
         </div>
         <div class="form-row">
           <input
             v-model="name"
+            class="field"
             :aria-label="t('albums.name')"
             :placeholder="t('albums.name')"
-            maxlength="80"
+            :maxlength="MAX_NAME_LEN"
             required
           />
           <select v-if="editing === null" v-model="kind" :aria-label="t('albums.type')">
@@ -154,27 +151,50 @@ async function remove(album: Album) {
           {{ editing === null ? t('albums.create') : t('albums.save') }}
         </button>
       </form>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <p v-if="error || albums.error" class="page-error" role="alert">{{ error || albums.error }}</p>
 
       <div v-if="albums.list.length" class="cards">
         <div v-for="album in albums.list" :key="album.id" class="card">
-          <RouterLink :to="{ name: 'album', params: { id: album.id } }" class="cover" :aria-label="album.name">
-            <img v-if="album.cover" :src="thumbUrl(album.cover, album.coverThumb)" alt="" loading="lazy" />
+          <RouterLink :to="{ name: 'album', params: { id: album.id } }" class="card-cover" :aria-label="album.name">
+            <img
+              v-if="album.cover"
+              :src="thumbUrl(album.cover, album.coverThumb)"
+              alt=""
+              loading="lazy"
+              decoding="async"
+              draggable="false"
+            />
             <Icon v-else name="folder" :size="36" />
           </RouterLink>
-          <div class="meta">
-            <RouterLink :to="{ name: 'album', params: { id: album.id } }">{{ album.name }}</RouterLink>
-            <span class="muted"
-              >{{ t('status.items', { n: album.count }) }} ·
-              {{ t(album.kind === AlbumKind.AlbumSmart ? 'albums.smart' : 'albums.manual') }}</span
-            >
+          <div class="card-meta">
+            <RouterLink :to="{ name: 'album', params: { id: album.id } }" class="card-name">{{
+              album.name
+            }}</RouterLink>
+            <span class="card-count">{{
+              t('albums.summary', {
+                items: t('status.items', { n: album.count }),
+                kind: t(album.kind === AlbumKind.AlbumSmart ? 'albums.smart' : 'albums.manual'),
+              })
+            }}</span>
           </div>
-          <button class="icon-btn" :title="t('albums.edit')" @click="edit(album)">
-            <Icon name="pencil" :size="16" />
-          </button>
-          <button class="icon-btn" :title="t('albums.delete')" @click="remove(album)">
-            <Icon name="trash" :size="16" />
-          </button>
+          <div class="actions">
+            <button
+              class="icon-btn"
+              :title="t('albums.edit')"
+              :aria-label="t('albums.editNamed', { name: album.name })"
+              @click="edit(album)"
+            >
+              <Icon name="pencil" :size="16" />
+            </button>
+            <button
+              class="icon-btn"
+              :title="t('albums.delete')"
+              :aria-label="t('albums.deleteNamed', { name: album.name })"
+              @click="remove(album)"
+            >
+              <Icon name="trash" :size="16" />
+            </button>
+          </div>
         </div>
       </div>
       <EmptyState v-else-if="albums.loaded" icon="folder" :title="t('albums.empty')" :text="t('albums.emptyHint')" />
@@ -214,13 +234,13 @@ h2 {
   flex: 1;
   min-width: 0;
 }
-input:not([type='checkbox']),
+.rules input:not([type='checkbox']),
 select {
   min-height: 32px;
   padding: 4px 8px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--surface);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
 }
 .rules {
   display: grid;
@@ -242,42 +262,9 @@ select {
   min-height: 32px;
   font-size: 14px;
 }
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 18px;
-}
-.card {
-  min-width: 0;
-}
-.cover {
-  display: grid;
-  place-items: center;
-  aspect-ratio: 1;
-  border-radius: var(--radius-m);
-  overflow: hidden;
-  background: var(--surface-2);
-  color: var(--text-3);
-}
-.cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.meta {
+.actions {
   display: flex;
-  flex-direction: column;
-  margin: 6px 0;
-}
-.meta a {
-  color: var(--text);
-  font-weight: 600;
-  text-decoration: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.meta .muted {
-  font-size: 12px;
+  gap: 2px;
+  margin-top: 2px;
 }
 </style>

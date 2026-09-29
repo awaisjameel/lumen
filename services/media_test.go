@@ -3,11 +3,13 @@ package services
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"lumen/internal/core"
@@ -69,27 +71,77 @@ func TestVideoMediaRoutes(t *testing.T) {
 	if err := st.SaveThumbnails(ctx, "v", []store.ThumbResult{{AssetID: id}}); err != nil {
 		t.Fatal(err)
 	}
-	m := NewMediaService(st, cache)
+	stream, err := NewStreamer(st, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go stream.Run()
+	defer stream.Close()
+	m := NewMediaService(st, cache, stream)
 	for _, tc := range []struct {
 		url, kind string
-		status    int
 	}{
-		{fmt.Sprintf("/thumb/%d/256", id), "image/jpeg", http.StatusOK},
-		{fmt.Sprintf("/sprite/%d", id), "image/jpeg", http.StatusOK},
-		{fmt.Sprintf("/frame/%d/1000", id), "image/jpeg", http.StatusOK},
-		{fmt.Sprintf("/play/%d?at=1000", id), "video/mp4", http.StatusOK},
+		{fmt.Sprintf("/thumb/%d/256", id), "image/jpeg"},
+		{fmt.Sprintf("/sprite/%d", id), "image/jpeg"},
+		{fmt.Sprintf("/frame/%d/1000", id), "image/jpeg"},
 	} {
 		rec := httptest.NewRecorder()
 		m.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, tc.url, http.NoBody))
-		if rec.Code != tc.status || rec.Header().Get("Content-Type") != tc.kind || rec.Body.Len() == 0 {
+		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != tc.kind || rec.Body.Len() == 0 {
 			t.Errorf("%s: status %d, content type %q, bytes %d", tc.url, rec.Code, rec.Header().Get("Content-Type"), rec.Body.Len())
 		}
 	}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/original/%d", id), http.NoBody)
-	req.Header.Set("Range", "bytes=0-15")
-	m.ServeHTTP(rec, req)
-	if rec.Code != http.StatusPartialContent || rec.Body.Len() != 16 {
-		t.Fatalf("direct video Range: status %d, bytes %d", rec.Code, rec.Body.Len())
+	for _, url := range []string{fmt.Sprintf("/thumb/%d/300", id), fmt.Sprintf("/original/%d", id), "/thumb/x/256"} {
+		rec := httptest.NewRecorder()
+		m.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status %d, want 404", url, rec.Code)
+		}
+	}
+
+	// Videos stream from the loopback server, really streamed.
+	type response struct {
+		status int
+		header http.Header
+		body   []byte
+	}
+	get := func(url, rng, host string) response {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rng != "" {
+			req.Header.Set("Range", rng)
+		}
+		if host != "" {
+			req.Host = host
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response{res.StatusCode, res.Header, body}
+	}
+	base := m.VideoBase()
+	if r := get(fmt.Sprintf("%s/video/%d", base, id), "bytes=0-15", ""); r.status != http.StatusPartialContent ||
+		len(r.body) != 16 || r.header.Get("Content-Type") != "video/mp4" {
+		t.Errorf("direct video Range: status %d, %d bytes, %q", r.status, len(r.body), r.header.Get("Content-Type"))
+	}
+	if r := get(fmt.Sprintf("%s/play/%d?at=1000", base, id), "", ""); r.status != http.StatusOK ||
+		r.header.Get("Content-Type") != "video/mp4" || len(r.body) == 0 {
+		t.Errorf("converted video: status %d, %q, %d bytes", r.status, r.header.Get("Content-Type"), len(r.body))
+	}
+	wrongSecret := strings.Replace(base, stream.secret, "0123", 1)
+	if r := get(fmt.Sprintf("%s/video/%d", wrongSecret, id), "", ""); r.status != http.StatusNotFound {
+		t.Errorf("wrong secret: status %d, want 404", r.status)
+	}
+	if r := get(fmt.Sprintf("%s/video/%d", base, id), "", "evil.example"); r.status != http.StatusForbidden {
+		t.Errorf("other host: status %d, want 403", r.status)
 	}
 }

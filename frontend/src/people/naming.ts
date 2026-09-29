@@ -1,4 +1,4 @@
-import { engine } from '../bridge'
+import { engine, ErrorCode, errorCode } from '../bridge'
 import { confirm } from '../shared/confirm'
 import { t } from '../shared/i18n'
 
@@ -9,12 +9,15 @@ import { t } from '../shared/i18n'
  */
 export async function namePerson(id: number, name: string): Promise<number | null> {
   name = name.trim()
-  const other = name ? await engine.personByName(name) : 0
-  if (other && other !== id) {
-    if (!(await confirm(t('person.mergeTitle', { name }), t('person.mergeText'), t('person.merge')))) return null
-    await engine.mergePeople(id, other)
-    return other
+  try {
+    await engine.namePerson(id, name)
+    return id
+  } catch (e) {
+    if (errorCode(e) !== ErrorCode.PersonExists) throw e
   }
-  await engine.namePerson(id, name)
-  return id
+  if (!(await confirm(t('person.mergeTitle', { name }), t('person.mergeText'), t('person.merge')))) return null
+  const other = await engine.personByName(name)
+  if (!other) return null // renamed meanwhile: nothing to merge with
+  await engine.mergePeople(id, other)
+  return other
 }

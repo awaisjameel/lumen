@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"lumen/internal/core"
@@ -42,7 +41,7 @@ func (s *Store) AddSource(ctx context.Context, path string) (core.Source, error)
 			return err
 		}
 		for _, e := range existing {
-			if IsWithin(path, e.Path) {
+			if core.IsWithin(path, e.Path) {
 				src = e
 				return ErrAlreadyCovered
 			}
@@ -54,7 +53,7 @@ func (s *Store) AddSource(ctx context.Context, path string) (core.Source, error)
 		id, _ := res.LastInsertId()
 		src = core.Source{ID: id, Path: path, Enabled: true}
 		for _, e := range existing {
-			if !IsWithin(e.Path, path) {
+			if !core.IsWithin(e.Path, path) {
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, "UPDATE files SET source_id = ? WHERE source_id = ?", id, e.ID); err != nil {
@@ -80,7 +79,7 @@ func (s *Store) RemoveSource(ctx context.Context, id int64) error {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM files WHERE source_id = ?", id); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM sources WHERE id = ?", id); err != nil {
+		if err := affected(tx.ExecContext(ctx, "DELETE FROM sources WHERE id = ?", id)); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE assets SET missing_since = ?
@@ -88,16 +87,4 @@ func (s *Store) RemoveSource(ctx context.Context, id int64) error {
 			time.Now().Unix())
 		return err
 	})
-}
-
-// IsWithin reports whether path is dir or inside it (case-insensitive, as on Windows).
-func IsWithin(path, dir string) bool {
-	path, dir = filepath.Clean(path), filepath.Clean(dir)
-	if strings.EqualFold(path, dir) {
-		return true
-	}
-	if !strings.HasSuffix(dir, string(filepath.Separator)) {
-		dir += string(filepath.Separator)
-	}
-	return len(path) > len(dir) && strings.EqualFold(path[:len(dir)], dir)
 }
