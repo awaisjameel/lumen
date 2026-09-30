@@ -187,6 +187,43 @@ func (s *LibraryService) DuplicateGroups(ctx context.Context) ([]core.DuplicateG
 	return s.store.DuplicateGroups(ctx)
 }
 
+// Places lists nearby cities found from GPS coordinates using bundled data.
+func (s *LibraryService) Places(ctx context.Context) ([]core.Place, error) {
+	return s.store.Places(ctx)
+}
+
+// Place returns one city and its current visible count.
+func (s *LibraryService) Place(ctx context.Context, id int64) (core.Place, error) {
+	return s.store.Place(ctx, id)
+}
+
+// Events detects time and location groups in the currently visible timeline.
+func (s *LibraryService) Events(ctx context.Context) ([]core.Event, error) {
+	gap, err := s.store.EventGapHours(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.Events(ctx, gap)
+}
+
+// Event returns one group, including any name chosen by the user.
+func (s *LibraryService) Event(ctx context.Context, id int64) (core.Event, error) {
+	gap, err := s.store.EventGapHours(ctx)
+	if err != nil {
+		return core.Event{}, err
+	}
+	return s.store.Event(ctx, id, gap)
+}
+
+// SetEventName renames an event; an empty name restores its generated title.
+func (s *LibraryService) SetEventName(ctx context.Context, id int64, name string) error {
+	gap, err := s.store.EventGapHours(ctx)
+	if err != nil {
+		return err
+	}
+	return s.store.SetEventName(ctx, id, name, gap)
+}
+
 // SetFavourite marks or unmarks a favourite.
 func (s *LibraryService) SetFavourite(ctx context.Context, id int64, fav bool) error {
 	return s.store.SetFavourite(ctx, id, fav)
@@ -276,7 +313,17 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 		return core.Settings{}, err
 	}
 	conf, err := tagConfidence(ctx, s.store)
-	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf}, err
+	if err != nil {
+		return core.Settings{}, err
+	}
+	gap, err := s.store.EventGapHours(ctx)
+	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf, EventGapHours: gap}, err
+}
+
+// SetEventGapHours sets the quiet period that splits detected events.
+func (s *LibraryService) SetEventGapHours(ctx context.Context, hours int) error {
+	hours = min(max(hours, core.EventGapMin), core.EventGapMax)
+	return s.store.SetInt(ctx, core.SettingEventGapHours, hours)
 }
 
 // SetAIOnBattery lets the AI keep working on battery power (it waits for

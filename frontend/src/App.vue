@@ -33,6 +33,12 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
         <RouterLink to="/things" class="nav-item" :class="{ active: route.path.startsWith('/things') }">
           <Icon name="things" />{{ t('nav.things') }}
         </RouterLink>
+        <RouterLink to="/places" class="nav-item" :class="{ active: route.path.startsWith('/places') }">
+          <Icon name="pin" />{{ t('nav.places') }}
+        </RouterLink>
+        <RouterLink to="/events" class="nav-item" :class="{ active: route.path.startsWith('/events') }">
+          <Icon name="calendar" />{{ t('nav.events') }}
+        </RouterLink>
         <RouterLink to="/albums" class="nav-item" :class="{ active: route.path.startsWith('/albums') }">
           <Icon name="folder" />{{ t('nav.albums') }}
         </RouterLink>

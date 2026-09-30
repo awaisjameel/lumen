@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { engine, Filter } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { DayBucket, DayItems, SearchResults } from '../bridge'
-import { affects, useLibrary } from './store'
+import { affects, scopeKey, useLibrary } from './store'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -39,6 +39,12 @@ beforeEach(() => {
 })
 
 describe('library requests', () => {
+  it('keeps place and event timelines in separate request scopes', () => {
+    const place = scopeKey({ kind: 'timeline', view: { filter: Filter.FilterAll, place: 12 } })
+    const event = scopeKey({ kind: 'timeline', view: { filter: Filter.FilterAll, event: 12 } })
+    expect(place).not.toBe(event)
+    expect(place).not.toBe(scopeKey(all))
+  })
   it('does not let a previous view block or overwrite the same day in a new view', async () => {
     const lib = shownLibrary()
     await lib.setScope(all)

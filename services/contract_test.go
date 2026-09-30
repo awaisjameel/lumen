@@ -40,6 +40,9 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"TAG_CONFIDENCE_DEFAULT": core.TagConfidenceDefault,
 		"TAG_CONFIDENCE_MIN":     core.TagConfidenceMin,
 		"TAG_CONFIDENCE_MAX":     core.TagConfidenceMax,
+		"EVENT_GAP_DEFAULT":      core.EventGapDefault,
+		"EVENT_GAP_MIN":          core.EventGapMin,
+		"EVENT_GAP_MAX":          core.EventGapMax,
 		"MAX_NAME_LEN":           core.MaxNameLen,
 	} {
 		if got := constant(name); got != want {

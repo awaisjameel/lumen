@@ -253,6 +253,23 @@ export enum DuplicateKind {
 };
 
 /**
+ * Event is a consecutive run of visible media, separated by time or distance.
+ */
+export interface Event {
+    /**
+     * oldest asset in the run
+     */
+    "id": number;
+    "name": string;
+    "startAt": number;
+    "endAt": number;
+    "count": number;
+    "cover": number;
+    "coverThumb": number;
+    "placeId": number;
+}
+
+/**
  * Face is one face in a photo or video: where it is, and who it is.
  */
 export interface Face {
@@ -385,6 +402,21 @@ export interface Person {
 }
 
 /**
+ * Place is a city near one or more visible GPS-tagged assets.
+ */
+export interface Place {
+    "id": number;
+    "name": string;
+    "region": string;
+    "country": string;
+    "lat": number;
+    "lon": number;
+    "count": number;
+    "cover": number;
+    "coverThumb": number;
+}
+
+/**
  * Playback says how the viewer plays a video.
  */
 export enum Playback {
@@ -495,6 +527,7 @@ export interface Settings {
      * TagConfidenceMin..Max
      */
     "tagConfidence": number;
+    "eventGapHours": number;
 }
 
 /**
@@ -617,4 +650,14 @@ export interface View {
      * 0 = any; excludes other view filters
      */
     "album"?: number;
+
+    /**
+     * 0 = anywhere
+     */
+    "place"?: number;
+
+    /**
+     * 0 = any event
+     */
+    "event"?: number;
 }

@@ -28,6 +28,8 @@ export type IconName =
   | 'pencil'
   | 'check'
   | 'copy'
+  | 'pin'
+  | 'calendar'
 
 const paths: Record<IconName, string> = {
   photos:
@@ -61,6 +63,9 @@ const paths: Record<IconName, string> = {
   pencil: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
   check: 'M5 12.5l4.5 4.5L19 7.5',
   copy: 'M8 8h11a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2zM16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3',
+  pin: 'M12 21s-7-6.2-7-12a7 7 0 1 1 14 0c0 5.8-7 12-7 12zM12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  calendar:
+    'M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM8 2v4M16 2v4M4 10h16M8 14h2M14 14h2M8 17h2',
 }
 </script>
 

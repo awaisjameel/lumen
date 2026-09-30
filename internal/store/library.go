@@ -53,7 +53,23 @@ func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float32) (whe
 		where, args = albumFilter(a).where(minScore)
 		return where, args, nil
 	}
-	f := assetFilter{tag: v.Tag, person: v.Person}
+	if v.Place != 0 {
+		if _, err := s.Place(ctx, v.Place); err != nil {
+			return "", nil, err
+		}
+	}
+	f := assetFilter{tag: v.Tag, person: v.Person, place: v.Place}
+	if v.Event != 0 {
+		gap, err := s.EventGapHours(ctx)
+		if err != nil {
+			return "", nil, err
+		}
+		event, err := s.Event(ctx, v.Event, gap)
+		if err != nil {
+			return "", nil, err
+		}
+		f.event = &event
+	}
 	switch v.Filter {
 	case core.FilterAll:
 	case core.FilterFavourites:
@@ -73,7 +89,9 @@ type assetFilter struct {
 	from, to   string // inclusive calendar days, YYYY-MM-DD (validated by the caller)
 	tag        int64  // carrying this tag (AI tags from minScore up)
 	person     int64  // showing this person
-	album      int64  // in this manual album
+	place      int64  // near this city
+	event      *core.Event
+	album      int64 // in this manual album
 }
 
 // where is the filter as a WHERE clause for the assets table, with only
@@ -103,6 +121,17 @@ func (f assetFilter) where(minScore float32) (where string, args []any) {
 	if f.person != 0 {
 		where += " AND id IN (SELECT asset_id FROM faces WHERE person_id = ?)"
 		args = append(args, f.person)
+	}
+	if f.place != 0 {
+		where += " AND place_id = ?"
+		args = append(args, f.place)
+	}
+	if f.event != nil {
+		e := f.event
+		where += " AND taken_at >= ? AND taken_at <= ?"
+		where += " AND (taken_at > ? OR (taken_at = ? AND id >= ?))"
+		where += " AND (taken_at < ? OR (taken_at = ? AND id <= ?))"
+		args = append(args, e.StartAt, e.EndAt, e.StartAt, e.StartAt, e.FirstID, e.EndAt, e.EndAt, e.LastID)
 	}
 	if f.album != 0 {
 		where += " AND id IN (SELECT asset_id FROM album_items WHERE album_id = ?)"

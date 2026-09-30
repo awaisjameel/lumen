@@ -56,8 +56,16 @@ func foldSQL(v any) any {
 
 // Store is the handle every other package uses.
 type Store struct {
-	w *sql.DB // single writer connection
-	r *sql.DB // read-only pool
+	w           *sql.DB // single writer connection
+	r           *sql.DB // read-only pool
+	eventsCache struct {
+		sync.Mutex
+		revision      int64
+		coverRevision int64
+		gap           int
+		loaded        bool
+		items         []core.Event
+	}
 
 	// settings caches every setting read or written: only the Store writes
 	// them, and some (the tag confidence) are read on every scroll.

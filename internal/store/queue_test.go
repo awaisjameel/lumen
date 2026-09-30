@@ -195,6 +195,16 @@ func TestUpgradeMovesBlockedJobsToWaiting(t *testing.T) {
 	check(t, st.SaveMetadata(ctx, "m", []MetadataResult{{AssetID: b, Orientation: 1}}))
 	check(t, errOf(st.w.ExecContext(ctx, "UPDATE asset_jobs SET status = 'pending' WHERE status = 'waiting'")))
 	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE asset_jobs DROP COLUMN prior_version"))) // added by v9
+	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX assets_by_place")))                       // added by v10
+	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE places")))
+	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX assets_pending_place")))
+	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX assets_event_cover")))
+	for _, trigger := range []string{"event_asset_added", "event_asset_changed", "event_asset_deleted", "event_name_added", "event_name_changed", "event_name_deleted", "event_cover_changed"} {
+		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER "+trigger))) // added by v12
+	}
+	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE event_revision")))
+	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE event_names"))) // added by v11
+	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE assets DROP COLUMN place_checked")))
 	check(t, errOf(st.w.ExecContext(ctx, "PRAGMA user_version = 7")))
 	check(t, st.Close())
 

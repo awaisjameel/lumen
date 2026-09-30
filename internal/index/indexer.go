@@ -248,6 +248,19 @@ func (ix *Indexer) Start(ctx context.Context) {
 		slog.Error("read settings", "err", err)
 	}
 	ix.aiOnBattery, ix.onBattery = on, onBattery()
+	ix.run(func() {
+		for ctx.Err() == nil {
+			n, err := ix.store.BackfillPlaces(ctx)
+			if n > 0 {
+				ix.markChanged(core.Changes{Assets: true})
+			}
+			if err == nil || ctx.Err() != nil {
+				return
+			}
+			slog.Error("resolve existing GPS locations", "err", err)
+			sleep(ctx, retryDelay)
+		}
+	})
 
 	ix.run(func() {
 		if n, err := ix.store.RequeueOutdated(ctx, ix.version); err != nil {

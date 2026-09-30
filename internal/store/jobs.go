@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lumen/internal/core"
+	"lumen/internal/places"
 )
 
 // JobItem is one asset waiting for a stage, with what a worker needs to run it.
@@ -262,6 +263,16 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 	if len(rs) == 0 {
 		return nil
 	}
+	cities := make([]places.City, len(rs))
+	for i, r := range rs {
+		if r.Err == "" && !r.Skipped && r.Lat != nil && r.Lon != nil {
+			var err error
+			cities[i], _, err = places.Lookup(*r.Lat, *r.Lon)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := time.Now().Unix()
 		// Without a capture date, the time the file says it was saved beats
@@ -272,7 +283,7 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 					WHEN ?12 != 0 AND date_from = 'file' AND ?12 < taken_at THEN ?12 ELSE taken_at END,
 				date_from = CASE WHEN ?1 != 0 THEN 'exif' ELSE date_from END,
 				width = NULLIF(?2, 0), height = NULLIF(?3, 0), orientation = ?4,
-				camera = NULLIF(?5, ''), lat = ?6, lon = ?7,
+				camera = NULLIF(?5, ''), lat = ?6, lon = ?7, place_id = ?13, place_checked = 1,
 				duration_ms = NULLIF(?8, 0), video_codec = NULLIF(?9, ''), audio_codec = NULLIF(?10, '')
 			WHERE id = ?11`)
 		if err != nil {
@@ -296,8 +307,15 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 			return err
 		}
 		defer job.Close()
-		for _, r := range rs {
+		for i, r := range rs {
 			if r.Err == "" && !r.Skipped {
+				if err := savePlace(ctx, tx, cities[i]); err != nil {
+					return err
+				}
+				var placeID any
+				if cities[i].ID != 0 {
+					placeID = cities[i].ID
+				}
 				args := []any{now, r.AssetID, max(r.Orientation, 1)}
 				for _, st := range afterMetadata {
 					args = append(args, st)
@@ -306,7 +324,7 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 					return err
 				}
 				if _, err := upd.ExecContext(ctx, r.TakenAt, r.Width, r.Height, max(r.Orientation, 1),
-					r.Camera, r.Lat, r.Lon, r.Duration, r.VideoCodec, r.AudioCodec, r.AssetID, r.Modified); err != nil {
+					r.Camera, r.Lat, r.Lon, r.Duration, r.VideoCodec, r.AudioCodec, r.AssetID, r.Modified, placeID); err != nil {
 					return err
 				}
 			}

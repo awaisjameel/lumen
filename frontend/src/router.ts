@@ -7,6 +7,8 @@ import SettingsView from './settings/SettingsView.vue'
 import ThingsView from './things/ThingsView.vue'
 import AlbumsView from './albums/AlbumsView.vue'
 import DuplicatesView from './duplicates/DuplicatesView.vue'
+import PlacesView from './places/PlacesView.vue'
+import EventsView from './events/EventsView.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -31,6 +33,10 @@ export const router = createRouter({
     { path: '/things/:id(\\d+)', name: 'thing', component: LibraryView, meta: { filter: Filter.FilterAll } },
     { path: '/albums', name: 'albums', component: AlbumsView },
     { path: '/albums/:id(\\d+)', name: 'album', component: LibraryView, meta: { filter: Filter.FilterAll } },
+    { path: '/places', name: 'places', component: PlacesView },
+    { path: '/places/:id(\\d+)', name: 'place', component: LibraryView, meta: { filter: Filter.FilterAll } },
+    { path: '/events', name: 'events', component: EventsView },
+    { path: '/events/:id(\\d+)', name: 'event', component: LibraryView, meta: { filter: Filter.FilterAll } },
     { path: '/duplicates', name: 'duplicates', component: DuplicatesView },
     { path: '/search', name: 'search', component: LibraryView },
     { path: '/settings', name: 'settings', component: SettingsView },

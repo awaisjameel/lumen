@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { computed, ref, shallowRef } from 'vue'
-import { errorText } from './errors'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { errorText, logError } from './errors'
 
 /**
  * Wraps a read of the engine so at most one runs at a time. Calls made while
@@ -34,6 +34,42 @@ export function coalescedLoad<T>(fetch: () => Promise<T>, apply: (value: T) => v
   }
 }
 
+function listState<T>(fetch: () => Promise<T[]>, active: () => boolean = () => true) {
+  const list = shallowRef<T[]>([])
+  const loaded = ref(false)
+  const error = ref('')
+  const read = coalescedLoad(
+    () => (active() ? fetch() : Promise.resolve([])),
+    (got) => {
+      if (!active()) return
+      list.value = got
+      loaded.value = true
+      error.value = ''
+    },
+  )
+  async function load() {
+    if (!active()) return
+    try {
+      await read()
+    } catch (e) {
+      if (!active()) return
+      error.value = errorText(e)
+      throw e
+    }
+  }
+  return { list, loaded, error, load }
+}
+
+export function useList<T>(fetch: () => Promise<T[]>) {
+  let active = true
+  const state = listState(fetch, () => active)
+  onMounted(() => void state.load().catch(logError))
+  onBeforeUnmount(() => {
+    active = false
+  })
+  return state
+}
+
 /**
  * A store holding one list from the engine (Things, People, Albums), loaded on
  * demand, with an index by id. error says why the last load failed ("" once
@@ -41,23 +77,8 @@ export function coalescedLoad<T>(fetch: () => Promise<T>, apply: (value: T) => v
  */
 export function defineListStore<T extends { id: number }>(id: string, fetch: () => Promise<T[]>) {
   return defineStore(id, () => {
-    const list = shallowRef<T[]>([])
-    const loaded = ref(false)
-    const error = ref('')
-    const byId = computed(() => new Map(list.value.map((x) => [x.id, x])))
-    const read = coalescedLoad(fetch, (got) => {
-      list.value = got
-      loaded.value = true
-      error.value = ''
-    })
-    async function load() {
-      try {
-        await read()
-      } catch (e) {
-        error.value = errorText(e)
-        throw e
-      }
-    }
-    return { list, loaded, error, byId, load }
+    const state = listState(fetch)
+    const byId = computed(() => new Map(state.list.value.map((item) => [item.id, item])))
+    return { ...state, byId }
   })
 }

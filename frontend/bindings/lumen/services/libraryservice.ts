@@ -74,6 +74,20 @@ export function DuplicateGroups(): $CancellablePromise<core$0.DuplicateGroup[] |
 }
 
 /**
+ * Event returns one group, including any name chosen by the user.
+ */
+export function Event(id: number): $CancellablePromise<core$0.Event> {
+    return $Call.ByID(3629311687, id);
+}
+
+/**
+ * Events detects time and location groups in the currently visible timeline.
+ */
+export function Events(): $CancellablePromise<core$0.Event[] | null> {
+    return $Call.ByID(1048653148);
+}
+
+/**
  * Focus tells the indexer which days are on screen so they are processed first.
  */
 export function Focus($from: string, to: string): $CancellablePromise<void> {
@@ -85,6 +99,20 @@ export function Focus($from: string, to: string): $CancellablePromise<void> {
  */
 export function PickFolder(): $CancellablePromise<string> {
     return $Call.ByID(345271492);
+}
+
+/**
+ * Place returns one city and its current visible count.
+ */
+export function Place(id: number): $CancellablePromise<core$0.Place> {
+    return $Call.ByID(416035844, id);
+}
+
+/**
+ * Places lists nearby cities found from GPS coordinates using bundled data.
+ */
+export function Places(): $CancellablePromise<core$0.Place[] | null> {
+    return $Call.ByID(2155255637);
 }
 
 /**
@@ -121,6 +149,20 @@ export function SetAIOnBattery(on: boolean): $CancellablePromise<void> {
  */
 export function SetAlbumItem(albumID: number, assetID: number, include: boolean): $CancellablePromise<void> {
     return $Call.ByID(1841706489, albumID, assetID, include);
+}
+
+/**
+ * SetEventGapHours sets the quiet period that splits detected events.
+ */
+export function SetEventGapHours(hours: number): $CancellablePromise<void> {
+    return $Call.ByID(3524076506, hours);
+}
+
+/**
+ * SetEventName renames an event; an empty name restores its generated title.
+ */
+export function SetEventName(id: number, name: string): $CancellablePromise<void> {
+    return $Call.ByID(4140607586, id, name);
 }
 
 /**

@@ -5,6 +5,8 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { AlbumKind, engine, Filter, thumbUrl } from '../bridge'
 import type { GridItem } from '../bridge'
 import { logError } from '../shared/errors'
+import { coalescedLoad } from '../shared/listStore'
+import { useLiveReload } from '../shared/liveReload'
 import { dayLabel, duration } from '../shared/format'
 import { listFormat, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
@@ -45,6 +47,8 @@ const scope = computed<Scope>(() => {
       tag: route.name === 'thing' ? id : 0,
       person: route.name === 'person' ? id : 0,
       album: route.name === 'album' ? id : 0,
+      place: route.name === 'place' ? id : 0,
+      event: route.name === 'event' ? id : 0,
     },
   }
 })
@@ -66,6 +70,40 @@ const titles: Record<Filter, MessageKey> = {
 const tagId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.tag ?? 0) : 0))
 const personId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.person ?? 0) : 0))
 const albumId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.album ?? 0) : 0))
+const placeId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.place ?? 0) : 0))
+const eventId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.event ?? 0) : 0))
+const groupTitle = ref('')
+let active = true
+const readGroupTitle = coalescedLoad(
+  async () => {
+    const place = placeId.value
+    const event = eventId.value
+    const result = !active ? null : place ? await engine.place(place) : event ? await engine.event(event) : null
+    return { place, event, name: result?.name ?? '' }
+  },
+  (result) => {
+    if (active && result.place === placeId.value && result.event === eventId.value) groupTitle.value = result.name
+  },
+)
+async function loadGroupTitle() {
+  try {
+    await readGroupTitle()
+  } catch (e) {
+    if (active) {
+      groupTitle.value = ''
+      logError(e)
+    }
+  }
+}
+watch(
+  [placeId, eventId],
+  () => {
+    groupTitle.value = ''
+    void loadGroupTitle()
+  },
+  { immediate: true },
+)
+useLiveReload(loadGroupTitle, (change) => change.assets && !!(eventId.value || placeId.value))
 watch(
   albumId,
   (id) => {
@@ -94,6 +132,8 @@ const title = computed(() => {
   if (tagId.value) return things.byId.get(tagId.value)?.name ?? t('nav.things')
   if (personId.value) return people.byId.get(personId.value)?.name || t('person.unnamed')
   if (albumId.value) return albums.byId.get(albumId.value)?.name || t('nav.albums')
+  if (placeId.value) return groupTitle.value || t('nav.places')
+  if (eventId.value) return groupTitle.value || t('nav.events')
   return t(titles[s.view.filter])
 })
 
@@ -114,6 +154,7 @@ onMounted(() => {
   if (scroller.value) ro.observe(scroller.value)
 })
 onBeforeUnmount(() => {
+  active = false
   ro?.disconnect()
   clearTimeout(focusTimer)
   lib.detach()
@@ -297,6 +338,8 @@ const emptyText = computed((): [string, string] => {
           : 'albums.manualEmptyHint',
       ),
     ]
+  if (placeId.value) return [t('places.viewEmpty'), t('places.emptyHint')]
+  if (eventId.value) return [t('events.viewEmpty'), t('events.emptyHint')]
   const keys: [MessageKey, MessageKey] =
     s.view.filter === Filter.FilterFavourites
       ? ['favourites.empty', 'favourites.emptyHint']
@@ -435,9 +478,13 @@ const searchNotes = computed(() => {
                     alt=""
                   />
                   <span v-else class="ph" />
-                  <span v-if="it?.v" class="badge video"><Icon name="video" :size="16" /></span>
+                  <span v-if="it?.v" class="badge video">
+                    <Icon name="video" :size="16" />
+                  </span>
                   <span v-if="it?.v && it.d" class="badge duration">{{ duration(it.d) }}</span>
-                  <span v-if="it?.f" class="badge fav"><Icon name="heart-filled" :size="16" /></span>
+                  <span v-if="it?.f" class="badge fav">
+                    <Icon name="heart-filled" :size="16" />
+                  </span>
                 </button>
               </div>
             </div>
@@ -467,9 +514,11 @@ const searchNotes = computed(() => {
   height: 100%;
   min-width: 0;
 }
+
 .main {
   flex: 1;
 }
+
 .heading {
   display: flex;
   flex-direction: column;
@@ -478,66 +527,80 @@ const searchNotes = computed(() => {
   min-width: 0;
   max-width: 30%;
 }
+
 .count {
   color: var(--text-3);
   font-size: 12px;
   white-space: nowrap;
 }
+
 .note {
   margin: 0 20px 8px;
   color: var(--text-3);
   font-size: 12px;
 }
+
 .zoom {
   display: flex;
   align-items: center;
   gap: 8px;
   color: var(--text-3);
 }
+
 .zoom input {
   width: 110px;
   accent-color: var(--accent);
 }
+
 .grid-wrap {
   position: relative;
   flex: 1;
   min-height: 0;
 }
+
 .scroller {
   position: absolute;
   inset: 0;
   overflow-y: auto;
   overflow-x: hidden;
   outline: none;
-  scrollbar-width: none; /* the timeline scrubber replaces the scrollbar */
+  scrollbar-width: none;
+  /* the timeline scrubber replaces the scrollbar */
 }
+
 .scroller::-webkit-scrollbar {
   display: none;
 }
+
 .rows {
   position: relative;
   width: 100%;
 }
+
 .row {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
 }
+
 .day-header {
   display: flex;
   align-items: flex-end;
   height: 100%;
   padding-bottom: 10px;
 }
+
 .day-header h2 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
 }
+
 .cells {
   display: flex;
 }
+
 .cell {
   position: relative;
   flex-shrink: 0;
@@ -548,6 +611,7 @@ const searchNotes = computed(() => {
   background: var(--placeholder);
   cursor: pointer;
 }
+
 .cell img,
 .cell .ph {
   display: block;
@@ -555,30 +619,37 @@ const searchNotes = computed(() => {
   height: 100%;
   object-fit: cover;
 }
+
 .cell .ph {
   background: linear-gradient(100deg, var(--placeholder) 40%, var(--surface-2) 50%, var(--placeholder) 60%);
   background-size: 300% 100%;
   animation: shimmer 1.6s ease-in-out infinite;
 }
+
 @keyframes shimmer {
   from {
     background-position: 100% 0;
   }
+
   to {
     background-position: 0 0;
   }
 }
+
 .cell.selected {
   outline: 3px solid var(--accent);
   outline-offset: -3px;
 }
+
 .cell.selected img {
   transform: scale(0.94);
   border-radius: var(--radius-s);
 }
+
 .cell img {
   transition: transform 0.12s ease;
 }
+
 .badge {
   position: absolute;
   display: grid;
@@ -586,14 +657,17 @@ const searchNotes = computed(() => {
   color: #fff;
   filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.6));
 }
+
 .badge.video {
   top: 6px;
   right: 6px;
 }
+
 .badge.fav {
   bottom: 6px;
   left: 6px;
 }
+
 .badge.duration {
   right: 5px;
   bottom: 5px;
@@ -602,6 +676,7 @@ const searchNotes = computed(() => {
   background: rgb(0 0 0 / 0.68);
   font-size: 11px;
 }
+
 .overlay {
   position: absolute;
   inset: 0;

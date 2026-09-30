@@ -64,6 +64,7 @@ const (
 	SettingAIOnBattery   = "ai_on_battery"      // bool: keep AI indexing going on battery (off by default)
 	SettingTagConfidence = "tag_confidence"     // float: minimum AI probability for a tag to apply
 	SettingVocabulary    = "vocabulary_version" // int: built-in Things last synced
+	SettingEventGapHours = "event_gap_hours"    // split events after this many quiet hours
 )
 
 // Settings are the user-facing preferences.
@@ -71,7 +72,17 @@ type Settings struct {
 	Videos        bool    `json:"videos"`
 	AIOnBattery   bool    `json:"aiOnBattery"`
 	TagConfidence float64 `json:"tagConfidence"` // TagConfidenceMin..Max
+	EventGapHours int     `json:"eventGapHours"`
 }
+
+const (
+	// EventGapDefault is the number of quiet hours that starts a new event.
+	EventGapDefault = 12
+	// EventGapMin is the shortest configurable gap in hours.
+	EventGapMin = 1
+	// EventGapMax is the longest configurable gap in hours.
+	EventGapMax = 72
+)
 
 // Tag confidence: the default, and the range the setting may take. The
 // lower bound is also the lowest score stored, so the slider never needs a
@@ -144,6 +155,35 @@ type View struct {
 	Tag    int64  `json:"tag,omitempty"`    // 0 = any
 	Person int64  `json:"person,omitempty"` // 0 = anyone
 	Album  int64  `json:"album,omitempty"`  // 0 = any; excludes other view filters
+	Place  int64  `json:"place,omitempty"`  // 0 = anywhere
+	Event  int64  `json:"event,omitempty"`  // 0 = any event
+}
+
+// Event is a consecutive run of visible media, separated by time or distance.
+type Event struct {
+	ID         int64  `json:"id"` // oldest asset in the run
+	Name       string `json:"name"`
+	StartAt    int64  `json:"startAt"`
+	EndAt      int64  `json:"endAt"`
+	Count      int    `json:"count"`
+	Cover      int64  `json:"cover"`
+	CoverThumb int    `json:"coverThumb"`
+	PlaceID    int64  `json:"placeId"`
+	FirstID    int64  `json:"-"` // boundary among equal timestamps; engine only
+	LastID     int64  `json:"-"`
+}
+
+// Place is a city near one or more visible GPS-tagged assets.
+type Place struct {
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Region     string  `json:"region"`
+	Country    string  `json:"country"`
+	Lat        float64 `json:"lat"`
+	Lon        float64 `json:"lon"`
+	Count      int     `json:"count"`
+	Cover      int64   `json:"cover"`
+	CoverThumb int     `json:"coverThumb"`
 }
 
 // AlbumRule is a conjunction of optional filters, saved for a smart album.

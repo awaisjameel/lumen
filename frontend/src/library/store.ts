@@ -1,6 +1,14 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, triggerRef } from 'vue'
-import { engine, Filter, onLibraryChanged, onProgress, startMedia, TAG_CONFIDENCE_DEFAULT } from '../bridge'
+import {
+  engine,
+  EVENT_GAP_DEFAULT,
+  Filter,
+  onLibraryChanged,
+  onProgress,
+  startMedia,
+  TAG_CONFIDENCE_DEFAULT,
+} from '../bridge'
 import type { Changes, DayBucket, GridItem, Progress, Settings, Source, View } from '../bridge'
 import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
@@ -19,7 +27,7 @@ export type Scope = { kind: 'timeline'; view: View } | { kind: 'search'; query: 
 export function scopeKey(s: Scope): string {
   return s.kind === 'search'
     ? `search:${s.query}`
-    : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}:${s.view.album ?? 0}`
+    : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}:${s.view.album ?? 0}:${s.view.place ?? 0}:${s.view.event ?? 0}`
 }
 
 /** Whether a change in the library can change which days and assets a timeline view shows. */
@@ -62,7 +70,12 @@ function loadZoom(): number {
 export const useLibrary = defineStore('library', () => {
   const ready = ref(false)
   const sources = ref<Source[]>([])
-  const settings = ref<Settings>({ videos: false, aiOnBattery: false, tagConfidence: TAG_CONFIDENCE_DEFAULT })
+  const settings = ref<Settings>({
+    videos: false,
+    aiOnBattery: false,
+    tagConfidence: TAG_CONFIDENCE_DEFAULT,
+    eventGapHours: EVENT_GAP_DEFAULT,
+  })
   const progress = ref<Progress | null>(null)
 
   const scope = ref<Scope>({ kind: 'timeline', view: { filter: Filter.FilterAll } })

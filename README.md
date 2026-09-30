@@ -43,14 +43,16 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 - Manual albums collect photos and videos without moving files. Membership follows an asset when its file is renamed or moved; the Details panel lets you add or remove the selected item.
 - Smart albums save a rule for media kind, favourites, inclusive capture dates, a Thing, and a person. They update from current library metadata and tags. Albums have live counts, covers, rename/edit, and deletion.
 - Duplicates review lists exact file copies and likely similar photos using the existing perceptual hashes. It only suggests matches and opens their folder; files are never changed automatically.
+- Places groups GPS-tagged media by nearby city using a bundled, offline GeoNames index. Existing libraries are resolved in the background after an upgrade. Places show live visible counts and open filtered timelines.
+- Events groups visible media after a configurable time gap (12 hours by default) or a location jump over 100 km. Events open filtered timelines and regroup as the library changes. Renames follow current members through later splits or removal of the oldest member; reset restores automatic names for the current group.
 
-Not yet: events, places, trash, organise-on-disk, the 2 GB cache cap, OCR.
+Not yet in Phase 5: blocking, organise-on-disk with dry run and undo, XMP sidecar export. Trash, the 2 GB cache cap and OCR also remain future work.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
 ## Setup (Windows)
 
-Needs Go 1.27, Node 22.22.2+ / 24.15+ / 26+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, and Python 3 (only to prepare the models). Toolchain used:
+Needs Go 1.27, Node 22.22.2+ / 24.15+ / 26+ and npm 11.19+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, and Python 3 (only to prepare the models). Toolchain used:
 
 - Go 1.27.1 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
 - User environment: `CGO_ENABLED=1`, `CC=clang`, `CXX=clang++`
@@ -79,7 +81,7 @@ Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), what
 | Python   | Ruff             | Ruff                                                                                                      | `ruff.toml`                                                                        |
 | Shell    |                  | ShellCheck                                                                                                |                                                                                    |
 
-The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm install`). New tool versions are at least a week old when pinned, matching `frontend/.npmrc`. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line.
+The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm install`). npm enforces a seven-day release-age window through `min-release-age=7` in `frontend/.npmrc`; engine checks reject unsupported Node/npm versions. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line.
 
 Editors do the same on save: `.editorconfig` sets line endings and indentation, and `.vscode/settings.json` runs these formatters and linters from the pinned copies (install the recommended extensions).
 
@@ -103,7 +105,7 @@ Before moving between implementation phases, also regenerate the bindings with
 do not run independent frontend and Go production builds concurrently. Browser
 component tests use jsdom; actual codec playback still needs a WebView smoke test
 (the app started with `LUMEN_DEVTOOLS_PORT`, driven over the DevTools protocol).
-See [the latest audit](docs/audit-2026-09-29.md) for findings, verification evidence
+See [the latest audit](docs/audit-2026-09-30.md) for findings, verification evidence
 and remaining acceptance limits.
 
 Handy environment variables:
@@ -132,6 +134,7 @@ services/            Wails services (Library, Search, People, Media), the loopba
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/{library,search,things,people,onboarding,settings,shared}   UI by feature
 frontend/src/albums  manual and smart album browser and rule editor
+frontend/src/{places,events}   GPS places and automatic event groups
 frontend/src/duplicates  exact-copy and similar-photo review (read-only)
 scripts/             deps.sh (native dependencies), prepare_models.py, env.sh
 spikes/              Phase 0 experiments (own Go module; models in spikes/.cache)
@@ -142,6 +145,8 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 **Tags.** A Thing applies to a photo when SigLIP's probability for its best prompt passes the confidence setting (default 0.02; scores from 0.002 up are stored, so the slider needs no re-scan). Generic concepts rarely pass on probability alone, because SigLIP learned from specific web captions, so ten broad kinds of photo are also assigned by best fit. On one real library this found 94% of the people photos, against 16% on probability alone. Prompts were chosen by measuring them on that library.
 
 **People.** Clustering joins groups of faces while their average cosine similarity is at least 0.42 (Phase 0 found every group at that threshold held one person). A new person needs clear faces in three photos: sharpness (variance of the Laplacian of the aligned face) at least 15, head turn at most 0.45 eye distances. On 204 office photos with 1,000 faces, 92% were placed into 28 people, each checked by eye to hold one person; the rest wait, unplaced, for more photos of them. The faces stage and clustering never undo the user: see `internal/people/cluster.go`.
+
+**Places.** City names come from [GeoNames](https://www.geonames.org/), licensed under CC BY 4.0. Lumen bundles a reduced 30 September 2026 `cities5000` snapshot (69,760 populated places), with region and country names, so lookups make no network request. A city within 75 km is an approximate label, not an exact administrative boundary. See [data provenance](docs/geonames.md).
 
 ## Deviations from the plan (so far)
 

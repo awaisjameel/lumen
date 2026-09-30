@@ -25,9 +25,11 @@ import type {
   DayItems as RawDayItems,
   DuplicateGroup as RawDuplicateGroup,
   DuplicateItem as RawDuplicateItem,
+  Event,
   Face,
   GridItem,
   Person,
+  Place,
   Progress,
   SearchResult,
   Settings,
@@ -46,6 +48,8 @@ export type {
   Face,
   GridItem,
   Person,
+  Event,
+  Place,
   Progress,
   Settings,
   Source,
@@ -78,6 +82,9 @@ export const SPRITE_ROWS = 4 // core.SpriteRows
 export const TAG_CONFIDENCE_DEFAULT = 0.02 // core.TagConfidenceDefault
 export const TAG_CONFIDENCE_MIN = 0.002 // core.TagConfidenceMin
 export const TAG_CONFIDENCE_MAX = 0.3 // core.TagConfidenceMax
+export const EVENT_GAP_DEFAULT = 12 // core.EventGapDefault
+export const EVENT_GAP_MIN = 1 // core.EventGapMin
+export const EVENT_GAP_MAX = 72 // core.EventGapMax
 export const MAX_NAME_LEN = 80 // core.MaxNameLen: people, Things and albums
 export type ThumbSize = typeof THUMB_SMALL | typeof THUMB_LARGE
 
@@ -133,6 +140,11 @@ export const engine = {
       ...g,
       items: (g.items ?? []).map((it) => ({ ...it, paths: it.paths ?? [] })),
     })),
+  places: async (): Promise<Place[]> => (await LibraryService.Places()) ?? [],
+  place: (id: number): Promise<Place> => LibraryService.Place(id),
+  events: async (): Promise<Event[]> => (await LibraryService.Events()) ?? [],
+  event: (id: number): Promise<Event> => LibraryService.Event(id),
+  setEventName: (id: number, name: string): Promise<void> => LibraryService.SetEventName(id, name),
   setFavourite: (id: number, fav: boolean): Promise<void> => LibraryService.SetFavourite(id, fav),
   albums: async (): Promise<Album[]> => (await LibraryService.Albums()) ?? [],
   /** Creates a manual album holding items, or a smart album (no items). */
@@ -152,6 +164,7 @@ export const engine = {
   setVideos: (on: boolean): Promise<void> => LibraryService.SetVideos(on),
   setAIOnBattery: (on: boolean): Promise<void> => LibraryService.SetAIOnBattery(on),
   setTagConfidence: (v: number): Promise<void> => LibraryService.SetTagConfidence(v),
+  setEventGapHours: (hours: number): Promise<void> => LibraryService.SetEventGapHours(hours),
 
   search: async (query: string): Promise<SearchResults> => {
     const r = await SearchService.Search(query)

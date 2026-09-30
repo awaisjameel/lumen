@@ -1,0 +1,102 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
+import { flushPromises, mount } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { engine, onLibraryChanged } from '../bridge'
+import type * as Bridge from '../bridge'
+import type { Changes, Event } from '../bridge'
+import LibraryView from './LibraryView.vue'
+
+vi.mock('../bridge', async (importOriginal) => ({
+  ...(await importOriginal<typeof Bridge>()),
+  engine: {
+    timeline: vi.fn<typeof Bridge.engine.timeline>().mockResolvedValue([]),
+    event: vi.fn<typeof Bridge.engine.event>(),
+  },
+  onLibraryChanged: vi.fn<typeof Bridge.onLibraryChanged>(),
+}))
+
+let changed!: (changes: Changes) => void
+const event = (id: number, name: string): Event => ({
+  id,
+  name,
+  startAt: 0,
+  endAt: 0,
+  count: 2,
+  cover: 0,
+  coverThumb: 0,
+  placeId: 0,
+})
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.useFakeTimers()
+  vi.mocked(engine.event).mockReset()
+  vi.mocked(onLibraryChanged).mockImplementation((callback) => {
+    changed = callback
+    return vi.fn()
+  })
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe = vi.fn()
+      unobserve = vi.fn()
+      disconnect = vi.fn()
+    },
+  )
+})
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+async function mountedTimeline() {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/events/:id', name: 'event', component: LibraryView }],
+  })
+  await router.push('/events/1')
+  const wrapper = mount(LibraryView, {
+    global: { plugins: [createPinia(), router], stubs: { SearchBox: true } },
+  })
+  await flushPromises()
+  return { wrapper, router }
+}
+
+it('refreshes an event heading after relevant library changes', async () => {
+  vi.mocked(engine.event).mockResolvedValueOnce(event(1, 'Before')).mockResolvedValueOnce(event(1, 'After'))
+  const { wrapper } = await mountedTimeline()
+  expect(wrapper.get('h1').text()).toBe('Before')
+  changed({ assets: true, thumbs: false, tags: false, people: false })
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(wrapper.get('h1').text()).toBe('After')
+  expect(engine.event).toHaveBeenCalledTimes(2)
+  wrapper.unmount()
+})
+
+it('does not apply a previous event title after the route changes', async () => {
+  let resolve!: (value: Event) => void
+  vi.mocked(engine.event)
+    .mockReturnValueOnce(new Promise((done) => (resolve = done)))
+    .mockResolvedValueOnce(event(2, 'Second event'))
+  const { wrapper, router } = await mountedTimeline()
+  await router.push('/events/2')
+  resolve(event(1, 'Old event'))
+  await flushPromises()
+  expect(wrapper.get('h1').text()).toBe('Second event')
+  expect(engine.event).toHaveBeenNthCalledWith(2, 2)
+  wrapper.unmount()
+})
+
+it('does not start a queued title read after unmount', async () => {
+  let resolve!: (value: Event) => void
+  vi.mocked(engine.event).mockReturnValueOnce(new Promise((done) => (resolve = done)))
+  const { wrapper } = await mountedTimeline()
+  changed({ assets: true, thumbs: false, tags: false, people: false })
+  await vi.advanceTimersByTimeAsync(3000)
+  wrapper.unmount()
+  resolve(event(1, 'Late event'))
+  await flushPromises()
+  expect(engine.event).toHaveBeenCalledOnce()
+})

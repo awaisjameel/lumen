@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { Device, engine, TAG_CONFIDENCE_MAX, TAG_CONFIDENCE_MIN } from '../bridge'
+import {
+  Device,
+  engine,
+  EVENT_GAP_DEFAULT,
+  EVENT_GAP_MAX,
+  EVENT_GAP_MIN,
+  TAG_CONFIDENCE_MAX,
+  TAG_CONFIDENCE_MIN,
+} from '../bridge'
 import type { Source } from '../bridge'
 import { useLibrary } from '../library/store'
 import { confirm } from '../shared/confirm'
@@ -60,6 +68,45 @@ async function setVideos(on: boolean) {
 async function setAIOnBattery(on: boolean) {
   lib.settings.aiOnBattery = on
   if (!(await run(() => engine.setAIOnBattery(on)))) lib.settings.aiOnBattery = !on
+}
+
+let pendingEventGap: number | null = null
+let eventGapRevision = 0
+let savingEventGap = false
+let savedEventGap = lib.settings.eventGapHours
+async function setEventGap(e: Event) {
+  if (!(e.target instanceof HTMLInputElement)) return
+  const parsed = e.target.valueAsNumber
+  const value = Math.min(
+    EVENT_GAP_MAX,
+    Math.max(EVENT_GAP_MIN, Number.isFinite(parsed) ? Math.round(parsed) : EVENT_GAP_DEFAULT),
+  )
+  e.target.value = String(value)
+  lib.settings.eventGapHours = value
+  pendingEventGap = value
+  eventGapRevision++
+  error.value = ''
+  if (savingEventGap) return
+  savingEventGap = true
+  try {
+    while (pendingEventGap !== null) {
+      const revision = eventGapRevision
+      const hours = pendingEventGap
+      pendingEventGap = null
+      try {
+        await engine.setEventGapHours(hours)
+        savedEventGap = hours
+        if (revision === eventGapRevision) await lib.refresh()
+      } catch (e) {
+        if (revision === eventGapRevision) {
+          lib.settings.eventGapHours = savedEventGap
+          error.value = errorText(e)
+        }
+      }
+    }
+  } finally {
+    savingEventGap = false
+  }
 }
 
 const themes: Theme[] = ['system', 'light', 'dark']
@@ -171,6 +218,18 @@ onBeforeUnmount(saveConfidence)
           </label>
           <details class="advanced">
             <summary>{{ t('settings.advanced') }}</summary>
+            <label class="event-gap">
+              {{ t('settings.eventGap') }}
+              <small class="muted">{{ t('settings.eventGapHint') }}</small>
+              <input
+                type="number"
+                :min="EVENT_GAP_MIN"
+                :max="EVENT_GAP_MAX"
+                step="1"
+                :value="lib.settings.eventGapHours"
+                @change="setEventGap"
+              />
+            </label>
             <div class="slider">
               <label for="confidence">{{ t('settings.confidence') }}</label>
               <small class="muted">{{ t('settings.confidenceHint') }}</small>
@@ -210,6 +269,24 @@ onBeforeUnmount(saveConfidence)
 </template>
 
 <style scoped>
+.event-gap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 16px 0;
+}
+
+.event-gap input {
+  width: 80px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
 .content {
   max-width: 720px;
   padding: 4px 0 16px;
