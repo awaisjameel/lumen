@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Replaces the scrollbar: years and months placed where they sit in the
 // timeline. Click or drag to jump; hover shows which month is there.
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DayBucket } from '../bridge'
 import { monthLabel } from '../shared/format'
 import { rowAt } from './layout'
@@ -85,19 +85,18 @@ function up() {
 const ro = new ResizeObserver(() => {
   if (track.value) trackH.value = track.value.clientHeight
 })
-onBeforeUnmount(() => ro.disconnect())
-function setTrack(el: unknown) {
-  track.value = el as HTMLElement | null
+onMounted(() => {
   if (track.value) {
     ro.observe(track.value)
     trackH.value = track.value.clientHeight
   }
-}
+})
+onBeforeUnmount(() => ro.disconnect())
 </script>
 
 <template>
   <div
-    :ref="setTrack"
+    ref="track"
     class="scrubber"
     role="scrollbar"
     aria-orientation="vertical"

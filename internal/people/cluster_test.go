@@ -1,6 +1,7 @@
 package people
 
 import (
+	"context"
 	"math"
 	"math/rand/v2"
 	"reflect"
@@ -199,17 +200,32 @@ func TestLinkerIsIncremental(t *testing.T) {
 	for k := range 20 {
 		faces = append(faces, w.faces(k, 6)...)
 	}
-	all := NewLinker(DefaultParams).Update(faces)
+	all, _ := NewLinker(DefaultParams).Update(t.Context(), faces)
 	l := NewLinker(DefaultParams)
-	l.Update(faces[:40])
-	l.Update(faces[:90])
-	if got := l.Update(faces); !reflect.DeepEqual(got, all) {
+	_, _ = l.Update(t.Context(), faces[:40])
+	_, _ = l.Update(t.Context(), faces[:90])
+	if got, _ := l.Update(t.Context(), faces); !reflect.DeepEqual(got, all) {
 		t.Error("incremental links differ from linking all at once")
 	}
 	// Placing faces drops them from the links.
 	faces[0].Person = 1
-	if got := l.Update(faces); got[faces[0].ID] != nil || len(got) != len(all)-1 {
+	if got, _ := l.Update(t.Context(), faces); got[faces[0].ID] != nil || len(got) != len(all)-1 {
 		t.Errorf("placed face still linked (%d links)", len(got))
+	}
+	// Taken out of that person again: linked as before, listed once.
+	faces[0].Person = 0
+	if got, _ := l.Update(t.Context(), faces); !reflect.DeepEqual(got, all) {
+		t.Error("a face placed and taken out again changed the links")
+	}
+	// Its photo hidden: it leaves every list, as if it had never been seen.
+	want, _ := NewLinker(DefaultParams).Update(t.Context(), faces[1:])
+	if got, _ := l.Update(t.Context(), faces[1:]); !reflect.DeepEqual(got, want) {
+		t.Error("links to a hidden face remain")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := NewLinker(DefaultParams).Update(ctx, faces); err == nil {
+		t.Error("a cancelled update succeeded")
 	}
 }
 

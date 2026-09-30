@@ -38,9 +38,19 @@ export function DeleteTag(id: number): $CancellablePromise<void> {
 }
 
 /**
+ * PrepareSearch readies the AI for a search the user is starting to type
+ * (the search box got focus). It does nothing without the AI.
+ */
+export function PrepareSearch(): $CancellablePromise<void> {
+    return $Call.ByID(2637945223);
+}
+
+/**
  * Search finds photos matching a description, best match first. Named
  * people in it narrow the search to photos of all of them ("Ali at the
- * beach"); names alone give their photos, newest first.
+ * beach"); names alone give their photos, newest first. Without the AI,
+ * the description can't be searched (the result says so): named people's
+ * photos are still found.
  */
 export function Search(query: string): $CancellablePromise<core$0.SearchResult> {
     return $Call.ByID(3154275024, query);
@@ -54,7 +64,8 @@ export function SetTagHidden(id: number, hidden: boolean): $CancellablePromise<v
 }
 
 /**
- * SuggestTags returns Things whose names contain text, for the search box.
+ * SuggestTags returns Things whose names contain text, for the search box
+ * (their id, name and kind; no counts).
  */
 export function SuggestTags(text: string): $CancellablePromise<core$0.Tag[] | null> {
     return $Call.ByID(1097184719, text);

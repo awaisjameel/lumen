@@ -2,8 +2,6 @@
 // The small, calm progress line in the sidebar. The app is fully usable
 // while this runs; it only says what is happening and offers a pause.
 import { computed } from 'vue'
-import { engine } from '../bridge'
-import { logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { useLibrary } from './store'
@@ -35,19 +33,31 @@ const label = computed(() => {
   return t('status.upToDate')
 })
 
+// What screen readers hear: the phase when it changes, not every count.
+const phase = computed(() => {
+  const v = p.value
+  if (!v) return ''
+  if (v.paused && left.value) return t('status.pausedPhase')
+  if (v.scanning || preparing.value) return t('status.preparingPhase')
+  if (understanding.value) return v.onBattery ? t('status.batteryPhase') : t('status.understandingPhase')
+  return t('status.upToDate')
+})
+
 function togglePause() {
-  if (p.value) engine.setPaused(!p.value.paused).catch(logError)
+  if (p.value) void lib.setPaused(!p.value.paused)
 }
 </script>
 
 <template>
-  <div v-if="p" class="status" role="status" aria-live="polite">
+  <div v-if="p" class="status">
+    <span class="sr-only" role="status">{{ phase }}</span>
     <div class="line">
       <span class="label">{{ label }}</span>
       <button
         v-if="busy || p.paused"
         class="icon-btn small"
         :title="p.paused ? t('status.resume') : t('status.pause')"
+        :aria-label="p.paused ? t('status.resume') : t('status.pause')"
         @click="togglePause"
       >
         <Icon :name="p.paused ? 'play' : 'pause'" :size="14" />
@@ -112,6 +122,6 @@ function togglePause() {
 }
 .sub {
   margin: 4px 0 0;
-  color: var(--text-3);
+  color: var(--text-2); /* --text-3 is under 4.5:1 on this tinted panel */
 }
 </style>

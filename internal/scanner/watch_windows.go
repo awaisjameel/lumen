@@ -4,38 +4,36 @@ package scanner
 
 import (
 	"context"
-	"io/fs"
-	"log/slog"
+	"errors"
 	"path/filepath"
-	"syscall"
+	"strings"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-func isHiddenOrSystem(d fs.DirEntry) bool {
-	info, err := d.Info()
+// Watch reports changes anywhere under dir until ctx is cancelled, then
+// returns nil; if the watch fails (the folder was deleted, its drive
+// unplugged) it returns why. It uses one recursive ReadDirectoryChangesW
+// handle per source instead of one watch per sub-folder. ready, if not nil,
+// is called once the watch runs. onChange receives the full path of each
+// changed entry; if Windows drops events (buffer overflow) it receives dir
+// itself, meaning "rescan all".
+func Watch(ctx context.Context, dir string, ready func(), onChange func(path string)) error {
+	done, err := watch(ctx, dir, onChange)
 	if err != nil {
-		return false
+		return err
 	}
-	if a, ok := info.Sys().(*syscall.Win32FileAttributeData); ok {
-		return a.FileAttributes&(windows.FILE_ATTRIBUTE_HIDDEN|windows.FILE_ATTRIBUTE_SYSTEM) != 0
+	if ready != nil {
+		ready()
 	}
-	return false
+	return <-done
 }
 
-// Watch reports changes anywhere under dir until ctx is cancelled. It uses one
-// recursive ReadDirectoryChangesW handle per source instead of one watch per
-// sub-folder. onChange receives the full path of each changed entry; if Windows
-// drops events (buffer overflow) it receives dir itself, meaning "rescan all".
-func Watch(ctx context.Context, dir string, onChange func(path string)) error {
-	_, err := watch(ctx, dir, onChange)
-	return err
-}
-
-// watch is Watch plus a channel that closes once the handle is released.
-func watch(ctx context.Context, dir string, onChange func(path string)) (<-chan struct{}, error) {
+// watch starts watching dir. done receives the watch's outcome (nil when
+// cancelled) once its handle is released.
+func watch(ctx context.Context, dir string, onChange func(path string)) (<-chan error, error) {
 	p, err := windows.UTF16PtrFromString(dir)
 	if err != nil {
 		return nil, err
@@ -51,13 +49,14 @@ func watch(ctx context.Context, dir string, onChange func(path string)) (<-chan 
 	// On cancel it interrupts the read, retrying in case the reader was between
 	// reads, and closes the handle only once the reader has returned, so
 	// CancelIoEx never touches a closed (and possibly reused) handle.
-	readerDone := make(chan struct{})
-	released := make(chan struct{})
+	readerDone := make(chan error, 1)
+	done := make(chan error, 1)
 	go func() {
-		defer close(released)
+		var err error
+		defer func() { done <- err }()
 		defer windows.CloseHandle(h) //nolint:errcheck // nothing to do if closing fails
 		select {
-		case <-readerDone:
+		case err = <-readerDone:
 			return
 		case <-ctx.Done():
 		}
@@ -67,41 +66,79 @@ func watch(ctx context.Context, dir string, onChange func(path string)) (<-chan 
 			_ = windows.CancelIoEx(h, nil) // fails once the read has ended; the loop checks
 			select {
 			case <-readerDone:
-				return
+				return // cancelled: err stays nil
 			case <-t.C:
 			}
 		}
 	}()
 
-	go func() {
-		defer close(readerDone)
-		const mask = windows.FILE_NOTIFY_CHANGE_FILE_NAME | windows.FILE_NOTIFY_CHANGE_DIR_NAME |
-			windows.FILE_NOTIFY_CHANGE_SIZE | windows.FILE_NOTIFY_CHANGE_LAST_WRITE
-		buf := make([]byte, 64<<10) // must be DWORD-aligned; Go's allocator guarantees it
-		for {
-			var n uint32
-			err := windows.ReadDirectoryChanges(h, &buf[0], uint32(len(buf)), true, mask, &n, nil, 0)
-			if ctx.Err() != nil {
-				return
-			}
-			if err != nil {
-				slog.Warn("folder watch stopped", "dir", dir, "err", err)
-				return
-			}
-			if n == 0 { // overflow: too many changes to report individually
-				onChange(dir)
-				continue
-			}
-			for off := uint32(0); ; {
-				info := (*windows.FileNotifyInformation)(unsafe.Pointer(&buf[off]))
-				name := unsafe.Slice(&info.FileName, info.FileNameLength/2)
-				onChange(filepath.Join(dir, windows.UTF16ToString(name)))
-				if info.NextEntryOffset == 0 {
-					break
-				}
-				off += info.NextEntryOffset
-			}
+	go func() { readerDone <- readChanges(ctx, h, dir, onChange) }()
+	return done, nil
+}
+
+// readChanges reports changes on h until ctx ends (nil) or reading fails.
+func readChanges(ctx context.Context, h windows.Handle, dir string, onChange func(path string)) error {
+	const mask = windows.FILE_NOTIFY_CHANGE_FILE_NAME | windows.FILE_NOTIFY_CHANGE_DIR_NAME |
+		windows.FILE_NOTIFY_CHANGE_SIZE | windows.FILE_NOTIFY_CHANGE_LAST_WRITE
+	buf := make([]byte, 64<<10) // must be DWORD-aligned; Go's allocator guarantees it
+	for {
+		var n uint32
+		err := windows.ReadDirectoryChanges(h, &buf[0], uint32(len(buf)), true, mask, &n, nil, 0)
+		if ctx.Err() != nil {
+			return nil //nolint:nilerr // cancelled: the read was interrupted on purpose
 		}
-	}()
-	return released, nil
+		// Too many changes to report one by one (a zero-byte result, or, on
+		// network shares, ERROR_NOTIFY_ENUM_DIR): rescan everything.
+		if errors.Is(err, windows.ERROR_NOTIFY_ENUM_DIR) || (err == nil && n == 0) {
+			onChange(dir)
+			continue
+		}
+		if err != nil {
+			onChange(dir) // what changed before the failure went unreported
+			return err
+		}
+		for off := uint32(0); ; {
+			info := (*windows.FileNotifyInformation)(unsafe.Pointer(&buf[off]))
+			name := unsafe.Slice(&info.FileName, info.FileNameLength/2)
+			onChange(longName(filepath.Join(dir, windows.UTF16ToString(name))))
+			if info.NextEntryOffset == 0 {
+				break
+			}
+			off += info.NextEntryOffset
+		}
+	}
+}
+
+// longName expands 8.3 short names ("PHOTOS~1") that Windows may report,
+// so a changed path matches the one the scan recorded. A path that no longer
+// exists keeps its short last part, but its folder is expanded.
+func longName(path string) string {
+	if !strings.Contains(path, "~") {
+		return path
+	}
+	if long, ok := getLongPathName(path); ok {
+		return long
+	}
+	if dir, ok := getLongPathName(filepath.Dir(path)); ok {
+		return filepath.Join(dir, filepath.Base(path))
+	}
+	return path
+}
+
+func getLongPathName(path string) (string, bool) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return "", false
+	}
+	buf := make([]uint16, windows.MAX_PATH)
+	for {
+		n, err := windows.GetLongPathName(p, &buf[0], uint32(len(buf)))
+		if err != nil || n == 0 {
+			return "", false
+		}
+		if n <= uint32(len(buf)) {
+			return windows.UTF16ToString(buf[:n]), true
+		}
+		buf = make([]uint16, n) // n is the size needed
+	}
 }

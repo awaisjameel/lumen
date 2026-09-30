@@ -25,7 +25,9 @@ func For(ctx context.Context, n, workers int, fn func(i int)) {
 	for range min(workers, n) {
 		wg.Go(func() {
 			for i := range idx {
-				fn(i)
+				if ctx.Err() == nil { // an index handed out as ctx ended is skipped too
+					fn(i)
+				}
 			}
 		})
 	}

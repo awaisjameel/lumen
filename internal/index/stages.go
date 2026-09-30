@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
+	"runtime"
 	"slices"
 	"time"
 
@@ -24,6 +24,13 @@ type stage[R any] struct {
 	wake  chan struct{}   // nudged when new work may exist
 	next  []chan struct{} // nudged after a save: the stages that wait for this one
 	model releaser        // the model the stage runs, freed when idle or held; may be nil
+	// changes is what a saved batch changes in the library, for the UI.
+	changes core.Changes
+	// unchanged, if set, reports a result that only records the new version
+	// (see upgrade.go): a batch of nothing else changes nothing to show.
+	unchanged func(R) bool
+	// fail, if set, shows why the stage can't run ("" once it runs again).
+	fail func(msg string)
 	// process handles a batch. An error means the stage itself can't run
 	// right now (e.g. the model won't load): nothing is saved and the batch
 	// is retried later. Per-file failures go in the results instead.
@@ -37,11 +44,22 @@ type releaser interface {
 	release()
 }
 
+// A stage that can't run (its model fails) tries again after stageRetry,
+// doubling up to stageRetryMax. idlePoll is how often an idle stage looks
+// for work it wasn't woken for.
+const (
+	stageRetry    = 30 * time.Second
+	stageRetryMax = 10 * time.Minute
+	idlePoll      = 30 * time.Second
+)
+
 // runStage drains one stage's job queue: fetch a batch (what the user is
 // looking at first, then newest first), process it, save the results in one
 // transaction, repeat. With nothing to do it sleeps until woken. Batches are
 // small so the UI sees results stream in and focus changes apply fast.
 func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
+	retry := stageRetry
+	failing := false
 	for {
 		if !ix.waitTurn(ctx, s.name, s.model) {
 			return
@@ -52,7 +70,7 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 				return
 			}
 			slog.Error("fetch jobs", "stage", s.name, "err", err)
-			sleep(ctx, 5*time.Second)
+			sleep(ctx, retryDelay)
 			continue
 		}
 		if len(items) == 0 {
@@ -63,7 +81,7 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 			case <-ctx.Done():
 				return
 			case <-s.wake:
-			case <-time.After(30 * time.Second):
+			case <-time.After(idlePoll):
 			}
 			continue
 		}
@@ -72,16 +90,34 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 			return // don't save half-cancelled work; it simply re-runs next time
 		}
 		if err != nil {
-			slog.Error("stage can't run", "stage", s.name, "err", err)
-			sleep(ctx, time.Minute)
+			slog.Error("stage can't run", "stage", s.name, "err", err, "retry in", retry)
+			if s.model != nil {
+				s.model.release() // a model that failed is loaded afresh next time
+			}
+			if s.fail != nil {
+				s.fail(err.Error())
+			}
+			failing = true
+			sleep(ctx, retry)
+			retry = min(2*retry, stageRetryMax)
 			continue
 		}
 		if err := s.save(ctx, results); err != nil {
-			slog.Error("save results", "stage", s.name, "err", err)
-			sleep(ctx, 5*time.Second)
+			if ctx.Err() == nil {
+				slog.Error("save results", "stage", s.name, "err", err)
+			}
+			sleep(ctx, retryDelay)
 			continue
 		}
-		ix.changed.Store(true)
+		if failing {
+			failing, retry = false, stageRetry
+			if s.fail != nil {
+				s.fail("")
+			}
+		}
+		if s.unchanged == nil || !all(results, s.unchanged) {
+			ix.markChanged(s.changes)
+		}
 		for _, ch := range s.next {
 			nudge(ch)
 		}
@@ -98,7 +134,27 @@ func eachItem[R any](workers int, fn func(context.Context, store.JobItem) R) fun
 	}
 }
 
+// all reports whether f holds for every one of rs.
+func all[R any](rs []R, f func(R) bool) bool {
+	for _, r := range rs {
+		if !f(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (ix *Indexer) fetch(ctx context.Context, stage core.Stage, n int) ([]store.JobItem, error) {
+	if stage == core.StageFaces {
+		// Photos the thumbnail stage decoded for faces go first, before
+		// they are dropped.
+		if ids := ix.pixels.ids(); len(ids) > 0 {
+			items, err := ix.store.PendingJobsOf(ctx, stage, ids[:min(len(ids), n)])
+			if err != nil || len(items) > 0 {
+				return items, err
+			}
+		}
+	}
 	ix.mu.Lock()
 	focus := ix.focus
 	ix.mu.Unlock()
@@ -126,15 +182,69 @@ func (ix *Indexer) doMetadata(ctx context.Context, j store.JobItem) (r store.Met
 	if !m.TakenAt.IsZero() {
 		r.TakenAt = core.WallClock(m.TakenAt)
 	}
+	if !m.Modified.IsZero() {
+		r.Modified = core.WallClock(m.Modified)
+	}
 	r.Width, r.Height, r.Orientation, r.Camera, r.Lat, r.Lon = m.Width, m.Height, m.Orientation, m.Camera, m.Lat, m.Lon
 	r.Duration, r.VideoCodec, r.AudioCodec = m.Duration, m.VideoCodec, m.AudioCodec
 	return r
 }
 
-func (ix *Indexer) doThumbnail(ctx context.Context, j store.JobItem) (r store.ThumbResult) {
+// thumbnailWorkers is how many files the thumbnail stage decodes at once:
+// half the CPU's threads (libvips runs one per file), at least 6 where there
+// are more, leaving one for the UI. Six on 20 threads left most of them idle.
+var thumbnailWorkers = max(1, min(runtime.NumCPU()-1, max(6, runtime.NumCPU()/2)))
+
+// doThumbnails makes a batch's thumbnails. Photos the faces stage will want
+// next are decoded at faceSide and kept for it (see decoded), with the
+// thumbnails made from those pixels.
+func (ix *Indexer) doThumbnails(ctx context.Context, items []store.JobItem) ([]store.ThumbResult, error) {
+	keep := ix.keepForFaces(ctx, items)
+	return eachItem(thumbnailWorkers, func(ctx context.Context, j store.JobItem) store.ThumbResult {
+		return ix.doThumbnail(ctx, j, keep[j.AssetID])
+	})(ctx, items)
+}
+
+// keepForFaces returns the photos of items whose faces are still to find,
+// while the faces stage can run.
+func (ix *Indexer) keepForFaces(ctx context.Context, items []store.JobItem) map[int64]bool {
+	ix.mu.Lock()
+	off := ix.people == nil || ix.facesError != "" || ix.held(core.StageFaces)
+	ix.mu.Unlock()
+	if off {
+		return nil
+	}
+	var ids []int64
+	for _, j := range items {
+		if j.Kind == core.KindPhoto {
+			ids = append(ids, j.AssetID)
+		}
+	}
+	keep, err := ix.store.Unfinished(ctx, core.StageFaces, ids)
+	if err != nil {
+		slog.Error("find photos waiting for faces", "err", err)
+		return nil
+	}
+	return keep
+}
+
+func (ix *Indexer) doThumbnail(ctx context.Context, j store.JobItem, keep bool) (r store.ThumbResult) {
 	r.AssetID = j.AssetID
 	defer recoverInto(&r.Err, j.Path)
-	t, err := ix.cache.Decoder.Thumbnail(ctx, j.Path, j.Kind, j.Orientation)
+	if j.Prior != "" && thumbnailsStand(j) {
+		r.Unchanged = true
+		return r
+	}
+	var t media.Thumbs
+	var err error
+	if keep && ix.pixels.room() {
+		t, _ = ix.thumbnailForFaces(ctx, j)
+	}
+	if t.Large == nil {
+		// Not kept, or that failed: the usual way, whose result or error
+		// is the file's.
+		t, err = ix.cache.Decoder.Thumbnail(ctx, j.Path, j.Kind, j.Orientation)
+	}
 	switch {
 	case errors.Is(err, media.ErrUnsupported):
 		r.Skipped = true
@@ -151,13 +261,28 @@ func (ix *Indexer) doThumbnail(ctx context.Context, j store.JobItem) (r store.Th
 	return r
 }
 
+// thumbnailForFaces decodes a photo at faceSide, keeps it for the faces
+// stage and makes the thumbnails from it.
+func (ix *Indexer) thumbnailForFaces(ctx context.Context, j store.JobItem) (media.Thumbs, error) {
+	im, err := ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
+	if err != nil {
+		return media.Thumbs{}, err
+	}
+	t, err := media.ThumbsFromImage(im)
+	if err == nil {
+		ix.pixels.put(j.AssetID, j.Orientation, im)
+	}
+	return t, err
+}
+
 // embedWorkers is how many photos have their image model input (read from
 // the thumbnail) prepared at once.
 const embedWorkers = 4
 
-// doEmbeddings embeds a batch of photos with SigLIP and tags them. Inputs
-// come from the 1024 px thumbnails (upright, small, already decoded once),
-// rebuilt first if they were evicted.
+// doEmbeddings embeds a batch of photos and videos with SigLIP and tags
+// them. Photo inputs come from the 1024 px thumbnails (upright, small,
+// already decoded once), rebuilt first if they were evicted; videos are
+// sampled frame by frame.
 func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]store.EmbedResult, error) {
 	if err := ix.search.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("search engine: %w", err)
@@ -215,13 +340,17 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 			return nil, err
 		}
 		for k, i := range chunk {
+			if vecs[k] == nil {
+				results[i].Err = errNoVector
+				continue
+			}
 			results[i].Vec, results[i].Scale = search.Quantize(vecs[k])
 			results[i].Tags = ix.search.Tags(vecs[k])
 		}
 	}
 	for i, j := range items {
 		if j.Kind == core.KindVideo {
-			if err := ix.embedVideo(ctx, j, enc, side, &results[i]); err != nil {
+			if err := ix.embedVideoSafely(ctx, j, enc, side, &results[i]); err != nil {
 				return nil, err
 			}
 		}
@@ -230,8 +359,20 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 	return results, nil
 }
 
+// errNoVector is the per-file error for an input the image model made no
+// usable vector of.
+const errNoVector = "the image model gave no usable result"
+
+// embedVideoSafely is embedVideo, turning a panic (a corrupt file finding a
+// decoder bug) into the video's error, as the per-file stages do.
+func (ix *Indexer) embedVideoSafely(ctx context.Context, j store.JobItem, enc *ai.ImageEncoder, side int,
+	r *store.EmbedResult) error {
+	defer recoverInto(&r.Err, j.Path)
+	return ix.embedVideo(ctx, j, enc, side, r)
+}
+
 // embedVideo keeps each sampled moment searchable and stores a normalised
-// mean for the existing asset-level tag and search paths.
+// mean for the asset-level vector.
 func (ix *Indexer) embedVideo(ctx context.Context, j store.JobItem, enc *ai.ImageEncoder, side int,
 	r *store.EmbedResult) error {
 	var inputs [][]byte
@@ -268,6 +409,9 @@ func (ix *Indexer) embedVideo(ctx context.Context, j store.JobItem, enc *ai.Imag
 			return err
 		}
 		for k, v := range vecs {
+			if v == nil {
+				continue // that frame alone is left out
+			}
 			q, scale := search.Quantize(v)
 			r.Frames = append(r.Frames, store.FrameEmbedding{At: times[lo+k], Vec: q, Scale: scale})
 			for d, x := range v {
@@ -276,14 +420,9 @@ func (ix *Indexer) embedVideo(ctx context.Context, j store.JobItem, enc *ai.Imag
 			r.Tags = search.BestTags(r.Tags, ix.search.Tags(v))
 		}
 	}
-	var norm float64
-	for _, x := range mean {
-		norm += float64(x) * float64(x)
-	}
-	if norm > 0 {
-		for d := range mean {
-			mean[d] /= float32(math.Sqrt(norm))
-		}
+	if !ai.Normalise(mean) {
+		r.Frames, r.Tags, r.Err = nil, nil, errNoVector
+		return nil
 	}
 	r.Vec, r.Scale = search.Quantize(mean)
 	return nil
@@ -291,7 +430,7 @@ func (ix *Indexer) embedVideo(ctx context.Context, j store.JobItem, enc *ai.Imag
 
 // saveEmbeddings stores a batch, then makes it searchable.
 func (ix *Indexer) saveEmbeddings(ctx context.Context, rs []store.EmbedResult) error {
-	if err := ix.store.SaveEmbeddings(ctx, ix.search.Model().Version, rs); err != nil {
+	if err := ix.store.SaveEmbeddings(ctx, ix.search.Model().Version, ix.version[core.StageEmbedding], rs); err != nil {
 		return err
 	}
 	for _, r := range rs {
@@ -317,17 +456,34 @@ const (
 	faceThreads  = 2 // CPU threads per face model run
 )
 
-// doFaces finds, aligns and recognises the faces in a batch of photos.
+// doFaces finds, aligns and recognises the faces in a batch of photos,
+// except where those found before an upgrade stand (see facesStanding).
 func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.FaceResult, error) {
-	faces, err := ix.faces.get()
+	stand, err := ix.facesStanding(ctx, items)
 	if err != nil {
 		return nil, err
 	}
 	results := make([]store.FaceResult, len(items))
-	parallel.For(ctx, len(items), faceWorkers, func(i int) {
-		j := items[i]
-		r := &results[i]
-		r.AssetID = j.AssetID
+	var run []int
+	for i, j := range items {
+		results[i].AssetID = j.AssetID
+		if stand[j.AssetID] {
+			results[i].Unchanged = true
+			ix.pixels.take(j.AssetID, j.Orientation) // if the thumbnail stage kept it, it isn't wanted
+		} else {
+			run = append(run, i)
+		}
+	}
+	if len(run) == 0 {
+		return results, nil // without loading the models
+	}
+	faces, err := ix.faces.get()
+	if err != nil {
+		return nil, err
+	}
+	parallel.For(ctx, len(run), faceWorkers, func(k int) {
+		j := items[run[k]]
+		r := &results[run[k]]
 		defer recoverInto(&r.Err, j.Path)
 		process := func(im media.Image, at int64) error {
 			found, err := faces.Detect(im.Pix, im.W, im.H, faceMinScore)
@@ -341,6 +497,9 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 			}
 			w, h := float64(im.W), float64(im.H)
 			for k, f := range found {
+				if ids[k].Vec == nil {
+					continue // not recognisable: as if too small
+				}
 				r.Faces = append(r.Faces, store.DetectedFace{
 					Frame: at,
 					X:     float32(f.X / w), Y: float32(f.Y / h), W: float32(f.W / w), H: float32(f.H / h),
@@ -354,8 +513,10 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 			err = ix.cache.Decoder.Frames(ctx, j.Path, media.SampleCount(j.Duration), faceSide,
 				func(f media.Frame) error { return process(f.Image, f.At) })
 		} else {
-			var im media.Image
-			im, err = ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
+			im, ok := ix.pixels.take(j.AssetID, j.Orientation)
+			if !ok {
+				im, err = ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
+			}
 			if err == nil {
 				err = process(im, 0)
 			}
@@ -374,12 +535,16 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 
 // saveFaces stores a batch, then lets the people engine group them.
 func (ix *Indexer) saveFaces(ctx context.Context, rs []store.FaceResult) error {
-	if err := ix.store.SaveFaces(ctx, ix.people.Model().Version, rs); err != nil {
+	if err := ix.store.SaveFaces(ctx, ix.people.Model().Version, ix.version[core.StageFaces], rs); err != nil {
 		return err
 	}
-	ix.people.Nudge()
+	if !all(rs, facesUnchanged) {
+		ix.people.Nudge()
+	}
 	return nil
 }
+
+func facesUnchanged(r store.FaceResult) bool { return r.Unchanged }
 
 // recoverInto turns a panic in a decoder (corrupt files find bugs) into a
 // per-file error instead of taking the whole app down.

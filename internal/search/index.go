@@ -1,7 +1,7 @@
 // Package search turns text into ranked assets and decides which Things an
 // image shows. Image embeddings live in SQLite (the source of truth) and, for
 // speed, in an in-memory int8 Index that a plain parallel scan searches: at
-// 300,000 photos that is about 230 MB and 20 ms (spikes/README.md).
+// 300,000 photos that is about 230 MB and 17 ms (spikes/README.md).
 package search
 
 import (
@@ -26,14 +26,15 @@ type Index struct {
 // NewIndex returns an empty index for vectors of dim values.
 func NewIndex(dim int) *Index { return &Index{dim: dim, pos: map[int64]int{}} }
 
-// Quantize maps a vector to int8 with one scale: v ≈ q * scale.
+// Quantize maps a vector to int8 with one scale: v ≈ q * scale. A vector
+// that is not finite quantizes to zero, which matches nothing.
 func Quantize(v []float32) (q []int8, scale float32) {
 	var m float32
 	for _, x := range v {
 		m = max(m, float32(math.Abs(float64(x))))
 	}
 	q = make([]int8, len(v))
-	if m == 0 {
+	if m == 0 || math.IsNaN(float64(m)) || math.IsInf(float64(m), 0) {
 		return q, 0
 	}
 	scale = m / 127
@@ -96,6 +97,10 @@ type Hit struct {
 	At    int64 // ms of the best matching video frame; 0 for photos
 }
 
+// rowsPerWorker is the least rows a search worker scans: fewer would cost
+// more to start than they save.
+const rowsPerWorker = 2048
+
 // Search returns up to k assets whose cosine similarity to the unit vector
 // q is at least minCos, best first. With allow, only assets it accepts count.
 func (x *Index) Search(q []float32, minCos float32, k int, allow func(id int64) bool) []Hit {
@@ -106,7 +111,7 @@ func (x *Index) Search(q []float32, minCos float32, k int, allow func(id int64) 
 	if n == 0 || k <= 0 || qs == 0 {
 		return nil
 	}
-	workers := max(1, min(runtime.NumCPU(), n/2048))
+	workers := max(1, min(runtime.NumCPU(), n/rowsPerWorker))
 	parts := make([][]Hit, workers)
 	chunk := (n + workers - 1) / workers
 	var wg sync.WaitGroup
@@ -131,7 +136,7 @@ func (x *Index) scan(q []int8, qs float32, lo, hi int, minCos float32, k int, al
 			continue
 		}
 		s := x.cos(i, q, qs)
-		if s < floor {
+		if !(s >= floor) { // also drops NaN, which compares false
 			continue
 		}
 		top = append(top, Hit{ID: x.ids[i], Score: s})

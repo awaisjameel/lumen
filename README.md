@@ -26,7 +26,7 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 
 **Phase 3 (people)** is working:
 
-- **Faces**: YuNet finds faces (with five landmarks) in each photo decoded at 2048 px; each is aligned to SFace's template and turned into a 128-dim identity vector. Both models run on the CPU, loaded only while there is work; a 1,466-photo library took about 45 s on a laptop
+- **Faces**: YuNet finds faces (with five landmarks) in each photo decoded at 2048 px; each is aligned to SFace's template and turned into a 128-dim identity vector. Both models run on the GPU through DirectML (CPU fallback; the two give the same faces and vectors), taking turns with the image model, loaded only while there is work; a 1,466-photo library took about 45 s on a laptop
 - **People**: faces are grouped by average-linkage clustering (a group's similarity is the dot product of mean vectors, so merging is cheap), incrementally as photos arrive. Two faces in one photo are never one person; blurred or turned-away faces may join someone but never start a new person
 - **User corrections always win**: naming, merging (naming someone with a name already taken asks "same person?"), hiding, "not this person" (never put back), moving faces to someone else or a new person (splitting), choosing their picture. A face placed by the user never moves; a named person is never merged automatically
 - **People view**, a person's photos (their page is the timeline, filtered), a face review that lists the least-alike faces first, people in the details panel ("Who is this?" for faces not recognised yet)
@@ -36,7 +36,7 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 
 - Videos are included when the user enables them in Settings. Bundled FFmpeg and ffprobe read capture date, dimensions, duration, codecs, camera, and location without changing the original file.
 - Indexing makes a poster and a 4×4 hover preview sprite. SigLIP 2 and face recognition sample video frames (about one per five seconds, at most 24). Search results jump to the best matching moment.
-- The viewer plays supported files directly and converts other codecs to H.264/AAC while playing. Seeking a converted video starts a new stream at that point; converted copies are not kept on disk.
+- The viewer plays supported files directly and converts other codecs to H.264/AAC while playing. Seeking a converted video starts a new stream at that point; converted copies are not kept on disk. Video streams from a small server on 127.0.0.1 (a random secret in every path), because the app's own origin hands WebView2 a response only once it is complete.
 
 **Phase 5 (organization) is underway:**
 
@@ -101,9 +101,10 @@ Before moving between implementation phases, also regenerate the bindings with
 `wails3 generate bindings -ts -i`, check `git diff -- frontend/bindings`, and run
 `wails3 build`. The frontend must finish building before Go embeds `frontend/dist`;
 do not run independent frontend and Go production builds concurrently. Browser
-component tests use jsdom; actual codec playback still needs a browser or WebView
-smoke test. See [the current implementation audit](docs/audit-2026-09-28-current.md) for findings,
-verification evidence and remaining acceptance limits.
+component tests use jsdom; actual codec playback still needs a WebView smoke test
+(the app started with `LUMEN_DEVTOOLS_PORT`, driven over the DevTools protocol).
+See [the latest audit](docs/audit-2026-09-29.md) for findings, verification evidence
+and remaining acceptance limits.
 
 Handy environment variables:
 
@@ -127,7 +128,7 @@ internal/search      in-memory int8 vector index, search, Things vocabulary and 
 internal/people      face clustering (incremental, constrained by the user's corrections), names in searches
 internal/index       background pipeline: scan loop, stage workers, model loading, battery, events
 internal/parallel    the worker pool loops run on
-services/            thin Wails services (LibraryService, SearchService, PeopleService, MediaService)
+services/            Wails services (Library, Search, People, Media), the loopback video server, error codes
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/{library,search,things,people,onboarding,settings,shared}   UI by feature
 frontend/src/albums  manual and smart album browser and rule editor
@@ -154,4 +155,6 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **One writer connection** instead of a writer goroutine: SQLite writes serialise on it, and callers batch hundreds of rows per transaction.
 - **People are clusters, named or not** (no separate `cluster_id`): a new group of faces is an unnamed person, and naming is how the user confirms it. Face vectors live in the `faces` table (float32 BLOBs), not a vector extension.
 - **Faces are decoded at 2048 px** for their stage (not the 1024 px preview): nearly every face is then big enough to recognise. Detecting on tiles as well found only 3% more faces, for five times the work.
+- **Videos stream from a loopback server**, not the app's asset handler: on Windows, Wails buffers each response until it is complete, which would hold a whole conversion in memory before playback started.
+- **Names and paths compare with Unicode case folding** (`core.Fold`, also the SQL function `fold()`), not SQLite's `NOCASE`, which folds only A–Z: "Émile" and "émile" are one person, as Windows treats "ÉTÉ" and "été" as one folder.
 - **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). Trim it when packaging the installer (Phase 6), after the video decoder and encoder set is finalized.

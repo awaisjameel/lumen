@@ -10,6 +10,7 @@ package vips
 #cgo CFLAGS: -I${SRCDIR}/../../../deps/vips/include -I${SRCDIR}/../../../deps/vips/include/glib-2.0 -I${SRCDIR}/../../../deps/vips/lib/glib-2.0/include
 #cgo LDFLAGS: -L${SRCDIR}/../../../deps/vips/lib -l:libvips.lib
 #include <stdlib.h>
+#include <string.h>
 #include <vips/vips.h>
 
 typedef struct {
@@ -25,16 +26,25 @@ static int lumen_init(void) {
 	return 0;
 }
 
+// lumen_error takes libvips' error log (shared by every thread) and clears
+// it in one step, so one file's error never shows under another's name.
 static char *lumen_error(void) {
-	char *s = g_strdup(vips_error_buffer());
-	vips_error_clear();
-	return s;
+	return vips_error_buffer_copy();
 }
 
 // to_srgb8 returns in as 8-bit sRGB with exactly 3 bands, transparency
-// flattened onto white. It always consumes in.
+// flattened onto white. An embedded colour profile (Display P3 from
+// iPhones, Adobe RGB from cameras) is converted from, as the WebView and the
+// AI read the result as sRGB. It always consumes in.
 static VipsImage *to_srgb8(VipsImage *in) {
 	VipsImage *t = NULL;
+	if (vips_image_get_typeof(in, VIPS_META_ICC_NAME)) {
+		if (vips_icc_transform(in, &t, "srgb", "embedded", TRUE, "intent", VIPS_INTENT_RELATIVE, NULL) == 0) {
+			g_object_unref(in); in = t; t = NULL;
+		} else {
+			vips_error_clear(); // a broken profile: use the pixels as they are
+		}
+	}
 	if (vips_image_get_interpretation(in) != VIPS_INTERPRETATION_sRGB) {
 		if (vips_colourspace(in, &t, VIPS_INTERPRETATION_sRGB, NULL)) goto fail;
 		g_object_unref(in); in = t; t = NULL;
@@ -197,6 +207,24 @@ static int lumen_header(const char *path, int *w, int *h) {
 	if (!im) return -1;
 	*w = vips_image_get_width(im);
 	*h = vips_image_get_height(im);
+	g_object_unref(im);
+	return 0;
+}
+
+// lumen_profile reads only the header: a copy of the embedded colour
+// profile in *out (g_malloc'd; NULL if there is none).
+static int lumen_profile(const char *path, void **out, size_t *n) {
+	const void *data = NULL;
+	size_t len = 0;
+	VipsImage *im = vips_image_new_from_file(path, NULL);
+	*out = NULL; *n = 0;
+	if (!im) return -1;
+	if (vips_image_get_typeof(im, VIPS_META_ICC_NAME) &&
+		vips_image_get_blob(im, VIPS_META_ICC_NAME, &data, &len) == 0 && len > 0) {
+		*out = g_malloc(len);
+		memcpy(*out, data, len);
+		*n = len;
+	}
 	g_object_unref(im);
 	return 0;
 }
@@ -416,6 +444,26 @@ func Size(path string) (w, h int, err error) {
 		return 0, 0, lastError()
 	}
 	return int(cw), int(ch), nil
+}
+
+// Profile returns the colour profile (ICC) embedded in a file, reading only
+// its header; nil if it has none.
+func Profile(path string) ([]byte, error) {
+	if err := Init(); err != nil {
+		return nil, err
+	}
+	cpath := C.CString(path)
+	defer C.free(unsafe.Pointer(cpath))
+	var buf unsafe.Pointer
+	var n C.size_t
+	if C.lumen_profile(cpath, &buf, &n) != 0 {
+		return nil, lastError()
+	}
+	if buf == nil {
+		return nil, nil
+	}
+	defer C.g_free(C.gpointer(buf))
+	return C.GoBytes(buf, C.int(n)), nil
 }
 
 func lastError() error {

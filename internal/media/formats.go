@@ -1,7 +1,7 @@
 package media
 
 // Go's image decoders, registered (by importing them for their side
-// effect) for image.DecodeConfig, sizes when a file has no EXIF, and
+// effect) for image.DecodeConfig, the pixel size of photos, and
 // image.Decode, BMP thumbnails.
 import (
 	_ "image/gif"  // registers GIF

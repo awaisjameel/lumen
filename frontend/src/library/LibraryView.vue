@@ -17,7 +17,7 @@ import { useThings } from '../things/store'
 import { useAlbums } from '../albums/store'
 import { buildLayout, GAP, move, rowHeight, rowOfItem } from './layout'
 import type { Row } from './layout'
-import { scopeKey, useLibrary, ZOOM_MAX, ZOOM_MIN } from './store'
+import { RESULTS, scopeKey, useLibrary, ZOOM_MAX, ZOOM_MIN } from './store'
 import type { Scope, Sel } from './store'
 import TimelineScrubber from './TimelineScrubber.vue'
 import DetailsPanel from './DetailsPanel.vue'
@@ -33,8 +33,8 @@ const albums = useAlbums()
 const route = useRoute()
 
 // The route decides what the grid shows: a filter (/, /favourites, /videos),
-// one Thing (/things/:id), one person (/people/:id) or search results
-// (/search?q=…).
+// one Thing (/things/:id), one person (/people/:id), one album (/albums/:id)
+// or search results (/search?q=…).
 const scope = computed<Scope>(() => {
   if (route.name === 'search') return { kind: 'search', query: String(route.query.q ?? '').trim() }
   const id = Number(route.params.id) || 0
@@ -48,6 +48,9 @@ const scope = computed<Scope>(() => {
     },
   }
 })
+// The grid shows the library's scope while mounted (before the scope is set,
+// so that loads).
+lib.attach()
 watch(
   () => scopeKey(scope.value),
   () => void lib.setScope(scope.value).catch(logError),
@@ -87,8 +90,8 @@ watch(
 
 const title = computed(() => {
   const s = scope.value
-  if (s.kind === 'search') return `“${s.query}”`
-  if (tagId.value) return things.byId.get(tagId.value)?.name ?? ''
+  if (s.kind === 'search') return t('search.title', { q: s.query })
+  if (tagId.value) return things.byId.get(tagId.value)?.name ?? t('nav.things')
   if (personId.value) return people.byId.get(personId.value)?.name || t('person.unnamed')
   if (albumId.value) return albums.byId.get(albumId.value)?.name || t('nav.albums')
   return t(titles[s.view.filter])
@@ -110,7 +113,11 @@ onMounted(() => {
   })
   if (scroller.value) ro.observe(scroller.value)
 })
-onBeforeUnmount(() => ro?.disconnect())
+onBeforeUnmount(() => {
+  ro?.disconnect()
+  clearTimeout(focusTimer)
+  lib.detach()
+})
 
 const layout = computed(() => buildLayout(lib.buckets, Math.max(width.value, 200), lib.zoom, !lib.isSearch))
 
@@ -150,7 +157,21 @@ const visible = computed<VisibleRow[]>(() => {
   })
 })
 
-// Load the days on screen, and tell the engine to prioritise them.
+/** The days of layout rows from to to (clamped). */
+function daysOfRows(from: number, to: number): string[] {
+  const rows = layout.value.rows
+  const out = new Set<string>()
+  for (let i = Math.max(0, from); i <= Math.min(rows.length - 1, to); i++) {
+    const row = rows[i]
+    if (row) out.add(row.day)
+  }
+  return [...out]
+}
+
+// Load the days on screen, and tell the engine to prioritise them. Days are
+// fetched a few screens at a time: once the rows within a screen of the view
+// need a day not loaded yet, everything within three screens comes in one
+// request (fetching only what was on screen made a request every few rows).
 let focusTimer = 0
 watch(
   [visible, () => lib.days],
@@ -158,7 +179,12 @@ watch(
     const days = [...new Set(visible.value.map((v) => v.row.day))]
     const [newest, oldest] = [days[0], days.at(-1)]
     if (newest === undefined || oldest === undefined || lib.isSearch) return
-    void lib.ensureDays(days)
+    const items = virtualizer.value.getVirtualItems()
+    const first = items[0]?.index ?? 0
+    const last = items.at(-1)?.index ?? first
+    const screen = last - first + 1
+    const near = daysOfRows(first - screen, last + screen)
+    void lib.ensureDays(lib.needsDays(near) ? daysOfRows(first - 3 * screen, last + 3 * screen) : days)
     clearTimeout(focusTimer)
     focusTimer = window.setTimeout(() => void engine.focus(oldest, newest).catch(logError), 300)
   },
@@ -209,7 +235,10 @@ async function onKey(e: KeyboardEvent) {
       if (first) {
         await lib.ensureDays([first.day])
         const s = lib.selAt(first.day, 0)
-        if (s) lib.selected = s
+        if (s) {
+          lib.selected = s
+          scrollIntoView(s)
+        }
       }
       return
     }
@@ -233,6 +262,7 @@ async function onKey(e: KeyboardEvent) {
 }
 
 // When the viewer closes, keep the grid on the photo that was last viewed.
+// After the DOM update: the grid can only take focus once the viewer is gone.
 watch(
   () => lib.viewer,
   (now, before) => {
@@ -242,6 +272,7 @@ watch(
       scroller.value?.focus()
     }
   },
+  { flush: 'post' },
 )
 
 const aiError = computed(() => lib.progress?.ai.error ?? '')
@@ -251,7 +282,9 @@ const searching = computed(() => lib.isSearch && !lib.timelineLoaded && !lib.loa
 const emptyText = computed((): [string, string] => {
   const s = scope.value
   if (s.kind === 'search') {
-    return aiError.value ? [t('search.unavailable'), aiError.value] : [t('search.none'), t('search.noneHint')]
+    return lib.searchInfo?.noAI
+      ? [t('search.unavailable'), aiError.value || t('error.noAI')]
+      : [t('search.none'), t('search.noneHint')]
   }
   if (tagId.value) return [t('things.viewEmpty'), t('things.viewEmptyHint')]
   if (personId.value) return [t('person.empty'), t('person.emptyHint')]
@@ -280,6 +313,19 @@ const countText = computed(() => {
   return lib.isSearch ? t('search.results', { n: lib.total }) : t('status.items', { n: lib.total })
 })
 
+function onZoom(e: Event) {
+  if (e.target instanceof HTMLInputElement) lib.setZoom(Number(e.target.value))
+}
+
+/** What a cell is, for screen readers: the kind, the day, a favourite. */
+function cellLabel(day: string, it: GridItem): string {
+  const what =
+    day === RESULTS
+      ? t(it.v ? 'library.video' : 'library.photo')
+      : t(it.v ? 'library.videoOn' : 'library.photoOn', { day: dayLabel(day) })
+  return it.f ? t('library.favouriteItem', { item: what }) : what
+}
+
 // Why a search may be missing photos: too many matches, or photos the AI
 // hasn't seen yet.
 const searchNotes = computed(() => {
@@ -287,6 +333,7 @@ const searchNotes = computed(() => {
   if (!lib.isSearch || !info) return []
   const notes: string[] = []
   if (info.people.length) notes.push(t('search.withPeople', { names: listFormat.format(info.people) }))
+  if (info.noAI && lib.total) notes.push(t('search.onlyPeople'))
   if (!info.complete) notes.push(t('search.more', { n: lib.total }))
   if (info.pending) notes.push(t('search.pending', { n: info.pending }))
   return notes
@@ -313,13 +360,14 @@ const searchNotes = computed(() => {
             step="8"
             :value="lib.zoom"
             :aria-label="t('library.zoom')"
-            @input="lib.setZoom(Number(($event.target as HTMLInputElement).value))"
+            @input="onZoom"
           />
         </label>
         <button
           class="icon-btn"
           :aria-pressed="lib.showDetails"
-          :title="t('library.info') + ' (I)'"
+          :title="t('common.withKey', { label: t('library.info'), key: 'I' })"
+          :aria-label="t('library.info')"
           @click="lib.showDetails = !lib.showDetails"
         >
           <Icon name="info" />
@@ -333,7 +381,7 @@ const searchNotes = computed(() => {
           ref="scroller"
           class="scroller"
           tabindex="0"
-          role="grid"
+          role="group"
           :aria-label="title"
           @scroll.passive="onScroll"
           @keydown="onKey"
@@ -371,6 +419,8 @@ const searchNotes = computed(() => {
                   class="cell"
                   :class="{ selected: it && lib.selected?.id === it.id }"
                   :style="{ width: layout.cell + 'px', height: layout.cell + 'px' }"
+                  :aria-label="it ? cellLabel(v.row.day, it) : undefined"
+                  :aria-current="it && lib.selected?.id === it.id ? 'true' : undefined"
                   tabindex="-1"
                   @click="select(v.row.day, it)"
                   @dblclick="open(v.row.day, it)"
@@ -405,7 +455,8 @@ const searchNotes = computed(() => {
       </div>
     </section>
 
-    <DetailsPanel v-if="lib.showDetails" :sel="lib.selected" />
+    <!-- The viewer has its own panel; this one would only load the same again behind it. -->
+    <DetailsPanel v-if="lib.showDetails && !lib.viewer" :sel="lib.selected" />
     <Viewer v-if="lib.viewer" />
   </div>
 </template>
@@ -547,7 +598,7 @@ const searchNotes = computed(() => {
   right: 5px;
   bottom: 5px;
   padding: 2px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-s);
   background: rgb(0 0 0 / 0.68);
   font-size: 11px;
 }

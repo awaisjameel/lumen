@@ -1,9 +1,9 @@
 // The one place that talks to the Go engine. Components and stores call these
-// functions, never the generated bindings directly, so engine communication
-// can be understood (and mocked) from this file alone.
+// functions, never the generated bindings directly (ESLint enforces it), so
+// engine communication can be understood (and mocked) from this file alone.
 
 import { Events } from '@wailsio/runtime'
-import { LibraryService, PeopleService, SearchService } from '../../bindings/lumen/services'
+import { LibraryService, MediaService, PeopleService, SearchService } from '../../bindings/lumen/services'
 import {
   AlbumKind,
   DateSource,
@@ -20,6 +20,7 @@ import type {
   AlbumRule,
   AssetDetail as RawAssetDetail,
   AssetTag,
+  Changes,
   DayBucket,
   DayItems as RawDayItems,
   DuplicateGroup as RawDuplicateGroup,
@@ -36,7 +37,21 @@ import type {
 } from '../../bindings/lumen/internal/core'
 
 export { AlbumKind, DateSource, Device, DuplicateKind, Filter, Kind, Playback, TagKind, TagSource }
-export type { Album, AlbumRule, AssetTag, DayBucket, Face, GridItem, Person, Progress, Settings, Source, Tag, View }
+export type {
+  Album,
+  AlbumRule,
+  AssetTag,
+  Changes,
+  DayBucket,
+  Face,
+  GridItem,
+  Person,
+  Progress,
+  Settings,
+  Source,
+  Tag,
+  View,
+}
 
 // Go sends an empty list as null; the generated types say so. These are the
 // same types with their lists made non-null, which this file guarantees, so
@@ -54,23 +69,51 @@ export type DuplicateItem = NonNullLists<RawDuplicateItem, 'paths'>
 /** Exact copies or similar photos to review. */
 export type DuplicateGroup = Omit<RawDuplicateGroup, 'items'> & { items: DuplicateItem[] }
 
-// Thumbnail sizes (longest edge). Must match core.ThumbSmall / core.ThumbLarge;
-// the media route is plain HTTP, so they are not part of the generated bindings.
-export const THUMB_SMALL = 256
-export const THUMB_LARGE = 1024
-export const SPRITE_COLS = 4
-export const SPRITE_ROWS = 4
+// Constants of the engine's that are not part of the generated bindings.
+// services/contract_test.go checks each against its Go original.
+export const THUMB_SMALL = 256 // core.ThumbSmall
+export const THUMB_LARGE = 1024 // core.ThumbLarge
+export const SPRITE_COLS = 4 // core.SpriteCols
+export const SPRITE_ROWS = 4 // core.SpriteRows
+export const TAG_CONFIDENCE_DEFAULT = 0.02 // core.TagConfidenceDefault
+export const TAG_CONFIDENCE_MIN = 0.002 // core.TagConfidenceMin
+export const TAG_CONFIDENCE_MAX = 0.3 // core.TagConfidenceMax
+export const MAX_NAME_LEN = 80 // core.MaxNameLen: people, Things and albums
 export type ThumbSize = typeof THUMB_SMALL | typeof THUMB_LARGE
 
-// Tag confidence: default and range. Must match core.TagConfidenceDefault /
-// Min / Max (constants are not part of the generated bindings).
-export const TAG_CONFIDENCE_DEFAULT = 0.02
-export const TAG_CONFIDENCE_MIN = 0.002
-export const TAG_CONFIDENCE_MAX = 0.3
+/**
+ * Why an engine call failed, when the UI explains it in its own words
+ * (services.ErrorCode). Other failures carry only a message.
+ */
+export const ErrorCode = {
+  NotFound: 'not_found',
+  NoAI: 'no_ai',
+  InvalidName: 'invalid_name',
+  AlbumExists: 'album_exists',
+  InvalidAlbum: 'invalid_album',
+  PersonExists: 'person_exists',
+  TagExists: 'tag_exists',
+  BuiltinTag: 'builtin_tag',
+  TagInAlbum: 'tag_in_album',
+  AlreadyCovered: 'already_covered',
+  FolderNotFound: 'folder_not_found',
+} as const
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
+
+const errorCodes = new Set<string>(Object.values(ErrorCode))
+
+/** The code of a failed engine call (see ErrorCode), if it has one. */
+export function errorCode(e: unknown): ErrorCode | undefined {
+  const cause: unknown = e instanceof Error ? e.cause : undefined
+  if (typeof cause !== 'object' || cause === null || !('code' in cause)) return undefined
+  const code = cause.code
+  return typeof code === 'string' && errorCodes.has(code) ? (code as ErrorCode) : undefined
+}
 
 export const engine = {
   sources: async (): Promise<Source[]> => (await LibraryService.Sources()) ?? [],
   suggestedFolders: async (): Promise<string[]> => (await LibraryService.SuggestedFolders()) ?? [],
+  /** The folder the user picked, or "" if they closed the picker. */
   pickFolder: (): Promise<string> => LibraryService.PickFolder(),
   addSources: async (paths: string[]): Promise<Source[]> => (await LibraryService.AddSources(paths)) ?? [],
   removeSource: (id: number): Promise<void> => LibraryService.RemoveSource(id),
@@ -92,15 +135,16 @@ export const engine = {
     })),
   setFavourite: (id: number, fav: boolean): Promise<void> => LibraryService.SetFavourite(id, fav),
   albums: async (): Promise<Album[]> => (await LibraryService.Albums()) ?? [],
-  createAlbum: (name: string, kind: AlbumKind, rule: AlbumRule): Promise<number> =>
-    LibraryService.CreateAlbum(name, kind, rule),
+  /** Creates a manual album holding items, or a smart album (no items). */
+  createAlbum: (name: string, kind: AlbumKind, rule: AlbumRule, items: number[] = []): Promise<number> =>
+    LibraryService.CreateAlbum(name, kind, rule, items),
   updateAlbum: (id: number, name: string, rule: AlbumRule): Promise<void> => LibraryService.UpdateAlbum(id, name, rule),
   deleteAlbum: (id: number): Promise<void> => LibraryService.DeleteAlbum(id),
   assetAlbums: async (id: number): Promise<number[]> => (await LibraryService.AssetAlbums(id)) ?? [],
   setAlbumItem: (album: number, asset: number, include: boolean): Promise<void> =>
     LibraryService.SetAlbumItem(album, asset, include),
-  showInFolder: (id: number): Promise<void> => LibraryService.ShowInFolder(id),
-  showFileInFolder: (id: number, path: string): Promise<void> => LibraryService.ShowFileInFolder(id, path),
+  /** Opens Explorer on one of an asset's files: path, or "" for the first one there. */
+  showInFolder: (id: number, path = ''): Promise<void> => LibraryService.ShowInFolder(id, path),
 
   progress: (): Promise<Progress> => LibraryService.Progress(),
   setPaused: (paused: boolean): Promise<void> => LibraryService.SetPaused(paused),
@@ -114,6 +158,7 @@ export const engine = {
     return { ...r, items: r.items ?? [], people: r.people ?? [] }
   },
   suggestTags: async (text: string): Promise<Tag[]> => (await SearchService.SuggestTags(text)) ?? [],
+  prepareSearch: (): Promise<void> => SearchService.PrepareSearch(),
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],
   createLabel: (name: string): Promise<number> => SearchService.CreateLabel(name),
   deleteTag: (id: number): Promise<void> => SearchService.DeleteTag(id),
@@ -136,25 +181,34 @@ export const engine = {
   nameFaces: (faces: number[], name: string): Promise<number> => PeopleService.NameFaces(faces, name),
 }
 
+// The engine's events (services.EventProgress, services.EventLibraryChanged),
+// typed by the generated event declarations: a name they don't know fails
+// to compile.
+const EVENT_PROGRESS = 'index:progress' satisfies keyof Events.CustomEvents
+const EVENT_LIBRARY_CHANGED = 'library:changed' satisfies keyof Events.CustomEvents
+
 /** Fires whenever indexing progress changes. Returns an unsubscribe function. */
 export function onProgress(cb: (p: Progress) => void): () => void {
-  return Events.On('index:progress', (e) => cb(e.data))
+  return Events.On(EVENT_PROGRESS, (e) => cb(e.data))
 }
 
 /**
- * Fires (at most once a second) when assets were added, removed or updated,
- * with how many assets are now visible. Returns an unsubscribe function.
+ * Fires (at most once a second) when the library changed, saying what:
+ * assets, their tags, or who is in them. Returns an unsubscribe function.
  */
-export function onLibraryChanged(cb: (visible: number) => void): () => void {
-  return Events.On('library:changed', (e) => cb(e.data))
+export function onLibraryChanged(cb: (c: Changes) => void): () => void {
+  return Events.On(EVENT_LIBRARY_CHANGED, (e) => cb(e.data))
 }
 
-/** Thumbnail URL. The version makes the WebView re-fetch when a thumbnail is rebuilt. */
-export function thumbUrl(id: number, version: number, size: ThumbSize = THUMB_SMALL): string {
-  return `/media/thumb/${id}/${size}?v=${version}`
+/**
+ * Thumbnail URL, or undefined while the asset has none (version 0). The
+ * version makes the WebView fetch again when a thumbnail is rebuilt.
+ */
+export function thumbUrl(id: number, version: number, size: ThumbSize = THUMB_SMALL): string | undefined {
+  return version ? `/media/thumb/${id}/${size}?v=${version}` : undefined
 }
 
-/** The original file, for formats the WebView can display. */
+/** The original file, for photos the WebView can display. */
 export function originalUrl(id: number): string {
   return `/media/original/${id}`
 }
@@ -163,10 +217,25 @@ export function spriteUrl(id: number, version: number): string {
   return `/media/sprite/${id}?v=${version}`
 }
 
-export function playUrl(id: number, at = 0): string {
-  return `/media/play/${id}?at=${Math.max(0, Math.round(at))}`
-}
-
 export function frameUrl(id: number, at: number): string {
   return `/media/frame/${id}/${Math.max(0, Math.round(at))}`
+}
+
+// Videos stream from the engine's own server (MediaService.VideoBase), which
+// startMedia asks for once.
+let videoBase = ''
+
+/** Learns where videos stream from. Call once at startup. */
+export async function startMedia(): Promise<void> {
+  videoBase = await MediaService.VideoBase()
+}
+
+/** A video file the WebView plays as it is. */
+export function videoUrl(id: number): string {
+  return `${videoBase}/video/${id}`
+}
+
+/** A video converted to H.264 while it plays, from at ms. */
+export function playUrl(id: number, at = 0): string {
+  return `${videoBase}/play/${id}?at=${Math.max(0, Math.round(at))}`
 }

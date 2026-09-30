@@ -3,7 +3,7 @@
 // how many photos, and what can be done about them.
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { engine } from '../bridge'
+import { engine, MAX_NAME_LEN } from '../bridge'
 import type { Person } from '../bridge'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
@@ -33,7 +33,10 @@ async function load() {
   const request = ++loadRequest
   try {
     const p = await engine.person(props.id)
-    if (request === loadRequest) person.value = p
+    if (request === loadRequest) {
+      person.value = p
+      error.value = ''
+    }
   } catch (e) {
     if (request === loadRequest) error.value = errorText(e)
   }
@@ -49,7 +52,7 @@ watch(
   },
   { immediate: true },
 )
-useLiveReload(load)
+useLiveReload(load, (c) => c.people || c.assets || c.thumbs)
 
 async function edit() {
   draft.value = person.value?.name ?? ''
@@ -101,7 +104,7 @@ async function toggleHidden() {
         class="name-input"
         :aria-label="t('person.name')"
         :placeholder="t('person.namePlaceholder')"
-        maxlength="60"
+        :maxlength="MAX_NAME_LEN"
         @keydown.enter="save"
         @keydown.esc.stop="editing = false"
         @blur="save"
@@ -115,10 +118,16 @@ async function toggleHidden() {
     <RouterLink :to="{ name: 'personFaces', params: { id } }" class="btn" :title="t('person.review')">
       <Icon name="user" :size="16" /><span class="label">{{ t('person.review') }}</span>
     </RouterLink>
-    <button class="icon-btn" :title="person.hidden ? t('people.unhide') : t('people.hide')" @click="toggleHidden">
+    <button
+      class="icon-btn"
+      :title="person.hidden ? t('people.unhide') : t('people.hide')"
+      :aria-label="person.hidden ? t('people.unhide') : t('people.hide')"
+      @click="toggleHidden"
+    >
       <Icon :name="person.hidden ? 'eye' : 'eye-off'" :size="18" />
     </button>
   </div>
+  <p v-else-if="error" class="error" role="alert">{{ error }}</p>
 </template>
 
 <style scoped>

@@ -13,7 +13,7 @@ declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
             "index:progress": core$0.Progress;
-            "library:changed": number;
+            "library:changed": core$0.Changes;
         }
     }
 }

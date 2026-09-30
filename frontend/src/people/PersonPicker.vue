@@ -16,7 +16,7 @@ const text = ref('')
 const open = ref(false)
 const active = ref(-1) // -1 = the typed text
 
-const found = useSuggestions(text, engine.suggestPeople, [] as Person[])
+const found = useSuggestions<Person[]>(text, engine.suggestPeople, [])
 const options = computed(() => found.value.filter((p) => p.id !== props.exclude))
 watch(text, () => (active.value = -1))
 

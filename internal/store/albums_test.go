@@ -17,7 +17,7 @@ func TestManualAlbumsKeepAssetIdentityAndRespectVisibility(t *testing.T) {
 	var asset, file int64
 	check(t, st.r.QueryRowContext(ctx, `SELECT id FROM assets`).Scan(&asset))
 	check(t, st.r.QueryRowContext(ctx, `SELECT id FROM files`).Scan(&file))
-	id, err := st.CreateAlbum(ctx, " Weekend ", "manual", core.AlbumRule{})
+	id, err := st.CreateAlbum(ctx, " Weekend ", core.AlbumManual, core.AlbumRule{}, nil)
 	check(t, err)
 	check(t, st.SetAlbumItem(ctx, id, asset, true))
 	check(t, st.SetAlbumItem(ctx, id, asset, true)) // idempotent
@@ -28,8 +28,13 @@ func TestManualAlbumsKeepAssetIdentityAndRespectVisibility(t *testing.T) {
 	if buckets, err := st.DayBuckets(ctx, view, 0.02); err != nil || len(buckets) != 1 || buckets[0].Count != 1 {
 		t.Fatalf("album timeline = %+v, %v", buckets, err)
 	}
-	if albums, err := st.Albums(ctx, 0.02); err != nil || len(albums) != 1 || albums[0].Name != "Weekend" || albums[0].Count != 1 || albums[0].Cover != asset {
+	// No cover until the photo has a thumbnail to show.
+	if albums, err := st.Albums(ctx, 0.02); err != nil || len(albums) != 1 || albums[0].Name != "Weekend" || albums[0].Count != 1 || albums[0].Cover != 0 {
 		t.Fatalf("albums = %+v, %v", albums, err)
+	}
+	check(t, st.SaveThumbnails(ctx, "t", []ThumbResult{{AssetID: asset}}))
+	if albums, err := st.Albums(ctx, 0.02); err != nil || albums[0].Cover != asset || albums[0].CoverThumb == 0 {
+		t.Fatalf("albums with a thumbnail = %+v, %v", albums, err)
 	}
 	check(t, st.RemoveFiles(ctx, []int64{file}))
 	if albums, err := st.Albums(ctx, 0.02); err != nil || albums[0].Count != 0 {
@@ -62,7 +67,7 @@ func TestSmartAlbumReevaluatesCurrentMetadataAndTags(t *testing.T) {
 	tag, err := st.CreateTag(ctx, "Trip", core.TagManual, nil)
 	check(t, err)
 	rule := core.AlbumRule{Kind: core.KindPhoto, Favourites: true, From: "2025-03-14", To: "2025-03-14", Tag: tag}
-	album, err := st.CreateAlbum(ctx, "Trip favourites", "smart", rule)
+	album, err := st.CreateAlbum(ctx, "Trip favourites", core.AlbumSmart, rule, nil)
 	check(t, err)
 	assertCount := func(want int) {
 		t.Helper()
@@ -96,18 +101,18 @@ func TestSmartAlbumReevaluatesCurrentMetadataAndTags(t *testing.T) {
 
 func TestAlbumValidation(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
-	if _, err := st.CreateAlbum(ctx, " ", "manual", core.AlbumRule{}); !errors.Is(err, ErrInvalidAlbum) {
+	if _, err := st.CreateAlbum(ctx, " ", core.AlbumManual, core.AlbumRule{}, nil); !errors.Is(err, ErrInvalidAlbum) {
 		t.Fatalf("blank name: %v", err)
 	}
-	if _, err := st.CreateAlbum(ctx, "Bad dates", "smart", core.AlbumRule{From: "2025-02-30"}); !errors.Is(err, ErrInvalidAlbum) {
+	if _, err := st.CreateAlbum(ctx, "Bad dates", core.AlbumSmart, core.AlbumRule{From: "2025-02-30"}, nil); !errors.Is(err, ErrInvalidAlbum) {
 		t.Fatalf("invalid date: %v", err)
 	}
-	if _, err := st.CreateAlbum(ctx, "Backwards", "smart", core.AlbumRule{From: "2025-04-01", To: "2025-03-01"}); !errors.Is(err, ErrInvalidAlbum) {
+	if _, err := st.CreateAlbum(ctx, "Backwards", core.AlbumSmart, core.AlbumRule{From: "2025-04-01", To: "2025-03-01"}, nil); !errors.Is(err, ErrInvalidAlbum) {
 		t.Fatalf("backwards dates: %v", err)
 	}
-	id, err := st.CreateAlbum(ctx, "Holiday", "manual", core.AlbumRule{})
+	id, err := st.CreateAlbum(ctx, "Holiday", core.AlbumManual, core.AlbumRule{}, nil)
 	check(t, err)
-	if _, err := st.CreateAlbum(ctx, "holiday", "smart", core.AlbumRule{}); !errors.Is(err, ErrInvalidAlbum) {
+	if _, err := st.CreateAlbum(ctx, "holiday", core.AlbumSmart, core.AlbumRule{}, nil); !errors.Is(err, ErrAlbumExists) {
 		t.Fatalf("duplicate name: %v", err)
 	}
 	if err := st.SetAlbumItem(ctx, id, 999, true); !errors.Is(err, ErrNotFound) {
@@ -123,7 +128,7 @@ func TestSmartAlbumFollowsPersonCorrections(t *testing.T) {
 	fa, fb := facesOf(t, st, a)[0].ID, facesOf(t, st, b)[0].ID
 	person, err := st.NameFaces(ctx, []int64{fa, fb}, "Ali")
 	check(t, err)
-	album, err := st.CreateAlbum(ctx, "Ali", "smart", core.AlbumRule{Person: person})
+	album, err := st.CreateAlbum(ctx, "Ali", core.AlbumSmart, core.AlbumRule{Person: person}, nil)
 	check(t, err)
 	if albums, err := st.Albums(ctx, 0.02); err != nil || albums[0].Count != 2 {
 		t.Fatalf("person album = %+v, %v", albums, err)
@@ -140,7 +145,7 @@ func TestSmartAlbumFollowsMergedPerson(t *testing.T) {
 	check(t, err)
 	into, err := st.NameFaces(ctx, []int64{facesOf(t, st, b)[0].ID}, "Second")
 	check(t, err)
-	id, err := st.CreateAlbum(ctx, "Family", core.AlbumSmart, core.AlbumRule{Person: from})
+	id, err := st.CreateAlbum(ctx, "Family", core.AlbumSmart, core.AlbumRule{Person: from}, nil)
 	check(t, err)
 	check(t, st.MergePeople(ctx, from, into))
 	albums, err := st.Albums(ctx, 0.02)
@@ -160,7 +165,7 @@ func TestSmartAlbumRetainsEmptyUnnamedPerson(t *testing.T) {
 	face := facesOf(t, st, a)[0].ID
 	person, err := st.NameFaces(ctx, []int64{face}, "")
 	check(t, err)
-	_, err = st.CreateAlbum(ctx, "Someone", core.AlbumSmart, core.AlbumRule{Person: person})
+	_, err = st.CreateAlbum(ctx, "Someone", core.AlbumSmart, core.AlbumRule{Person: person}, nil)
 	check(t, err)
 	// Moving its last face away normally removes an unnamed person.
 	_, err = st.NameFaces(ctx, []int64{face}, "Another person")
@@ -176,7 +181,7 @@ func TestSmartAlbumProtectsTagReference(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
 	tag, err := st.CreateTag(ctx, "Trip", core.TagManual, nil)
 	check(t, err)
-	id, err := st.CreateAlbum(ctx, "Trips", core.AlbumSmart, core.AlbumRule{Tag: tag})
+	id, err := st.CreateAlbum(ctx, "Trips", core.AlbumSmart, core.AlbumRule{Tag: tag}, nil)
 	check(t, err)
 	if err := st.DeleteTag(ctx, tag); !errors.Is(err, ErrTagInAlbum) {
 		t.Fatalf("deleting referenced tag: %v", err)
@@ -184,7 +189,7 @@ func TestSmartAlbumProtectsTagReference(t *testing.T) {
 	check(t, st.UpdateAlbum(ctx, id, "Trips", core.AlbumRule{}))
 	check(t, st.DeleteTag(ctx, tag))
 	for _, rule := range []core.AlbumRule{{Tag: tag}, {Person: 999}} {
-		if _, err := st.CreateAlbum(ctx, "Invalid", core.AlbumSmart, rule); !errors.Is(err, ErrInvalidAlbum) {
+		if _, err := st.CreateAlbum(ctx, "Invalid", core.AlbumSmart, rule, nil); !errors.Is(err, ErrInvalidAlbum) {
 			t.Fatalf("creating dangling rule %+v: %v", rule, err)
 		}
 		if err := st.UpdateAlbum(ctx, id, "Invalid", rule); !errors.Is(err, ErrInvalidAlbum) {
@@ -198,7 +203,7 @@ func TestVocabularyRetainsTagUsedBySmartAlbum(t *testing.T) {
 	check(t, st.SyncVocabulary(ctx, []VocabLabel{{Name: "Old Thing", Prompts: []string{"old"}}}))
 	tag, _, err := st.TagByName(ctx, "Old Thing")
 	check(t, err)
-	_, err = st.CreateAlbum(ctx, "Saved", core.AlbumSmart, core.AlbumRule{Tag: tag})
+	_, err = st.CreateAlbum(ctx, "Saved", core.AlbumSmart, core.AlbumRule{Tag: tag}, nil)
 	check(t, err)
 	check(t, st.SyncVocabulary(ctx, []VocabLabel{{Name: "New Thing", Prompts: []string{"new"}}}))
 	got, kind, err := st.TagByName(ctx, "Old Thing")

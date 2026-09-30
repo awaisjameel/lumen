@@ -20,8 +20,9 @@ watch(question, async (q) => {
       <h2>{{ question.title }}</h2>
       <p>{{ question.text }}</p>
       <div class="actions">
-        <button class="btn" @click="question.answer(false)">{{ t('common.cancel') }}</button>
-        <button class="btn btn-primary" autofocus @click="question.answer(true)">{{ question.ok }}</button>
+        <!-- Cancel is focused: Enter must not delete or merge by accident. -->
+        <button class="btn" autofocus @click="question.answer(false)">{{ t('common.cancel') }}</button>
+        <button class="btn btn-primary" @click="question.answer(true)">{{ question.ok }}</button>
       </div>
     </template>
   </dialog>
@@ -38,7 +39,7 @@ watch(question, async (q) => {
   box-shadow: var(--shadow);
 }
 .confirm::backdrop {
-  background: rgb(0 0 0 / 0.4);
+  background: var(--backdrop);
 }
 h2 {
   margin: 0 0 6px;

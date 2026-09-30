@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, triggerRef } from 'vue'
-import { engine, Filter, onLibraryChanged, onProgress, TAG_CONFIDENCE_DEFAULT } from '../bridge'
-import type { DayBucket, GridItem, Progress, Settings, Source, View } from '../bridge'
-import { errorText, logError } from '../shared/errors'
+import { engine, Filter, onLibraryChanged, onProgress, startMedia, TAG_CONFIDENCE_DEFAULT } from '../bridge'
+import type { Changes, DayBucket, GridItem, Progress, Settings, Source, View } from '../bridge'
+import { errorText, logError, reportError } from '../shared/errors'
+import { coalescedLoad } from '../shared/listStore'
 
 const ZOOM_KEY = 'lumen.zoom'
 export const ZOOM_MIN = 96
@@ -21,6 +22,12 @@ export function scopeKey(s: Scope): string {
     : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}:${s.view.album ?? 0}`
 }
 
+/** Whether a change in the library can change which days and assets a timeline view shows. */
+export function affects(view: View, c: Changes): boolean {
+  const album = !!view.album // a smart album can select by anything
+  return c.assets || (c.tags && (!!view.tag || album)) || (c.people && (!!view.person || album))
+}
+
 /** A position in the library: which day, which asset. Survives items shifting. */
 export interface Sel {
   day: string
@@ -32,6 +39,7 @@ export interface SearchInfo {
   pending: number // photos the AI hasn't seen yet
   complete: boolean
   people: string[] // people named in the query
+  noAI: boolean // the description couldn't be searched
 }
 
 function loadZoom(): number {
@@ -48,7 +56,8 @@ function loadZoom(): number {
  * Library state: the groups (days, or one group of search results) for the
  * current scope, a cache of loaded items, selection, and indexing progress.
  * Days load lazily as they scroll into view; a library change marks them
- * stale and they reload in place.
+ * stale and they reload in place. While no grid is shown (attach/detach),
+ * changes only mark the scope stale, and it reloads when shown again.
  */
 export const useLibrary = defineStore('library', () => {
   const ready = ref(false)
@@ -65,10 +74,12 @@ export const useLibrary = defineStore('library', () => {
   // day -> items. A shallowRef plus triggerRef keeps big maps cheap.
   const days = shallowRef(new Map<string, GridItem[]>())
   const fresh = new Set<string>() // days loaded since the last change
-  const inflight = new Map<string, symbol>()
+  const inflight = new Map<string, Promise<void>>() // day -> the load under way
   let generation = 0 // changes even when returning to a previously visited scope
   let loadRequest = 0
   let dayRevision = 0
+  let shown = 0 // grids showing the scope (see attach)
+  let stale = false // the library changed while no grid showed it
 
   const selected = ref<Sel | null>(null)
   const viewer = ref<Sel | null>(null)
@@ -95,17 +106,18 @@ export const useLibrary = defineStore('library', () => {
     return it ? { day, id: it.id } : null
   }
 
-  /** Load the initial state. Throws if the engine can't be reached. */
+  /**
+   * Load the initial state. Throws if the engine can't be reached. Events
+   * are followed first, so none sent while this loads is missed.
+   */
   async function init() {
-    ;[sources.value, settings.value, progress.value] = await Promise.all([
-      engine.sources(),
-      engine.settings(),
-      engine.progress(),
-    ])
-    ready.value = true
     onProgress((p) => (progress.value = p))
-    onLibraryChanged(() => void refresh().catch(logError))
-    if (sources.value.length) await load()
+    onLibraryChanged((c) => void refresh(c).catch(logError))
+    const [s, set, p] = await Promise.all([engine.sources(), engine.settings(), engine.progress(), startMedia()])
+    sources.value = s
+    settings.value = set
+    progress.value ??= p // an event is newer than the snapshot
+    ready.value = true
   }
 
   /** Load the current scope's groups (and, for a search, its results). */
@@ -114,11 +126,12 @@ export const useLibrary = defineStore('library', () => {
     const current = generation
     const request = ++loadRequest
     loadError.value = ''
+    stale = false
     try {
       if (s.kind === 'search') {
         const r = await engine.search(s.query)
         if (current !== generation || request !== loadRequest) return
-        searchInfo.value = { pending: r.pending, complete: r.complete, people: r.people }
+        searchInfo.value = { pending: r.pending, complete: r.complete, people: r.people, noAI: r.noAI }
         buckets.value = r.items.length ? [{ day: RESULTS, count: r.items.length }] : []
         days.value = new Map(r.items.length ? [[RESULTS, r.items]] : [])
         fresh.add(RESULTS)
@@ -140,16 +153,28 @@ export const useLibrary = defineStore('library', () => {
   }
 
   /**
-   * Reload after the engine reports changes: counts, then visible days on
-   * demand. Search results stay as they are (reshuffling them while someone
-   * looks would be jarring); searching again picks up new photos.
+   * Reload after the engine reports changes (all, if c is not given): counts,
+   * then visible days on demand. Search results stay as they are
+   * (reshuffling them while someone looks would be jarring); searching again
+   * picks up new photos.
    */
   let refreshing: Promise<void> | null = null
   let refreshRevision = 0
-  async function refresh() {
-    if (isSearch.value) return
+  async function refresh(c?: Changes) {
+    const s = scope.value
+    if (s.kind === 'search' || (c && !affects(s.view, c) && !c.thumbs)) return
+    if (!shown) {
+      stale = true // loaded when a grid shows it again
+      return
+    }
     dayRevision++
     fresh.clear()
+    if (c && !affects(s.view, c)) {
+      // Only thumbnails changed: the days and counts stand, and the view
+      // asks again for the days it shows.
+      triggerRef(days)
+      return
+    }
     refreshRevision++
     if (refreshing) return refreshing
     refreshing = (async () => {
@@ -167,22 +192,37 @@ export const useLibrary = defineStore('library', () => {
     return refreshing
   }
 
+  /** Whether any of the days is neither loaded nor on its way. */
+  function needsDays(want: string[]): boolean {
+    return !isSearch.value && want.some((d) => !fresh.has(d) && !inflight.has(d))
+  }
+
   /**
-   * Make sure the given days are loaded (one request for the whole span).
-   * Never throws: a failed load is logged and retried when next needed.
+   * Make sure the given days are loaded (one request for the whole span),
+   * waiting for any already on their way. Never throws: a failed load is
+   * logged and retried when next needed.
    */
   async function ensureDays(want: string[]) {
     const s = scope.value
     if (s.kind === 'search') return // results arrive all at once
-    const current = generation
-    const revision = dayRevision
-    const request = Symbol()
+    const waiting = want.flatMap((d) => inflight.get(d) ?? [])
     const missing = want.filter((d) => !fresh.has(d) && !inflight.has(d)).sort()
     const [from, to] = [missing[0], missing.at(-1)]
-    if (from === undefined || to === undefined) return
-    missing.forEach((d) => inflight.set(d, request))
+    if (from !== undefined && to !== undefined) {
+      const request: Promise<void> = loadDays(s.view, missing, from, to).finally(() => {
+        for (const d of missing) if (inflight.get(d) === request) inflight.delete(d)
+      })
+      missing.forEach((d) => inflight.set(d, request))
+      waiting.push(request)
+    }
+    await Promise.all(waiting)
+  }
+
+  async function loadDays(view: View, missing: string[], from: string, to: string) {
+    const current = generation
+    const revision = dayRevision
     try {
-      const got = await engine.days(from, to, s.view)
+      const got = await engine.days(from, to, view)
       if (current !== generation || revision !== dayRevision) return
       const next = new Map(days.value)
       const inSpan = new Set(missing)
@@ -204,14 +244,15 @@ export const useLibrary = defineStore('library', () => {
     } catch (e) {
       logError(e)
     } finally {
-      missing.forEach((d) => {
-        if (inflight.get(d) === request) inflight.delete(d)
-      })
-      if (current === generation && revision !== dayRevision) triggerRef(days)
+      if (current === generation && revision !== dayRevision) triggerRef(days) // ask again for what is shown
     }
   }
 
-  /** The next (dir 1) or previous (dir -1) asset in grid order, loading the neighbouring day if needed. */
+  /**
+   * The next (dir 1) or previous (dir -1) asset in grid order, loading the
+   * neighbouring day if needed. A day reloaded meanwhile (the library
+   * changed) is asked for again once.
+   */
   async function neighbour(sel: Sel, dir: 1 | -1): Promise<Sel | null> {
     const list = days.value.get(sel.day) ?? []
     const i = list.findIndex((x) => x.id === sel.id)
@@ -220,7 +261,7 @@ export const useLibrary = defineStore('library', () => {
     const k = buckets.value.findIndex((b) => b.day === sel.day)
     const nb = buckets.value[k + dir]
     if (k < 0 || !nb) return null
-    await ensureDays([nb.day])
+    for (let tries = 0; tries < 2 && !days.value.has(nb.day); tries++) await ensureDays([nb.day])
     const next = days.value.get(nb.day)
     const edge = dir > 0 ? next?.[0] : next?.at(-1)
     return edge ? { day: nb.day, id: edge.id } : null
@@ -228,7 +269,10 @@ export const useLibrary = defineStore('library', () => {
 
   /** Show another scope. Searching again with the same words re-runs the search. */
   async function setScope(s: Scope) {
-    if (scopeKey(s) === scopeKey(scope.value) && timelineLoaded.value && s.kind !== 'search') return
+    if (scopeKey(s) === scopeKey(scope.value) && timelineLoaded.value && s.kind !== 'search') {
+      if (stale) await refresh()
+      return
+    }
     scope.value = s
     generation++
     dayRevision++
@@ -243,6 +287,18 @@ export const useLibrary = defineStore('library', () => {
     await load()
   }
 
+  /**
+   * A grid starts (attach) or stops (detach) showing the scope. The viewer
+   * belongs to the grid, so it closes with it.
+   */
+  function attach() {
+    shown++
+  }
+  function detach() {
+    shown = Math.max(0, shown - 1)
+    if (!shown) viewer.value = null
+  }
+
   function setZoom(v: number) {
     zoom.value = v
     try {
@@ -252,28 +308,61 @@ export const useLibrary = defineStore('library', () => {
     }
   }
 
-  /** Flip an asset's favourite flag: shown at once, undone if the engine refuses. */
+  /**
+   * Flip an asset's favourite flag: shown at once, put back if the engine
+   * refuses. Clicks on one asset take turns, so the flag always ends as the
+   * engine has it.
+   */
+  const favouriting = new Map<number, Promise<void>>()
   async function toggleFavourite(p: Sel | null) {
     const it = itemAt(p)
-    if (!it) return
+    if (!p || !it) return
     const fav = !it.f
-    it.f = fav
-    triggerRef(days)
-    try {
-      await engine.setFavourite(it.id, fav)
-    } catch (e) {
-      it.f = !fav
-      triggerRef(days)
-      logError(e)
-      return
+    const set = (value: boolean) => {
+      const item = itemAt(p) // the day may have been reloaded meanwhile
+      if (item) {
+        item.f = value
+        triggerRef(days)
+      }
     }
-    const s = scope.value
-    if (s.kind === 'timeline' && (s.view.filter === Filter.FilterFavourites || !!s.view.album))
-      await refresh().catch(logError)
+    set(fav)
+    const before = favouriting.get(it.id) ?? Promise.resolve()
+    const saving = before.then(async () => {
+      try {
+        await engine.setFavourite(it.id, fav)
+      } catch (e) {
+        set(!fav)
+        reportError(e)
+        return
+      }
+      const s = scope.value
+      if (s.kind === 'timeline' && (s.view.filter === Filter.FilterFavourites || !!s.view.album))
+        await refresh().catch(logError)
+    })
+    favouriting.set(it.id, saving)
+    await saving
+    if (favouriting.get(it.id) === saving) favouriting.delete(it.id)
   }
 
-  async function reloadSources() {
-    ;[sources.value, settings.value] = await Promise.all([engine.sources(), engine.settings()])
+  /**
+   * Pause or resume indexing: shown at once, put back (and said) if the
+   * engine refuses. The next progress event confirms it.
+   */
+  async function setPaused(paused: boolean) {
+    const p = progress.value
+    if (p) progress.value = { ...p, paused }
+    try {
+      await engine.setPaused(paused)
+    } catch (e) {
+      if (progress.value) progress.value = { ...progress.value, paused: !paused }
+      reportError(e)
+    }
+  }
+
+  /** Reload the folders (after adding or removing one), then what they hold. */
+  const reloadSources = coalescedLoad(engine.sources, (got) => (sources.value = got))
+  async function sourcesChanged() {
+    await reloadSources()
     await refresh()
   }
 
@@ -301,11 +390,15 @@ export const useLibrary = defineStore('library', () => {
     selAt,
     init,
     refresh,
+    needsDays,
     ensureDays,
     neighbour,
     setScope,
+    attach,
+    detach,
     setZoom,
     toggleFavourite,
-    reloadSources,
+    setPaused,
+    sourcesChanged,
   }
 })

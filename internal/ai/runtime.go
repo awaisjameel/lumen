@@ -4,9 +4,9 @@
 // comes back.
 //
 // ONNX Runtime 1.24.4 (the last DirectML build) and DirectML ship beside the
-// executable (deps/runtime in development). The image model runs on the GPU
-// through DirectML when one is usable, and on the CPU otherwise; the small
-// text and face models always run on the CPU.
+// executable (deps/runtime in development). The image and face models run
+// on the GPU through DirectML when one is usable, and on the CPU otherwise;
+// the small text model always runs on the CPU, where one query is quickest.
 package ai
 
 import (
@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	ort "github.com/yalue/onnxruntime_go"
 
@@ -117,41 +118,119 @@ func openSession(path string, device Device, threads int, outputs ...string) (*s
 			return nil, fmt.Errorf("DirectML: %w", err)
 		}
 	}
-	in, out, err := ort.GetInputOutputInfoWithOptions(path, opts)
+	in, out, err := modelIO(path)
 	if err != nil {
-		return nil, fmt.Errorf("read model %s: %w", filepath.Base(path), err)
-	}
-	if len(in) != 1 || len(out) == 0 {
-		return nil, fmt.Errorf("model %s: want one input and an output, got %d and %d", filepath.Base(path), len(in), len(out))
+		return nil, err
 	}
 	if len(outputs) == 0 {
 		// Prepared models have one output; a raw export also has the hidden
 		// states, and only the pooled embedding is wanted.
-		outputs = []string{out[0].Name}
+		outputs = []string{out[0]}
 		for _, o := range out {
-			if o.Name == "pooler_output" {
-				outputs[0] = o.Name
+			if o == "pooler_output" {
+				outputs[0] = o
 			}
 		}
 	}
-	s, err := ort.NewDynamicAdvancedSession(path, []string{in[0].Name}, outputs, opts)
+	s, err := ort.NewDynamicAdvancedSession(path, []string{in}, outputs, opts)
 	if err != nil {
 		return nil, fmt.Errorf("load model %s: %w", filepath.Base(path), err)
 	}
 	return &session{s: s, device: device, outputs: outputs}, nil
 }
 
+// modelNames caches modelIO's answers by model path.
+var modelNames sync.Map // path -> ioNames
+
+type ioNames struct {
+	in  string
+	out []string
+}
+
+// modelIO returns the name of a model's one input and of its outputs.
+// ONNX Runtime can only tell by loading the model, so each model file is
+// asked once, on the CPU without optimising (the names depend on neither),
+// not on every reload after it was freed for being idle.
+func modelIO(path string) (in string, out []string, err error) {
+	if v, ok := modelNames.Load(path); ok {
+		n := v.(ioNames) // only ioNames are stored
+		return n.in, n.out, nil
+	}
+	// Unoptimised: the quickest session to build, and the full optimisation
+	// level can't build these models at all (see openSession).
+	opts, err := ort.NewSessionOptions()
+	if err != nil {
+		return "", nil, err
+	}
+	defer destroy(opts)
+	if err := opts.SetGraphOptimizationLevel(ort.GraphOptimizationLevelDisableAll); err != nil {
+		return "", nil, err
+	}
+	ins, outs, err := ort.GetInputOutputInfoWithOptions(path, opts)
+	if err != nil {
+		return "", nil, fmt.Errorf("read model %s: %w", filepath.Base(path), err)
+	}
+	if len(ins) != 1 || len(outs) == 0 {
+		return "", nil, fmt.Errorf("model %s: want one input and an output, got %d and %d", filepath.Base(path), len(ins), len(outs))
+	}
+	n := ioNames{in: ins[0].Name}
+	for _, o := range outs {
+		n.out = append(n.out, o.Name)
+	}
+	modelNames.Store(path, n)
+	return n.in, n.out, nil
+}
+
 // errClosed means the model was freed (or failed to reload after a GPU error).
 var errClosed = errors.New("model is not loaded")
 
+// gpu lets one model at a time run on the GPU: DirectML can't run one
+// session from several threads, and models taking turns share it without
+// fighting over its memory and queue. The image model comes first: it has
+// only the GPU to run on quickly, where the face models run nearly as well on
+// the CPU. So they take the GPU only when it is free and the image model
+// isn't waiting for it (tryRun), and run on the CPU otherwise; the image
+// model then waits for one face run at most, a few milliseconds.
+var gpu struct {
+	mu      sync.Mutex
+	waiting atomic.Int32 // run calls waiting for mu
+}
+
 // run feeds one input and returns each output's data (copied), in the order
-// openSession named them. Safe for concurrent use.
+// openSession named them, waiting for the GPU if it runs there. Safe for
+// concurrent use.
 func (s *session) run(in ort.Value) ([][]float32, error) {
+	if s != nil && s.device == GPU {
+		gpu.waiting.Add(1)
+		gpu.mu.Lock()
+		gpu.waiting.Add(-1)
+		defer gpu.mu.Unlock()
+	}
+	return s.exec(in)
+}
+
+// tryRun is run on the GPU if it is free and no run is waiting for it,
+// reporting whether it ran.
+func (s *session) tryRun(in ort.Value) (out [][]float32, ran bool, err error) {
+	if gpu.waiting.Load() > 0 || !gpu.mu.TryLock() {
+		return nil, false, nil
+	}
+	defer gpu.mu.Unlock()
+	out, err = s.exec(in)
+	return out, true, err
+}
+
+func (s *session) exec(in ort.Value) ([][]float32, error) {
 	if s == nil || s.s == nil {
 		return nil, errClosed
 	}
 	outs := make([]ort.Value, len(s.outputs)) // ONNX Runtime allocates them
 	if err := s.s.Run([]ort.Value{in}, outs); err != nil {
+		for _, o := range outs { // a run can fail after making some of them
+			if o != nil {
+				destroy(o)
+			}
+		}
 		return nil, err
 	}
 	data := make([][]float32, len(outs))

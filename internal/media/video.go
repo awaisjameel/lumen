@@ -225,9 +225,22 @@ func first(tags map[string]string, keys ...string) string {
 func runTool(ctx context.Context, exe string, stdout io.Writer, args ...string) error {
 	cmd := exec.CommandContext(ctx, exe, args...)
 	hideWindow(cmd)
-	var stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = stdout, &stderr
+	stderr := &headWriter{max: 64 << 10} // a damaged file can make a long run print without end
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	return toolError(ctx, exe, cmd.Run(), stderr.String())
+}
+
+// headWriter keeps the first max bytes written to it and drops the rest.
+type headWriter struct {
+	bytes.Buffer
+	max int
+}
+
+func (w *headWriter) Write(p []byte) (int, error) {
+	if room := w.max - w.Len(); room > 0 {
+		w.Buffer.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
 }
 
 // toolError describes a finished run of an FFmpeg program: nil if it

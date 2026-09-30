@@ -63,7 +63,7 @@ var DefaultParams = Params{Threshold: 0.42, MinFaces: 3, MinSharpness: 15, MaxYa
 // run (see Linker); without them they are worked out from scratch.
 func Cluster(in Input, p Params) store.ClusterChanges {
 	if in.Links == nil {
-		in.Links = NewLinker(p).Update(in.Faces)
+		in.Links, _ = NewLinker(p).Update(context.Background(), in.Faces) // never cancelled: never fails
 	}
 	c := newClustering(in.Faces, in.People, in.Rejections)
 	c.link(in.Links, p)

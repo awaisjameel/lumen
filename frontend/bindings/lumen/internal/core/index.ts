@@ -19,6 +19,7 @@ export type {
     AlbumRule,
     AssetDetail,
     AssetTag,
+    Changes,
     DayBucket,
     DayItems,
     DuplicateGroup,

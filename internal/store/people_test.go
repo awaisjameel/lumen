@@ -17,7 +17,7 @@ func peopleFixture(t *testing.T) (st *Store, ctx context.Context, a, b, c int64)
 	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b"), item(src.ID, `C:\Photos\c.jpg`, "c")})))
 	jobs, _ := st.PendingJobs(ctx, core.StageMetadata, nil, 10)
 	a, b, c = jobs[0].AssetID, jobs[1].AssetID, jobs[2].AssetID
-	err := st.SaveFaces(ctx, "f1", []FaceResult{
+	err := st.SaveFaces(ctx, "f1", "f1", []FaceResult{
 		{AssetID: a, Faces: []DetectedFace{face(0.1, 1), face(0.6, 2)}},
 		{AssetID: b, Faces: []DetectedFace{face(0.3, 1)}},
 		{AssetID: c, Faces: []DetectedFace{face(0.3, 3)}},
@@ -90,7 +90,7 @@ func TestFacesKeepTheirPersonWhenSeenAgain(t *testing.T) {
 	}
 	// A new model finds the left face slightly moved and loses the right one.
 	moved := face(0.12, 1)
-	if err := st.SaveFaces(ctx, "f2", []FaceResult{{AssetID: a, Faces: []DetectedFace{moved}}}); err != nil {
+	if err := st.SaveFaces(ctx, "f2", "f2", []FaceResult{{AssetID: a, Faces: []DetectedFace{moved}}}); err != nil {
 		t.Fatal(err)
 	}
 	after := facesOf(t, st, a)

@@ -20,25 +20,6 @@ func openTest(t *testing.T) *Store {
 	return st
 }
 
-func TestIsWithin(t *testing.T) {
-	cases := []struct {
-		path, dir string
-		want      bool
-	}{
-		{`C:\Photos`, `C:\Photos`, true},
-		{`C:\Photos\2024\a.jpg`, `C:\Photos`, true},
-		{`c:\photos\2024`, `C:\Photos\`, true},
-		{`C:\Photos2`, `C:\Photos`, false},
-		{`C:\Pho`, `C:\Photos`, false},
-		{`D:\Photos`, `C:\Photos`, false},
-	}
-	for _, c := range cases {
-		if got := IsWithin(c.path, c.dir); got != c.want {
-			t.Errorf("IsWithin(%q, %q) = %v, want %v", c.path, c.dir, got, c.want)
-		}
-	}
-}
-
 func TestReopenKeepsSchemaVersion(t *testing.T) {
 	names, _ := fs.Glob(migrationFS, "migrations/*.sql")
 	latest := len(names) // migrations are numbered 1..n
@@ -79,7 +60,7 @@ func TestAddSourceNeverOverlaps(t *testing.T) {
 	if len(srcs) != 1 || srcs[0].ID != parent.ID {
 		t.Fatalf("sources = %+v, want only the parent", srcs)
 	}
-	if files, _ := st.KnownFiles(ctx, parent.ID, ""); len(files) != 1 {
+	if files, _, _ := st.KnownFiles(ctx, parent.ID, ""); len(files) != 1 {
 		t.Fatalf("parent has %d files, want 1", len(files))
 	}
 }
@@ -101,7 +82,7 @@ func TestIngestJoinsDuplicatesAndKeepsMovedAssets(t *testing.T) {
 	}
 
 	// b.jpg is deleted: its asset leaves the grid but is kept.
-	files, _ := st.KnownFiles(ctx, src.ID, "")
+	files, _, _ := st.KnownFiles(ctx, src.ID, "")
 	if err := st.RemoveFiles(ctx, []int64{files[`c:\photos\b.jpg`].ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +187,7 @@ func TestEmbeddingsAndTags(t *testing.T) {
 		t.Fatalf("vectors not stored: %+v", auto[0])
 	}
 
-	err = st.SaveEmbeddings(ctx, "m", []EmbedResult{
+	err = st.SaveEmbeddings(ctx, "m", "m", []EmbedResult{
 		{AssetID: a, Vec: []int8{127, -5}, Scale: 0.01, Tags: []TagScore{{beach, 0.4}, {dogs, 0.01}}},
 		{AssetID: b, Skipped: true},
 	})
@@ -244,7 +225,7 @@ func TestEmbeddingsAndTags(t *testing.T) {
 	if err := st.UntagAsset(ctx, a, beach); err != nil {
 		t.Fatal(err)
 	}
-	check(t, st.SaveEmbeddings(ctx, "m", []EmbedResult{{AssetID: a, Vec: []int8{1, 1}, Scale: 1, Tags: []TagScore{{beach, 0.9}}}}))
+	check(t, st.SaveEmbeddings(ctx, "m", "m", []EmbedResult{{AssetID: a, Vec: []int8{1, 1}, Scale: 1, Tags: []TagScore{{beach, 0.9}}}}))
 	check(t, st.SetTagScores(ctx, beach, []AssetScore{{a, 0.9}, {b, 0.5}}))
 	if tags, _ = st.AssetTags(ctx, a, 0.002); len(tags) != 0 {
 		t.Fatalf("rejected tag came back: %+v", tags)
@@ -296,7 +277,7 @@ func TestEmbeddingsAndTags(t *testing.T) {
 	if err := st.DeleteTag(ctx, label); err != nil {
 		t.Fatal(err)
 	}
-	err = st.SaveEmbeddings(ctx, "m", []EmbedResult{{AssetID: b, Vec: []int8{1, 1}, Scale: 1,
+	err = st.SaveEmbeddings(ctx, "m", "m", []EmbedResult{{AssetID: b, Vec: []int8{1, 1}, Scale: 1,
 		Tags: []TagScore{{label, 0.9}, {auto[0].ID, 0.9}}}})
 	if err != nil {
 		t.Fatalf("save with a deleted tag: %v", err)

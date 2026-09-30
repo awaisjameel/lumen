@@ -10,7 +10,7 @@ import type { Person, Tag } from '../bridge'
 import { logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
-import { isTyping } from '../shared/keys'
+import { isTyping, modalOpen } from '../shared/keys'
 import { useSuggestions } from '../shared/suggest'
 import { useLibrary } from '../library/store'
 import FaceThumb from '../people/FaceThumb.vue'
@@ -40,16 +40,24 @@ const options = computed<Option[]>(() => {
   ]
 })
 
-// Show the current query while on the results page.
+// Show the current query while on the results page, and forget it on leaving.
 watch(
   () => (route.name === 'search' ? String(route.query.q ?? '') : null),
-  (q) => {
+  (q, before) => {
     if (q !== null) text.value = q
+    else if (before != null) text.value = ''
   },
   { immediate: true },
 )
 
 watch(text, () => (active.value = 0))
+
+// A search needs the AI's text model, which takes seconds to load: start
+// that as soon as someone is about to type one (a loaded model just stays).
+function onFocus() {
+  open.value = true
+  engine.prepareSearch().catch(logError)
+}
 
 function close() {
   open.value = false
@@ -100,8 +108,10 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
-// Ctrl+F or "/" from anywhere (except while typing elsewhere).
+// Ctrl+F or "/" from anywhere (except while typing elsewhere, or when the
+// viewer or a question covers the box).
 function onGlobalKey(e: KeyboardEvent) {
+  if (modalOpen()) return
   if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !isTyping(e))) {
     e.preventDefault()
     input.value?.focus()
@@ -139,7 +149,7 @@ function heading(o: Option, i: number): string {
       :title="t('search.shortcut')"
       spellcheck="false"
       autocomplete="off"
-      @focus="open = true"
+      @focus="onFocus"
       @input="open = true"
       @keydown="onKey"
     />

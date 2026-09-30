@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { AlbumKind, DateSource, engine, Kind, TagSource } from '../bridge'
+import { AlbumKind, DateSource, engine, MAX_NAME_LEN, TagSource } from '../bridge'
 import type { AssetDetail, AssetTag, Face } from '../bridge'
 import { errorText, logError } from '../shared/errors'
 import { bytes, dateTime, duration, megapixels } from '../shared/format'
@@ -11,7 +11,7 @@ import { useLiveReload } from '../shared/liveReload'
 import FaceThumb from '../people/FaceThumb.vue'
 import PersonPicker from '../people/PersonPicker.vue'
 import { useLibrary } from './store'
-import { useAlbums } from '../albums/store'
+import { emptyRule, useAlbums } from '../albums/store'
 import type { Sel } from './store'
 
 const props = defineProps<{ sel: Sel | null }>()
@@ -71,11 +71,15 @@ watch(
     albumIDs.value = []
     newTag.value = ''
     newAlbum.value = ''
+    creatingAlbum.value = false // one still on its way no longer concerns this photo
     void loadExtras(id)
   },
   { immediate: true },
 )
-useLiveReload(() => loadExtras(props.sel?.id))
+useLiveReload(
+  () => loadExtras(props.sel?.id),
+  (c) => c.tags || c.people || c.assets || c.thumbs,
+)
 void albums.load().catch(logError)
 
 async function loadAlbums(id: number | undefined) {
@@ -93,37 +97,36 @@ async function loadAlbums(id: number | undefined) {
   }
 }
 
-function toggleAlbum(albumID: number, assetID: number, include: boolean) {
+function toggleAlbum(albumID: number, e: Event) {
+  const box = e.target
+  const assetID = detail.value?.id
+  if (!(box instanceof HTMLInputElement) || !assetID) return
+  const include = box.checked
   void edit(
     () => engine.setAlbumItem(albumID, assetID, include),
     async () => {
       await Promise.all([loadAlbums(assetID), albums.load()])
     },
-  )
+  ).then((ok) => {
+    if (!ok) box.checked = !include // the album didn't change: neither does the box
+  })
 }
 
-async function createAlbumForItem(assetID: number) {
+async function createAlbumForItem() {
   const name = newAlbum.value.trim()
-  if (!name || creatingAlbum.value) return
+  const assetID = detail.value?.id
+  if (!name || !assetID || creatingAlbum.value) return
   const revision = selectionRevision
   creatingAlbum.value = true
   error.value = ''
   try {
-    const id = await engine.createAlbum(name, AlbumKind.AlbumManual, {
-      kind: Kind.$zero,
-      favourites: false,
-      from: '',
-      to: '',
-      tag: 0,
-      person: 0,
-    })
-    await engine.setAlbumItem(id, assetID, true)
+    await engine.createAlbum(name, AlbumKind.AlbumManual, emptyRule(), [assetID]) // with the photo in it, at once
     if (revision === selectionRevision) newAlbum.value = ''
     await Promise.all([loadAlbums(assetID), albums.load()])
   } catch (e) {
     if (revision === selectionRevision) error.value = errorText(e)
   } finally {
-    creatingAlbum.value = false
+    if (revision === selectionRevision) creatingAlbum.value = false
   }
 }
 
@@ -159,49 +162,65 @@ async function loadFaces(id: number | undefined) {
 
 /**
  * Change something about this photo, then show the result with reload (and
- * refresh the grid, which may be a Thing's or a person's).
+ * refresh the grid, which may be a Thing's or a person's). It reports whether
+ * the change was made.
  */
-async function edit(fn: () => Promise<unknown>, reload: () => Promise<void>) {
+async function edit(fn: () => Promise<unknown>, reload: () => Promise<void>): Promise<boolean> {
   const requested = selectionRevision
   error.value = ''
   try {
     await fn()
-    await reload()
-    void lib.refresh().catch(logError)
   } catch (e) {
     if (selectionRevision === requested) error.value = errorText(e)
+    return false
+  }
+  await reload().catch(logError)
+  void lib.refresh().catch(logError)
+  return true
+}
+
+async function addTag() {
+  const name = newTag.value.trim()
+  const id = detail.value?.id
+  if (!name || !id) return
+  const requested = selectionRevision
+  // What was typed stays until the tag is on, so a failure loses nothing.
+  if (
+    (await edit(
+      () => engine.tagAsset(id, name),
+      () => loadTags(id),
+    )) &&
+    requested === selectionRevision
+  ) {
+    newTag.value = ''
   }
 }
 
-function addTag(id: number) {
-  const name = newTag.value.trim()
-  if (!name) return
-  newTag.value = ''
-  void edit(
-    () => engine.tagAsset(id, name),
-    () => loadTags(id),
-  )
+function removeTag(tag: AssetTag) {
+  const id = detail.value?.id
+  if (id)
+    void edit(
+      () => engine.untagAsset(id, tag.id),
+      () => loadTags(id),
+    )
 }
 
-function removeTag(id: number, tag: AssetTag) {
-  void edit(
-    () => engine.untagAsset(id, tag.id),
-    () => loadTags(id),
-  )
+function nameFace(face: Face, name: string) {
+  const id = detail.value?.id
+  if (id)
+    void edit(
+      () => engine.nameFaces([face.id], name),
+      () => loadFaces(id),
+    )
 }
 
-function nameFace(id: number, face: Face, name: string) {
-  void edit(
-    () => engine.nameFaces([face.id], name),
-    () => loadFaces(id),
-  )
-}
-
-function notThem(id: number, face: Face) {
-  void edit(
-    () => engine.rejectFaces(face.person, [face.id]),
-    () => loadFaces(id),
-  )
+function notThem(face: Face) {
+  const id = detail.value?.id
+  if (id)
+    void edit(
+      () => engine.rejectFaces(face.person, [face.id]),
+      () => loadFaces(id),
+    )
 }
 
 const dateFromText: Record<DateSource, MessageKey> = {
@@ -223,12 +242,18 @@ function showInFolder(id: number) {
   <aside class="details" :aria-label="t('details.title')">
     <header>
       <h2>{{ t('details.title') }}</h2>
-      <button class="icon-btn" :title="t('common.close')" @click="lib.showDetails = false">
+      <button
+        class="icon-btn"
+        :title="t('common.close')"
+        :aria-label="t('common.close')"
+        @click="lib.showDetails = false"
+      >
         <Icon name="close" :size="18" />
       </button>
     </header>
 
-    <p v-if="!detail" class="muted pad">{{ error || t('details.none') }}</p>
+    <p v-if="!detail && error" class="error pad" role="alert">{{ error }}</p>
+    <p v-else-if="!detail" class="muted pad">{{ props.sel ? t('details.loading') : t('details.none') }}</p>
 
     <div v-else class="pad body">
       <section>
@@ -240,16 +265,26 @@ function showInFolder(id: number) {
       <section v-if="detail.width">
         <h3>{{ t('details.size') }}</h3>
         <p>
-          {{ detail.width }} × {{ detail.height }} · {{ megapixels(detail.width, detail.height) }} ·
-          {{ bytes(detail.size) }}
+          {{
+            t('details.dimensions', {
+              w: detail.width,
+              h: detail.height,
+              mp: megapixels(detail.width, detail.height),
+              size: bytes(detail.size),
+            })
+          }}
         </p>
       </section>
 
       <section v-if="detail.video">
         <h3>{{ t('details.duration') }}</h3>
         <p>{{ duration(detail.video.duration) }}</p>
-        <p v-if="detail.video.codec" class="muted small">{{ t('details.videoCodec') }}: {{ detail.video.codec }}</p>
-        <p v-if="detail.video.audio" class="muted small">{{ t('details.audioCodec') }}: {{ detail.video.audio }}</p>
+        <p v-if="detail.video.codec" class="muted small">
+          {{ t('common.labelValue', { label: t('details.videoCodec'), value: detail.video.codec }) }}
+        </p>
+        <p v-if="detail.video.audio" class="muted small">
+          {{ t('common.labelValue', { label: t('details.audioCodec'), value: detail.video.audio }) }}
+        </p>
       </section>
 
       <section v-if="detail.camera">
@@ -272,7 +307,11 @@ function showInFolder(id: number) {
             :title="tag.source === TagSource.TagByAI ? t('details.byAI') : t('details.byYou')"
           >
             <RouterLink :to="{ name: 'thing', params: { id: tag.id } }">{{ tag.name }}</RouterLink>
-            <button :title="t('details.removeTag', { name: tag.name })" @click="removeTag(detail.id, tag)">
+            <button
+              :title="t('details.removeTag', { name: tag.name })"
+              :aria-label="t('details.removeTag', { name: tag.name })"
+              @click="removeTag(tag)"
+            >
               <Icon name="close" :size="12" />
             </button>
           </li>
@@ -280,32 +319,34 @@ function showInFolder(id: number) {
         <p v-else class="muted small">{{ t('details.noTags') }}</p>
         <input
           v-model="newTag"
-          class="add-tag"
+          class="field add-tag"
           :placeholder="t('details.addTag')"
           :aria-label="t('details.addTag')"
-          maxlength="60"
-          @keydown.enter="addTag(detail.id)"
+          :maxlength="MAX_NAME_LEN"
+          @keydown.enter="addTag"
         />
       </section>
 
       <section>
         <h3>{{ t('nav.albums') }}</h3>
         <label v-for="album in manualAlbums" :key="album.id" class="album-option">
-          <input
-            type="checkbox"
-            :checked="albumIDs.includes(album.id)"
-            @change="toggleAlbum(album.id, detail.id, ($event.target as HTMLInputElement).checked)"
-          />
+          <input type="checkbox" :checked="albumIDs.includes(album.id)" @change="toggleAlbum(album.id, $event)" />
           {{ album.name }}
         </label>
-        <form class="album-new" @submit.prevent="createAlbumForItem(detail.id)">
+        <form class="album-new" @submit.prevent="createAlbumForItem">
           <input
             v-model="newAlbum"
+            class="field"
             :placeholder="t('albums.createForItem')"
             :aria-label="t('albums.createForItem')"
-            maxlength="80"
+            :maxlength="MAX_NAME_LEN"
           />
-          <button class="icon-btn" :title="t('albums.createForItem')" :disabled="creatingAlbum || !newAlbum.trim()">
+          <button
+            class="icon-btn"
+            :title="t('albums.createForItem')"
+            :aria-label="t('albums.createForItem')"
+            :disabled="creatingAlbum || !newAlbum.trim()"
+          >
             <Icon name="plus" :size="16" />
           </button>
         </form>
@@ -323,17 +364,13 @@ function showInFolder(id: number) {
               <button
                 class="not"
                 :title="t('details.notThisPerson', { name: f.name || t('person.unnamed') })"
-                @click="notThem(detail.id, f)"
+                :aria-label="t('details.notThisPerson', { name: f.name || t('person.unnamed') })"
+                @click="notThem(f)"
               >
                 <Icon name="close" :size="12" />
               </button>
             </template>
-            <PersonPicker
-              v-else
-              class="who"
-              :placeholder="t('details.whoIsThis')"
-              @pick="(n) => nameFace(detail!.id, f, n)"
-            />
+            <PersonPicker v-else class="who" :placeholder="t('details.whoIsThis')" @pick="(n) => nameFace(f, n)" />
           </li>
         </ul>
       </section>
@@ -356,7 +393,7 @@ function showInFolder(id: number) {
           {{ t('common.showInFolder') }}
         </button>
       </div>
-      <p v-if="error" class="error small">{{ error }}</p>
+      <p v-if="error" class="error small" role="alert">{{ error }}</p>
     </div>
   </aside>
 </template>
@@ -373,14 +410,8 @@ function showInFolder(id: number) {
   align-items: center;
   margin-top: 8px;
 }
-.album-new input {
+.album-new .field {
   flex: 1;
-  min-width: 0;
-  height: 30px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--surface);
 }
 .details {
   width: var(--details-w);
@@ -484,19 +515,7 @@ p {
 }
 .add-tag {
   width: 100%;
-  height: 30px;
   margin-top: 4px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--surface-2);
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  outline: none;
-}
-.add-tag:focus {
-  border-color: var(--accent);
 }
 .faces {
   display: flex;

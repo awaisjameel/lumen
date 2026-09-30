@@ -38,7 +38,7 @@ func (m *model[T]) get() (T, error) {
 	if err != nil {
 		return v, err
 	}
-	slog.Info(m.name+" loaded", "took", time.Since(t).Round(time.Millisecond))
+	slog.Info("model loaded", "model", m.name, "took", time.Since(t).Round(time.Millisecond))
 	m.v, m.loaded = v, true
 	return v, nil
 }
@@ -54,7 +54,8 @@ func (m *model[T]) releaseIdle() {
 	}
 }
 
-// release frees the model now.
+// release frees the model now: its stage is idle, held (paused, on
+// battery) or stopping, or the model failed and is loaded afresh next time.
 func (m *model[T]) release() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -65,5 +66,5 @@ func (m *model[T]) release() {
 	var zero T
 	m.v, m.loaded = zero, false
 	m.report(zero, false, nil)
-	slog.Info(m.name + " unloaded (no work)")
+	slog.Info("model unloaded", "model", m.name)
 }

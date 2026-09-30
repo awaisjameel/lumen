@@ -1,11 +1,15 @@
-// Package services holds the thin Wails services the UI calls. Each method is
-// turned into a typed TypeScript function in frontend/bindings. Services only
-// translate between the UI and the internal packages; they hold no logic.
+// Package services holds the Wails services the UI calls. Each method is
+// turned into a typed TypeScript function in frontend/bindings. Services
+// translate between the UI and the internal packages: they check what the
+// UI sends, combine the packages' answers (a search asks people, search and
+// the store), and name failures the UI explains (see ErrorCode). The
+// engine's rules live in the internal packages.
 package services
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +30,7 @@ const (
 
 func init() {
 	application.RegisterEvent[core.Progress](EventProgress)
-	application.RegisterEvent[int](EventLibraryChanged) // payload: visible asset count
+	application.RegisterEvent[core.Changes](EventLibraryChanged)
 }
 
 // Emitter forwards indexer events to the UI (it implements index.Events).
@@ -40,10 +44,10 @@ func (e *Emitter) Progress(p core.Progress) {
 	}
 }
 
-// LibraryChanged says the library changed, with how many assets are visible.
-func (e *Emitter) LibraryChanged(visible int) {
+// LibraryChanged says what changed in the library.
+func (e *Emitter) LibraryChanged(c core.Changes) {
 	if e.App != nil {
-		e.App.Event.Emit(EventLibraryChanged, visible)
+		e.App.Event.Emit(EventLibraryChanged, c)
 	}
 }
 
@@ -86,7 +90,7 @@ func (s *LibraryService) SuggestedFolders() []string {
 		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
 			covered := false
 			for _, o := range out {
-				covered = covered || store.IsWithin(c, o)
+				covered = covered || core.IsWithin(c, o)
 			}
 			if !covered {
 				out = append(out, c)
@@ -96,28 +100,47 @@ func (s *LibraryService) SuggestedFolders() []string {
 	return out
 }
 
+// dialogCancelled is the message Wails' Windows file dialog fails with when
+// the user closes it (its error value is internal to Wails).
+const dialogCancelled = "cancelled by user"
+
 // PickFolder opens the native folder picker. It returns "" if cancelled.
 func (s *LibraryService) PickFolder() (string, error) {
-	return application.Get().Dialog.OpenFile().
+	path, err := application.Get().Dialog.OpenFile().
 		SetTitle("Choose a folder with photos").
 		CanChooseDirectories(true).
 		CanChooseFiles(false).
 		CanCreateDirectories(false).
 		PromptForSingleSelection()
+	if err != nil && err.Error() == dialogCancelled {
+		return "", nil
+	}
+	return path, err
 }
 
-// AddSources adds folders and starts scanning them. Folders already inside
-// the library are skipped silently.
+// AddSources adds folders and starts scanning them, all or none: a folder
+// that doesn't exist fails the call before any is added. Folders already
+// inside the library are skipped.
 func (s *LibraryService) AddSources(ctx context.Context, paths []string) ([]core.Source, error) {
 	for _, p := range paths {
 		if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
-			return nil, errors.New("folder not found: " + p)
+			return nil, fmt.Errorf("%w: %s", ErrFolderNotFound, p)
 		}
-		if _, err := s.store.AddSource(ctx, p); err != nil && !errors.Is(err, store.ErrAlreadyCovered) {
+	}
+	added := false
+	defer func() {
+		if added {
+			s.ix.RescanAll() // scan what was added, even if a later folder failed
+		}
+	}()
+	for _, p := range paths {
+		switch _, err := s.store.AddSource(ctx, p); {
+		case err == nil:
+			added = true
+		case !errors.Is(err, store.ErrAlreadyCovered):
 			return nil, err
 		}
 	}
-	s.ix.RescanAll()
 	return s.store.ListSources(ctx)
 }
 
@@ -139,7 +162,7 @@ func (s *LibraryService) Timeline(ctx context.Context, view core.View) ([]core.D
 	if err != nil {
 		return nil, err
 	}
-	return s.store.DayBuckets(ctx, view, minScore)
+	return s.store.DayBuckets(ctx, view, float32(minScore))
 }
 
 // Days returns the view's grid items for the days from..to (YYYY-MM-DD, inclusive).
@@ -148,7 +171,7 @@ func (s *LibraryService) Days(ctx context.Context, from, to string, view core.Vi
 	if err != nil {
 		return nil, err
 	}
-	return s.store.DayItems(ctx, from, to, view, minScore)
+	return s.store.DayItems(ctx, from, to, view, float32(minScore))
 }
 
 // Focus tells the indexer which days are on screen so they are processed first.
@@ -175,12 +198,14 @@ func (s *LibraryService) Albums(ctx context.Context) ([]core.Album, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.store.Albums(ctx, minScore)
+	return s.store.Albums(ctx, float32(minScore))
 }
 
-// CreateAlbum saves a new manual album or smart rule.
-func (s *LibraryService) CreateAlbum(ctx context.Context, name string, kind core.AlbumKind, rule core.AlbumRule) (int64, error) {
-	return s.store.CreateAlbum(ctx, name, kind, rule)
+// CreateAlbum saves a new manual album holding items, or a smart rule (no
+// items), in one step.
+func (s *LibraryService) CreateAlbum(ctx context.Context, name string, kind core.AlbumKind, rule core.AlbumRule,
+	items []int64) (int64, error) {
+	return s.store.CreateAlbum(ctx, name, kind, rule, items)
 }
 
 // UpdateAlbum changes an album's name and smart rule.
@@ -203,23 +228,24 @@ func (s *LibraryService) SetAlbumItem(ctx context.Context, albumID, assetID int6
 	return s.store.SetAlbumItem(ctx, albumID, assetID, include)
 }
 
-// ShowInFolder opens Explorer with the asset's file selected.
-func (s *LibraryService) ShowInFolder(ctx context.Context, id int64) error {
+// ShowInFolder opens Explorer with one of the asset's files selected: path,
+// which must be one of them, or "" for the first that is there.
+func (s *LibraryService) ShowInFolder(ctx context.Context, id int64, path string) error {
 	f, err := s.store.AssetFile(ctx, id)
 	if err != nil {
 		return err
 	}
-	return showInFolder(ctx, f.Path)
-}
-
-// ShowFileInFolder selects a specific registered copy of an asset in Explorer.
-func (s *LibraryService) ShowFileInFolder(ctx context.Context, id int64, path string) error {
-	asset, err := s.store.AssetDetail(ctx, id)
-	if err != nil {
-		return err
-	}
-	if !slices.Contains(asset.Paths, path) {
-		return store.ErrNotFound
+	switch {
+	case path != "":
+		if !slices.Contains(f.Paths, path) {
+			return store.ErrNotFound
+		}
+	default:
+		i := slices.IndexFunc(f.Paths, func(p string) bool { _, err := os.Stat(p); return err == nil })
+		if i < 0 {
+			return fmt.Errorf("%w: no copy of the file is available", store.ErrNotFound)
+		}
+		path = f.Paths[i]
 	}
 	return showInFolder(ctx, path)
 }
@@ -250,7 +276,7 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 		return core.Settings{}, err
 	}
 	conf, err := tagConfidence(ctx, s.store)
-	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: float64(conf)}, err
+	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf}, err
 }
 
 // SetAIOnBattery lets the AI keep working on battery power (it waits for

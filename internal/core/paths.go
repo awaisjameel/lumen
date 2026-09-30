@@ -53,26 +53,27 @@ func PathsIn(dir string) Paths {
 }
 
 // FFmpeg is the bundled ffmpeg.exe ("" if there is no runtime folder).
-func (p Paths) FFmpeg() string {
-	if p.Runtime == "" {
-		return ""
-	}
-	return filepath.Join(p.Runtime, "ffmpeg", "ffmpeg.exe")
-}
+func (p Paths) FFmpeg() string { return p.runtimeFile("ffmpeg", "ffmpeg.exe") }
 
 // FFprobe is the bundled ffprobe.exe ("" if there is no runtime folder).
-func (p Paths) FFprobe() string {
+func (p Paths) FFprobe() string { return p.runtimeFile("ffmpeg", "ffprobe.exe") }
+
+// SigLIP is the folder holding the SigLIP 2 model files ("" if there is no
+// runtime folder).
+func (p Paths) SigLIP() string { return p.runtimeFile("models", "siglip2") }
+
+// Faces is the folder holding the face models, YuNet and SFace ("" if there
+// is no runtime folder).
+func (p Paths) Faces() string { return p.runtimeFile("models", "faces") }
+
+// runtimeFile is a path inside the runtime folder, "" without one: a
+// relative path would be looked for wherever Lumen was started.
+func (p Paths) runtimeFile(parts ...string) string {
 	if p.Runtime == "" {
 		return ""
 	}
-	return filepath.Join(p.Runtime, "ffmpeg", "ffprobe.exe")
+	return filepath.Join(append([]string{p.Runtime}, parts...)...)
 }
-
-// SigLIP is the folder holding the SigLIP 2 model files.
-func (p Paths) SigLIP() string { return filepath.Join(p.Runtime, "models", "siglip2") }
-
-// Faces is the folder holding the face models (YuNet and SFace).
-func (p Paths) Faces() string { return filepath.Join(p.Runtime, "models", "faces") }
 
 // Ensure creates the data folders if they are missing.
 func (p Paths) Ensure() error {

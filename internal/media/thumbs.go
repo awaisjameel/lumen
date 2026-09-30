@@ -25,8 +25,8 @@ import (
 // a fix); the indexer then re-runs just that stage.
 // Photos and videos have their own, as different code serves them.
 const (
-	MetadataVersion       = "imagemeta-1.1+goexif+vips-2" // also persist capture dates before 1970
-	ThumbnailVersion      = "vips-8.18-1"
+	MetadataVersion       = "imagemeta-1.1+goexif+vips-3" // capture dates only (not modify dates); header sizes
+	ThumbnailVersion      = "vips-8.18-2"                 // colour profiles converted to sRGB
 	VideoMetadataVersion  = "ffprobe-9.0-1"
 	VideoThumbnailVersion = "ffmpeg-9.0+vips-8.18-1"
 )
@@ -45,6 +45,14 @@ const maxPixels = 100_000_000
 const hashSide = 64
 
 var sizes = vips.Sizes{Large: core.ThumbLarge, Small: core.ThumbSmall, Square: hashSide}
+
+// JPEG qualities of what Go encodes: video frames as the large thumbnail is
+// (vips.go encodes that at 85, the small one at 80), sprites a little lower,
+// as they only flash by while hovering.
+const (
+	jpegQuality   = 85
+	spriteQuality = 75
+)
 
 // Thumbs is one decode's worth of output.
 type Thumbs struct {
@@ -124,6 +132,21 @@ func (d Decoders) Thumbnail(ctx context.Context, path string, kind core.Kind, or
 	} else {
 		t, err = vips.ThumbnailPixels(src.pix, src.w, src.h, src.bands, src.orientation, sizes)
 	}
+	if err != nil {
+		return Thumbs{}, err
+	}
+	ph, err := perceptualHash(t.Square)
+	if err != nil {
+		return Thumbs{}, err
+	}
+	return Thumbs{Small: t.Small, Large: t.Large, PHash: ph}, nil
+}
+
+// ThumbsFromImage makes both thumbnail sizes and the perceptual hash from a
+// photo Decode returned (upright sRGB, at least core.ThumbLarge where the
+// original is), so a photo also wanted as pixels is decoded once.
+func ThumbsFromImage(im Image) (Thumbs, error) {
+	t, err := vips.ThumbnailPixels(im.Pix, im.W, im.H, 3, 1, sizes)
 	if err != nil {
 		return Thumbs{}, err
 	}
@@ -218,7 +241,9 @@ func goDecode(path string) (source, error) {
 		return source{}, fmt.Errorf("decode: %w", err)
 	}
 	b := img.Bounds()
-	rgba := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	// Straight (not premultiplied) alpha, as libvips flattens it and WIC
+	// delivers it: premultiplying first would darken see-through pixels twice.
+	rgba := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	draw.Draw(rgba, rgba.Bounds(), img, b.Min, draw.Src)
 	return source{pix: rgba.Pix, w: b.Dx(), h: b.Dy(), bands: 4, orientation: 1}, nil
 }
@@ -324,7 +349,7 @@ func makeSprite(tiles []tile, duration int64) ([]byte, error) {
 			copy(pix[((y0+y)*w+x0)*3:], t.Pix[y*tw*3:(y+1)*tw*3])
 		}
 	}
-	return vips.JPEG(pix, w, rows*th, 75)
+	return vips.JPEG(pix, w, rows*th, spriteQuality)
 }
 
 func abs64(x int64) int64 { return max(x, -x) }

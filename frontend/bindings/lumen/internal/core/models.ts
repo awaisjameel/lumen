@@ -115,6 +115,33 @@ export interface AssetTag {
 }
 
 /**
+ * Changes says what changed in the library: the payload of library:changed,
+ * so each view reloads only for what it shows. While the AI works through a
+ * big library, tags and people change for hours after the timeline settles.
+ */
+export interface Changes {
+    /**
+     * assets came, went, or their dates or sizes changed
+     */
+    "assets": boolean;
+
+    /**
+     * only thumbnails (and the perceptual hashes made with them) changed
+     */
+    "thumbs": boolean;
+
+    /**
+     * the AI tagged assets
+     */
+    "tags": boolean;
+
+    /**
+     * faces were found or grouped into people
+     */
+    "people": boolean;
+}
+
+/**
  * DateSource says where an asset's capture date came from, best first.
  */
 export enum DateSource {
@@ -450,6 +477,11 @@ export interface SearchResult {
      * false: more matched than are shown
      */
     "complete": boolean;
+
+    /**
+     * the description could not be searched: the AI isn't available (see AI.Error)
+     */
+    "noAI": boolean;
 }
 
 /**
@@ -566,7 +598,7 @@ export interface Video {
 
 /**
  * View is what the timeline grid shows: a filter, optionally narrowed to
- * one tag or one person.
+ * one tag or one person, or one album instead.
  */
 export interface View {
     "filter": Filter;

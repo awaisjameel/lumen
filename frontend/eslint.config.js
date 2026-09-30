@@ -53,6 +53,24 @@ export default defineConfigWithVueTs(
     },
   },
 
+  // Only the bridge talks to the engine (see src/bridge/index.ts).
+  {
+    name: 'lumen/bridge-only',
+    files: ['src/**/*.{ts,vue}'],
+    ignores: ['src/bridge/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['**/bindings/**'], message: 'Call the engine through src/bridge.' },
+            { group: ['@wailsio/runtime', '@wailsio/runtime/*'], message: 'Use the runtime through src/bridge.' },
+          ],
+        },
+      ],
+    },
+  },
+
   // Tool configs run in Node and sit outside the app's tsconfig.
   {
     name: 'lumen/configs',

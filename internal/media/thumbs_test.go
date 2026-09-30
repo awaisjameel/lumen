@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"testing"
@@ -232,5 +233,80 @@ func TestDecodeMatchesThumbnail(t *testing.T) {
 	}
 	if im, err := (Decoders{}).Decode(ctx, write(t, "a.bmp", b.Bytes()), core.KindPhoto, 1, 32); err != nil || im.W != 32 || im.H != 24 {
 		t.Errorf("bmp decoded %dx%d (%v), want 32x24", im.W, im.H, err)
+	}
+}
+
+// A photo with a wide-gamut profile (Display P3, as iPhones take) must come
+// out as the same colours in sRGB, not its raw values read as sRGB (duller).
+// testdata/red-p3.jpg is pure red stored in P3: raw values about (234, 51, 35).
+func TestWideGamutPhotosAreConvertedToSRGB(t *testing.T) {
+	var d Decoders
+	th, err := d.Thumbnail(ctx, filepath.Join("testdata", "red-p3.jpg"), core.KindPhoto, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := decodeJPEG(t, th.Small).At(8, 8); !nearly(c, 255, 0, 0) {
+		t.Errorf("thumbnail of P3 red is %v, want sRGB red", c)
+	}
+	im, err := d.Decode(ctx, filepath.Join("testdata", "red-p3.jpg"), core.KindPhoto, 1, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if px := im.Pix[(8*im.W+8)*3:]; !nearly(color.RGBA{px[0], px[1], px[2], 255}, 255, 0, 0) {
+		t.Errorf("decoded P3 red is %v, want sRGB red", px[:3])
+	}
+}
+
+// nearly reports whether c is within 12 of (r, g, b) on every channel.
+func nearly(c color.Color, r, g, b uint8) bool {
+	cr, cg, cb, _ := c.RGBA()
+	d := func(x uint32, y uint8) bool { v := int(x>>8) - int(y); return v > -12 && v < 12 }
+	return d(cr, r) && d(cg, g) && d(cb, b)
+}
+
+// Thumbnails made from a photo decoded for the faces stage are the ones the
+// file itself gives: same sizes, the same way up, nearly the same hash.
+func TestThumbsFromImageMatchThumbnail(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 3000, 2000))
+	for y := range 2000 {
+		for x := range 3000 {
+			img.Set(x, y, color.RGBA{uint8(x * 255 / 3000), uint8(y * 255 / 2000), uint8((x ^ y) >> 4), 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatal(err)
+	}
+	p := write(t, "big.jpg", withOrientation(buf.Bytes(), 6))
+	var d Decoders
+	want, err := d.Thumbnail(ctx, p, core.KindPhoto, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	im, err := d.Decode(ctx, p, core.KindPhoto, 6, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ThumbsFromImage(im)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := func(b []byte) image.Point {
+		c, err := jpeg.DecodeConfig(bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return image.Pt(c.Width, c.Height)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want []byte
+	}{{"large", got.Large, want.Large}, {"small", got.Small, want.Small}} {
+		if g, w := size(c.got), size(c.want); g != w {
+			t.Errorf("%s thumbnail is %v, want %v", c.name, g, w)
+		}
+	}
+	if dist := bits.OnesCount64(got.PHash ^ want.PHash); dist > 4 {
+		t.Errorf("hashes differ in %d bits", dist)
 	}
 }

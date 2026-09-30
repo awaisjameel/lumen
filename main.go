@@ -39,7 +39,8 @@ func main() {
 }
 
 // run wires everything together and blocks until the window closes. The
-// database is closed by a defer on every path, after the indexer has stopped.
+// database is closed by a defer on every path that opened it, after the
+// indexer has stopped.
 func run() error {
 	paths, err := core.DefaultPaths()
 	if err != nil {
@@ -49,35 +50,18 @@ func run() error {
 		return err
 	}
 	setupLogging(paths)
-	slog.Info("lumen starting", "data", paths.DataDir, "runtime", paths.Runtime, "libvips", vips.Version())
 
-	st, err := store.Open(paths.DBPath)
-	if err != nil {
-		return fmt.Errorf("open library: %w", err)
-	}
-	defer st.Close()
-
-	cache := media.NewCache(paths.ThumbDir, media.Decoders{FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe()})
-	models := startAI(paths, st)
-	events := &services.Emitter{}
-	ix := index.New(st, paths, cache, models, events)
-
+	// The application comes first: a second copy of Lumen must hand over to
+	// the running one before it touches the database (two would fight over
+	// it) or loads the AI. New exits then.
 	app := application.New(application.Options{
-		Name:        "Lumen",
-		Description: "Local, private AI photo gallery",
-		Services: []application.Service{
-			application.NewService(&background{ix: ix, search: models.Search}),
-			application.NewService(services.NewLibraryService(st, ix)),
-			application.NewService(services.NewSearchService(st, models.Search, models.People)),
-			application.NewService(services.NewPeopleService(st, models.People)),
-			application.NewServiceWithOptions(services.NewMediaService(st, cache),
-				application.ServiceOptions{Route: "/media"}),
-		},
+		Name:         "Lumen",
+		Description:  "Local, private AI photo gallery",
+		MarshalError: services.MarshalError,
 		Assets: application.AssetOptions{
 			Handler:        spa(application.AssetFileServerFS(assets)),
 			DisableLogging: true, // thousands of thumbnail requests
 		},
-		// Two copies indexing one database would fight; focus the first instead.
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "io.lumen.app",
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
@@ -90,7 +74,34 @@ func run() error {
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
 		Windows: application.WindowsOptions{AdditionalBrowserArgs: devtoolsArgs()},
 	})
-	events.App = app
+	slog.Info("lumen starting", "data", paths.DataDir, "runtime", paths.Runtime, "libvips", vips.Version())
+
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		return fmt.Errorf("open library: %w", err)
+	}
+	defer st.Close()
+
+	decoders := media.Decoders{FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe()}
+	cache := media.NewCache(paths.ThumbDir, decoders)
+	stream, err := services.NewStreamer(st, decoders)
+	if err != nil {
+		slog.Error("videos can't play: no video server", "err", err)
+	}
+	models := startAI(paths, st)
+	events := &services.Emitter{App: app}
+	ix := index.New(st, paths, cache, models, events)
+
+	for _, svc := range []application.Service{
+		application.NewService(&background{ix: ix, search: models.Search, cache: cache, stream: stream}),
+		application.NewService(services.NewLibraryService(st, ix)),
+		application.NewService(services.NewSearchService(st, models.Search, models.People != nil)),
+		application.NewService(services.NewPeopleService(st, models.People)),
+		application.NewServiceWithOptions(services.NewMediaService(st, cache, stream),
+			application.ServiceOptions{Route: "/media"}),
+	} {
+		app.RegisterService(svc)
+	}
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "Lumen",
@@ -135,12 +146,14 @@ func startAI(paths core.Paths, st *store.Store) index.Models {
 	return m
 }
 
-// background starts the search engine and indexing (which runs the people
-// engine) once the app is running, and stops them cleanly before the
-// database closes.
+// background starts the search engine, indexing (which runs the people
+// engine) and the video server once the app is running, and stops them
+// cleanly before the database closes.
 type background struct {
 	ix     *index.Indexer
 	search *search.Engine // nil without AI
+	cache  *media.Cache
+	stream *services.Streamer // nil if it couldn't listen
 	cancel context.CancelFunc
 }
 
@@ -153,6 +166,14 @@ func (b *background) ServiceStartup(ctx context.Context, _ application.ServiceOp
 		b.search.Start(ctx)
 	}
 	b.ix.Start(ctx)
+	if b.stream != nil {
+		go b.stream.Run()
+	}
+	go func() {
+		if err := b.cache.Sweep(); err != nil {
+			slog.Warn("tidy thumbnail cache", "err", err)
+		}
+	}()
 	return nil
 }
 
@@ -161,6 +182,9 @@ func (b *background) ServiceStartup(ctx context.Context, _ application.ServiceOp
 //nolint:unparam // the signature is Wails' service interface
 func (b *background) ServiceShutdown() error {
 	b.cancel()
+	if b.stream != nil {
+		_ = b.stream.Close() // ends every stream and conversion; nothing else to do if it fails
+	}
 	b.ix.Stop()
 	if b.search != nil {
 		b.search.Close() // after the indexer: it no longer adds embeddings

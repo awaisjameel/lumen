@@ -4,10 +4,12 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -47,56 +49,140 @@ type Face struct {
 	Landmarks [5][2]float64
 }
 
-// Yaw is how far the face is turned: the nose tip's sideways distance from
-// between the eyes, in eye distances. About 0 facing the camera, 0.3 at
+// Yaw is how far the face is turned: the nose tip's distance from between
+// the eyes along the line through them, in eye distances, so a tilted face
+// that looks at the camera is not taken for a turned one. About 0 facing the camera, 0.3 at
 // three-quarters, above 0.5 in profile, where recognition is unreliable.
 func (f Face) Yaw() float32 {
 	l := f.Landmarks
-	eyes := math.Hypot(l[1][0]-l[0][0], l[1][1]-l[0][1])
-	if eyes == 0 {
+	// The nose's offset from between the eyes, along the line through the
+	// eyes: a face that is only tilted (rolled) has none.
+	ex, ey := l[1][0]-l[0][0], l[1][1]-l[0][1]
+	dx, dy := l[2][0]-(l[0][0]+l[1][0])/2, l[2][1]-(l[0][1]+l[1][1])/2
+	eyes2 := ex*ex + ey*ey
+	if eyes2 == 0 {
 		return 1
 	}
-	return float32(math.Abs(l[2][0]-(l[0][0]+l[1][0])/2) / eyes)
+	return float32(math.Abs(dx*ex+dy*ey) / eyes2)
 }
 
 // Faces finds and recognises faces. YuNet detects them with five landmarks,
 // the landmarks align each face to SFace's template, and SFace turns it into
 // an identity vector: two photos of one person give vectors with a high
-// cosine similarity. Both models are small and run on the CPU. Safe for
+// cosine similarity. Both models run on the GPU while the image model leaves
+// it free (see gpu), and on the CPU otherwise or without one: the two find
+// the same faces with the same vectors (1,000 faces measured: the same
+// boxes, cosines above 0.99999), so any mix clusters together. Safe for
 // concurrent use.
 type Faces struct {
-	m        FaceModel
-	det, rec *session
+	m FaceModel
+	// mu is held for reading while a model runs, and for writing to drop
+	// the GPU's.
+	mu         sync.RWMutex
+	det, rec   *session // on the CPU
+	gdet, grec *session // on the GPU; nil without one, or after it failed
+	// turn queues face runs for the GPU, so while the image model leaves it
+	// free they all run there, one after another, rather than on the CPU.
+	turn sync.Mutex
 }
 
 // yunetStrides are the detector's three feature map strides; each has
 // cls/obj/bbox/kps outputs.
 var yunetStrides = [...]int{8, 16, 32}
 
-// OpenFaces loads both face models. threads limits each model's CPU threads.
-func OpenFaces(m FaceModel, threads int) (*Faces, error) {
+// OpenFaces loads both face models on the CPU and, with device GPU, on the
+// GPU too where one is usable. threads limits each model's CPU threads.
+func OpenFaces(m FaceModel, device Device, threads int) (*Faces, error) {
+	f := &Faces{m: m}
+	var err error
+	if f.det, f.rec, err = openFaceModels(m, CPU, threads); err != nil {
+		return nil, err
+	}
+	if device == GPU {
+		if f.gdet, f.grec, err = openFaceModels(m, GPU, 0); err != nil {
+			slog.Warn("face models can't use the GPU; using the CPU", "err", err)
+		}
+	}
+	return f, nil
+}
+
+func openFaceModels(m FaceModel, device Device, threads int) (det, rec *session, err error) {
 	var outputs []string
 	for _, kind := range []string{"cls", "obj", "bbox", "kps"} {
 		for _, s := range yunetStrides {
 			outputs = append(outputs, fmt.Sprintf("%s_%d", kind, s))
 		}
 	}
-	det, err := openSession(filepath.Join(m.Dir, "yunet.onnx"), CPU, threads, outputs...)
+	det, err = openSession(filepath.Join(m.Dir, "yunet.onnx"), device, threads, outputs...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	rec, err := openSession(filepath.Join(m.Dir, "sface.onnx"), CPU, threads)
+	rec, err = openSession(filepath.Join(m.Dir, "sface.onnx"), device, threads)
 	if err != nil {
 		det.close()
-		return nil, err
+		return nil, nil, err
 	}
-	return &Faces{m: m, det: det, rec: rec}, nil
+	return det, rec, nil
 }
 
-// Close frees both models.
+// Device reports where the models run while the GPU is free: the GPU, or
+// the CPU without one (or after it failed).
+func (f *Faces) Device() Device {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.gdet != nil {
+		return GPU
+	}
+	return CPU
+}
+
+// run runs the detector (or, with rec, the recogniser): on the GPU if the
+// image model leaves it free, else on the CPU. A GPU that fails (a driver
+// update, a removed device) is dropped, and the CPU runs everything.
+func (f *Faces) run(rec bool, in ort.Value) ([][]float32, error) {
+	f.mu.RLock()
+	c, g := f.det, f.gdet
+	if rec {
+		c, g = f.rec, f.grec
+	}
+	if g != nil {
+		f.turn.Lock()
+		out, ran, err := g.tryRun(in)
+		f.turn.Unlock()
+		if ran {
+			f.mu.RUnlock()
+			if err == nil {
+				return out, nil
+			}
+			f.dropGPU(g, err)
+			return f.run(rec, in)
+		}
+	}
+	defer f.mu.RUnlock()
+	return c.run(in)
+}
+
+// dropGPU frees the GPU's models after a run failed on failed, unless
+// another run already did.
+func (f *Faces) dropGPU(failed *session, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if failed != f.gdet && failed != f.grec {
+		return
+	}
+	slog.Warn("face models failed on the GPU; using the CPU", "err", err)
+	f.gdet.close()
+	f.grec.close()
+	f.gdet, f.grec = nil, nil
+}
+
+// Close frees the models.
 func (f *Faces) Close() {
-	f.det.close()
-	f.rec.close()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range []*session{f.det, f.rec, f.gdet, f.grec} {
+		s.close()
+	}
 }
 
 // Detect finds the faces in an 8-bit RGB image scoring at least minScore,
@@ -125,7 +211,7 @@ func (f *Faces) Detect(pix []byte, w, h int, minScore float32) ([]Face, error) {
 		return nil, err
 	}
 	defer destroy(in)
-	outs, err := f.det.run(in)
+	outs, err := f.run(false, in)
 	if err != nil {
 		return nil, fmt.Errorf("run face detector: %w", err)
 	}
@@ -159,12 +245,17 @@ func (f *Faces) Detect(pix []byte, w, h int, minScore float32) ([]Face, error) {
 	return nonMaxSuppress(found, 0.3), nil
 }
 
+// FaceAnalysisVersion is the version of what Lumen computes around the face
+// models (alignment, sharpness, yaw). A change re-runs the faces stage, as a
+// new model does.
+const FaceAnalysisVersion = "2"
+
 // embedBatch is the most faces SFace embeds in one run.
 const embedBatch = 32
 
 // Identity is what recognition makes of one face.
 type Identity struct {
-	Vec []float32 // unit vector; the same person's faces point the same way
+	Vec []float32 // unit vector; the same person's faces point the same way. nil: not recognisable
 	// Sharpness is how much detail the aligned face holds (the variance of
 	// its Laplacian): blurred, dark or enlarged tiny faces score low, and
 	// their vectors are less reliable.
@@ -185,8 +276,8 @@ func (f *Faces) Embed(pix []byte, w, h int, faces []Face) ([]Identity, error) {
 		data := make([]float32, len(batch)*3*plane)
 		sharp := make([]float32, len(batch))
 		for b, fc := range batch {
-			crop := Align(pix, w, h, fc.Landmarks, side)
-			sharp[b] = sharpness(crop, side)
+			crop, inside := align(pix, w, h, fc.Landmarks, side)
+			sharp[b] = sharpness(crop, inside, side)
 			base := b * 3 * plane
 			for i := range plane { // planar RGB, 0..255: SFace normalises itself
 				data[base+i] = float32(crop[3*i])
@@ -198,7 +289,7 @@ func (f *Faces) Embed(pix []byte, w, h int, faces []Face) ([]Identity, error) {
 		if err != nil {
 			return nil, err
 		}
-		res, err := f.rec.run(in)
+		res, err := f.run(true, in)
 		destroy(in)
 		if err != nil {
 			return nil, fmt.Errorf("run face recognizer: %w", err)
@@ -216,8 +307,9 @@ func (f *Faces) Embed(pix []byte, w, h int, faces []Face) ([]Identity, error) {
 
 // sharpness is the variance of the Laplacian of an aligned face's
 // brightness, over the face itself (eyes to chin, not the background at the
-// crop's edges).
-func sharpness(crop []byte, side int) float32 {
+// crop's edges). Pixels next to where the photo ends are left out: the hard
+// edge against black would count as detail.
+func sharpness(crop []byte, inside []bool, side int) float32 {
 	g := make([]float64, side*side)
 	for i := range g {
 		g[i] = 0.299*float64(crop[3*i]) + 0.587*float64(crop[3*i+1]) + 0.114*float64(crop[3*i+2])
@@ -226,11 +318,17 @@ func sharpness(crop []byte, side int) float32 {
 	var n int
 	for y := side * 24 / 112; y < side*96/112; y++ {
 		for x := side * 20 / 112; x < side*92/112; x++ {
+			if i := y*side + x; !inside[i] || !inside[i-1] || !inside[i+1] || !inside[i-side] || !inside[i+side] {
+				continue
+			}
 			v := 4*g[y*side+x] - g[y*side+x-1] - g[y*side+x+1] - g[(y-1)*side+x] - g[(y+1)*side+x]
 			sum += v
 			sum2 += v * v
 			n++
 		}
+	}
+	if n == 0 {
+		return 0
 	}
 	mean := sum / float64(n)
 	return float32(sum2/float64(n) - mean*mean)
@@ -247,6 +345,13 @@ var faceTemplate = [5][2]float64{
 // the landmarks onto it. It returns a side x side 8-bit RGB crop. Big faces
 // are averaged over several samples per pixel, so they don't alias.
 func Align(pix []byte, w, h int, lm [5][2]float64, side int) []byte {
+	crop, _ := align(pix, w, h, lm, side)
+	return crop
+}
+
+// align is Align, also reporting which crop pixels come from inside the
+// image (the rest are black), so sharpness can leave out the image's edge.
+func align(pix []byte, w, h int, lm [5][2]float64, side int) (crop []byte, inside []bool) {
 	k := float64(side) / 112
 	var mx, my, tx, ty float64
 	for i := range 5 {
@@ -263,9 +368,9 @@ func Align(pix []byte, w, h int, lm [5][2]float64, side int) []byte {
 		num2 += px*qy - py*qx
 		den += px*px + py*py
 	}
-	out := make([]byte, side*side*3)
+	crop, inside = make([]byte, side*side*3), make([]bool, side*side)
 	if den == 0 {
-		return out
+		return crop, inside
 	}
 	// crop = [a -b; b a] * (image - m) + t, so image = inverse applied to crop.
 	a, b := num1/den, num2/den
@@ -275,21 +380,25 @@ func Align(pix []byte, w, h int, lm [5][2]float64, side int) []byte {
 	for v := range side {
 		for u := range side {
 			var acc [3]float64
+			in := true
 			for sv := range n {
 				for su := range n {
 					du := float64(u) + (float64(su)+0.5)/float64(n) - 0.5 - tx
 					dv := float64(v) + (float64(sv)+0.5)/float64(n) - 0.5 - ty
-					c := bilinear(pix, w, h, inv*(a*du+b*dv)+mx, inv*(-b*du+a*dv)+my)
+					x, y := inv*(a*du+b*dv)+mx, inv*(-b*du+a*dv)+my
+					in = in && x >= 0 && y >= 0 && x <= float64(w-1) && y <= float64(h-1)
+					c := bilinear(pix, w, h, x, y)
 					acc[0], acc[1], acc[2] = acc[0]+c[0], acc[1]+c[1], acc[2]+c[2]
 				}
 			}
 			o := (v*side + u) * 3
 			for ch := range 3 {
-				out[o+ch] = uint8(math.Round(acc[ch] / float64(n*n)))
+				crop[o+ch] = uint8(math.Round(acc[ch] / float64(n*n)))
 			}
+			inside[v*side+u] = in
 		}
 	}
-	return out
+	return crop, inside
 }
 
 // bilinear samples an RGB image at (x, y); outside it is black.

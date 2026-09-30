@@ -10,16 +10,14 @@ import (
 	"lumen/internal/core"
 )
 
-// ErrNotFound is returned when an asset does not exist or is not visible.
+// ErrNotFound is returned when an asset, album, person, tag or face does not
+// exist (or no longer does), or an asset is not visible.
 var ErrNotFound = errors.New("not found")
 
 // UnavailableAssets identifies stored vectors that must not compete for search
 // results. Keep their embeddings so restored sources become searchable again.
 func (s *Store) UnavailableAssets(ctx context.Context) (map[int64]bool, error) {
-	ids, err := queryAll(ctx, s.r, func(r *sql.Rows) (id int64, err error) {
-		err = r.Scan(&id)
-		return id, err
-	}, "SELECT id FROM assets WHERE NOT ("+visible+")")
+	ids, err := queryAll(ctx, s.r, scanID, "SELECT id FROM assets WHERE NOT ("+visible+")")
 	if err != nil {
 		return nil, err
 	}
@@ -48,31 +46,69 @@ func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float32) (
 // viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
 func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float32) (where string, args []any, err error) {
 	if v.Album != 0 {
-		var a core.Album
-		a, err = s.album(ctx, v.Album)
+		a, err := album(ctx, s.r, v.Album)
 		if err != nil {
 			return "", nil, err
 		}
-		where, args = albumPredicate(a, minScore)
+		where, args = albumFilter(a).where(minScore)
 		return where, args, nil
 	}
-	where = visible
+	f := assetFilter{tag: v.Tag, person: v.Person}
 	switch v.Filter {
 	case core.FilterAll:
 	case core.FilterFavourites:
-		where += " AND favourite = 1"
+		f.favourites = true
 	case core.FilterVideos:
-		where += " AND kind = 'video'"
+		f.kind = core.KindVideo
 	}
-	if v.Tag != 0 {
-		where += " AND id IN (SELECT x.asset_id FROM asset_tags x WHERE x.tag_id = ? AND " + tagApplies + ")"
-		args = append(args, v.Tag, minScore)
-	}
-	if v.Person != 0 {
-		where += " AND id IN (SELECT asset_id FROM faces WHERE person_id = ?)"
-		args = append(args, v.Person)
-	}
+	where, args = f.where(minScore)
 	return where, args, nil
+}
+
+// assetFilter narrows the visible assets, for a view of the timeline or a
+// smart album's rule. Zero fields match everything.
+type assetFilter struct {
+	kind       core.Kind
+	favourites bool
+	from, to   string // inclusive calendar days, YYYY-MM-DD (validated by the caller)
+	tag        int64  // carrying this tag (AI tags from minScore up)
+	person     int64  // showing this person
+	album      int64  // in this manual album
+}
+
+// where is the filter as a WHERE clause for the assets table, with only
+// bound values. It starts with visible, so the grid's queries use the
+// assets_timeline index.
+func (f assetFilter) where(minScore float32) (where string, args []any) {
+	where, args = visible, []any{}
+	if f.kind != "" {
+		where += " AND kind = ?"
+		args = append(args, f.kind)
+	}
+	if f.favourites {
+		where += " AND favourite = 1"
+	}
+	if day, err := time.Parse(time.DateOnly, f.from); err == nil {
+		where += " AND taken_at >= ?"
+		args = append(args, day.Unix())
+	}
+	if day, err := time.Parse(time.DateOnly, f.to); err == nil {
+		where += " AND taken_at < ?"
+		args = append(args, day.AddDate(0, 0, 1).Unix())
+	}
+	if f.tag != 0 {
+		where += " AND id IN (SELECT x.asset_id FROM asset_tags x WHERE x.tag_id = ? AND " + tagApplies + ")"
+		args = append(args, f.tag, minScore)
+	}
+	if f.person != 0 {
+		where += " AND id IN (SELECT asset_id FROM faces WHERE person_id = ?)"
+		args = append(args, f.person)
+	}
+	if f.album != 0 {
+		where += " AND id IN (SELECT asset_id FROM album_items WHERE album_id = ?)"
+		args = append(args, f.album)
+	}
+	return where, args
 }
 
 // DayItems returns the view's grid items for the days from..to inclusive
@@ -170,7 +206,7 @@ func (s *Store) AssetDetail(ctx context.Context, id int64) (core.AssetDetail, er
 	var lat, lon sql.NullFloat64
 	err := s.r.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon, favourite,
 		duration_ms, video_codec, audio_codec
-		FROM assets WHERE id = ? AND missing_since IS NULL`, id).
+		FROM assets WHERE id = ? AND `+present, id).
 		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.Favourite,
 			&duration, &videoCodec, &audioCodec)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -206,7 +242,7 @@ func (s *Store) AssetDetail(ctx context.Context, id int64) (core.AssetDetail, er
 
 // MediaFile is what the media handler needs to serve an asset.
 type MediaFile struct {
-	Path         string
+	Paths        []string // every copy on disk, the primary one (see primaryFile) first
 	Ext          string
 	Kind         core.Kind
 	Orientation  int
@@ -216,23 +252,36 @@ type MediaFile struct {
 	Duration     int64
 }
 
-// AssetFile returns the first file on disk for an asset.
+// AssetFile returns what serving an asset needs, with every file it is in:
+// if one copy is on a drive that is not plugged in, another may be.
 func (s *Store) AssetFile(ctx context.Context, id int64) (MediaFile, error) {
 	var m MediaFile
-	err := s.r.QueryRowContext(ctx, `SELECT f.path, a.ext, a.kind, a.orientation, a.thumb_version,
-		COALESCE(a.video_codec, ''), COALESCE(a.audio_codec, ''), COALESCE(a.duration_ms, 0)
-		FROM assets a JOIN files f ON f.asset_id = a.id WHERE a.id = ? LIMIT 1`, id).
-		Scan(&m.Path, &m.Ext, &m.Kind, &m.Orientation, &m.ThumbVersion, &m.VideoCodec, &m.AudioCodec, &m.Duration)
-	if errors.Is(err, sql.ErrNoRows) {
-		return m, ErrNotFound
-	}
+	err := s.read(ctx, func(tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx, `SELECT ext, kind, orientation, thumb_version,
+			COALESCE(video_codec, ''), COALESCE(audio_codec, ''), COALESCE(duration_ms, 0)
+			FROM assets WHERE id = ? AND `+present, id).
+			Scan(&m.Ext, &m.Kind, &m.Orientation, &m.ThumbVersion, &m.VideoCodec, &m.AudioCodec, &m.Duration)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		m.Paths, err = queryAll(ctx, tx, func(r *sql.Rows) (p string, err error) {
+			err = r.Scan(&p)
+			return p, err
+		}, "SELECT path FROM files WHERE asset_id = ? ORDER BY id", id)
+		if err == nil && len(m.Paths) == 0 {
+			err = ErrNotFound
+		}
+		return err
+	})
 	return m, err
 }
 
 // SetFavourite marks or unmarks an asset as a favourite.
 func (s *Store) SetFavourite(ctx context.Context, id int64, fav bool) error {
-	_, err := s.w.ExecContext(ctx, "UPDATE assets SET favourite = ? WHERE id = ?", fav, id)
-	return err
+	return affected(s.w.ExecContext(ctx, "UPDATE assets SET favourite = ? WHERE id = ? AND "+present, fav, id))
 }
 
 // CountVisible returns how many assets the grid shows.

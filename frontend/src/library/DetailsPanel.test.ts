@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { DateSource, engine, Kind } from '../bridge'
+import { AlbumKind, DateSource, engine, Kind } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { AssetDetail } from '../bridge'
+import { emptyRule } from '../albums/store'
 import DetailsPanel from './DetailsPanel.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -84,6 +85,20 @@ it('does not clear the next selection draft when album creation finishes', async
   await wrapper.get('.album-new input').setValue('Second album')
   pending.resolve(4)
   await flushPromises()
-  expect(engine.setAlbumItem).toHaveBeenCalledWith(4, 1, true)
+  expect(engine.createAlbum).toHaveBeenCalledWith('First album', AlbumKind.AlbumManual, emptyRule(), [1])
   expect(wrapper.get<HTMLInputElement>('.album-new input').element.value).toBe('Second album')
+})
+
+it('puts an album checkbox back when the change fails', async () => {
+  vi.mocked(engine.albums).mockResolvedValue([
+    { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
+  ])
+  vi.mocked(engine.setAlbumItem).mockRejectedValueOnce(new Error('album deleted'))
+  wrapper = mount(DetailsPanel, { props: { sel: { day: 'results', id: 1 } } })
+  await flushPromises()
+  const box = wrapper.get<HTMLInputElement>('.album-option input')
+  await box.setValue(true)
+  await flushPromises()
+  expect(box.element.checked).toBe(false)
+  expect(wrapper.text()).toContain('album deleted')
 })

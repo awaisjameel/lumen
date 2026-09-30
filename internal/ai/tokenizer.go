@@ -67,10 +67,27 @@ func LoadTokenizer(path string) (*Tokenizer, error) {
 	return t, nil
 }
 
+// maxTokenRunes bounds how many characters one token covers (SigLIP 2's
+// longest are well under it).
+const maxTokenRunes = 32
+
 // Encode returns exactly n token ids for text: lower-cased, at most n-1
 // tokens, then <eos>, then <pad> to fill (as SigLIP 2 was trained).
 func (t *Tokenizer) Encode(text string, n int) []int64 {
 	s := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(text)), " ", "▁")
+	// Merging is quadratic in the length. Only the first n-1 tokens are
+	// kept, and no token is longer than maxTokenRunes, so the rest of a long
+	// text can't change them.
+	if limit := n * maxTokenRunes; len(s) > limit {
+		k := 0
+		for i := range s {
+			if k == limit {
+				s = s[:i]
+				break
+			}
+			k++
+		}
+	}
 	syms := make([]int32, 0, len(s))
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
