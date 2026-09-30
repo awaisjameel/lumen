@@ -121,6 +121,14 @@ export const ErrorCode = {
   InvalidName: 'invalid_name',
   AlbumExists: 'album_exists',
   InvalidAlbum: 'invalid_album',
+  AlbumMediaKind: 'album_media_kind',
+  AlbumSelection: 'album_selection',
+  AlbumDate: 'album_date',
+  AlbumDateOrder: 'album_date_order',
+  AlbumSmartItems: 'album_smart_items',
+  AlbumKind: 'album_kind',
+  AlbumReference: 'album_reference',
+  AlbumManualOnly: 'album_manual_only',
   PersonExists: 'person_exists',
   BlockedName: 'blocked_name',
   TagExists: 'tag_exists',
@@ -213,8 +221,8 @@ export const engine = {
   updateAlbum: (id: number, name: string, rule: AlbumRule): Promise<void> => LibraryService.UpdateAlbum(id, name, rule),
   deleteAlbum: (id: number): Promise<void> => LibraryService.DeleteAlbum(id),
   assetAlbums: async (id: number): Promise<number[]> => (await LibraryService.AssetAlbums(id)) ?? [],
-  setAlbumItem: (album: number, asset: number, include: boolean): Promise<void> =>
-    LibraryService.SetAlbumItem(album, asset, include),
+  setAlbumItem: (assetID: number, albumID: number, include: boolean): Promise<void> =>
+    LibraryService.SetAlbumItem(assetID, albumID, include),
   /** Opens Explorer on one of an asset's files: path, or "" for the first one there. */
   showInFolder: (id: number, path = ''): Promise<void> => LibraryService.ShowInFolder(id, path),
 

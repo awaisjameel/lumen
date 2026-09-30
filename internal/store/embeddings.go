@@ -16,13 +16,14 @@ type TagScore struct {
 
 // EmbedResult is the outcome of the embedding stage for one asset.
 type EmbedResult struct {
-	AssetID int64
-	Vec     []int8 // int8 embedding; the vector is Vec * Scale
-	Scale   float32
-	Tags    []TagScore       // replaces the asset's AI tags
-	Frames  []FrameEmbedding // one vector per sampled video frame; nil for photos
-	Err     string
-	Skipped bool // nothing to embed (no thumbnail can be made, or a video without frames)
+	LabelsGeneration uint64
+	AssetID          int64
+	Vec              []int8 // int8 embedding; the vector is Vec * Scale
+	Scale            float32
+	Tags             []TagScore       // replaces the asset's AI tags
+	Frames           []FrameEmbedding // one vector per sampled video frame; nil for photos
+	Err              string
+	Skipped          bool // nothing to embed (no thumbnail can be made, or a video without frames)
 }
 
 // FrameEmbedding is one searchable moment of a video.
@@ -37,6 +38,11 @@ type FrameEmbedding struct {
 // The user's own tag edits are never touched: an AI tag the user removed
 // stays removed.
 func (s *Store) SaveEmbeddings(ctx context.Context, model, version string, rs []EmbedResult) error {
+	return s.SaveEmbeddingVersions(ctx, model, StageVersion{Photo: version, Video: version}, rs)
+}
+
+// SaveEmbeddingVersions saves embeddings at their media-kind-specific stage versions.
+func (s *Store) SaveEmbeddingVersions(ctx context.Context, model string, version StageVersion, rs []EmbedResult) error {
 	if len(rs) == 0 {
 		return nil
 	}
@@ -64,7 +70,7 @@ func (s *Store) SaveEmbeddings(ctx context.Context, model, version string, rs []
 			return err
 		}
 		defer tags.close()
-		job, err := prepareJobUpdate(ctx, tx)
+		job, err := prepareVersionedJobUpdate(ctx, tx, version)
 		if err != nil {
 			return err
 		}
@@ -86,7 +92,7 @@ func (s *Store) SaveEmbeddings(ctx context.Context, model, version string, rs []
 					return err
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageEmbedding, version, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageEmbedding, version.Photo, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}

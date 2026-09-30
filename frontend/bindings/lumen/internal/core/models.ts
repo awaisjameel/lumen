@@ -577,7 +577,7 @@ export interface SearchResult {
     "noAI": boolean;
 
     /**
-     * a blocked person's name occurred in the query
+     * a blocked named entity occurred in the query
      */
     "blocked": boolean;
 }

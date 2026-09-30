@@ -92,6 +92,35 @@ func TestSearchWithoutAI(t *testing.T) {
 	if r, err := s.Search(ctx, "Ali Khan"); err != nil || r.Blocked || len(r.Items) != 1 || r.Items[0].ID != beach {
 		t.Errorf("visible longer name beside a blocked one = %+v, %v", r, err)
 	}
+	thing, err := st.CreateTag(ctx, "Été", core.TagManual, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	album, err := st.CreateAlbum(ctx, "Family Trip", core.AlbumManual, core.AlbumRule{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []struct {
+		kind  core.BlockKind
+		id    int64
+		query string
+	}{
+		{core.BlockTag, thing, "photos of ÉTÉ"},
+		{core.BlockAlbum, album, "family trip at the beach"},
+	} {
+		if _, err := st.SetBlock(ctx, target.kind, target.id, "", core.BlockLabel); err != nil {
+			t.Fatal(err)
+		}
+		if r, err := s.Search(ctx, target.query); err != nil || !r.Blocked || r.NoAI || len(r.Items) != 0 || len(r.People) != 0 {
+			t.Errorf("%s name search = %+v, %v", target.kind, r, err)
+		}
+	}
+	if r, err := s.Search(ctx, "Étéland"); err != nil || r.Blocked {
+		t.Errorf("partial Thing name = %+v, %v", r, err)
+	}
+	if r, err := s.Search(ctx, "Ali Khan and Ali Khan"); err != nil || r.Blocked || len(r.Items) != 1 {
+		t.Errorf("repeated longer name = %+v, %v", r, err)
+	}
 	if _, err := s.CreateLabel(ctx, "Eiffel Tower"); !errors.Is(err, ErrNoAI) {
 		t.Errorf("CreateLabel without AI: %v, want ErrNoAI", err)
 	}

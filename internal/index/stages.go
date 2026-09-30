@@ -39,6 +39,7 @@ type stage[R any] struct {
 	// results instead.
 	process func(context.Context, []store.JobItem) ([]R, error)
 	save    func(context.Context, []R) error
+	fetch   func(context.Context, int) ([]store.JobItem, error)
 }
 
 // storeError is a process error from the database rather than the stage's
@@ -83,7 +84,11 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 		if !ix.waitTurn(ctx, s.name, s.model) {
 			return
 		}
-		items, err := ix.fetch(ctx, s.name, s.batch)
+		fetch := s.fetch
+		if fetch == nil {
+			fetch = func(ctx context.Context, n int) ([]store.JobItem, error) { return ix.fetch(ctx, s.name, n) }
+		}
+		items, err := fetch(ctx, s.batch)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -115,6 +120,9 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 			continue
 		}
 		if err != nil {
+			if len(results) > 0 && saveResults(ctx, s, results) {
+				ix.markChanged(s.changes)
+			}
 			slog.Error("stage can't run", "stage", s.name, "err", err, "retry in", retry)
 			if s.model != nil {
 				s.model.release() // a model that failed is loaded afresh next time
@@ -199,12 +207,19 @@ func (ix *Indexer) fetch(ctx context.Context, stage core.Stage, n int) ([]store.
 	focus := ix.focus
 	ix.mu.Unlock()
 	if focus != nil {
-		items, err := ix.store.PendingJobs(ctx, stage, focus, n)
+		items, err := ix.pendingJobs(ctx, stage, focus, n)
 		if err != nil || len(items) > 0 {
 			return items, err
 		}
 	}
-	return ix.store.PendingJobs(ctx, stage, nil, n)
+	return ix.pendingJobs(ctx, stage, nil, n)
+}
+
+func (ix *Indexer) pendingJobs(ctx context.Context, stage core.Stage, within *store.TimeRange, n int) ([]store.JobItem, error) {
+	if stage == core.StageEmbedding || stage == core.StageFaces {
+		return ix.store.PendingJobsKind(ctx, stage, core.KindPhoto, within, n)
+	}
+	return ix.store.PendingJobs(ctx, stage, within, n)
 }
 
 func (ix *Indexer) doMetadata(ctx context.Context, j store.JobItem) (r store.MetadataResult) {
@@ -319,20 +334,18 @@ func (ix *Indexer) thumbnailForFaces(ctx context.Context, j store.JobItem) (medi
 // the thumbnail) prepared at once.
 const embedWorkers = 4
 
-// doEmbeddings embeds a batch of photos and videos with SigLIP and tags
-// them. Photo inputs come from the 1024 px thumbnails (upright, small,
-// already decoded once), rebuilt first if they are missing; videos are
-// sampled frame by frame. Photos and video frames share the model's batches
-// (see modelBatch), so a short clip doesn't cost a whole batch of its own.
+// doEmbeddings embeds and tags photos from their upright 1024 px thumbnails,
+// rebuilt first if missing. The video coordinator batches sampled frames separately.
 func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]store.EmbedResult, error) {
 	if err := ix.search.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("search engine: %w", err)
 	}
-	enc, err := ix.encoder.get()
+	enc, done, err := ix.encoder.acquire()
 	if err != nil {
 		return nil, err
 	}
-	ix.embedLabels = ix.search.LabelsGeneration() // before any is tagged
+	defer done()
+	generation := ix.search.LabelsGeneration()
 	side := ix.search.Model().ImageSize
 	results := make([]store.EmbedResult, len(items))
 	inputs := make([][]byte, len(items))
@@ -340,6 +353,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 		j := items[i]
 		r := &results[i]
 		r.AssetID = j.AssetID
+		r.LabelsGeneration = generation
 		defer recoverInto(&r.Err, j.Path)
 		if j.Kind != core.KindPhoto {
 			return
@@ -381,22 +395,8 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 			return nil, err
 		}
 	}
-	var videos []*videoEmbedding
-	for i, j := range items {
-		if j.Kind == core.KindVideo {
-			v := &videoEmbedding{r: &results[i], tags: ix.search.Tags, mean: make([]float32, ix.search.Model().Dim)}
-			videos = append(videos, v)
-			ix.sampleVideoSafely(ctx, j, side, b, v)
-			if b.err != nil {
-				return nil, b.err
-			}
-		}
-	}
 	if err := b.flush(); err != nil {
 		return nil, err
-	}
-	for _, v := range videos {
-		v.finish()
 	}
 	ix.setAIState(func() { ix.aiDevice = enc.Device() }) // it may have moved to the CPU
 	return results, nil
@@ -451,34 +451,6 @@ type videoEmbedding struct {
 	sampled int // frames sent to the model
 }
 
-// sampleVideoSafely sends a video's sampled frames to the model, recording
-// a decoding failure (or a panic: a corrupt file finding a decoder bug) as
-// the video's error. A model failure is left in b.err for the caller.
-func (ix *Indexer) sampleVideoSafely(ctx context.Context, j store.JobItem, side int, b *modelBatch, v *videoEmbedding) {
-	defer recoverInto(&v.r.Err, j.Path)
-	seen := map[int64]bool{}
-	err := ix.cache.Decoder.Frames(ctx, j.Path, media.SampleCount(j.Duration), core.ThumbLarge, func(f media.Frame) error {
-		if seen[f.At] {
-			return nil
-		}
-		px, err := media.ModelInputPixels(f.Image, side)
-		if err != nil {
-			return err
-		}
-		seen[f.At] = true
-		v.sampled++
-		at := f.At
-		return b.add(px, func(vec []float32) { v.frame(at, vec) })
-	})
-	switch {
-	case b.err != nil: // the model's failure, not the file's
-	case errors.Is(err, media.ErrUnsupported):
-		v.r.Skipped = true
-	case err != nil:
-		v.r.Err = err.Error()
-	}
-}
-
 // frame keeps one sampled moment searchable, unless the video already failed
 // or the model made nothing of that frame (it alone is left out).
 func (v *videoEmbedding) frame(at int64, vec []float32) {
@@ -509,8 +481,11 @@ func (v *videoEmbedding) finish() {
 
 // saveEmbeddings stores a batch, then makes it searchable.
 func (ix *Indexer) saveEmbeddings(ctx context.Context, rs []store.EmbedResult) error {
-	return ix.search.Commit(ix.embedLabels, rs, func(rs []store.EmbedResult) error {
-		return ix.store.SaveEmbeddings(ctx, ix.search.Model().Version, ix.version[core.StageEmbedding], rs)
+	if len(rs) == 0 {
+		return nil
+	}
+	return ix.search.Commit(rs[0].LabelsGeneration, rs, func(rs []store.EmbedResult) error {
+		return ix.store.SaveEmbeddingVersions(ctx, ix.search.Model().Version, ix.version[core.StageEmbedding], rs)
 	})
 }
 
@@ -547,10 +522,11 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 	if len(run) == 0 {
 		return results, nil // without loading the models
 	}
-	faces, err := ix.faces.get()
+	faces, done, err := ix.faces.acquire()
 	if err != nil {
 		return nil, err
 	}
+	defer done()
 	var failed atomic.Pointer[modelError] // the models failed: the batch can't be done
 	parallel.For(ctx, len(run), faceWorkers, func(k int) {
 		j := items[run[k]]
@@ -559,46 +535,21 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 		// A bad image is this file's problem; any other failure of the
 		// models is every file's.
 		modelErr := func(err error) error {
+			if err == nil {
+				return nil
+			}
 			if errors.Is(err, ai.ErrBadImage) {
 				return err
 			}
 			return modelError{err}
 		}
-		process := func(im media.Image, at int64) error {
-			found, err := faces.Detect(im.Pix, im.W, im.H, faceMinScore)
-			if err != nil {
-				return modelErr(err)
-			}
-			found = slices.DeleteFunc(found, func(f ai.Face) bool { return min(f.W, f.H) < faceMinSide })
-			ids, err := faces.Embed(im.Pix, im.W, im.H, found)
-			if err != nil {
-				return modelErr(err)
-			}
-			w, h := float64(im.W), float64(im.H)
-			for k, f := range found {
-				if ids[k].Vec == nil {
-					continue // not recognisable: as if too small
-				}
-				r.Faces = append(r.Faces, store.DetectedFace{
-					Frame: at,
-					X:     float32(f.X / w), Y: float32(f.Y / h), W: float32(f.W / w), H: float32(f.H / h),
-					Score: f.Score, Sharpness: ids[k].Sharpness, Yaw: f.Yaw(), Vec: ids[k].Vec,
-				})
-			}
-			return nil
-		}
+		im, ok := ix.pixels.take(j.AssetID, j.Orientation)
 		var err error
-		if j.Kind == core.KindVideo {
-			err = ix.cache.Decoder.Frames(ctx, j.Path, media.SampleCount(j.Duration), faceSide,
-				func(f media.Frame) error { return process(f.Image, f.At) })
-		} else {
-			im, ok := ix.pixels.take(j.AssetID, j.Orientation)
-			if !ok {
-				im, err = ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
-			}
-			if err == nil {
-				err = process(im, 0)
-			}
+		if !ok {
+			im, err = ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
+		}
+		if err == nil {
+			err = modelErr(findFaces(faces, im, 0, r))
 		}
 		var merr modelError
 		switch {
@@ -619,9 +570,31 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 	return results, nil
 }
 
+func findFaces(faces *ai.Faces, im media.Image, at int64, r *store.FaceResult) error {
+	found, err := faces.Detect(im.Pix, im.W, im.H, faceMinScore)
+	if err != nil {
+		return err
+	}
+	found = slices.DeleteFunc(found, func(f ai.Face) bool { return min(f.W, f.H) < faceMinSide })
+	ids, err := faces.Embed(im.Pix, im.W, im.H, found)
+	if err != nil {
+		return err
+	}
+	w, h := float64(im.W), float64(im.H)
+	for k, f := range found {
+		if ids[k].Vec != nil {
+			r.Faces = append(r.Faces, store.DetectedFace{
+				Frame: at, X: float32(f.X / w), Y: float32(f.Y / h), W: float32(f.W / w), H: float32(f.H / h),
+				Score: f.Score, Sharpness: ids[k].Sharpness, Yaw: f.Yaw(), Vec: ids[k].Vec,
+			})
+		}
+	}
+	return nil
+}
+
 // saveFaces stores a batch, then lets the people engine group them.
 func (ix *Indexer) saveFaces(ctx context.Context, rs []store.FaceResult) error {
-	if err := ix.store.SaveFaces(ctx, ix.people.Model().Version, ix.version[core.StageFaces], rs); err != nil {
+	if err := ix.store.SaveFaceVersions(ctx, ix.people.Model().Version, ix.version[core.StageFaces], rs); err != nil {
 		return err
 	}
 	if !all(rs, facesUnchanged) {

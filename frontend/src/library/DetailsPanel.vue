@@ -111,7 +111,7 @@ function toggleAlbum(albumID: number, e: Event) {
   if (!(box instanceof HTMLInputElement) || !assetID) return
   const include = box.checked
   void edit(
-    () => engine.setAlbumItem(albumID, assetID, include),
+    () => engine.setAlbumItem(assetID, albumID, include),
     async () => {
       await Promise.all([loadAlbums(assetID), albums.load()])
     },

@@ -326,6 +326,14 @@ type AssetTag struct {
 	Score  float32   `json:"score"` // AI probability; 0 for user tags
 }
 
+// NamedTarget is a named entity considered when resolving a search query.
+type NamedTarget struct {
+	ID      int64
+	Name    string
+	Kind    BlockKind
+	Blocked bool
+}
+
 // SearchResult is the answer to a natural-language search, best match first.
 type SearchResult struct {
 	Items    []GridItem `json:"items"`
@@ -333,7 +341,7 @@ type SearchResult struct {
 	Pending  int        `json:"pending"`  // photos not yet understood, so not searchable yet
 	Complete bool       `json:"complete"` // false: more matched than are shown
 	NoAI     bool       `json:"noAI"`     // the description could not be searched: the AI isn't available (see AI.Error)
-	Blocked  bool       `json:"blocked"`  // a blocked person's name occurred in the query
+	Blocked  bool       `json:"blocked"`  // a blocked named entity occurred in the query
 }
 
 // Face is one face in a photo or video: where it is, and who it is.

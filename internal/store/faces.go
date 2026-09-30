@@ -58,6 +58,11 @@ func (s *Store) WithFaces(ctx context.Context, ids []int64) (map[int64]bool, err
 // who is in it: each new face takes over the old face at the same spot, with
 // its person and the user's corrections.
 func (s *Store) SaveFaces(ctx context.Context, model, version string, rs []FaceResult) error {
+	return s.SaveFaceVersions(ctx, model, StageVersion{Photo: version, Video: version}, rs)
+}
+
+// SaveFaceVersions saves faces at their media-kind-specific stage versions.
+func (s *Store) SaveFaceVersions(ctx context.Context, model string, version StageVersion, rs []FaceResult) error {
 	if len(rs) == 0 {
 		return nil
 	}
@@ -85,7 +90,7 @@ func (s *Store) SaveFaces(ctx context.Context, model, version string, rs []FaceR
 			return err
 		}
 		defer del.Close()
-		job, err := prepareJobUpdate(ctx, tx)
+		job, err := prepareVersionedJobUpdate(ctx, tx, version)
 		if err != nil {
 			return err
 		}
@@ -121,7 +126,7 @@ func (s *Store) SaveFaces(ctx context.Context, model, version string, rs []FaceR
 					}
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageFaces, version, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageFaces, version.Photo, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}

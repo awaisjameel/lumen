@@ -183,8 +183,8 @@ export function SetAIOnBattery(on: boolean): $CancellablePromise<void> {
 /**
  * SetAlbumItem changes membership in a manual album.
  */
-export function SetAlbumItem(albumID: number, assetID: number, include: boolean): $CancellablePromise<void> {
-    return $Call.ByID(1841706489, albumID, assetID, include);
+export function SetAlbumItem(assetID: number, albumID: number, include: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1841706489, assetID, albumID, include);
 }
 
 /**

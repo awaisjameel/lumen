@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"lumen/internal/core"
@@ -17,14 +18,30 @@ var (
 	// ErrAlbumExists means another album has that name (in any case). It
 	// comes wrapped with ErrInvalidAlbum.
 	ErrAlbumExists = errors.New("an album already has that name")
+	// ErrAlbumMediaKind rejects an unsupported photo/video filter.
+	ErrAlbumMediaKind = fmt.Errorf("%w: unknown media kind", ErrInvalidAlbum)
+	// ErrAlbumSelection rejects a negative Thing or person ID.
+	ErrAlbumSelection = fmt.Errorf("%w: invalid tag or person", ErrInvalidAlbum)
+	// ErrAlbumDate rejects an invalid calendar date.
+	ErrAlbumDate = fmt.Errorf("%w: date must be YYYY-MM-DD", ErrInvalidAlbum)
+	// ErrAlbumDateOrder rejects a reversed date range.
+	ErrAlbumDateOrder = fmt.Errorf("%w: start date follows end date", ErrInvalidAlbum)
+	// ErrAlbumSmartItems rejects explicit members in a smart album.
+	ErrAlbumSmartItems = fmt.Errorf("%w: smart albums choose their own items", ErrInvalidAlbum)
+	// ErrAlbumKind rejects an unsupported collection kind.
+	ErrAlbumKind = fmt.Errorf("%w: unknown album kind", ErrInvalidAlbum)
+	// ErrAlbumReference rejects a deleted Thing or person.
+	ErrAlbumReference = fmt.Errorf("%w: the selected Thing or person no longer exists", ErrInvalidAlbum)
+	// ErrAlbumManualOnly rejects member edits in a smart album.
+	ErrAlbumManualOnly = fmt.Errorf("%w: only manual albums accept items", ErrInvalidAlbum)
 )
 
 func validateAlbumRule(rule core.AlbumRule) error {
 	if rule.Kind != "" && rule.Kind != core.KindPhoto && rule.Kind != core.KindVideo {
-		return fmt.Errorf("%w: unknown media kind", ErrInvalidAlbum)
+		return ErrAlbumMediaKind
 	}
 	if rule.Tag < 0 || rule.Person < 0 {
-		return fmt.Errorf("%w: invalid tag or person", ErrInvalidAlbum)
+		return ErrAlbumSelection
 	}
 	for _, day := range []string{rule.From, rule.To} {
 		if day == "" {
@@ -32,11 +49,11 @@ func validateAlbumRule(rule core.AlbumRule) error {
 		}
 		parsed, err := time.Parse(time.DateOnly, day)
 		if err != nil || parsed.Format(time.DateOnly) != day {
-			return fmt.Errorf("%w: date must be YYYY-MM-DD", ErrInvalidAlbum)
+			return ErrAlbumDate
 		}
 	}
 	if rule.From != "" && rule.To != "" && rule.From > rule.To {
-		return fmt.Errorf("%w: start date follows end date", ErrInvalidAlbum)
+		return ErrAlbumDateOrder
 	}
 	return nil
 }
@@ -65,10 +82,10 @@ func (s *Store) CreateAlbum(ctx context.Context, name string, kind core.AlbumKin
 		rule = core.AlbumRule{}
 	case core.AlbumSmart:
 		if len(items) > 0 {
-			return 0, fmt.Errorf("%w: smart albums choose their own items", ErrInvalidAlbum)
+			return 0, ErrAlbumSmartItems
 		}
 	default:
-		return 0, fmt.Errorf("%w: unknown album kind", ErrInvalidAlbum)
+		return 0, ErrAlbumKind
 	}
 	if err := validateAlbumRule(rule); err != nil {
 		return 0, err
@@ -148,7 +165,7 @@ func albumReferences(ctx context.Context, tx *sql.Tx, rule core.AlbumRule) error
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("%w: the selected Thing or person no longer exists", ErrInvalidAlbum)
+		return ErrAlbumReference
 	}
 	return nil
 }
@@ -185,16 +202,13 @@ func (s *Store) Albums(ctx context.Context, minScore float64) ([]core.Album, err
 		for i := range albums {
 			a := &albums[i]
 			where, args := albumFilter(*a).where(minScore)
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM assets WHERE `+where, args...).Scan(&a.Count); err != nil {
-				return err
-			}
-			if a.Count == 0 {
-				continue // no cover to find
-			}
-			// The newest member that has a thumbnail yet.
-			err := tx.QueryRowContext(ctx, `SELECT id, thumb_version FROM assets WHERE `+where+
-				` AND thumb_version > 0 ORDER BY taken_at DESC, id DESC LIMIT 1`, args...).Scan(&a.Cover, &a.CoverThumb)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			err := tx.QueryRowContext(ctx, `WITH cover AS (
+				SELECT id, thumb_version FROM assets WHERE `+where+`
+				AND thumb_version > 0 ORDER BY taken_at DESC, id DESC LIMIT 1)
+				SELECT count(*), COALESCE((SELECT id FROM cover), 0),
+					COALESCE((SELECT thumb_version FROM cover), 0)
+				FROM assets WHERE `+where, slices.Concat(args, args)...).Scan(&a.Count, &a.Cover, &a.CoverThumb)
+			if err != nil {
 				return err
 			}
 		}
@@ -249,7 +263,7 @@ func setAlbumItem(ctx context.Context, tx *sql.Tx, albumID, assetID int64, inclu
 		return err
 	}
 	if kind != core.AlbumManual {
-		return fmt.Errorf("%w: only manual albums accept items", ErrInvalidAlbum)
+		return ErrAlbumManualOnly
 	}
 	if include {
 		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO album_items (album_id, asset_id, added_at) VALUES (?, ?, ?)`,

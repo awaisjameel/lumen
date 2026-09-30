@@ -72,7 +72,7 @@ func (d Decoders) frames(ctx context.Context, path string, n, side int, fn func(
 // VideoFramesVersion versions how Frames samples a video (SampleCount, the
 // passes below): both AI stages' versions end with it, so a change re-runs
 // them for videos.
-const VideoFramesVersion = "+video-frames-1"
+const VideoFramesVersion = "+video-frames-2"
 
 // samplePass runs ffmpeg once, selecting a frame every `every` seconds:
 // keyframes only, or every frame decoded, from the start or, with

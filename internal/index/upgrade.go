@@ -35,21 +35,20 @@ func thumbnailsStand(j store.JobItem) bool {
 // facesBeforeAnalysis is the faces version from before ai.FaceAnalysisVersion
 // was part of it, for the current face models.
 func (ix *Indexer) facesBeforeAnalysis() string {
-	return ix.people.Model().Version + media.VideoFramesVersion
+	return ix.people.Model().Version + "+video-frames-1"
 }
 
 // facesStanding returns which of items' faces, found at their Prior version,
 // are what the faces stage would find now. Analysis 2 works out yaw and
 // sharpness differently, and needs the landmarks (not stored) to do it, so
 // every file with faces runs again. One where none were found still has none
-// to find: the models are the same, and so are its pixels if it decodes as
-// it did then (photos) or its frames are sampled the same way (videos:
-// media.VideoFramesVersion).
+// to find if the photo still decodes as it did then. Videos must run again:
+// the corrected sampler can find frames that the old pass missed.
 func (ix *Indexer) facesStanding(ctx context.Context, items []store.JobItem) (map[int64]bool, error) {
 	before := ix.facesBeforeAnalysis()
 	var ids []int64
 	for _, j := range items {
-		if j.Prior == before {
+		if j.Kind == core.KindPhoto && j.Prior == before {
 			ids = append(ids, j.AssetID)
 		}
 	}
@@ -62,8 +61,8 @@ func (ix *Indexer) facesStanding(ctx context.Context, items []store.JobItem) (ma
 	}
 	stand := map[int64]bool{}
 	for _, j := range items {
-		if j.Prior == before && !found[j.AssetID] &&
-			(j.Kind == core.KindVideo || media.DecodesAsAt(j.Path, media.UnmanagedThumbnailVersion)) {
+		if j.Kind == core.KindPhoto && j.Prior == before && !found[j.AssetID] &&
+			media.DecodesAsAt(j.Path, media.UnmanagedThumbnailVersion) {
 			stand[j.AssetID] = true
 		}
 	}

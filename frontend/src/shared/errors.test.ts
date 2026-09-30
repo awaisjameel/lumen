@@ -11,9 +11,10 @@ it('explains failures the engine names in the UI’s own words', () => {
   expect(errorText(failure('someone already has that name', ErrorCode.PersonExists))).toBe(
     'Someone already has that name.',
   )
-  expect(errorText(failure('invalid album: start date follows end date', ErrorCode.InvalidAlbum))).toBe(
-    'This album can’t be saved: start date follows end date.',
+  expect(errorText(failure('invalid album: start date follows end date', ErrorCode.AlbumDateOrder))).toBe(
+    'The start date must not follow the end date.',
   )
+  expect(errorText(failure('private engine details', ErrorCode.InvalidAlbum))).toBe('This album can’t be saved.')
   expect(errorText(failure('a name must be 1 to 80 characters', ErrorCode.InvalidName))).toBe(
     'A name must be 1 to 80 characters.',
   )

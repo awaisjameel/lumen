@@ -13,6 +13,7 @@ import (
 	"lumen/internal/core"
 	"lumen/internal/media"
 	"lumen/internal/people"
+	"lumen/internal/search"
 	"lumen/internal/store"
 )
 
@@ -118,7 +119,7 @@ func TestUpgradeRemakesOnlyThumbnailsThatChange(t *testing.T) {
 			t.Errorf("%s was remade (thumbnail version %d, then %d): its pixels are the same", name, it.Thumb, after[name].Thumb)
 		}
 	}
-	if n, err := st.RequeueOutdated(ctx, ix.version); err != nil || n != 0 {
+	if n, err := st.RequeueVersions(ctx, ix.version); err != nil || n != 0 {
 		t.Errorf("after the upgrade %d jobs are still outdated (%v)", n, err)
 	}
 }
@@ -168,5 +169,47 @@ func TestFacesFoundBeforeTheAnalysisChangeStandWhereNoneWere(t *testing.T) {
 		if stand[j.AssetID] != want[j.AssetID] {
 			t.Errorf("%s (prior %s): stands = %v, want %v", filepath.Base(j.Path), j.Prior, stand[j.AssetID], want[j.AssetID])
 		}
+	}
+}
+
+func TestVideoQueuesMergeInCaptureOrder(t *testing.T) {
+	ctx := t.Context()
+	paths := core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	src, err := st.AddSource(ctx, `C:\Videos`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Ingest(ctx, []store.IngestItem{
+		{SourceID: src.ID, Path: `C:\Videos\newer.mp4`, Hash: []byte("newer"), Kind: core.KindVideo, Ext: ".mp4", TakenAt: 200},
+		{SourceID: src.ID, Path: `C:\Videos\older.mp4`, Hash: []byte("older"), Kind: core.KindVideo, Ext: ".mp4", TakenAt: 100},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 2)
+	if err != nil || len(jobs) != 2 {
+		t.Fatalf("jobs = %v, %v", jobs, err)
+	}
+	for _, j := range jobs {
+		if err := st.SaveMetadata(ctx, "m", []store.MetadataResult{{AssetID: j.AssetID}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SaveThumbnails(ctx, "t", []store.ThumbResult{{AssetID: j.AssetID}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ix := New(st, paths, nil, Models{Search: search.NewEngine(st, ai.Model{}), People: people.NewEngine(st, ai.FaceModel{})}, &fakeEvents{})
+	got, err := ix.fetchVideos(ctx, 2)
+	if err != nil || len(got) != 2 || got[0].TakenAt != 200 || got[1].TakenAt != 100 {
+		t.Fatalf("video order = %v, %v", got, err)
+	}
+	ix.focus = &store.TimeRange{From: 90, To: 110}
+	got, err = ix.fetchVideos(ctx, 2)
+	if err != nil || len(got) != 1 || got[0].TakenAt != 100 {
+		t.Fatalf("focused video jobs = %v, %v", got, err)
 	}
 }

@@ -35,19 +35,21 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 **Phase 4 (videos)** is working:
 
 - Videos are included when the user enables them in Settings. Bundled FFmpeg and ffprobe read capture date, dimensions, duration, codecs, camera, and location without changing the original file.
-- Indexing makes a poster and a 4×4 hover preview sprite. SigLIP 2 and face recognition sample video frames (about one per five seconds, at most 24). Search results jump to the best matching moment.
+- Indexing makes a poster and a 4×4 hover preview sprite. SigLIP 2 and face recognition share one streaming frame-sampling pass (about one per five seconds, at most 24), with independent photo/video versions and stage retries. Search results jump to the best matching moment.
 - The viewer plays supported files directly and converts other codecs to H.264/AAC while playing. Seeking a converted video starts a new stream at that point; converted copies are not kept on disk. Video streams from a small server on 127.0.0.1 (a random secret in every path), because the app's own origin hands WebView2 a response only once it is complete.
 
 **Phase 5 (organization) is underway:**
 
 - Manual albums collect photos and videos without moving files. Membership follows an asset when its file is renamed or moved; the Details panel lets you add or remove the selected item.
 - Smart albums save a rule for media kind, favourites, inclusive capture dates, a Thing, and a person. They update from current library metadata and tags. Albums have live counts, covers, rename/edit, and deletion.
-- Duplicates review lists exact file copies and likely similar photos using the existing perceptual hashes. It only suggests matches and opens their folder; files are never changed automatically.
+- Duplicates review virtualizes exact file copies and likely similar photos using the existing perceptual hashes. It only suggests matches and opens their folder; files are never changed automatically.
 - Places groups GPS-tagged media by nearby city using a bundled, offline GeoNames index. Existing libraries are resolved in the background after an upgrade. Places show live visible counts and open filtered timelines.
 - Events groups visible media after a configurable time gap (12 hours by default) or a location jump over 100 km. Events open filtered timelines and regroup as the library changes. Renames follow current members through later splits or removal of the oldest member; reset restores automatic names for the current group.
 - Blocking has started: people, Things, places, albums, photos/videos and folders can be blocked. Labels can be hidden alone or with their covered photos; photos and folders always hide media. The shared visibility rule feeds grids, search, counts, covers and media URLs. Settings has a PIN-protected Blocked list with mode changes and unblocking; a new block offers brief Undo. Earlier hidden people and user-hidden Things become photo blocks on upgrade; the internal sink Thing does not.
 
-Still to finish in Phase 5: face and event blocks, browsing covered photos from Blocked, saying so when a search names a blocked Thing, place or album (as it does for a blocked person), forgotten-PIN recovery through Windows sign-in, then organise-on-disk with dry run and undo and XMP sidecar export. Trash, the 2 GB cache cap and OCR also remain future work. See [the blocking implementation note](docs/blocking-phase5-2026-09-30.md) for current coverage and acceptance limits.
+Search reports exact blocked person, Thing, place and album names, with whole-word Unicode matching and longer-name precedence.
+
+Still to finish in Phase 5: face and event blocks, browsing covered photos from Blocked, forgotten-PIN recovery through Windows sign-in, then organise-on-disk with dry run and undo and XMP sidecar export. Trash, the 2 GB cache cap and OCR also remain future work. See [the blocking implementation note](docs/blocking-phase5-2026-09-30.md) for current coverage and acceptance limits.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 

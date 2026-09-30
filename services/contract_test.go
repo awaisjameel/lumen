@@ -1,6 +1,8 @@
 package services
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -8,6 +10,7 @@ import (
 	"testing"
 
 	"lumen/internal/core"
+	"lumen/internal/store"
 )
 
 // The bridge (frontend/src/bridge/index.ts) mirrors what the generated
@@ -76,6 +79,30 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 	for _, event := range []string{EventProgress, EventLibraryChanged} {
 		if !regexp.MustCompile(`'` + regexp.QuoteMeta(event) + `' satisfies keyof Events.CustomEvents`).MatchString(bridge) {
 			t.Errorf("the bridge does not listen for %q", event)
+		}
+	}
+}
+
+func TestAlbumValidationFailuresHaveSpecificCodes(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		code ErrorCode
+	}{
+		{store.ErrAlbumMediaKind, CodeAlbumMediaKind},
+		{store.ErrAlbumSelection, CodeAlbumSelection},
+		{store.ErrAlbumDate, CodeAlbumDate},
+		{store.ErrAlbumDateOrder, CodeAlbumDateOrder},
+		{store.ErrAlbumSmartItems, CodeAlbumSmartItems},
+		{store.ErrAlbumKind, CodeAlbumKind},
+		{store.ErrAlbumReference, CodeAlbumReference},
+		{store.ErrAlbumManualOnly, CodeAlbumManualOnly},
+	} {
+		var failure Failure
+		if err := json.Unmarshal(MarshalError(fmt.Errorf("save failed: %w", c.err)), &failure); err != nil {
+			t.Fatal(err)
+		}
+		if failure.Code != c.code {
+			t.Errorf("%v: code %s, want %s", c.err, failure.Code, c.code)
 		}
 	}
 }

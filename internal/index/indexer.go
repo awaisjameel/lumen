@@ -74,16 +74,13 @@ type Indexer struct {
 	wakeThum  chan struct{}
 	wakeEmbed chan struct{}
 	wakeFaces chan struct{}
+	wakeVideo chan struct{}
 
 	encoder *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
 	pixels  decoded                  // photos the thumbnail stage decoded for the faces stage
 
-	version map[core.Stage]string // what each running stage's results are made by
-	// embedLabels is the Things generation the embedding stage's batch was
-	// tagged under (see search.Engine.Commit). Only that stage's goroutine
-	// uses it, between processing a batch and saving it.
-	embedLabels uint64
+	version map[core.Stage]store.StageVersion // what each running stage's results are made by
 
 	rescanMu sync.Mutex // one RescanAll at a time, so the watchers match the sources
 
@@ -129,6 +126,7 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 		wakeThum:  make(chan struct{}, 1),
 		wakeEmbed: make(chan struct{}, 1),
 		wakeFaces: make(chan struct{}, 1),
+		wakeVideo: make(chan struct{}, 1),
 		resume:    make(chan struct{}),
 		pendingFS: map[string]bool{},
 	}
@@ -170,7 +168,9 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 					slog.Info("face models ready", "device", f.Device())
 				}
 				ix.setAIState(func() {
-					ix.facesError = ""
+					if loaded {
+						ix.facesError = ""
+					}
 					if err != nil {
 						ix.facesError = err.Error()
 					}
@@ -223,16 +223,20 @@ func (ix *Indexer) setAIState(change func()) {
 // versions is the current version of every stage that runs, built once in
 // New: every job a stage finishes records it, and a finished job with
 // another version re-runs.
-func (ix *Indexer) versions() map[core.Stage]string {
-	v := map[core.Stage]string{
-		core.StageMetadata:  media.MetadataVersion + "+" + media.VideoMetadataVersion,
-		core.StageThumbnail: media.ThumbnailVersion + "+" + media.VideoThumbnailVersion,
+func (ix *Indexer) versions() map[core.Stage]store.StageVersion {
+	metadata := media.MetadataVersion + "+" + media.VideoMetadataVersion
+	thumbnail := media.ThumbnailVersion + "+" + media.VideoThumbnailVersion
+	v := map[core.Stage]store.StageVersion{
+		core.StageMetadata:  {Photo: metadata, Video: metadata},
+		core.StageThumbnail: {Photo: thumbnail, Video: thumbnail},
 	}
 	if ix.search != nil {
-		v[core.StageEmbedding] = ix.search.Model().Version + media.VideoFramesVersion
+		photo := ix.search.Model().Version
+		v[core.StageEmbedding] = store.StageVersion{Photo: photo, Video: photo + media.VideoFramesVersion, LegacyPhoto: photo + "+video-frames-1"}
 	}
 	if ix.people != nil {
-		v[core.StageFaces] = ix.people.Model().Version + "+analysis-" + ai.FaceAnalysisVersion + media.VideoFramesVersion
+		photo := ix.people.Model().Version + "+analysis-" + ai.FaceAnalysisVersion
+		v[core.StageFaces] = store.StageVersion{Photo: photo, Video: photo + media.VideoFramesVersion, LegacyPhoto: photo + "+video-frames-1"}
 	}
 	return v
 }
@@ -272,7 +276,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	})
 
 	ix.run(func() {
-		if n, err := ix.store.RequeueOutdated(ctx, ix.version); err != nil {
+		if n, err := ix.store.RequeueVersions(ctx, ix.version); err != nil {
 			slog.Error("requeue outdated jobs", "err", err)
 		} else if n > 0 {
 			slog.Info("re-running stages after an upgrade", "jobs", n)
@@ -287,18 +291,18 @@ func (ix *Indexer) Start(ctx context.Context) {
 			changes: core.Changes{Assets: true},
 			process: eachItem(metadataWorkers, ix.doMetadata),
 			save: func(ctx context.Context, rs []store.MetadataResult) error {
-				return ix.store.SaveMetadata(ctx, ix.version[core.StageMetadata], rs)
+				return ix.store.SaveMetadata(ctx, ix.version[core.StageMetadata].Photo, rs)
 			},
 		})
 	})
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.ThumbResult]{
-			name: core.StageThumbnail, batch: thumbnailBatch, wake: ix.wakeThum, next: []chan struct{}{ix.wakeEmbed, ix.wakeFaces},
+			name: core.StageThumbnail, batch: thumbnailBatch, wake: ix.wakeThum, next: []chan struct{}{ix.wakeEmbed, ix.wakeFaces, ix.wakeVideo},
 			changes:   core.Changes{Thumbs: true}, // the timeline's days and counts stay as they are
 			unchanged: func(r store.ThumbResult) bool { return r.Unchanged },
 			process:   ix.doThumbnails,
 			save: func(ctx context.Context, rs []store.ThumbResult) error {
-				return ix.store.SaveThumbnails(ctx, ix.version[core.StageThumbnail], rs)
+				return ix.store.SaveThumbnails(ctx, ix.version[core.StageThumbnail].Photo, rs)
 			},
 		})
 	})
@@ -326,13 +330,27 @@ func (ix *Indexer) Start(ctx context.Context) {
 		})
 		ix.run(func() { ix.people.Run(ctx, func() { ix.markChanged(core.Changes{People: true}) }) })
 	}
+	if ix.search != nil || ix.people != nil {
+		ix.run(func() {
+			name := core.StageEmbedding
+			if ix.search == nil {
+				name = core.StageFaces
+			}
+			runStage(ctx, ix, stage[videoResults]{
+				name: name, batch: 4, wake: ix.wakeVideo,
+				model: videoModels{ix.encoder, ix.faces},
+				fetch: ix.fetchVideos, process: ix.doVideos, save: ix.saveVideos,
+				changes: core.Changes{Tags: true, People: true},
+			})
+		})
+	}
 	ix.run(func() { ix.reportLoop(ctx) })
 	ix.run(func() { ix.powerLoop(ctx) })
 }
 
 // wakeStages nudges every stage to look for work.
 func (ix *Indexer) wakeStages() {
-	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed, ix.wakeFaces} {
+	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed, ix.wakeFaces, ix.wakeVideo} {
 		nudge(ch)
 	}
 }

@@ -35,6 +35,41 @@ func TestPendingJobsReadsTheQueueInIndexOrder(t *testing.T) {
 	}
 }
 
+func TestKindVersionsAdoptPhotosAndRetryOldVideos(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{
+		item(src.ID, `C:\Photos\photo.jpg`, "photo"),
+		item(src.ID, `C:\Photos\video.mp4`, "video"),
+	})))
+	check(t, errOf(st.w.ExecContext(ctx, "UPDATE assets SET kind = 'video' WHERE content_hash = ?", []byte("video"))))
+	check(t, errOf(st.w.ExecContext(ctx, `UPDATE asset_jobs SET status = 'done', model_version = 'model+video-frames-1'
+		WHERE stage = 'embedding'`)))
+	check(t, errOf(st.w.ExecContext(ctx, `UPDATE asset_jobs SET status = 'skipped', attempts = 3
+		WHERE stage = 'embedding' AND asset_id IN (SELECT id FROM assets WHERE kind = 'video')`)))
+	versions := map[core.Stage]StageVersion{core.StageEmbedding: {
+		Photo: "model", Video: "model+video-frames-2", LegacyPhoto: "model+video-frames-1",
+	}}
+	n, err := st.RequeueVersions(ctx, versions)
+	check(t, err)
+	if n != 1 {
+		t.Fatalf("requeued %d jobs, want only the video", n)
+	}
+	var status, version string
+	check(t, st.r.QueryRowContext(ctx, `SELECT status, model_version FROM asset_jobs
+		WHERE stage = 'embedding' AND asset_id IN (SELECT id FROM assets WHERE kind = 'photo')`).Scan(&status, &version))
+	if status != "done" || version != "model" {
+		t.Fatalf("photo = %s at %s, want done at model", status, version)
+	}
+	var attempts int
+	check(t, st.r.QueryRowContext(ctx, `SELECT status, attempts FROM asset_jobs
+		WHERE stage = 'embedding' AND asset_id IN (SELECT id FROM assets WHERE kind = 'video')`).Scan(&status, &attempts))
+	if status != "waiting" || attempts != 0 {
+		t.Fatalf("video = %s with %d attempts, want waiting with fresh retries", status, attempts)
+	}
+}
+
 func TestJobsCarryTheirAssetsCaptureTime(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
 	src, err := st.AddSource(ctx, `C:\Photos`)

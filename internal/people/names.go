@@ -24,26 +24,76 @@ var fillers = map[string]bool{
 // before "Ali"), a name only counts as whole words, and case is ignored as
 // everywhere else (core.Fold).
 func FindNames(query string, named []core.Person) (ids []int64, names []string, rest string) {
+	targets := make([]core.NamedTarget, len(named))
+	for i, p := range named {
+		targets[i] = core.NamedTarget{ID: p.ID, Name: p.Name, Kind: core.BlockPerson}
+	}
+	matches := MatchNames(query, targets)
+	seen := map[int64]bool{}
+	for _, match := range matches {
+		if !seen[match.Target.ID] {
+			seen[match.Target.ID] = true
+			ids = append(ids, match.Target.ID)
+			names = append(names, query[match.Start:match.End])
+		}
+	}
+	return ids, names, RemainingQuery(query, matches)
+}
+
+// NameMatch locates a whole-word entity name using byte offsets in the query.
+type NameMatch struct {
+	Target     core.NamedTarget
+	Start, End int
+}
+
+// MatchNames resolves all occurrences, preferring longer names and blocked exact ties.
+func MatchNames(query string, named []core.NamedTarget) []NameMatch {
 	named = slices.Clone(named)
-	slices.SortStableFunc(named, func(a, b core.Person) int {
-		return cmp.Compare(utf8.RuneCountInString(b.Name), utf8.RuneCountInString(a.Name))
+	slices.SortStableFunc(named, func(a, b core.NamedTarget) int {
+		if length := cmp.Compare(utf8.RuneCountInString(b.Name), utf8.RuneCountInString(a.Name)); length != 0 {
+			return length
+		}
+		if a.Blocked != b.Blocked {
+			if a.Blocked {
+				return -1
+			}
+			return 1
+		}
+		return 0
 	})
-	rest = query
+	remaining := []byte(query)
+	var matches []NameMatch
 	for _, p := range named {
 		if p.Name == "" {
 			continue
 		}
-		if start, end := wordIndex(rest, p.Name); start >= 0 {
-			ids = append(ids, p.ID)
-			names = append(names, rest[start:end])
-			rest = rest[:start] + " " + rest[end:]
+		for {
+			start, end := wordIndex(string(remaining), p.Name)
+			if start < 0 {
+				break
+			}
+			matches = append(matches, NameMatch{Target: p, Start: start, End: end})
+			for index := start; index < end; index++ {
+				remaining[index] = ' '
+			}
 		}
 	}
-	words := strings.Fields(rest)
-	if len(ids) > 0 && !slices.ContainsFunc(words, func(w string) bool { return !fillers[core.Fold(w)] }) {
+	return matches
+}
+
+// RemainingQuery removes matched names and ignores fillers when names were present.
+func RemainingQuery(query string, matches []NameMatch) string {
+	remaining := []byte(query)
+	for _, match := range matches {
+		for index := match.Start; index < match.End; index++ {
+			remaining[index] = ' '
+		}
+	}
+	words := strings.Fields(string(remaining))
+	if len(matches) > 0 && !slices.ContainsFunc(words, func(w string) bool { return !fillers[core.Fold(w)] }) {
 		words = nil
 	}
-	return ids, names, strings.Join(words, " ")
+	return strings.Join(words, " ")
 }
 
 // wordIndex finds name in s as whole words, whatever the case, and returns

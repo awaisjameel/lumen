@@ -32,6 +32,11 @@ func TestPlaceLabelBlockLeavesEventTitlesAlone(t *testing.T) {
 	}
 	_, err = st.SetBlock(ctx, core.BlockPlace, 1, "", core.BlockLabel)
 	check(t, err)
+	names, err := st.SearchNames(ctx, "photos in LAHORE")
+	check(t, err)
+	if len(names) != 1 || names[0].Kind != core.BlockPlace || !names[0].Blocked || names[0].Name != "Lahore" {
+		t.Fatalf("blocked place search names = %+v", names)
+	}
 	if e := events()[0]; e.PlaceID != 0 || strings.Contains(e.Name, "Lahore") {
 		t.Fatalf("blocked place still names its event: %+v", e)
 	}

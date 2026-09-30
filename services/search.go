@@ -37,22 +37,24 @@ func NewSearchService(st *store.Store, engine *search.Engine, faces bool) *Searc
 // the description can't be searched (the result says so): named people's
 // photos are still found.
 func (s *SearchService) Search(ctx context.Context, query string) (core.SearchResult, error) {
-	named, err := s.store.NamedPeople(ctx)
+	named, err := s.store.SearchNames(ctx, query)
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	blocked, err := s.store.BlockedNamedPeople(ctx)
-	if err != nil {
-		return core.SearchResult{}, err
-	}
-	// Blocked and visible names are found together, so the longer name wins
-	// either way: a blocked "Ali" doesn't swallow a visible "Ali Khan".
-	who, names, text := people.FindNames(query, slices.Concat(named, blocked))
-	if slices.ContainsFunc(who, func(id int64) bool {
-		return slices.ContainsFunc(blocked, func(p core.Person) bool { return p.ID == id })
-	}) {
+	matches := people.MatchNames(query, named)
+	if slices.ContainsFunc(matches, func(match people.NameMatch) bool { return match.Target.Blocked }) {
 		return core.SearchResult{Items: []core.GridItem{}, People: []string{}, Complete: true, Blocked: true}, nil
 	}
+	personMatches := slices.DeleteFunc(matches, func(match people.NameMatch) bool { return match.Target.Kind != core.BlockPerson })
+	var who []int64
+	var names []string
+	for _, match := range personMatches {
+		if !slices.Contains(who, match.Target.ID) {
+			who = append(who, match.Target.ID)
+			names = append(names, query[match.Start:match.End])
+		}
+	}
+	text := people.RemainingQuery(query, personMatches)
 	var ids []int64
 	var moments map[int64]int64
 	var waitFor []core.Stage // stages whose photos can't be found yet

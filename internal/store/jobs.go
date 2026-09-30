@@ -22,6 +22,7 @@ type JobItem struct {
 	Ext         string
 	Orientation int
 	Duration    int64
+	TakenAt     int64
 	// Prior is the version that made the output this job would replace,
 	// when an upgrade put the finished job back in the queue: the stage may
 	// keep that output where it would come out the same. "" otherwise.
@@ -104,9 +105,25 @@ const primaryFile = "(SELECT min(id) FROM files WHERE asset_id = a.id)"
 func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeRange, limit int) ([]JobItem, error) {
 	q, args := pendingJobsQuery(stage, within, limit)
 	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
-		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior)
+		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior, &j.TakenAt)
 		return j, err
 	}, q, args...)
+}
+
+// PendingJobsKind selects runnable jobs of one media kind in queue order.
+func (s *Store) PendingJobsKind(ctx context.Context, stage core.Stage, kind core.Kind, within *TimeRange, limit int) ([]JobItem, error) {
+	q, args := runnableQuery("asset_jobs j INDEXED BY asset_jobs_pending", nil, stage)
+	q += " AND a.kind = ?"
+	args = append(args, kind)
+	if within != nil {
+		q += " AND j.taken_at >= ? AND j.taken_at < ?"
+		args = append(args, within.From, within.To)
+	}
+	q += " ORDER BY j.taken_at DESC, j.asset_id DESC LIMIT ?"
+	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
+		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior, &j.TakenAt)
+		return j, err
+	}, q, append(args, limit)...)
 }
 
 func pendingJobsQuery(stage core.Stage, within *TimeRange, limit int) (q string, args []any) {
@@ -122,7 +139,7 @@ func pendingJobsQuery(stage core.Stage, within *TimeRange, limit int) (q string,
 // runnableQuery selects the jobs of stage a worker can run, as JobItems,
 // from the tables in from (which name the jobs j), with args for from.
 func runnableQuery(from string, fromArgs []any, stage core.Stage) (q string, args []any) {
-	q = `SELECT a.id, f.path, a.kind, a.ext, a.orientation, COALESCE(a.duration_ms, 0), COALESCE(j.prior_version, '')
+	q = `SELECT a.id, f.path, a.kind, a.ext, a.orientation, COALESCE(a.duration_ms, 0), COALESCE(j.prior_version, ''), j.taken_at
 		FROM ` + from + `
 		JOIN assets a ON a.id = j.asset_id
 		JOIN files f ON f.id = ` + primaryFile + `
@@ -151,7 +168,7 @@ func (s *Store) PendingJobsOf(ctx context.Context, stage core.Stage, ids []int64
 	// CROSS JOIN: look each one up by key, rather than walk the stage's queue.
 	q, args := runnableQuery("json_each(?) ids CROSS JOIN asset_jobs j ON j.asset_id = ids.value", []any{string(list)}, stage)
 	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
-		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior)
+		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior, &j.TakenAt)
 		return j, err
 	}, q+" ORDER BY j.taken_at DESC, j.asset_id DESC", args...)
 }
@@ -237,12 +254,37 @@ type ThumbResult struct {
 // version as its prior_version (JobItem.Prior), for the stage to check
 // whether its output would change. It returns how many jobs were requeued.
 func (s *Store) RequeueOutdated(ctx context.Context, versions map[core.Stage]string) (total int64, err error) {
+	kinds := make(map[core.Stage]StageVersion, len(versions))
+	for stage, version := range versions {
+		kinds[stage] = StageVersion{Photo: version, Video: version}
+	}
+	return s.RequeueVersions(ctx, kinds)
+}
+
+// StageVersion versions each media kind and optionally adopts an unchanged legacy photo version.
+type StageVersion struct {
+	Photo       string
+	Video       string
+	LegacyPhoto string
+}
+
+// RequeueVersions retries outdated work without rerunning unchanged legacy photos.
+func (s *Store) RequeueVersions(ctx context.Context, versions map[core.Stage]StageVersion) (total int64, err error) {
 	err = s.tx(ctx, func(tx *sql.Tx) error {
 		for stage, version := range versions {
+			if version.LegacyPhoto != "" {
+				if _, err := tx.ExecContext(ctx, `UPDATE asset_jobs SET model_version = ?
+					WHERE stage = ? AND status NOT IN `+unfinished+` AND model_version = ?
+					AND asset_id IN (SELECT id FROM assets WHERE kind = 'photo')`,
+					version.Photo, stage, version.LegacyPhoto); err != nil {
+					return err
+				}
+			}
 			res, err := tx.ExecContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?,
 					prior_version = CASE WHEN status = 'done' THEN model_version END
-				WHERE stage = ? AND status NOT IN `+unfinished+` AND COALESCE(model_version, '') != ?`,
-				time.Now().Unix(), stage, version)
+				WHERE stage = ? AND status NOT IN `+unfinished+` AND COALESCE(model_version, '') !=
+					CASE (SELECT kind FROM assets WHERE id = asset_jobs.asset_id) WHEN 'video' THEN ? ELSE ? END`,
+				time.Now().Unix(), stage, version.Video, version.Photo)
 			if err != nil {
 				return err
 			}
@@ -390,10 +432,13 @@ func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbRe
 type jobCloser struct {
 	update *sql.Stmt // records the outcome, counting consecutive failures
 	settle *sql.Stmt // then releases the asset's jobs that waited for it
+	video  string
 }
 
 func prepareJobUpdate(ctx context.Context, tx *sql.Tx) (*jobCloser, error) {
-	update, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = ?1, model_version = ?2, error = NULLIF(?3, ''), updated_at = ?4,
+	update, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = ?1,
+		model_version = CASE (SELECT kind FROM assets WHERE id = ?5) WHEN 'video' THEN ?7 ELSE ?2 END,
+		error = NULLIF(?3, ''), updated_at = ?4,
 			prior_version = NULL, attempts = CASE WHEN ?1 = 'error' THEN attempts + 1 ELSE 0 END
 		WHERE asset_id = ?5 AND stage = ?6`)
 	if err != nil {
@@ -404,6 +449,14 @@ func prepareJobUpdate(ctx context.Context, tx *sql.Tx) (*jobCloser, error) {
 		return nil, err // update closes with tx
 	}
 	return &jobCloser{update: update, settle: settle}, nil
+}
+
+func prepareVersionedJobUpdate(ctx context.Context, tx *sql.Tx, version StageVersion) (*jobCloser, error) {
+	closer, err := prepareJobUpdate(ctx, tx)
+	if err == nil {
+		closer.video = version.Video
+	}
+	return closer, err
 }
 
 func (c *jobCloser) Close() error {
@@ -422,7 +475,11 @@ func jobStatus(errMsg string, skipped bool) core.JobStatus {
 
 func execJob(ctx context.Context, c *jobCloser, assetID int64, stage core.Stage, version string,
 	status core.JobStatus, errMsg string, now int64) error {
-	if _, err := c.update.ExecContext(ctx, status, version, errMsg, now, assetID, stage); err != nil {
+	video := c.video
+	if video == "" {
+		video = version
+	}
+	if _, err := c.update.ExecContext(ctx, status, version, errMsg, now, assetID, stage, video); err != nil {
 		return err
 	}
 	if !hasLaterStages[stage] {

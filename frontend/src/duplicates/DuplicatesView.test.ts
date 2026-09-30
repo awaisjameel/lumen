@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { DuplicateKind, engine } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { DuplicateItem } from '../bridge'
+import { useDuplicates } from './store'
 import DuplicatesView from './DuplicatesView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -23,8 +24,51 @@ const photo = (id: number, path: string): DuplicateItem => ({
 })
 let wrapper: ReturnType<typeof mount> | undefined
 
+function height(element: Element): number {
+  return element.classList.contains('page-body')
+    ? 600
+    : element.classList.contains('virtual-row')
+      ? element.querySelector('.group')
+        ? 250
+        : 88
+      : 40
+}
+
+class TestResizeObserver implements ResizeObserver {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe(target: Element) {
+    const size: ResizeObserverSize = { inlineSize: 900, blockSize: height(target) }
+    this.callback(
+      [
+        {
+          target,
+          contentRect: new DOMRect(0, 0, 900, size.blockSize),
+          borderBoxSize: [size],
+          contentBoxSize: [size],
+          devicePixelContentBoxSize: [size],
+        },
+      ],
+      this,
+    )
+  }
+  unobserve = vi.fn()
+  disconnect = vi.fn()
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
+  vi.stubGlobal('ResizeObserver', TestResizeObserver)
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return new DOMRect(
+      0,
+      this.classList.contains('virtual-list') ? 40 - (this.parentElement?.scrollTop ?? 0) : 0,
+      900,
+      height(this),
+    )
+  })
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return height(this)
+  })
   vi.mocked(engine.duplicateGroups)
     .mockReset()
     .mockResolvedValue([
@@ -32,7 +76,10 @@ beforeEach(() => {
     ])
   vi.mocked(engine.showInFolder).mockReset().mockResolvedValue(undefined)
 })
-afterEach(() => wrapper?.unmount())
+afterEach(() => {
+  wrapper?.unmount()
+  vi.unstubAllGlobals()
+})
 
 it('names each similar photo and shows the copy it lists', async () => {
   wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
@@ -43,42 +90,44 @@ it('names each similar photo and shows the copy it lists', async () => {
   expect(engine.showInFolder).toHaveBeenCalledWith(2, 'C:\\b\\two.jpg')
 })
 
-it('renders a page of groups at a time as the list scrolls', async () => {
-  let seen: IntersectionObserverCallback | undefined
-  const observe = vi.fn()
-  vi.stubGlobal(
-    'IntersectionObserver',
-    class {
-      constructor(cb: IntersectionObserverCallback) {
-        seen = cb
-      }
-      observe = observe
-      unobserve = vi.fn()
-      disconnect = vi.fn()
-    },
+it('keeps the DOM bounded and jumps directly to the final similar groups', async () => {
+  vi.mocked(engine.duplicateGroups).mockResolvedValue(
+    Array.from({ length: 1005 }, (_, index) => ({
+      kind: index < 1000 ? DuplicateKind.DuplicateExact : DuplicateKind.DuplicateSimilar,
+      items: [photo(index + 1, `C:\\Photos\\photo-${index + 1}.jpg`)],
+    })),
   )
-  try {
-    vi.mocked(engine.duplicateGroups).mockResolvedValue(
-      Array.from({ length: 100 }, (_, i) => ({
-        kind: i < 30 ? DuplicateKind.DuplicateExact : DuplicateKind.DuplicateSimilar,
-        items: [photo(2 * i + 1, `C:\\a\\${i}.jpg`), photo(2 * i + 2, `C:\\b\\${i}.jpg`)],
-      })),
-    )
-    wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
-    await flushPromises()
-    // Every exact group first, then the similar ones up to the page.
-    expect(wrapper.findAll('.group')).toHaveLength(40)
-    expect(wrapper.findAll('.group.similar')).toHaveLength(10)
-    expect(observe).toHaveBeenCalled()
+  wrapper = mount(DuplicatesView, { attachTo: document.body, global: { stubs: { SearchBox: true } } })
+  await flushPromises()
+  expect(wrapper.findAll('.group').length).toBeGreaterThan(0)
+  expect(wrapper.findAll('.group').length).toBeLessThan(15)
+  const scroller = wrapper.get<HTMLElement>('.page-body')
+  const total = Number.parseFloat(wrapper.get<HTMLElement>('.virtual-list').element.style.height)
+  scroller.element.scrollTop = total - 600
+  await scroller.trigger('scroll')
+  await flushPromises()
+  expect(wrapper.text()).toContain('photo-1005.jpg')
+  expect(wrapper.findAll('.group').length).toBeLessThan(15)
+  expect(wrapper.text()).not.toContain('photo-1.jpg')
+  vi.mocked(engine.duplicateGroups).mockResolvedValue([
+    { kind: DuplicateKind.DuplicateExact, items: [photo(1, 'C:\\Photos\\photo-1.jpg')] },
+  ])
+  await useDuplicates().load()
+  scroller.element.scrollTop = 0
+  await scroller.trigger('scroll')
+  await flushPromises()
+  expect(wrapper.text()).toContain('photo-1.jpg')
+  expect(wrapper.text()).not.toContain('photo-1005.jpg')
+})
 
-    seen?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
-    await flushPromises()
-    expect(wrapper.findAll('.group')).toHaveLength(80)
-    seen?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
-    await flushPromises()
-    expect(wrapper.findAll('.group')).toHaveLength(100)
-    expect(wrapper.find('.more').exists()).toBe(false)
-  } finally {
-    vi.unstubAllGlobals()
-  }
+it('opens the preview from a virtual row', async () => {
+  wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
+  await flushPromises()
+  const dialog = wrapper.get<HTMLDialogElement>('dialog').element
+  const showModal = vi.fn()
+  dialog.showModal = showModal
+  await wrapper.get('.preview-button').trigger('click')
+  await flushPromises()
+  expect(showModal).toHaveBeenCalledOnce()
+  expect(wrapper.get('dialog img').attributes('alt')).toBe('one.jpg')
 })
