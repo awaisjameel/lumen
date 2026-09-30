@@ -1,5 +1,5 @@
 import { shallowRef } from 'vue'
-import { ErrorCode, errorCode, MAX_NAME_LEN } from '../bridge'
+import { ErrorCode, errorCode, MAX_NAME_LEN, PIN_MAX_LEN, PIN_MIN_LEN } from '../bridge'
 import { t } from './i18n'
 import type { MessageKey } from './i18n'
 
@@ -16,6 +16,12 @@ const codeText: Record<Exclude<ErrorCode, typeof ErrorCode.InvalidAlbum>, Messag
   [ErrorCode.TagInAlbum]: 'error.tagInAlbum',
   [ErrorCode.AlreadyCovered]: 'error.alreadyCovered',
   [ErrorCode.FolderNotFound]: 'error.folderNotFound',
+  [ErrorCode.InvalidPIN]: 'error.invalidPIN',
+  [ErrorCode.PINExists]: 'error.pinExists',
+  [ErrorCode.PINRateLimited]: 'error.pinRateLimited',
+  [ErrorCode.BlocksLocked]: 'error.blocksLocked',
+  [ErrorCode.UndoExpired]: 'error.undoExpired',
+  [ErrorCode.InvalidBlock]: 'error.invalidBlock',
 }
 
 /** A user-facing message for a failed engine call or other thrown value. */
@@ -26,7 +32,9 @@ export function errorText(e: unknown): string {
     // The engine says what is wrong with the rule after this prefix.
     return t('error.invalidAlbum', { why: msg.replace(/^invalid album: /, '') })
   }
-  return code ? t(codeText[code], { max: MAX_NAME_LEN }) : t('error.generic', { msg })
+  return code
+    ? t(codeText[code], { max: MAX_NAME_LEN, pinMin: PIN_MIN_LEN, pinMax: PIN_MAX_LEN })
+    : t('error.generic', { msg })
 }
 
 /**

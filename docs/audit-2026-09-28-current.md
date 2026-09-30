@@ -1,5 +1,9 @@
 # Current implementation audit — 28 September 2026
 
+> Historical record: "current" means as of 28 September 2026 (schema v6).
+> Places, Events and blocking have been built since; see the
+> [latest audit](audit-2026-10-01.md).
+
 This follow-up covers phases 1–4 and the implemented manual/smart-album part of
 phase 5. The working tree was clean before this audit. The earlier
 [phase 1–4 report](audit-2026-09-28.md) is historical evidence; verification below

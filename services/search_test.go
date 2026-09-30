@@ -34,9 +34,11 @@ func TestSearchWithoutAI(t *testing.T) {
 	if err != nil || len(days) != 1 || len(days[0].Items) != 2 {
 		t.Fatalf("days: %+v, %v", days, err)
 	}
-	ali := days[0].Items[1].ID // newest first: beach, then Ali
+	ali, beach := days[0].Items[1].ID, days[0].Items[0].ID // newest first: beach, then Ali
 	if err := st.SaveFaces(ctx, "f", "f", []store.FaceResult{{AssetID: ali, Faces: []store.DetectedFace{
 		{X: 0.1, Y: 0.1, W: 0.2, H: 0.2, Score: 0.9, Sharpness: 50, Vec: []float32{1, 0}},
+	}}, {AssetID: beach, Faces: []store.DetectedFace{
+		{X: 0.5, Y: 0.1, W: 0.2, H: 0.2, Score: 0.9, Sharpness: 50, Vec: []float32{0, 1}},
 	}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -48,6 +50,12 @@ func TestSearchWithoutAI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if faces, err = st.AssetFaces(ctx, beach); err != nil || len(faces) != 1 {
+		t.Fatalf("faces: %v, %v", faces, err)
+	}
+	if _, err := st.NameFaces(ctx, []int64{faces[0].ID}, "Ali Khan"); err != nil {
+		t.Fatal(err)
+	}
 	s := NewSearchService(st, nil, true)
 	for _, c := range []struct {
 		query string
@@ -56,6 +64,7 @@ func TestSearchWithoutAI(t *testing.T) {
 	}{
 		{"", nil, false},
 		{"ali", []int64{ali}, false},
+		{"Ali Khan", []int64{beach}, false},      // the longer name wins
 		{"Ali at the beach", []int64{ali}, true}, // only who is in them could be searched
 		{"the beach", nil, true},
 	} {
@@ -79,6 +88,10 @@ func TestSearchWithoutAI(t *testing.T) {
 	if err != nil || !blocked.Blocked || len(blocked.Items) != 0 {
 		t.Errorf("blocked name search = %+v, %v", blocked, err)
 	}
+	// A blocked shorter name doesn't hide a visible longer one.
+	if r, err := s.Search(ctx, "Ali Khan"); err != nil || r.Blocked || len(r.Items) != 1 || r.Items[0].ID != beach {
+		t.Errorf("visible longer name beside a blocked one = %+v, %v", r, err)
+	}
 	if _, err := s.CreateLabel(ctx, "Eiffel Tower"); !errors.Is(err, ErrNoAI) {
 		t.Errorf("CreateLabel without AI: %v, want ErrNoAI", err)
 	}
@@ -98,7 +111,7 @@ func TestAddSourcesIsAllOrNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil)
 	dir := t.TempDir()
 	if _, err := s.AddSources(ctx, []string{dir, filepath.Join(dir, "missing")}); !errors.Is(err, ErrFolderNotFound) {
 		t.Fatalf("AddSources with a missing folder: %v", err)
@@ -112,5 +125,15 @@ func TestAddSourcesIsAllOrNone(t *testing.T) {
 	}
 	if _, err := s.AddSources(ctx, []string{file}); !errors.Is(err, ErrFolderNotFound) {
 		t.Fatalf("AddSources with a file: %v", err)
+	}
+	if _, err := st.AddSource(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(dir, "inside")
+	if err := os.Mkdir(inside, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddSources(ctx, []string{inside}); !errors.Is(err, store.ErrAlreadyCovered) {
+		t.Fatalf("AddSources with only a covered folder: %v", err)
 	}
 }

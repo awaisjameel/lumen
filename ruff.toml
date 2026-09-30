@@ -22,7 +22,7 @@ select = [
 ]
 ignore = [
   "PLR2004", # "magic" numbers: model shapes and file-format constants read better inline
-  "S310",    # urllib.urlopen: deps.sh pins what is fetched
+  "S310",    # urllib.urlopen: a pinned revision, and prepare_models.py checks the values it reads
 ]
 
 [format]

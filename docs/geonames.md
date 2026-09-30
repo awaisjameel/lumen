@@ -13,6 +13,11 @@ three downloaded files by SHA-256 and writes the deterministic compressed
 timezone and most other source fields. The source files are available at
 `https://download.geonames.org/export/dump/`.
 
+To rebuild the data (a newer snapshot needs the script's three SHA-256 pins
+updated), download `cities5000.zip`, `admin1CodesASCII.txt` and
+`countryInfo.txt` from there into `deps/cache/`, then run
+`python scripts/build_places.py` from the repository root.
+
 The lookup chooses the nearest city within 75 km. It is an approximate label:
 in rural areas or near a border it can be absent or show a nearby city in a
 different administrative area. Lumen retains the original GPS coordinates;

@@ -13,3 +13,8 @@
 *.icns binary
 *.exe binary
 *.pyc binary
+*.gz binary
+*.bin binary
+*.jar binary
+*.car binary
+*.heic binary

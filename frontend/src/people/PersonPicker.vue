@@ -3,7 +3,7 @@
 // name and press Enter. Emits the name either way (the engine finds or
 // creates the person).
 import { computed, ref, useId, watch } from 'vue'
-import { engine } from '../bridge'
+import { engine, MAX_NAME_LEN } from '../bridge'
 import type { Person } from '../bridge'
 import { useSuggestions } from '../shared/suggest'
 import FaceThumb from './FaceThumb.vue'
@@ -55,7 +55,7 @@ function onKey(e: KeyboardEvent) {
       :aria-activedescendant="open && active >= 0 ? `${id}-${active}` : undefined"
       :aria-label="placeholder"
       :placeholder="placeholder"
-      maxlength="60"
+      :maxlength="MAX_NAME_LEN"
       spellcheck="false"
       autocomplete="off"
       @focus="open = true"

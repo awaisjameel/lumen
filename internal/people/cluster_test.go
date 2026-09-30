@@ -71,7 +71,7 @@ func TestFindsEachPersonOnce(t *testing.T) {
 		faces = append(faces, w.faces(k, 6)...)
 	}
 	faces = append(faces, w.faces(3, 2)...) // too few to be someone yet
-	got := Cluster(Input{Faces: faces}, DefaultParams)
+	got := cluster(Input{Faces: faces}, DefaultParams)
 	if len(got.NewPeople) != 3 || len(got.Assign) != 0 || len(got.Merges) != 0 {
 		t.Fatalf("changes = %+v, want 3 new people", got)
 	}
@@ -81,7 +81,7 @@ func TestFindsEachPersonOnce(t *testing.T) {
 			t.Errorf("person %d = %v, want the 6 faces of one identity", i, ids)
 		}
 	}
-	if again := Cluster(Input{Faces: faces}, DefaultParams); !reflect.DeepEqual(again, got) {
+	if again := cluster(Input{Faces: faces}, DefaultParams); !reflect.DeepEqual(again, got) {
 		t.Error("clustering the same faces twice gave different answers")
 	}
 }
@@ -94,7 +94,7 @@ func TestNewFacesJoinTheirPerson(t *testing.T) {
 	}
 	newAli, stranger := w.face(0, 0), w.face(1, 0)
 	faces = append(faces, newAli, stranger)
-	got := Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 7}}}, DefaultParams)
+	got := cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 7}}}, DefaultParams)
 	if got.Assign[newAli.ID] != 7 || len(got.Assign) != 1 || len(got.NewPeople) != 0 {
 		t.Errorf("changes = %+v, want only the new face placed with person 7", got)
 	}
@@ -108,7 +108,7 @@ func TestTwoFacesInOnePhotoAreTwoPeople(t *testing.T) {
 	for photo := range int64(4) {
 		faces = append(faces, w.face(0, photo+1), w.face(0, photo+1))
 	}
-	got := Cluster(Input{Faces: faces}, DefaultParams)
+	got := cluster(Input{Faces: faces}, DefaultParams)
 	for _, ids := range got.NewPeople {
 		assets := map[int64]bool{}
 		for _, id := range ids {
@@ -129,12 +129,12 @@ func TestVideoFacesAreConstrainedPerFrame(t *testing.T) {
 	}
 	a, b := w.face(0, 500), w.face(0, 500)
 	a.Frame, b.Frame = 1000, 6000
-	got := Cluster(Input{Faces: append(faces, a, b), People: []store.ClusterPerson{{ID: 7}}}, DefaultParams)
+	got := cluster(Input{Faces: append(faces, a, b), People: []store.ClusterPerson{{ID: 7}}}, DefaultParams)
 	if got.Assign[a.ID] != 7 || got.Assign[b.ID] != 7 {
 		t.Fatalf("faces at different moments of a video should join their person: %+v", got)
 	}
 	b.Frame = a.Frame
-	got = Cluster(Input{Faces: append(faces, a, b), People: []store.ClusterPerson{{ID: 7}}}, DefaultParams)
+	got = cluster(Input{Faces: append(faces, a, b), People: []store.ClusterPerson{{ID: 7}}}, DefaultParams)
 	if len(got.Assign) != 1 {
 		t.Fatalf("two faces in one frame cannot be one person: %+v", got)
 	}
@@ -148,7 +148,7 @@ func TestRejectedFaceStaysOut(t *testing.T) {
 	}
 	f := w.face(0, 0)
 	faces = append(faces, f)
-	got := Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 7}}, Rejections: []store.Rejection{{Face: f.ID, Person: 7}}}, DefaultParams)
+	got := cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 7}}, Rejections: []store.Rejection{{Face: f.ID, Person: 7}}}, DefaultParams)
 	if _, ok := got.Assign[f.ID]; ok {
 		t.Errorf("rejected face placed: %+v", got)
 	}
@@ -162,20 +162,20 @@ func TestSplitPeopleMergeUnlessBothConfirmed(t *testing.T) {
 	}
 	faces := slices.Concat(as, bs)
 
-	got := Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 3}, {ID: 8}}}, DefaultParams)
+	got := cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 3}, {ID: 8}}}, DefaultParams)
 	if len(got.Merges) != 1 || got.Merges[0] != (store.Merge{From: 8, Into: 3}) {
 		t.Errorf("unnamed split: merges = %+v, want 8 into 3 (the older)", got.Merges)
 	}
-	got = Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 3}, {ID: 8, Named: true}}}, DefaultParams)
+	got = cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 3}, {ID: 8, Confirmed: true}}}, DefaultParams)
 	if len(got.Merges) != 1 || got.Merges[0] != (store.Merge{From: 3, Into: 8}) {
 		t.Errorf("one named: merges = %+v, want 3 into the named 8", got.Merges)
 	}
-	got = Cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 3, Named: true}, {ID: 8, Named: true}}}, DefaultParams)
+	got = cluster(Input{Faces: faces, People: []store.ClusterPerson{{ID: 3, Confirmed: true}, {ID: 8, Confirmed: true}}}, DefaultParams)
 	if len(got.Merges) != 0 {
 		t.Errorf("both named: merges = %+v, want none", got.Merges)
 	}
 	bs[0].ByUser = true // the user placed a face with 8: confirmed too
-	got = Cluster(Input{Faces: append(as, bs...), People: []store.ClusterPerson{{ID: 3, Named: true}, {ID: 8}}}, DefaultParams)
+	got = cluster(Input{Faces: append(as, bs...), People: []store.ClusterPerson{{ID: 3, Confirmed: true}, {ID: 8}}}, DefaultParams)
 	if len(got.Merges) != 0 {
 		t.Errorf("named and user-confirmed: merges = %+v, want none", got.Merges)
 	}
@@ -189,7 +189,7 @@ func BenchmarkCluster5000(b *testing.B) {
 	}
 	b.ResetTimer()
 	for range b.N {
-		Cluster(Input{Faces: faces}, DefaultParams)
+		cluster(Input{Faces: faces}, DefaultParams)
 	}
 }
 
@@ -222,10 +222,21 @@ func TestLinkerIsIncremental(t *testing.T) {
 	if got, _ := l.Update(t.Context(), faces[1:]); !reflect.DeepEqual(got, want) {
 		t.Error("links to a hidden face remain")
 	}
+	// A face looked at again gets a new vector in place: its links, and
+	// those pointing at it, follow the new one.
+	faces = faces[1:]
+	faces[0].Vec = faces[len(faces)-1].Vec // now it looks like someone else
+	want, _ = NewLinker(DefaultParams).Update(t.Context(), faces)
+	if got, _ := l.Update(t.Context(), faces); !reflect.DeepEqual(got, want) {
+		t.Error("links kept a face's old vector")
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := NewLinker(DefaultParams).Update(ctx, faces); err == nil {
 		t.Error("a cancelled update succeeded")
+	}
+	if _, err := Cluster(ctx, Input{Faces: faces}, DefaultParams); err == nil {
+		t.Error("a cancelled clustering succeeded")
 	}
 }
 
@@ -237,15 +248,24 @@ func TestBlurryFacesDontStartPeople(t *testing.T) {
 	for i := range faces {
 		faces[i].Sharpness = 5
 	}
-	if got := Cluster(Input{Faces: faces}, DefaultParams); len(got.NewPeople) != 0 {
+	if got := cluster(Input{Faces: faces}, DefaultParams); len(got.NewPeople) != 0 {
 		t.Errorf("blurry faces started a person: %+v", got)
 	}
 	faces[0].Sharpness, faces[1].Sharpness, faces[2].Sharpness = 40, 40, 40
-	if got := Cluster(Input{Faces: faces}, DefaultParams); len(got.NewPeople) != 1 || len(got.NewPeople[0]) != 5 {
+	if got := cluster(Input{Faces: faces}, DefaultParams); len(got.NewPeople) != 1 || len(got.NewPeople[0]) != 5 {
 		t.Errorf("three clear faces and two blurry ones: %+v, want one person of 5", got)
 	}
 	faces[2].Yaw = 0.8 // in profile: no longer clear
-	if got := Cluster(Input{Faces: faces}, DefaultParams); len(got.NewPeople) != 0 {
+	if got := cluster(Input{Faces: faces}, DefaultParams); len(got.NewPeople) != 0 {
 		t.Errorf("two clear faces and a profile started a person: %+v", got)
 	}
+}
+
+// cluster is Cluster, never cancelled.
+func cluster(in Input, p Params) store.ClusterChanges {
+	c, err := Cluster(context.Background(), in, p)
+	if err != nil {
+		panic(err)
+	}
+	return c
 }

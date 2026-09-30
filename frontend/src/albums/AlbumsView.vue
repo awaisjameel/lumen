@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlbumKind, BlockKind, engine, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
 import type { Album, AlbumRule } from '../bridge'
@@ -23,6 +23,7 @@ const name = ref('')
 const kind = ref(AlbumKind.AlbumManual)
 const rule = ref<AlbumRule>(emptyRule())
 const editing = ref<number | null>(null)
+const nameField = ref<HTMLInputElement | null>(null)
 const busy = ref(false)
 const error = ref('')
 const active = ref(true)
@@ -42,12 +43,17 @@ function reset() {
   rule.value = emptyRule()
 }
 
-function edit(album: Album) {
+/** Loads an album into the form at the top of the page, and goes there. */
+async function edit(album: Album) {
   if (busy.value) return
   editing.value = album.id
   name.value = album.name
   kind.value = album.kind
   rule.value = { ...album.rule }
+  await nextTick()
+  nameField.value?.scrollIntoView({ block: 'nearest' })
+  nameField.value?.focus()
+  nameField.value?.select()
 }
 
 async function save() {
@@ -88,8 +94,8 @@ async function remove(album: Album) {
   }
 }
 
-async function blockAlbum(album: Album) {
-  if (await block(BlockKind.BlockAlbum, album.id, album.name)) await albums.load()
+function blockAlbum(album: Album) {
+  void block(BlockKind.BlockAlbum, album.id, album.name)
 }
 </script>
 
@@ -111,6 +117,7 @@ async function blockAlbum(album: Album) {
         </div>
         <div class="form-row">
           <input
+            ref="nameField"
             v-model="name"
             class="field"
             :aria-label="t('albums.name')"
@@ -162,7 +169,7 @@ async function blockAlbum(album: Album) {
         <div v-for="album in albums.list" :key="album.id" class="card">
           <RouterLink :to="{ name: 'album', params: { id: album.id } }" class="card-cover" :aria-label="album.name">
             <img
-              v-if="album.cover"
+              v-if="album.cover && album.coverThumb"
               :src="thumbUrl(album.cover, album.coverThumb)"
               alt=""
               loading="lazy"
@@ -216,9 +223,6 @@ async function blockAlbum(album: Album) {
 </template>
 
 <style scoped>
-.intro {
-  margin: 0 0 16px;
-}
 .editor {
   display: flex;
   flex-direction: column;

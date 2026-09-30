@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { DateSource, engine, Kind, Playback } from '../bridge'
+import { DateSource, engine, Kind, Playback, videosAvailable } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { AssetDetail } from '../bridge'
 import { useLibrary } from './store'
@@ -10,6 +10,7 @@ import Viewer from './Viewer.vue'
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   engine: { asset: vi.fn() },
+  videosAvailable: vi.fn(() => true),
 }))
 
 const detail: AssetDetail = {
@@ -46,6 +47,15 @@ it('shows the video without a still image covering playback', async () => {
   await flushPromises()
   expect(wrapper.find('video').exists()).toBe(true)
   expect(wrapper.find('.media img').exists()).toBe(false)
+})
+
+it('says so when videos cannot play at all', async () => {
+  vi.mocked(videosAvailable).mockReturnValue(false)
+  wrapper = mount(Viewer, { global: { stubs: { teleport: true } } })
+  await flushPromises()
+  expect(wrapper.find('video').exists()).toBe(false)
+  expect(wrapper.get('[role="alert"]').text()).toContain('couldn’t start its video player')
+  vi.mocked(videosAvailable).mockReturnValue(true)
 })
 
 it('uses the absolute media clock for direct playback from a search moment', async () => {

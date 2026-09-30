@@ -19,8 +19,8 @@ const error = ref('')
 const preview = ref<DuplicateItem | null>(null)
 const previewDialog = ref<HTMLDialogElement | null>(null)
 
-const exact = computed(() => duplicates.groups.filter((g) => g.kind === DuplicateKind.DuplicateExact))
-const similar = computed(() => duplicates.groups.filter((g) => g.kind === DuplicateKind.DuplicateSimilar))
+const exact = computed(() => duplicates.list.filter((g) => g.kind === DuplicateKind.DuplicateExact))
+const similar = computed(() => duplicates.list.filter((g) => g.kind === DuplicateKind.DuplicateSimilar))
 
 // Groups are rendered a page at a time as the list is scrolled (a large
 // library has thousands, and all of them at once took seconds to build and
@@ -29,7 +29,7 @@ const PAGE = 40
 const shown = ref(PAGE)
 const exactShown = computed(() => exact.value.slice(0, shown.value))
 const similarShown = computed(() => similar.value.slice(0, Math.max(0, shown.value - exact.value.length)))
-const more = computed(() => shown.value < duplicates.groups.length)
+const more = computed(() => shown.value < duplicates.list.length)
 const sentinel = ref<HTMLElement | null>(null)
 const observer =
   typeof IntersectionObserver === 'undefined'
@@ -57,11 +57,10 @@ onUnmounted(() => observer?.disconnect())
 
 async function refresh() {
   busy.value = true
-  error.value = ''
   try {
     await duplicates.load()
-  } catch (e) {
-    error.value = errorText(e)
+  } catch {
+    // duplicates.error says why
   } finally {
     busy.value = false
   }
@@ -102,7 +101,7 @@ async function openPreview(item: DuplicateItem) {
     </header>
     <div class="page-body">
       <p class="muted">{{ t('duplicates.intro') }}</p>
-      <p v-if="error" class="page-error" role="alert">{{ error }}</p>
+      <p v-if="error || duplicates.error" class="page-error" role="alert">{{ error || duplicates.error }}</p>
       <p v-if="busy" class="muted" role="status">{{ t('duplicates.loading') }}</p>
 
       <section v-if="exactShown.length" aria-labelledby="exact-title">
@@ -173,13 +172,18 @@ async function openPreview(item: DuplicateItem) {
       <div v-if="more" ref="sentinel" class="more" aria-hidden="true" />
 
       <EmptyState
-        v-if="duplicates.loaded && !duplicates.groups.length"
+        v-if="duplicates.loaded && !duplicates.list.length"
         icon="copy"
         :title="t('duplicates.empty')"
         :text="t('duplicates.emptyHint')"
       />
     </div>
-    <dialog ref="previewDialog" class="preview-dialog" @close="preview = null">
+    <dialog
+      ref="previewDialog"
+      class="dialog preview-dialog"
+      :aria-label="preview ? filename(preview.paths[0] ?? '') : undefined"
+      @close="preview = null"
+    >
       <template v-if="preview">
         <button class="icon-btn close" :aria-label="t('common.close')" @click="previewDialog?.close()">
           <Icon name="close" />
@@ -290,14 +294,7 @@ li .btn {
   max-width: min(90vw, 1100px);
   max-height: 90vh;
   padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
   background: var(--surface-2);
-  color: var(--text);
-}
-
-.preview-dialog::backdrop {
-  background: var(--backdrop);
 }
 
 .preview-dialog > img {

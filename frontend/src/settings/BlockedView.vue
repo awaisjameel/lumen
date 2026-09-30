@@ -2,12 +2,12 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { BlockKind, BlockMode, engine } from '../bridge'
 import type { Block } from '../bridge'
-import { useLibrary } from '../library/store'
+import { showBlocksChanged } from '../shared/block'
 import { confirm } from '../shared/confirm'
 import { errorText, reportError } from '../shared/errors'
 import { t } from '../shared/i18n'
+import PinFields from '../shared/PinFields.vue'
 
-const lib = useLibrary()
 const configured = ref(true)
 const unlocked = ref(false)
 const pin = ref('')
@@ -40,7 +40,10 @@ async function unlock() {
   error.value = ''
   try {
     if (!configured.value) {
-      if (pin.value !== confirmPIN.value) throw new Error(t('blocked.pinMismatch'))
+      if (pin.value !== confirmPIN.value) {
+        error.value = t('blocked.pinMismatch')
+        return
+      }
       await engine.createBlockPIN(pin.value)
       if (!isActive()) return
       configured.value = true
@@ -61,7 +64,7 @@ async function unlock() {
 }
 
 async function reload() {
-  await lib.refreshVisibility()
+  await showBlocksChanged()
   if (!isActive()) return
   const got = await engine.blocks()
   if (isActive()) blocks.value = got
@@ -131,29 +134,7 @@ function kindName(kind: BlockKind): string {
       <p v-if="error" class="page-error" role="alert">{{ error }}</p>
       <form v-if="!unlocked" class="unlock" @submit.prevent="unlock">
         <p>{{ t(configured ? 'blocked.enterPINHint' : 'blocked.createPINHint') }}</p>
-        <input
-          v-model="pin"
-          class="field"
-          type="password"
-          inputmode="numeric"
-          autocomplete="off"
-          pattern="[0-9]{6,12}"
-          required
-          :aria-label="t(configured ? 'blocked.enterPIN' : 'blocked.newPIN')"
-          :placeholder="t(configured ? 'blocked.enterPIN' : 'blocked.newPIN')"
-        />
-        <input
-          v-if="!configured"
-          v-model="confirmPIN"
-          class="field"
-          type="password"
-          inputmode="numeric"
-          autocomplete="off"
-          pattern="[0-9]{6,12}"
-          required
-          :aria-label="t('blocked.confirmPIN')"
-          :placeholder="t('blocked.confirmPIN')"
-        />
+        <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" :creating="!configured" />
         <button class="btn btn-primary" :disabled="busy">{{ t('blocked.unlock') }}</button>
       </form>
       <template v-else>
@@ -193,7 +174,7 @@ function kindName(kind: BlockKind): string {
   margin-top: 20px;
 }
 
-.unlock .field {
+.unlock :deep(.field) {
   width: 100%;
 }
 

@@ -28,7 +28,7 @@ let active = true
 onBeforeUnmount(() => (active = false))
 
 // Built-ins without photos and the internal sink kind never show.
-const listed = computed(() => things.list.filter((x) => !x.hidden && (x.kind !== TagKind.TagBuiltin || x.count > 0)))
+const listed = computed(() => things.list.filter((x) => x.kind !== TagKind.TagBuiltin || x.count > 0))
 const mine = computed(() => listed.value.filter((x) => x.kind !== TagKind.TagBuiltin))
 const builtin = computed(() => listed.value.filter((x) => x.kind === TagKind.TagBuiltin))
 const aiError = computed(() => lib.progress?.ai.error ?? '')
@@ -66,10 +66,7 @@ async function act(fn: () => Promise<void>) {
   }
 }
 
-const blockTag = (tag: Tag) =>
-  act(async () => {
-    await block(BlockKind.BlockTag, tag.id, tag.name)
-  })
+const blockTag = (tag: Tag) => void block(BlockKind.BlockTag, tag.id, tag.name)
 
 async function remove(tag: Tag) {
   if (await confirm(t('things.deleteTitle', { name: tag.name }), t('things.deleteText'), t('things.delete'))) {
@@ -112,7 +109,7 @@ async function remove(tag: Tag) {
           <div v-for="x in mine" :key="x.id" class="card">
             <RouterLink :to="{ name: 'thing', params: { id: x.id } }" class="card-cover" :aria-label="x.name">
               <img
-                v-if="x.cover"
+                v-if="x.cover && x.coverThumb"
                 :src="thumbUrl(x.cover, x.coverThumb)"
                 alt=""
                 loading="lazy"
@@ -150,7 +147,7 @@ async function remove(tag: Tag) {
         <div v-for="x in builtin" :key="x.id" class="card">
           <RouterLink :to="{ name: 'thing', params: { id: x.id } }" class="card-cover" :aria-label="x.name">
             <img
-              v-if="x.cover"
+              v-if="x.cover && x.coverThumb"
               :src="thumbUrl(x.cover, x.coverThumb)"
               alt=""
               loading="lazy"
@@ -186,9 +183,6 @@ async function remove(tag: Tag) {
 </template>
 
 <style scoped>
-.intro {
-  margin: 0 0 12px;
-}
 .new {
   display: flex;
   gap: 8px;

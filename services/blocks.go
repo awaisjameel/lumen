@@ -18,6 +18,31 @@ var (
 	ErrBlockUndoExpired = errors.New("the block can no longer be undone")
 )
 
+const (
+	// blockUnlockIdle relocks the Blocked list after this long unused, in case
+	// the screen never said it was left (the window was reloaded or closed).
+	blockUnlockIdle = 10 * time.Minute
+	// pinAttempts wrong PINs in a row wait pinCooldown before the next try.
+	pinAttempts = 5
+	pinCooldown = 30 * time.Second
+	// blockUndoWindow is how long Undo is accepted. The UI offers it for
+	// eight seconds; the rest allows for view refresh, WebView scheduling
+	// and the round trip after the button is pressed.
+	blockUndoWindow = 30 * time.Second
+)
+
+// unlockedNow reports whether the list is unlocked, and counts this as a use.
+// Call with s.blocked held.
+func (s *LibraryService) unlockedNow() bool {
+	if s.blocked.unlocked && time.Since(s.blocked.usedAt) > blockUnlockIdle {
+		s.blocked.unlocked = false
+	}
+	if s.blocked.unlocked {
+		s.blocked.usedAt = time.Now()
+	}
+	return s.blocked.unlocked
+}
+
 // BlockPINConfigured reports whether the first block must establish a PIN.
 func (s *LibraryService) BlockPINConfigured(ctx context.Context) (bool, error) {
 	return s.store.HasBlockPIN(ctx)
@@ -42,13 +67,13 @@ func (s *LibraryService) UnlockBlocks(ctx context.Context, pin string) error {
 	}
 	if !ok {
 		s.blocked.failures++
-		if s.blocked.failures >= 5 {
-			s.blocked.retryAt = time.Now().Add(30 * time.Second)
+		if s.blocked.failures >= pinAttempts {
+			s.blocked.retryAt = time.Now().Add(pinCooldown)
 			s.blocked.failures = 0
 		}
 		return store.ErrInvalidPIN
 	}
-	s.blocked.unlocked = true
+	s.blocked.unlocked, s.blocked.usedAt = true, time.Now()
 	s.blocked.failures = 0
 	return nil
 }
@@ -64,7 +89,7 @@ func (s *LibraryService) LockBlocks() {
 func (s *LibraryService) Blocks(ctx context.Context) ([]core.Block, error) {
 	s.blocked.Lock()
 	defer s.blocked.Unlock()
-	if !s.blocked.unlocked {
+	if !s.unlockedNow() {
 		return nil, ErrBlockLocked
 	}
 	return s.store.Blocks(ctx)
@@ -81,7 +106,7 @@ func (s *LibraryService) SetBlock(ctx context.Context, kind core.BlockKind, targ
 	}
 	s.blocked.Lock()
 	defer s.blocked.Unlock()
-	id, created, err := s.store.SetBlockWithCreated(ctx, kind, targetID, path, mode, s.blocked.unlocked)
+	id, created, err := s.store.SetBlockWithCreated(ctx, kind, targetID, path, mode, s.unlockedNow())
 	if errors.Is(err, store.ErrBlockChangeLocked) {
 		return core.BlockChange{}, ErrBlockLocked
 	}
@@ -100,9 +125,7 @@ func (s *LibraryService) SetBlock(ctx context.Context, kind core.BlockKind, targ
 func (s *LibraryService) UndoBlock(ctx context.Context, id int64) error {
 	s.blocked.Lock()
 	defer s.blocked.Unlock()
-	// The UI offers Undo for eight seconds. Allow extra time for view refresh,
-	// WebView scheduling and the round trip after the button is pressed.
-	if id == 0 || id != s.blocked.lastID || time.Since(s.blocked.lastAt) > 30*time.Second {
+	if id == 0 || id != s.blocked.lastID || time.Since(s.blocked.lastAt) > blockUndoWindow {
 		return ErrBlockUndoExpired
 	}
 	if err := s.store.RemoveBlock(ctx, id); err != nil {
@@ -117,7 +140,7 @@ func (s *LibraryService) UndoBlock(ctx context.Context, id int64) error {
 func (s *LibraryService) RemoveBlock(ctx context.Context, id int64) error {
 	s.blocked.Lock()
 	defer s.blocked.Unlock()
-	if !s.blocked.unlocked {
+	if !s.unlockedNow() {
 		return ErrBlockLocked
 	}
 	if err := s.store.RemoveBlock(ctx, id); err != nil {
@@ -127,8 +150,10 @@ func (s *LibraryService) RemoveBlock(ctx context.Context, id int64) error {
 	return nil
 }
 
+// blocksChanged tells every view: a block changes which assets, Things and
+// people are shown.
 func (s *LibraryService) blocksChanged() {
-	if s.events != nil {
-		s.events.LibraryChanged(core.Changes{Assets: true, Tags: true, People: true})
+	if s.ix != nil {
+		s.ix.LibraryChanged(core.Changes{Assets: true, Tags: true, People: true})
 	}
 }

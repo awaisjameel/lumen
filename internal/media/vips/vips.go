@@ -26,8 +26,9 @@ static int lumen_init(void) {
 	return 0;
 }
 
-// lumen_error takes libvips' error log (shared by every thread) and clears
-// it in one step, so one file's error never shows under another's name.
+// lumen_error takes libvips' error log and clears it in one step. The log is
+// shared by every thread, so while several files fail at once one may take
+// another's message and leave that one none (see lastError).
 static char *lumen_error(void) {
 	return vips_error_buffer_copy();
 }
@@ -107,24 +108,28 @@ static int lumen_thumbs_file(const char *path, int large, int small, int side, l
 	return finish(t, small, side, o);
 }
 
-// wrap_pixels wraps 8-bit RGB(A) pixels decoded elsewhere as an sRGB image.
-// The pixels must outlive the returned (lazy) image's use.
-static VipsImage *wrap_pixels(const void *pix, size_t len, int w, int h, int bands) {
+// wrap_pixels wraps 8-bit RGB(A) pixels decoded elsewhere as an RGB image,
+// in the colour profile icc (icc_len bytes; NULL: sRGB), which to_srgb8
+// then converts from. The pixels must outlive the returned (lazy) image's use.
+static VipsImage *wrap_pixels(const void *pix, size_t len, int w, int h, int bands, const void *icc, size_t icc_len) {
 	VipsImage *in = NULL, *c = NULL;
 	int err;
 	in = vips_image_new_from_memory(pix, len, w, h, bands, VIPS_FORMAT_UCHAR);
 	if (!in) return NULL;
 	err = vips_copy(in, &c, "interpretation", VIPS_INTERPRETATION_sRGB, NULL);
 	g_object_unref(in);
-	return err ? NULL : c;
+	if (err) return NULL;
+	if (icc && icc_len) vips_image_set_blob_copy(c, VIPS_META_ICC_NAME, icc, icc_len);
+	return c;
 }
 
 // from_pixels wraps pixels (see wrap_pixels) shrunk to at most side and
 // turned upright from orientation (EXIF 1..8).
-static VipsImage *from_pixels(const void *pix, size_t len, int w, int h, int bands, int orientation, int side) {
+static VipsImage *from_pixels(const void *pix, size_t len, int w, int h, int bands, const void *icc, size_t icc_len,
+		int orientation, int side) {
 	VipsImage *c = NULL, *t = NULL;
 	int err;
-	c = wrap_pixels(pix, len, w, h, bands);
+	c = wrap_pixels(pix, len, w, h, bands, icc, icc_len);
 	if (!c) return NULL;
 	vips_image_set_int(c, VIPS_META_ORIENTATION, orientation);
 	err = vips_thumbnail_image(c, &t, side, "height", side, "size", VIPS_SIZE_DOWN, NULL);
@@ -134,9 +139,9 @@ static VipsImage *from_pixels(const void *pix, size_t len, int w, int h, int ban
 
 // lumen_thumbs_pixels does what lumen_thumbs_file does for pixels decoded
 // elsewhere.
-static int lumen_thumbs_pixels(const void *pix, size_t len, int w, int h, int bands, int orientation,
-		int large, int small, int side, lumen_thumbs *o) {
-	VipsImage *t = from_pixels(pix, len, w, h, bands, orientation, large);
+static int lumen_thumbs_pixels(const void *pix, size_t len, int w, int h, int bands, const void *icc, size_t icc_len,
+		int orientation, int large, int small, int side, lumen_thumbs *o) {
+	VipsImage *t = from_pixels(pix, len, w, h, bands, icc, icc_len, orientation, large);
 	if (!t) return -1;
 	return finish(t, small, side, o);
 }
@@ -162,9 +167,9 @@ static int lumen_rgb_file(const char *path, int side, void **buf, size_t *len, i
 }
 
 // lumen_rgb_pixels does the same for pixels decoded elsewhere.
-static int lumen_rgb_pixels(const void *pix, size_t len, int w, int h, int bands, int orientation, int side,
-		void **buf, size_t *olen, int *ow, int *oh) {
-	VipsImage *t = from_pixels(pix, len, w, h, bands, orientation, side);
+static int lumen_rgb_pixels(const void *pix, size_t len, int w, int h, int bands, const void *icc, size_t icc_len,
+		int orientation, int side, void **buf, size_t *olen, int *ow, int *oh) {
+	VipsImage *t = from_pixels(pix, len, w, h, bands, icc, icc_len, orientation, side);
 	if (!t) return -1;
 	return to_rgb(t, buf, olen, ow, oh);
 }
@@ -183,7 +188,7 @@ static int lumen_square_pixels(const void *pix, size_t len, int w, int h, int si
 		void **buf, size_t *olen, int *ow, int *oh) {
 	VipsImage *c = NULL, *t = NULL;
 	int err;
-	c = wrap_pixels(pix, len, w, h, 3);
+	c = wrap_pixels(pix, len, w, h, 3, NULL, 0);
 	if (!c) return -1;
 	err = vips_thumbnail_image(c, &t, side, "height", side, "size", VIPS_SIZE_FORCE, NULL);
 	g_object_unref(c);
@@ -193,7 +198,7 @@ static int lumen_square_pixels(const void *pix, size_t len, int w, int h, int si
 
 // lumen_jpeg_pixels encodes RGB pixels as a JPEG of quality q.
 static int lumen_jpeg_pixels(const void *pix, size_t len, int w, int h, int q, void **buf, size_t *olen) {
-	VipsImage *c = wrap_pixels(pix, len, w, h, 3);
+	VipsImage *c = wrap_pixels(pix, len, w, h, 3, NULL, 0);
 	int err;
 	if (!c) return -1;
 	err = save_jpeg(c, q, buf, olen);
@@ -275,18 +280,43 @@ func ThumbnailFile(path string, s Sizes) (Thumbs, error) {
 	return collect(rc, &o, s.Square)
 }
 
-// ThumbnailPixels does the same for 8-bit RGB (bands 3) or RGBA (bands 4)
-// pixels, applying an EXIF orientation (1..8) first.
-func ThumbnailPixels(pix []byte, w, h, bands, orientation int, s Sizes) (Thumbs, error) {
+// Pixels is an image decoded outside libvips: 8-bit RGB (Bands 3) or RGBA
+// (Bands 4), in the colour profile ICC (nil: sRGB), with the EXIF
+// Orientation (1..8) still to apply.
+type Pixels struct {
+	Pix         []byte
+	W, H, Bands int
+	Orientation int
+	ICC         []byte
+}
+
+// RGBPixels is upright sRGB pixels: what Decode, video frames and the rest
+// of Lumen make.
+func RGBPixels(pix []byte, w, h int) Pixels {
+	return Pixels{Pix: pix, W: w, H: h, Bands: 3, Orientation: 1}
+}
+
+// cICC is p's profile for C: its address and length (nil, 0 for none).
+func (p Pixels) cICC() (icc unsafe.Pointer, size C.size_t) {
+	if len(p.ICC) == 0 {
+		return nil, 0
+	}
+	return unsafe.Pointer(unsafe.SliceData(p.ICC)), C.size_t(len(p.ICC))
+}
+
+// ThumbnailPixels does what ThumbnailFile does for pixels decoded elsewhere,
+// applying their orientation and converting from their profile.
+func ThumbnailPixels(p Pixels, s Sizes) (Thumbs, error) {
 	if err := Init(); err != nil {
 		return Thumbs{}, err
 	}
-	if err := checkPixels(pix, w, h, bands); err != nil {
+	if err := checkPixels(p.Pix, p.W, p.H, p.Bands); err != nil {
 		return Thumbs{}, err
 	}
 	var o C.lumen_thumbs
-	rc := C.lumen_thumbs_pixels(unsafe.Pointer(unsafe.SliceData(pix)), C.size_t(len(pix)), C.int(w), C.int(h),
-		C.int(bands), C.int(max(1, min(orientation, 8))), C.int(s.Large), C.int(s.Small), C.int(s.Square), &o)
+	icc, iccLen := p.cICC()
+	rc := C.lumen_thumbs_pixels(unsafe.Pointer(unsafe.SliceData(p.Pix)), C.size_t(len(p.Pix)), C.int(p.W), C.int(p.H),
+		C.int(p.Bands), icc, iccLen, C.int(max(1, min(p.Orientation, 8))), C.int(s.Large), C.int(s.Small), C.int(s.Square), &o)
 	return collect(rc, &o, s.Square)
 }
 
@@ -334,20 +364,21 @@ func DecodeFile(path string, side int) (RGB, error) {
 	return collectRGB(rc, buf, n, w, h)
 }
 
-// DecodePixels does the same for 8-bit RGB (bands 3) or RGBA (bands 4)
-// pixels, applying an EXIF orientation (1..8).
-func DecodePixels(pix []byte, w, h, bands, orientation, side int) (RGB, error) {
+// DecodePixels does what DecodeFile does for pixels decoded elsewhere,
+// applying their orientation and converting from their profile.
+func DecodePixels(p Pixels, side int) (RGB, error) {
 	if err := Init(); err != nil {
 		return RGB{}, err
 	}
-	if err := checkPixels(pix, w, h, bands); err != nil {
+	if err := checkPixels(p.Pix, p.W, p.H, p.Bands); err != nil {
 		return RGB{}, err
 	}
 	var buf unsafe.Pointer
 	var n C.size_t
 	var ow, oh C.int
-	rc := C.lumen_rgb_pixels(unsafe.Pointer(unsafe.SliceData(pix)), C.size_t(len(pix)), C.int(w), C.int(h),
-		C.int(bands), C.int(max(1, min(orientation, 8))), C.int(side), &buf, &n, &ow, &oh)
+	icc, iccLen := p.cICC()
+	rc := C.lumen_rgb_pixels(unsafe.Pointer(unsafe.SliceData(p.Pix)), C.size_t(len(p.Pix)), C.int(p.W), C.int(p.H),
+		C.int(p.Bands), icc, iccLen, C.int(max(1, min(p.Orientation, 8))), C.int(side), &buf, &n, &ow, &oh)
 	return collectRGB(rc, buf, n, ow, oh)
 }
 
@@ -471,5 +502,9 @@ func lastError() error {
 	defer C.g_free(C.gpointer(msg))
 	// The first line of libvips' error log is the useful one.
 	first, _, _ := strings.Cut(C.GoString(msg), "\n")
+	if first == "" {
+		// Another file failing at the same moment took the message.
+		first = "the image could not be read"
+	}
 	return errors.New("vips: " + first)
 }

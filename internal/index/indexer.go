@@ -80,6 +80,10 @@ type Indexer struct {
 	pixels  decoded                  // photos the thumbnail stage decoded for the faces stage
 
 	version map[core.Stage]string // what each running stage's results are made by
+	// embedLabels is the Things generation the embedding stage's batch was
+	// tagged under (see search.Engine.Commit). Only that stage's goroutine
+	// uses it, between processing a batch and saving it.
+	embedLabels uint64
 
 	rescanMu sync.Mutex // one RescanAll at a time, so the watchers match the sources
 
@@ -105,9 +109,10 @@ type Indexer struct {
 	stale   atomic.Bool   // only the progress changed (scan counts, pause)
 	last    core.Progress
 
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	rootCtx context.Context // nil until Start
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+	watchers sync.WaitGroup  // watchLoops; Added under mu, only while rootCtx lives
+	rootCtx  context.Context // nil until Start
 }
 
 type scanRequest struct {
@@ -185,6 +190,10 @@ const (
 	changedPeople
 )
 
+// LibraryChanged records a change made outside the indexer (a block), so the
+// UI hears of it with the indexer's own, at most once a second.
+func (ix *Indexer) LibraryChanged(c core.Changes) { ix.markChanged(c) }
+
 // markChanged records that the library changed, for reportLoop to tell the UI.
 func (ix *Indexer) markChanged(c core.Changes) {
 	var bits uint32
@@ -220,10 +229,10 @@ func (ix *Indexer) versions() map[core.Stage]string {
 		core.StageThumbnail: media.ThumbnailVersion + "+" + media.VideoThumbnailVersion,
 	}
 	if ix.search != nil {
-		v[core.StageEmbedding] = ix.search.Model().Version + core.VideoFramesVersion
+		v[core.StageEmbedding] = ix.search.Model().Version + media.VideoFramesVersion
 	}
 	if ix.people != nil {
-		v[core.StageFaces] = ix.people.Model().Version + "+analysis-" + ai.FaceAnalysisVersion + core.VideoFramesVersion
+		v[core.StageFaces] = ix.people.Model().Version + "+analysis-" + ai.FaceAnalysisVersion + media.VideoFramesVersion
 	}
 	return v
 }
@@ -334,12 +343,13 @@ func (ix *Indexer) Stop() {
 		return
 	}
 	ix.cancel()
-	ix.mu.Lock()
+	ix.mu.Lock() // after cancel: restartWatchers starts no more watchers
 	if ix.fsTimer != nil {
 		ix.fsTimer.Stop()
 	}
 	ix.mu.Unlock()
 	ix.wg.Wait()
+	ix.watchers.Wait()
 	if ix.encoder != nil {
 		ix.encoder.release()
 	}
@@ -606,15 +616,22 @@ func (ix *Indexer) skipDirs() []string { return []string{ix.paths.DataDir} }
 // restartWatchers watches every enabled source for changes.
 func (ix *Indexer) restartWatchers(srcs []core.Source) {
 	ix.mu.Lock()
+	defer ix.mu.Unlock()
 	if ix.watchStop != nil {
 		ix.watchStop()
 	}
+	if ix.rootCtx.Err() != nil {
+		return // stopping
+	}
 	ctx, cancel := context.WithCancel(ix.rootCtx)
 	ix.watchStop = cancel
-	ix.mu.Unlock()
 	for _, s := range srcs {
 		if s.Enabled {
-			go ix.watchLoop(ctx, s)
+			ix.watchers.Add(1)
+			go func() {
+				defer ix.watchers.Done()
+				ix.watchLoop(ctx, s)
+			}()
 		}
 	}
 }
@@ -703,8 +720,16 @@ func (ix *Indexer) flushFSChanges() {
 			dir = filepath.Dir(p)
 		}
 		for _, s := range srcs {
-			if !s.Enabled || !core.IsWithin(dir, s.Path) || scanner.Excluded(s.Path, p, ix.skipDirs()) {
-				continue // e.g. a hidden folder or the recycle bin, which scans leave out
+			if !s.Enabled || !core.IsWithin(dir, s.Path) {
+				continue
+			}
+			if at, byAttribute, excluded := scanner.Exclusion(s.Path, p, ix.skipDirs()); excluded {
+				if !byAttribute {
+					continue // e.g. the recycle bin, which scans always leave out
+				}
+				// Inside a folder hidden now: what the library has of it goes,
+				// by a scan of the folder around it.
+				dir = filepath.Dir(at)
 			}
 			if dirs[s.ID] == nil {
 				dirs[s.ID] = map[string]bool{}
@@ -745,6 +770,7 @@ func (ix *Indexer) flushFSChanges() {
 // big library, so it spends at most a fifth of the time doing it.
 func (ix *Indexer) reportLoop(ctx context.Context) {
 	wait := time.Second
+	visibility, _ := ix.store.VisibilityRevision(ctx) // 0 on failure: at worst one extra reload
 	for {
 		select {
 		case <-ctx.Done():
@@ -754,6 +780,16 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 		bits := ix.changes.Swap(0)
 		if stale := ix.stale.Swap(false); !stale && bits == 0 {
 			continue
+		}
+		if bits != 0 {
+			// New tags or faces can put photos under a block: then which
+			// assets are visible changed too, which every timeline shows.
+			if rev, err := ix.store.VisibilityRevision(ctx); err == nil {
+				if rev != visibility {
+					bits |= changedAssets
+				}
+				visibility = rev
+			}
 		}
 		start := time.Now()
 		p := ix.Progress(ctx)

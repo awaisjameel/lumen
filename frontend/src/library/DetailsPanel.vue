@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { AlbumKind, BlockKind, DateSource, engine, MAX_NAME_LEN, TagSource } from '../bridge'
 import type { AssetDetail, AssetTag, Face } from '../bridge'
-import { errorText, logError } from '../shared/errors'
+import { errorText, logError, orFallback } from '../shared/errors'
 import { block } from '../shared/block'
 import { bytes, dateTime, duration, megapixels } from '../shared/format'
 import { t } from '../shared/i18n'
@@ -19,6 +19,7 @@ const props = defineProps<{ sel: Sel | null }>()
 const lib = useLibrary()
 const albums = useAlbums()
 const detail = ref<AssetDetail | null>(null)
+const placeName = ref('') // the city near the photo, once known
 const tags = ref<AssetTag[]>([])
 const faces = ref<Face[]>([])
 const newTag = ref('')
@@ -40,19 +41,25 @@ onBeforeUnmount(() => {
   albumsRequest++
 })
 
+// The photo's details: again when another is selected, or its favourite
+// flag changes (two sources, so a grid update that changes neither doesn't
+// ask again, nor clear what an edit said went wrong).
 watch(
-  () => [props.sel?.id, lib.itemAt(props.sel)?.f] as const,
-  async ([id]) => {
+  [() => props.sel?.id, () => lib.itemAt(props.sel)?.f],
+  async ([id], old) => {
     const request = ++detailRequest
-    error.value = ''
-    if (detail.value?.id !== id) detail.value = null
-    if (!id) {
+    if (id !== old[0]) {
+      error.value = ''
       detail.value = null
-      return
+      placeName.value = ''
     }
+    if (!id) return
     try {
       const d = await engine.asset(id)
-      if (request === detailRequest) detail.value = d
+      if (request !== detailRequest) return
+      detail.value = d
+      const place = d.placeId ? await orFallback(engine.place(d.placeId), null) : null
+      if (request === detailRequest) placeName.value = place?.name ?? ''
     } catch (e) {
       if (request === detailRequest) error.value = errorText(e)
     }
@@ -227,7 +234,8 @@ async function blockPerson(face: Face) {
 
 async function blockPlace() {
   const id = detail.value?.placeId
-  if (id && (await block(BlockKind.BlockPlace, id, t('details.location')))) await loadExtras(props.sel?.id)
+  if (id && (await block(BlockKind.BlockPlace, id, placeName.value || t('details.location'))))
+    await loadExtras(props.sel?.id)
 }
 
 async function blockFolder(path: string) {
@@ -326,6 +334,7 @@ function showInFolder(id: number) {
 
       <section v-if="detail.lat !== null && detail.lon !== null">
         <h3>{{ t('details.location') }}</h3>
+        <p v-if="placeName">{{ placeName }}</p>
         <p class="mono">{{ detail.lat.toFixed(5) }}, {{ detail.lon.toFixed(5) }}</p>
         <button v-if="detail.placeId" class="btn btn-subtle" @click="blockPlace">{{ t('blocked.blockPlace') }}</button>
       </section>

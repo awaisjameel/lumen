@@ -62,18 +62,23 @@ func (d Decoders) frames(ctx context.Context, path string, n, side int, fn func(
 	if v.Duration > 0 {
 		every = float64(v.Duration) / 1000 / float64(max(n, 1))
 	}
-	got, err := d.samplePass(ctx, path, v, side, every, true, fn)
-	if err == nil && got <= 1 && n > 1 && v.Duration > 0 {
-		_, err = d.samplePass(ctx, path, v, side, every, false, fn)
+	got, err := d.samplePass(ctx, path, v, side, every, true, false, fn)
+	if err == nil && v.Duration > 0 && (got == 0 || (got == 1 && n > 1)) {
+		_, err = d.samplePass(ctx, path, v, side, every, false, got == 1, fn)
 	}
 	return v, err
 }
 
+// VideoFramesVersion versions how Frames samples a video (SampleCount, the
+// passes below): both AI stages' versions end with it, so a change re-runs
+// them for videos.
+const VideoFramesVersion = "+video-frames-1"
+
 // samplePass runs ffmpeg once, selecting a frame every `every` seconds:
-// keyframes only, from the start, or every frame decoded, from the second
-// sample on (after a keyframe pass found just the first). It returns how
-// many frames it handed to fn.
-func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side int, every float64, keyframes bool,
+// keyframes only, or every frame decoded, from the start or, with
+// skipFirst (a keyframe pass found just the first), from the second sample
+// on. It returns how many frames it handed to fn.
+func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side int, every float64, keyframes, skipFirst bool,
 	fn func(Frame) error) (int, error) {
 	sel := fmt.Sprintf("isnan(prev_selected_t)+gte(t-prev_selected_t,%.3f)", every)
 	timeout := framesTimeout
@@ -81,7 +86,9 @@ func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side
 	if keyframes {
 		args = append(args, "-skip_frame", "nokey")
 	} else {
-		sel = fmt.Sprintf("gte(t,%.3f)*(%s)", v.start+every, sel) // t counts from the stream's start time
+		if skipFirst {
+			sel = fmt.Sprintf("gte(t,%.3f)*(%s)", v.start+every, sel) // t counts from the stream's start time
+		}
 		timeout = fullPassTimeout
 	}
 	if math.IsInf(every, 1) {

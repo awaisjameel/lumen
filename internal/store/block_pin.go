@@ -9,6 +9,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+
+	"lumen/internal/core"
 )
 
 var (
@@ -20,8 +22,9 @@ var (
 
 const pinIterations = 600_000
 
+// validPIN reports whether pin is core.PINMinLen to core.PINMaxLen digits.
 func validPIN(pin string) bool {
-	if len(pin) < 6 || len(pin) > 12 {
+	if len(pin) < core.PINMinLen || len(pin) > core.PINMaxLen {
 		return false
 	}
 	for _, c := range pin {

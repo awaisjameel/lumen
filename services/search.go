@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"lumen/internal/core"
 	"lumen/internal/people"
@@ -36,18 +37,22 @@ func NewSearchService(st *store.Store, engine *search.Engine, faces bool) *Searc
 // the description can't be searched (the result says so): named people's
 // photos are still found.
 func (s *SearchService) Search(ctx context.Context, query string) (core.SearchResult, error) {
-	blocked, err := s.store.BlockedNamedPeople(ctx)
-	if err != nil {
-		return core.SearchResult{}, err
-	}
-	if ids, _, _ := people.FindNames(query, blocked); len(ids) > 0 {
-		return core.SearchResult{Items: []core.GridItem{}, People: []string{}, Complete: true, Blocked: true}, nil
-	}
 	named, err := s.store.NamedPeople(ctx)
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	who, names, text := people.FindNames(query, named)
+	blocked, err := s.store.BlockedNamedPeople(ctx)
+	if err != nil {
+		return core.SearchResult{}, err
+	}
+	// Blocked and visible names are found together, so the longer name wins
+	// either way: a blocked "Ali" doesn't swallow a visible "Ali Khan".
+	who, names, text := people.FindNames(query, slices.Concat(named, blocked))
+	if slices.ContainsFunc(who, func(id int64) bool {
+		return slices.ContainsFunc(blocked, func(p core.Person) bool { return p.ID == id })
+	}) {
+		return core.SearchResult{Items: []core.GridItem{}, People: []string{}, Complete: true, Blocked: true}, nil
+	}
 	var ids []int64
 	var moments map[int64]int64
 	var waitFor []core.Stage // stages whose photos can't be found yet
@@ -135,7 +140,7 @@ func (s *SearchService) Things(ctx context.Context) ([]core.Tag, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.store.Things(ctx, float32(minScore))
+	return s.store.Things(ctx, minScore)
 }
 
 // CreateLabel adds a Thing for the AI to look for, and finds it across the
@@ -165,7 +170,7 @@ func (s *SearchService) AssetTags(ctx context.Context, assetID int64) ([]core.As
 	if err != nil {
 		return nil, err
 	}
-	return s.store.AssetTags(ctx, assetID, float32(minScore))
+	return s.store.AssetTags(ctx, assetID, minScore)
 }
 
 // TagAsset puts a tag on a photo by name, creating the tag if it's new.

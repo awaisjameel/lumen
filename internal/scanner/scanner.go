@@ -279,22 +279,30 @@ func withinAny(path string, dirs []string) bool {
 // folder between them (or path itself) is hidden, a system folder, or in
 // skip. The indexer checks folder changes with it before scanning them.
 func Excluded(root, path string, skip []string) bool {
+	_, _, excluded := Exclusion(root, path, skip)
+	return excluded
+}
+
+// Exclusion is Excluded, also saying which folder (or file) inside root is
+// left out, and whether that is for its hidden or system attribute (which the
+// user can change in Explorer) rather than its name or place.
+func Exclusion(root, path string, skip []string) (at string, byAttribute, excluded bool) {
 	rel, err := filepath.Rel(root, path)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return false
+		return "", false, false
 	}
 	cur := root
 	for name := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		cur = filepath.Join(cur, name)
 		if skipName(name) || withinAny(cur, skip) {
-			return true
+			return cur, false, true
 		}
 		// A deleted path has no attributes left; its name rules still apply.
 		if info, err := os.Lstat(cur); err == nil && isHiddenOrSystem(info) {
-			return true
+			return cur, true, true
 		}
 	}
-	return false
+	return "", false, false
 }
 
 // walkable returns the folder to walk for root. A source's root that is a
@@ -326,7 +334,7 @@ const (
 
 // Fingerprint returns the 16-byte content hash that identifies an asset.
 func Fingerprint(path string, size int64) ([]byte, error) {
-	f, err := openShared(path)
+	f, err := core.OpenShared(path)
 	if err != nil {
 		return nil, err
 	}

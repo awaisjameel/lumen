@@ -1,5 +1,9 @@
 import { shallowRef } from 'vue'
 import type { BlockKind } from '../bridge'
+import { useAlbums } from '../albums/store'
+import { useLibrary } from '../library/store'
+import { usePeople } from '../people/store'
+import { useThings } from '../things/store'
 
 export interface BlockRequest {
   kind: BlockKind
@@ -27,7 +31,21 @@ export function clearBlockUndo(): void {
   blockUndo.value = null
 }
 
-/** Ask which scope to block, confirming before changing the library view. */
+/**
+ * After a block was made, changed, undone or removed: the grid and every
+ * list already loaded (Things, People, Albums) show what is visible now, so
+ * a blocked item never shows again on the way back to its list.
+ */
+export async function showBlocksChanged(): Promise<void> {
+  const lists = [useThings(), usePeople(), useAlbums()].filter((s) => s.loaded)
+  await Promise.all([useLibrary().refreshVisibility(), ...lists.map((s) => s.load())])
+}
+
+/**
+ * Ask which scope to block, confirming before changing the library view.
+ * Once saved, everything shown is refreshed (showBlocksChanged): callers only
+ * act on what is theirs alone. Resolves whether the block was saved.
+ */
 export function block(
   kind: BlockKind,
   targetID: number,

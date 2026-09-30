@@ -28,7 +28,7 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 
 - **Faces**: YuNet finds faces (with five landmarks) in each photo decoded at 2048 px; each is aligned to SFace's template and turned into a 128-dim identity vector. Both models run on the GPU through DirectML (CPU fallback; the two give the same faces and vectors), taking turns with the image model, loaded only while there is work; a 1,466-photo library took about 45 s on a laptop
 - **People**: faces are grouped by average-linkage clustering (a group's similarity is the dot product of mean vectors, so merging is cheap), incrementally as photos arrive. Two faces in one photo are never one person; blurred or turned-away faces may join someone but never start a new person
-- **User corrections always win**: naming, merging (naming someone with a name already taken asks "same person?"), hiding, "not this person" (never put back), moving faces to someone else or a new person (splitting), choosing their picture. A face placed by the user never moves; a named person is never merged automatically
+- **User corrections always win**: naming, merging (naming someone with a name already taken asks "same person?"), "not this person" (never put back), moving faces to someone else or a new person (splitting), choosing their picture, blocking (Phase 5). A face placed by the user never moves; a named or blocked person is never merged automatically
 - **People view**, a person's photos (their page is the timeline, filtered), a face review that lists the least-alike faces first, people in the details panel ("Who is this?" for faces not recognised yet)
 - **Search by person**: names in a search narrow it to photos of all of them ("Ali and Sara at the beach"); names alone give their photos, newest first. The search box suggests people as you type
 
@@ -47,13 +47,13 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 - Events groups visible media after a configurable time gap (12 hours by default) or a location jump over 100 km. Events open filtered timelines and regroup as the library changes. Renames follow current members through later splits or removal of the oldest member; reset restores automatic names for the current group.
 - Blocking has started: people, Things, places, albums, photos/videos and folders can be blocked. Labels can be hidden alone or with their covered photos; photos and folders always hide media. The shared visibility rule feeds grids, search, counts, covers and media URLs. Settings has a PIN-protected Blocked list with mode changes and unblocking; a new block offers brief Undo. Earlier hidden people and user-hidden Things become photo blocks on upgrade; the internal sink Thing does not.
 
-Still to finish in Phase 5: face and event blocks, browsing covered photos from Blocked, forgotten-PIN recovery through Windows sign-in, then organise-on-disk with dry run and undo and XMP sidecar export. Trash, the 2 GB cache cap and OCR also remain future work. See [the blocking implementation note](docs/blocking-phase5-2026-09-30.md) for current coverage and acceptance limits.
+Still to finish in Phase 5: face and event blocks, browsing covered photos from Blocked, saying so when a search names a blocked Thing, place or album (as it does for a blocked person), forgotten-PIN recovery through Windows sign-in, then organise-on-disk with dry run and undo and XMP sidecar export. Trash, the 2 GB cache cap and OCR also remain future work. See [the blocking implementation note](docs/blocking-phase5-2026-09-30.md) for current coverage and acceptance limits.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
 ## Setup (Windows)
 
-Needs Go 1.27, Node 22.22.2+ / 24.15+ / 26+ and npm 11.19+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, and Python 3 (only to prepare the models). Toolchain used:
+Needs Go 1.27, Node 22.22.2+ / 24.15+ / 26+ and npm 11.19+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, and Python 3.14 (only to prepare the models; `ruff.toml` targets it). Toolchain used:
 
 - Go 1.27.1 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
 - User environment: `CGO_ENABLED=1`, `CC=clang`, `CXX=clang++`
@@ -62,7 +62,7 @@ Needs Go 1.27, Node 22.22.2+ / 24.15+ / 26+ and npm 11.19+ (matching `frontend/p
 Then, once, from Git Bash:
 
 ```sh
-scripts/deps.sh   # ~1.2 GB of downloads, pinned and hash-checked, into deps/ (git-ignored)
+scripts/deps.sh   # ~1.2 GB of downloads, pinned and checked, into deps/ (git-ignored)
 ```
 
 It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2, the YuNet and SFace face models and the linters (into `deps/tools/`), then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8, which takes it from 565 to 369 MB while agreeing with the original at cosine ≥ 0.9996, and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`. Nothing is ever downloaded at run time.
@@ -100,18 +100,20 @@ npm run test                 # Vitest: async store, viewer and settings regressi
 
 Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates, which only build for their own platforms.
 
+`task package` (the Wails template's NSIS installer) is not usable yet: the installer does not carry `deps/runtime`. The installer is Phase 6. The template's Docker and server tasks are left out of `Taskfile.yml`: Lumen needs cgo with the Windows libvips.
+
 Before moving between implementation phases, also regenerate the bindings with
 `wails3 generate bindings -ts -i`, check `git diff -- frontend/bindings`, and run
 `wails3 build`. The frontend must finish building before Go embeds `frontend/dist`;
 do not run independent frontend and Go production builds concurrently. Browser
 component tests use jsdom; actual codec playback still needs a WebView smoke test
 (the app started with `LUMEN_DEVTOOLS_PORT`, driven over the DevTools protocol).
-See [the latest audit](docs/audit-2026-09-30.md) for findings, verification evidence
-and remaining acceptance limits.
+See [the latest audit](docs/audit-2026-10-01.md) for findings, verification evidence
+and remaining acceptance limits (earlier audits in `docs/` are historical records).
 
 Handy environment variables:
 
-- `LUMEN_DATA_DIR`: use another data folder (default `%LOCALAPPDATA%\Lumen`). Handy for a scratch library.
+- `LUMEN_DATA_DIR`: use another data folder (default `%LOCALAPPDATA%\Lumen`). Handy for a scratch library: it runs beside the user's Lumen rather than handing over to it.
 - `LUMEN_RUNTIME_DIR`: where the DLLs, `ffmpeg\` and `models\` are (default: beside `Lumen.exe`).
 - `LUMEN_DEVTOOLS_PORT`: expose the WebView's DevTools protocol on `127.0.0.1` so UI tests (e.g. puppeteer-core) can drive the real app. Off by default.
 - `LUMEN_FACE_PHOTOS` (tests only): a folder of real photos of people. The face tests run on it and skip without it; keep such photos out of the repo.
@@ -120,7 +122,7 @@ Handy environment variables:
 
 ```text
 main.go              wiring: paths, logging, store, AI, indexer, services, window
-internal/core        domain types, paths, the wall-clock date convention
+internal/core        domain types, paths, the wall-clock date convention, case folding
 internal/store       SQLite schema (migrations/), all queries, job queue, tags, embeddings
 internal/scanner     folder walk, hashing, Windows folder watcher
 internal/media       EXIF, filename dates, thumbnails and their cache, perceptual hash
@@ -129,15 +131,18 @@ internal/media/wic   Windows Imaging Component decoding (HEIC)
 internal/ai          ONNX Runtime sessions, SigLIP 2 image/text encoders, tokenizer, face detection/alignment/recognition
 internal/search      in-memory int8 vector index, search, Things vocabulary and tagging
 internal/people      face clustering (incremental, constrained by the user's corrections), names in searches
+internal/places      offline reverse geocoding: the bundled GeoNames cities (cities.tsv.gz)
 internal/index       background pipeline: scan loop, stage workers, model loading, battery, events
 internal/parallel    the worker pool loops run on
+internal/testenv     finds deps/runtime for tests, skipping cleanly without it
 services/            Wails services (Library, Search, People, Media), the loopback video server, error codes
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/{library,search,things,people,onboarding,settings,shared}   UI by feature
 frontend/src/albums  manual and smart album browser and rule editor
 frontend/src/{places,events}   GPS places and automatic event groups
 frontend/src/duplicates  exact-copy and similar-photo review (read-only)
-scripts/             deps.sh (native dependencies), prepare_models.py, env.sh
+scripts/             deps.sh (native dependencies), prepare_models.py, env.sh, lint.sh, build_places.py
+docs/                audits (dated records), the blocking note, GeoNames provenance
 spikes/              Phase 0 experiments (own Go module; models in spikes/.cache)
 ```
 
@@ -155,7 +160,8 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **Pinia 4** (plan said 3; 4 is the current stable).
 - **Search is an in-memory int8 scan**, not sqlite-vec: SQLite stores the vectors, a flat int8 copy in memory is searched (Phase 0: 17 ms at 300k vs 351 ms). No vector extension is loaded.
 - **Search results are ordered by relevance**, not by date: SigLIP's probabilities vary too much between queries for a fixed cut-off to work, and a relevance order keeps weak matches at the end.
-- **libvips is the static "web" build** (one 18 MB DLL, no ImageMagick): BMP goes through Go instead.
+- **libvips is the static "web" build** (one 18 MB DLL, no ImageMagick), called through Lumen's own small cgo wrapper (`internal/media/vips`, one C function per job) rather than govips: BMP goes through Go, HEIC through WIC or FFmpeg (libvips reads its colour profile).
+- **Events are grouped when read**, not stored in an `events` table: consecutive visible media split by the time gap or a 100 km jump, cached until something they depend on changes. User names live in `event_names`, keyed by the event's member assets.
 - **Large files are hash-sampled**: files over 64 MB (mostly videos) hash size plus three 4 MB windows instead of every byte.
 - **Folder watching** uses `ReadDirectoryChangesW` directly (fsnotify has no recursive watch on Windows yet).
 - **One writer connection** instead of a writer goroutine: SQLite writes serialise on it, and callers batch hundreds of rows per transaction.

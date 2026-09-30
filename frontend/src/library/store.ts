@@ -4,6 +4,7 @@ import {
   engine,
   EVENT_GAP_DEFAULT,
   Filter,
+  isCancelled,
   onLibraryChanged,
   onProgress,
   startMedia,
@@ -77,10 +78,10 @@ export const useLibrary = defineStore('library', () => {
     tagConfidence: TAG_CONFIDENCE_DEFAULT,
     eventGapHours: EVENT_GAP_DEFAULT,
   })
-  const progress = ref<Progress | null>(null)
+  const progress = shallowRef<Progress | null>(null) // replaced whole by each event
 
   const scope = ref<Scope>({ kind: 'timeline', view: { filter: Filter.FilterAll } })
-  const buckets = ref<DayBucket[]>([])
+  const buckets = shallowRef<DayBucket[]>([]) // replaced whole: thousands of days
   const timelineLoaded = ref(false)
   const loadError = ref('')
   const searchInfo = ref<SearchInfo | null>(null)
@@ -92,6 +93,10 @@ export const useLibrary = defineStore('library', () => {
   let generation = 0 // changes even when returning to a previously visited scope
   let loadRequest = 0
   let dayRevision = 0
+  // Cancel reads whose answers would be dropped: the scope's groups when it
+  // loads again, the days' when they go stale (dayRevision).
+  let loadAbort = new AbortController()
+  let daysAbort = new AbortController()
   let shown = 0 // grids showing the scope (see attach)
   let stale = false // the library changed while no grid showed it
 
@@ -139,11 +144,14 @@ export const useLibrary = defineStore('library', () => {
     const s = scope.value
     const current = generation
     const request = ++loadRequest
+    loadAbort.abort()
+    loadAbort = new AbortController()
+    const { signal } = loadAbort
     loadError.value = ''
     stale = false
     try {
       if (s.kind === 'search') {
-        const r = await engine.search(s.query)
+        const r = await engine.search(s.query, signal)
         if (current !== generation || request !== loadRequest) return
         searchInfo.value = {
           pending: r.pending,
@@ -156,7 +164,7 @@ export const useLibrary = defineStore('library', () => {
         days.value = new Map(r.items.length ? [[RESULTS, r.items]] : [])
         fresh.add(RESULTS)
       } else {
-        const b = await engine.timeline(s.view)
+        const b = await engine.timeline(s.view, signal)
         if (current !== generation || request !== loadRequest) return
         buckets.value = b
         const present = new Set(b.map((bucket) => bucket.day))
@@ -166,10 +174,17 @@ export const useLibrary = defineStore('library', () => {
       }
       timelineLoaded.value = true
     } catch (e) {
-      if (current !== generation || request !== loadRequest) return
+      if (current !== generation || request !== loadRequest || isCancelled(e)) return
       loadError.value = errorText(e)
       throw e
     }
+  }
+
+  /** Every loaded day is stale: reads of them under way are cancelled. */
+  function staleDays() {
+    dayRevision++
+    daysAbort.abort()
+    daysAbort = new AbortController()
   }
 
   /**
@@ -187,7 +202,7 @@ export const useLibrary = defineStore('library', () => {
       stale = true // loaded when a grid shows it again
       return
     }
-    dayRevision++
+    staleDays()
     fresh.clear()
     if (c && !affects(s.view, c)) {
       // Only thumbnails changed: the days and counts stand, and the view
@@ -217,7 +232,7 @@ export const useLibrary = defineStore('library', () => {
     if (scope.value.kind === 'search') await setScope(scope.value)
     else {
       generation++
-      dayRevision++
+      staleDays()
       inflight.clear()
       fresh.clear()
       days.value = new Map()
@@ -257,7 +272,7 @@ export const useLibrary = defineStore('library', () => {
     const current = generation
     const revision = dayRevision
     try {
-      const got = await engine.days(from, to, view)
+      const got = await engine.days(from, to, view, daysAbort.signal)
       if (current !== generation || revision !== dayRevision) return
       const next = new Map(days.value)
       const inSpan = new Set(missing)
@@ -277,7 +292,7 @@ export const useLibrary = defineStore('library', () => {
       if (selected.value && missing.includes(selected.value.day) && !itemAt(selected.value)) selected.value = null
       if (viewer.value && missing.includes(viewer.value.day) && !itemAt(viewer.value)) viewer.value = null
     } catch (e) {
-      logError(e)
+      if (!isCancelled(e)) logError(e)
     } finally {
       if (current === generation && revision !== dayRevision) triggerRef(days) // ask again for what is shown
     }
@@ -310,7 +325,7 @@ export const useLibrary = defineStore('library', () => {
     }
     scope.value = s
     generation++
-    dayRevision++
+    staleDays()
     inflight.clear()
     selected.value = null
     viewer.value = null

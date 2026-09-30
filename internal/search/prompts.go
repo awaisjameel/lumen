@@ -54,19 +54,12 @@ func shippedVectors(m ai.Model) map[string][]float32 {
 	for i, p := range f.Prompts {
 		q := f.Vecs[i*f.Dim : (i+1)*f.Dim]
 		v := make([]float32, f.Dim)
-		var sum float64
 		for k, x := range q {
 			v[k] = float32(x) / math.MaxInt16
-			sum += float64(v[k]) * float64(v[k])
 		}
-		if sum == 0 {
-			continue
+		if ai.Normalise(v) {
+			out[p] = v
 		}
-		scale := float32(1 / math.Sqrt(sum))
-		for k := range v {
-			v[k] *= scale
-		}
-		out[p] = v
 	}
 	return out
 }

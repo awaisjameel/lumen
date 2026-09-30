@@ -45,9 +45,9 @@ var waitsFor = map[core.Stage][]core.Stage{
 // unfinished is the SQL list of statuses of a job still to do.
 const unfinished = "('pending', 'waiting')"
 
-// blocked is true for a job of asset_jobs (the outer table) whose earlier
+// heldBack is true for a job of asset_jobs (the outer table) whose earlier
 // stages (waitsFor) are not all finished, NULL for a stage with none.
-var blocked = func() string {
+var heldBack = func() string {
 	var b strings.Builder
 	b.WriteString("CASE asset_jobs.stage")
 	for _, st := range core.Stages {
@@ -73,9 +73,9 @@ func stageNames(stages []core.Stage) []string {
 // jobs it selects 'waiting' while an earlier stage they need is unfinished
 // and 'pending' once none is, so asset_jobs_pending holds only jobs a worker
 // can run. Every change to a job's status is followed by it. Metadata jobs
-// (blocked is NULL) and jobs already right are left alone.
-var settleSQL = `UPDATE asset_jobs SET status = CASE WHEN ` + blocked + ` THEN 'waiting' ELSE 'pending' END
-	WHERE status IN ` + unfinished + ` AND (status = 'waiting') != (` + blocked + `) AND `
+// (heldBack is NULL) and jobs already right are left alone.
+var settleSQL = `UPDATE asset_jobs SET status = CASE WHEN ` + heldBack + ` THEN 'waiting' ELSE 'pending' END
+	WHERE status IN ` + unfinished + ` AND (status = 'waiting') != (` + heldBack + `) AND `
 
 func settle(ctx context.Context, tx *sql.Tx, where string, args ...any) error {
 	_, err := tx.ExecContext(ctx, settleSQL+where, args...)
@@ -337,7 +337,10 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 }
 
 // SaveThumbnails records a batch of finished thumbnails and closes their
-// jobs. An Unchanged result only records the version.
+// jobs. An Unchanged result only records the version. New thumbnails of an
+// asset already embedded (an upgrade made them afresh) put its embedding
+// back in the queue: the image model reads the thumbnail, so its vector and
+// tags were made from the old pixels.
 func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbResult) error {
 	if len(rs) == 0 {
 		return nil
@@ -349,6 +352,14 @@ func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbRe
 			return err
 		}
 		defer upd.Close()
+		// Settled with the thumbnail job, below.
+		reembed, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?,
+				prior_version = NULL
+			WHERE asset_id = ? AND stage = ? AND status NOT IN `+unfinished)
+		if err != nil {
+			return err
+		}
+		defer reembed.Close()
 		job, err := prepareJobUpdate(ctx, tx)
 		if err != nil {
 			return err
@@ -361,6 +372,9 @@ func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbRe
 					ph = int64(*r.PHash) // SQLite integers are signed; the bits are what matter
 				}
 				if _, err := upd.ExecContext(ctx, ph, r.AssetID); err != nil {
+					return err
+				}
+				if _, err := reembed.ExecContext(ctx, now, r.AssetID, core.StageEmbedding); err != nil {
 					return err
 				}
 			}

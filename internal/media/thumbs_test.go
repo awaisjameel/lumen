@@ -17,6 +17,7 @@ import (
 	"golang.org/x/image/bmp"
 
 	"lumen/internal/core"
+	"lumen/internal/media/vips"
 	"lumen/internal/testenv"
 )
 
@@ -182,8 +183,43 @@ func TestHEIC(t *testing.T) {
 			if len(pix) != w*h*3 || abs(w*big.Dy()-h*big.Dx()) > max(w, h) {
 				t.Errorf("FFmpeg gives %dx%d, WIC path %v", w, h, big)
 			}
+			// FFmpeg leaves a Display P3 photo in P3: converting from its
+			// profile must bring it nearer what WIC makes (sRGB).
+			icc, err := vips.Profile(p)
+			if err != nil || icc == nil || isSRGB(icc) {
+				return
+			}
+			raw := vips.Pixels{Pix: pix, W: w, H: h, Bands: 3, Orientation: 1}
+			unmanaged, err := vips.DecodePixels(raw, core.ThumbSmall)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw.ICC = icc
+			managed, err := vips.DecodePixels(raw, core.ThumbSmall)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Equal(managed.Pix, unmanaged.Pix) {
+				t.Fatal("the photo's profile changed nothing")
+			}
+			wic, err := Decoders{}.Decode(ctx, p, core.KindPhoto, 1, core.ThumbSmall)
+			if err != nil || wic.W != managed.W || wic.H != managed.H {
+				return // no HEVC extension here, or another size: nothing to compare with
+			}
+			if m, u := meanDiff(managed.Pix, wic.Pix), meanDiff(unmanaged.Pix, wic.Pix); m >= u {
+				t.Errorf("converted pixels differ from WIC's by %.2f, unconverted by %.2f", m, u)
+			}
 		})
 	}
+}
+
+// meanDiff is the mean absolute difference of two equally long pixel buffers.
+func meanDiff(a, b []byte) float64 {
+	var sum int
+	for i := range a {
+		sum += abs(int(a[i]) - int(b[i]))
+	}
+	return float64(sum) / float64(len(a))
 }
 
 func TestParsePPM(t *testing.T) {
@@ -308,5 +344,55 @@ func TestThumbsFromImageMatchThumbnail(t *testing.T) {
 	}
 	if dist := bits.OnesCount64(got.PHash ^ want.PHash); dist > 4 {
 		t.Errorf("hashes differ in %d bits", dist)
+	}
+}
+
+// Pixels decoded elsewhere in another profile (as FFmpeg decodes HEIC) are
+// converted from it as libvips converts a file in that profile.
+func TestPixelsConvertFromTheirProfile(t *testing.T) {
+	path := filepath.Join("testdata", "red-p3.jpg")
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img, err := jpeg.Decode(f) // Go leaves the pixels in the file's profile
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := img.Bounds()
+	raw := make([]byte, 0, b.Dx()*b.Dy()*3)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, _ := img.At(x, y).RGBA()
+			raw = append(raw, byte(r>>8), byte(g>>8), byte(bl>>8))
+		}
+	}
+	icc, err := vips.Profile(path)
+	if err != nil || icc == nil {
+		t.Fatalf("profile: %d bytes, %v", len(icc), err)
+	}
+	want, err := vips.DecodeFile(path, core.ThumbSmall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := vips.Pixels{Pix: raw, W: b.Dx(), H: b.Dy(), Bands: 3, Orientation: 1}
+	unmanaged, err := vips.DecodePixels(p, core.ThumbSmall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.ICC = icc
+	managed, err := vips.DecodePixels(p, core.ThumbSmall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if managed.W != want.W || managed.H != want.H {
+		t.Fatalf("sizes %dx%d and %dx%d", managed.W, managed.H, want.W, want.H)
+	}
+	if d := meanDiff(managed.Pix, want.Pix); d > 2 {
+		t.Errorf("converted pixels differ from the file's by %.2f", d)
+	}
+	if d := meanDiff(unmanaged.Pix, want.Pix); d <= 2 {
+		t.Errorf("the profile made no difference (%.2f): the test photo shows nothing", d)
 	}
 }

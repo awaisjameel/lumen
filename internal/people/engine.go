@@ -91,7 +91,10 @@ func (e *Engine) recluster(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	c := Cluster(Input{Faces: faces, People: people, Rejections: rejections, Links: links}, e.params)
+	c, err := Cluster(ctx, Input{Faces: faces, People: people, Rejections: rejections, Links: links}, e.params)
+	if err != nil {
+		return false, err
+	}
 	if len(c.Assign) == 0 && len(c.NewPeople) == 0 && len(c.Merges) == 0 {
 		return false, nil
 	}

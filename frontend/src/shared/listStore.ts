@@ -71,9 +71,17 @@ export function useList<T>(fetch: () => Promise<T[]>) {
 }
 
 /**
- * A store holding one list from the engine (Things, People, Albums), loaded on
- * demand, with an index by id. error says why the last load failed ("" once
- * one succeeds); load also rejects, for callers that wait on it.
+ * A store holding one list from the engine (duplicate groups), loaded on
+ * demand. error says why the last load failed ("" once one succeeds); load
+ * also rejects, for callers that wait on it.
+ */
+export function defineCollectionStore<T>(id: string, fetch: () => Promise<T[]>) {
+  return defineStore(id, () => listState(fetch))
+}
+
+/**
+ * A collection store (see defineCollectionStore) of items with ids (Things,
+ * People, Albums), with an index by id.
  */
 export function defineListStore<T extends { id: number }>(id: string, fetch: () => Promise<T[]>) {
   return defineStore(id, () => {

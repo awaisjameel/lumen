@@ -28,18 +28,20 @@ func (s *Store) UnavailableAssets(ctx context.Context) (map[int64]bool, error) {
 	return out, nil
 }
 
-// VisibilityRevision changes whenever browsing membership can change. Search
-// checks it before reusing its excluded-ID cache.
+// VisibilityRevision changes whenever which assets are visible can change:
+// assets coming, going, hidden or missing, and blocks or anything a block
+// covers by (migration 0016). Search checks it before reusing its
+// excluded-ID cache; the indexer, before saying only tags or people changed.
 func (s *Store) VisibilityRevision(ctx context.Context) (int64, error) {
 	var revision int64
-	err := s.r.QueryRowContext(ctx, "SELECT value FROM event_revision WHERE id = 1").Scan(&revision)
+	err := s.r.QueryRowContext(ctx, "SELECT visible_value FROM event_revision WHERE id = 1").Scan(&revision)
 	return revision, err
 }
 
 // DayBuckets counts the view's assets per calendar day, newest day first.
 // The grid builds its entire layout, and the timeline scrubber, from this
 // list. AI tags count from minScore up.
-func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float32) ([]core.DayBucket, error) {
+func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float64) ([]core.DayBucket, error) {
 	where, args, err := s.viewSQL(ctx, v, minScore)
 	if err != nil {
 		return nil, err
@@ -52,7 +54,7 @@ func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float32) (
 }
 
 // viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
-func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float32) (where string, args []any, err error) {
+func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float64) (where string, args []any, err error) {
 	for _, target := range []struct {
 		kind core.BlockKind
 		id   int64
@@ -77,8 +79,13 @@ func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float32) (whe
 		return where, args, nil
 	}
 	if v.Place != 0 {
-		if _, err := s.Place(ctx, v.Place); err != nil {
+		var ok bool
+		if err := s.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM places WHERE id = ? AND NOT "+placeBlocked("places.id")+")",
+			v.Place).Scan(&ok); err != nil {
 			return "", nil, err
+		}
+		if !ok {
+			return "", nil, ErrNotFound
 		}
 	}
 	f := assetFilter{tag: v.Tag, person: v.Person, place: v.Place}
@@ -120,7 +127,7 @@ type assetFilter struct {
 // where is the filter as a WHERE clause for the assets table, with only
 // bound values. It starts with visible, so the grid's queries use the
 // assets_timeline index.
-func (f assetFilter) where(minScore float32) (where string, args []any) {
+func (f assetFilter) where(minScore float64) (where string, args []any) {
 	where, args = visible, []any{}
 	if f.kind != "" {
 		where += " AND kind = ?"
@@ -165,7 +172,7 @@ func (f assetFilter) where(minScore float32) (where string, args []any) {
 
 // DayItems returns the view's grid items for the days from..to inclusive
 // (YYYY-MM-DD, either order), grouped by day, newest first.
-func (s *Store) DayItems(ctx context.Context, from, to string, v core.View, minScore float32) ([]core.DayItems, error) {
+func (s *Store) DayItems(ctx context.Context, from, to string, v core.View, minScore float64) ([]core.DayItems, error) {
 	a, err := time.Parse(time.DateOnly, from)
 	if err != nil {
 		return nil, err
@@ -188,7 +195,7 @@ func (s *Store) DayItems(ctx context.Context, from, to string, v core.View, minS
 		return nil, err
 	}
 	defer rows.Close()
-	var out []core.DayItems
+	out := []core.DayItems{}
 	for rows.Next() {
 		var it core.GridItem
 		var takenAt int64
@@ -257,8 +264,7 @@ func (s *Store) AssetDetail(ctx context.Context, id int64) (core.AssetDetail, er
 	var videoCodec, audioCodec sql.NullString
 	var lat, lon sql.NullFloat64
 	err := s.r.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
-		CASE WHEN EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'place' AND b.target_id = assets.place_id)
-		THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
+		CASE WHEN `+placeBlocked("assets.place_id")+` THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
 		duration_ms, video_codec, audio_codec
 		FROM assets WHERE id = ? AND `+visible, id).
 		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.PlaceID, &d.Favourite,

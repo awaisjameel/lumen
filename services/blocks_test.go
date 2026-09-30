@@ -30,7 +30,7 @@ func TestBlockedListRequiresPINAndUndoIsSingleUse(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatalf("asset: %+v, %v", items, err)
 	}
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil)
 	if _, err := s.SetBlock(ctx, core.BlockAsset, 1, "", core.BlockPhotos); !errors.Is(err, ErrBlockLocked) {
 		t.Fatalf("block before PIN: %v", err)
 	}
@@ -44,8 +44,10 @@ func TestBlockedListRequiresPINAndUndoIsSingleUse(t *testing.T) {
 	if _, err := s.Blocks(ctx); !errors.Is(err, ErrBlockLocked) {
 		t.Fatalf("private list without PIN: %v", err)
 	}
-	if _, err := s.SetBlock(ctx, core.BlockAsset, 1, "", core.BlockLabel); !errors.Is(err, ErrBlockLocked) {
-		t.Fatalf("existing block change without PIN: %v", err)
+	// An asset is always blocked with its photo: asking again changes
+	// nothing, so it needs no PIN (a locked mode change is refused below).
+	if change, err := s.SetBlock(ctx, core.BlockAsset, 1, "", core.BlockLabel); err != nil || change.Created || change.ID != id.ID {
+		t.Fatalf("unchanged block without PIN: %+v, %v", change, err)
 	}
 	if err := s.UnlockBlocks(ctx, "000000"); !errors.Is(err, store.ErrInvalidPIN) {
 		t.Fatalf("wrong PIN: %v", err)
@@ -129,7 +131,7 @@ func TestBlockPINRateLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil)
 	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +148,19 @@ func TestBlockPINRateLimit(t *testing.T) {
 	s.blocked.Unlock()
 	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
 		t.Fatalf("PIN after cooldown: %v", err)
+	}
+	if _, err := s.Blocks(ctx); err != nil {
+		t.Fatalf("list after unlock: %v", err)
+	}
+	// Left unused (the window reloaded before the screen could relock it).
+	s.blocked.Lock()
+	s.blocked.usedAt = time.Now().Add(-blockUnlockIdle - time.Second)
+	s.blocked.Unlock()
+	if _, err := s.Blocks(ctx); !errors.Is(err, ErrBlockLocked) {
+		t.Fatalf("list after the idle timeout: %v", err)
+	}
+	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+		t.Fatal(err)
 	}
 	s.LockBlocks()
 	if _, err := s.Blocks(ctx); !errors.Is(err, ErrBlockLocked) {

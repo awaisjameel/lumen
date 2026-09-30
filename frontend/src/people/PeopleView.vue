@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // People: everyone the AI found in the photos, as round faces with names.
 // Naming someone once is how they are confirmed.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { BlockKind } from '../bridge'
 import type { Person } from '../bridge'
-import { errorText, logError } from '../shared/errors'
+import { logError } from '../shared/errors'
 import { block } from '../shared/block'
 import { t } from '../shared/i18n'
 import EmptyState from '../shared/EmptyState.vue'
@@ -17,24 +17,17 @@ import { usePeople } from './store'
 
 const lib = useLibrary()
 const people = usePeople()
-const error = ref('')
 
-const shown = computed(() => people.list)
-const named = computed(() => shown.value.filter((p) => p.name))
-const unnamed = computed(() => shown.value.filter((p) => !p.name))
+const named = computed(() => people.list.filter((p) => p.name))
+const unnamed = computed(() => people.list.filter((p) => !p.name))
 const facesError = computed(() => lib.progress?.ai.facesError ?? '')
 const looking = computed(() => lib.progress?.faces ?? 0)
 
 onMounted(() => void people.load().catch(logError))
 useLiveReload(people.load, (c) => c.people || c.assets || c.thumbs) // new people appear while faces are found
 
-async function blockPerson(p: Person) {
-  error.value = ''
-  try {
-    if (await block(BlockKind.BlockPerson, p.id, p.name || t('person.unnamed'))) await people.load()
-  } catch (e) {
-    error.value = errorText(e)
-  }
+function blockPerson(p: Person) {
+  void block(BlockKind.BlockPerson, p.id, p.name || t('person.unnamed'))
 }
 </script>
 
@@ -48,8 +41,8 @@ async function blockPerson(p: Person) {
 
     <div class="page-body">
       <p class="muted intro">{{ t('people.intro') }}</p>
-      <p v-if="error || people.error || facesError" class="page-error" role="alert">
-        {{ error || people.error || t('people.unavailable', { error: facesError }) }}
+      <p v-if="people.error || facesError" class="page-error" role="alert">
+        {{ people.error || t('people.unavailable', { error: facesError }) }}
       </p>
 
       <template v-for="group in [named, unnamed]" :key="group === named ? 'named' : 'unnamed'">
@@ -80,7 +73,7 @@ async function blockPerson(p: Person) {
       </template>
 
       <EmptyState
-        v-if="people.loaded && !shown.length"
+        v-if="people.loaded && !people.list.length"
         class="empty"
         icon="people"
         :title="t('people.empty')"
@@ -91,9 +84,6 @@ async function blockPerson(p: Person) {
 </template>
 
 <style scoped>
-.intro {
-  margin: 0 0 8px;
-}
 h2 {
   margin: 20px 0 12px;
   font-size: 14px;
@@ -126,8 +116,5 @@ h2 {
 }
 .empty {
   margin-top: 36px;
-}
-.show-hidden {
-  margin-top: 24px;
 }
 </style>

@@ -199,7 +199,8 @@ func TestUpgradeMovesBlockedJobsToWaiting(t *testing.T) {
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE places")))
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX assets_pending_place")))
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX assets_event_cover")))
-	for _, trigger := range []string{"event_asset_added", "event_asset_changed", "event_asset_deleted", "event_name_added", "event_name_changed", "event_name_deleted", "event_cover_changed", "event_block_added", "event_block_changed", "event_block_deleted", "event_block_face_added", "event_block_face_changed", "event_block_face_deleted", "event_block_tag_added", "event_block_tag_changed", "event_block_tag_deleted", "event_block_album_added", "event_block_album_deleted", "event_block_album_rule_changed", "event_block_favourite_changed", "event_block_confidence_changed", "event_block_confidence_added", "event_block_file_added", "event_block_file_changed", "event_block_file_deleted", "block_asset_deleted", "block_person_deleted", "block_tag_deleted", "block_place_deleted", "block_album_deleted"} {
+	for _, trigger := range []string{"event_asset_added", "event_asset_changed", "event_asset_deleted", "event_name_added", "event_name_changed", "event_name_deleted", "event_cover_changed", "event_block_added", "event_block_changed", "event_block_deleted", "event_block_face_added", "event_block_face_changed", "event_block_face_deleted", "event_block_tag_added", "event_block_tag_changed", "event_block_tag_deleted", "event_block_album_added", "event_block_album_deleted", "event_block_album_rule_changed", "event_block_favourite_changed", "event_block_confidence_changed", "event_block_confidence_added", "event_block_file_added", "event_block_file_changed", "event_block_file_deleted", "block_asset_deleted", "block_person_deleted", "block_tag_deleted", "block_place_deleted", "block_album_deleted",
+		"visible_asset_added", "visible_asset_deleted", "visible_asset_changed", "visible_block_place_changed", "visible_block_date_changed"} {
 		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER IF EXISTS "+trigger))) // added after v7
 	}
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE blocks")))
@@ -288,5 +289,31 @@ func TestUpgradeRemembersWhatMadeTheOutput(t *testing.T) {
 	check(t, err)
 	if len(jobs) != 1 || jobs[0].Prior != "" {
 		t.Fatalf("thumbnail after an orientation change = %+v, want no prior version", jobs)
+	}
+}
+
+// Thumbnails made afresh (an upgrade) re-run the image model, which reads
+// them; thumbnails that stand leave the embedding as it is.
+func TestNewThumbnailsRequeueTheEmbedding(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a")})))
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 1)
+	check(t, err)
+	id := jobs[0].AssetID
+	check(t, st.SaveMetadata(ctx, "m", []MetadataResult{{AssetID: id, Orientation: 1}}))
+	check(t, st.SaveThumbnails(ctx, "t1", []ThumbResult{{AssetID: id}}))
+	check(t, st.SaveEmbeddings(ctx, "model", "e", []EmbedResult{{AssetID: id, Vec: make([]int8, 4), Scale: 1}}))
+	if status, _ := readJob(t, st, id, core.StageEmbedding); status != core.JobDone {
+		t.Fatalf("embedding before: %s", status)
+	}
+	check(t, st.SaveThumbnails(ctx, "t2", []ThumbResult{{AssetID: id, Unchanged: true}}))
+	if status, _ := readJob(t, st, id, core.StageEmbedding); status != core.JobDone {
+		t.Fatalf("embedding after standing thumbnails: %s", status)
+	}
+	check(t, st.SaveThumbnails(ctx, "t3", []ThumbResult{{AssetID: id}}))
+	if status, _ := readJob(t, st, id, core.StageEmbedding); status != core.JobPending {
+		t.Fatalf("embedding after new thumbnails: %s", status)
 	}
 }

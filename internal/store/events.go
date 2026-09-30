@@ -75,7 +75,7 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int) ([]core.Event, e
 	placeRows, err := queryAll(ctx, tx, func(r *sql.Rows) (v namedID, err error) {
 		err = r.Scan(&v.id, &v.name)
 		return v, err
-	}, "SELECT id, name FROM places")
+	}, "SELECT id, name FROM places WHERE NOT "+placeBlocked("places.id")) // a blocked place names no event
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int) ([]core.Event, e
 		if a.thumb > 0 {
 			current.Cover, current.CoverThumb = a.id, a.thumb
 		}
-		if a.place != 0 {
+		if _, named := places[a.place]; named {
 			placeCounts[a.place]++
 		}
 		previous = a

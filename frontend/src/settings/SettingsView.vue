@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import {
+  BlockKind,
   Device,
   engine,
   EVENT_GAP_DEFAULT,
@@ -11,11 +12,11 @@ import {
 } from '../bridge'
 import type { Source } from '../bridge'
 import { useLibrary } from '../library/store'
+import { block } from '../shared/block'
 import { confirm } from '../shared/confirm'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
-import { block } from '../shared/block'
-import { BlockKind } from '../bridge'
+import { latestSave } from '../shared/latestSave'
 import Icon from '../shared/Icon.vue'
 import { theme } from '../shared/theme'
 import type { Theme } from '../shared/theme'
@@ -60,8 +61,8 @@ async function removeFolder(s: Source) {
   })
 }
 
-async function blockFolder(s: Source) {
-  if (await block(BlockKind.BlockFolder, 0, s.path, false, s.path)) await lib.refresh()
+function blockFolder(s: Source) {
+  void block(BlockKind.BlockFolder, 0, s.path, false, s.path) // the dialog refreshes what it hides
 }
 
 // Settings change at once in the UI and go back if the engine refuses, so
@@ -76,11 +77,15 @@ async function setAIOnBattery(on: boolean) {
   if (!(await run(() => engine.setAIOnBattery(on)))) lib.settings.aiOnBattery = !on
 }
 
-let pendingEventGap: number | null = null
-let eventGapRevision = 0
-let savingEventGap = false
-let savedEventGap = lib.settings.eventGapHours
-async function setEventGap(e: Event) {
+// A number typed in and the slider change faster than they save: each saves
+// its newest value, and a failure of the newest puts back the last saved.
+const failed = (e: unknown) => (error.value = errorText(e))
+const saveEventGap = latestSave(engine.setEventGapHours, lib.settings.eventGapHours, {
+  saved: () => lib.refresh(),
+  rollback: (hours) => (lib.settings.eventGapHours = hours),
+  failed,
+})
+function setEventGap(e: Event) {
   if (!(e.target instanceof HTMLInputElement)) return
   const parsed = e.target.valueAsNumber
   const value = Math.min(
@@ -89,43 +94,23 @@ async function setEventGap(e: Event) {
   )
   e.target.value = String(value)
   lib.settings.eventGapHours = value
-  pendingEventGap = value
-  eventGapRevision++
   error.value = ''
-  if (savingEventGap) return
-  savingEventGap = true
-  try {
-    while (pendingEventGap !== null) {
-      const revision = eventGapRevision
-      const hours = pendingEventGap
-      pendingEventGap = null
-      try {
-        await engine.setEventGapHours(hours)
-        savedEventGap = hours
-        if (revision === eventGapRevision) await lib.refresh()
-      } catch (e) {
-        if (revision === eventGapRevision) {
-          lib.settings.eventGapHours = savedEventGap
-          error.value = errorText(e)
-        }
-      }
-    }
-  } finally {
-    savingEventGap = false
-  }
+  return saveEventGap(value)
 }
 
 const themes: Theme[] = ['system', 'light', 'dark']
 
-/** Arrow keys move the choice, as in any group of radio buttons. */
-function onThemeKey(e: KeyboardEvent) {
+/** Arrow keys move the choice, and focus with it, as in any group of radio buttons. */
+async function onThemeKey(e: KeyboardEvent) {
   const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
-  if (!step) return
+  const group = e.currentTarget
+  if (!step || !(group instanceof HTMLElement)) return
   e.preventDefault()
   const next = themes[(themes.indexOf(theme.value) + step + themes.length) % themes.length]
-  if (next) theme.value = next
-  const group = e.currentTarget
-  if (group instanceof HTMLElement) group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus()
+  if (!next) return
+  theme.value = next
+  await nextTick() // the newly checked button is the one that can take focus
+  group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus()
 }
 
 const aiStatus = computed(() => {
@@ -142,6 +127,11 @@ const span = Math.log(TAG_CONFIDENCE_MAX / TAG_CONFIDENCE_MIN)
 const confidencePos = computed(() =>
   Math.round((100 * Math.log(lib.settings.tagConfidence / TAG_CONFIDENCE_MIN)) / span),
 )
+const saveTagConfidence = latestSave(engine.setTagConfidence, lib.settings.tagConfidence, {
+  saved: () => lib.refresh(),
+  rollback: (v) => (lib.settings.tagConfidence = v),
+  failed,
+})
 let saveTimer = 0
 let pendingConfidence: number | null = null
 function saveConfidence() {
@@ -149,10 +139,8 @@ function saveConfidence() {
   if (pendingConfidence === null) return
   const value = pendingConfidence
   pendingConfidence = null
-  void run(async () => {
-    await engine.setTagConfidence(value)
-    await lib.refresh()
-  })
+  error.value = ''
+  void saveTagConfidence(value)
 }
 function onConfidence(e: Event) {
   if (!(e.target instanceof HTMLInputElement)) return
@@ -171,7 +159,7 @@ onBeforeUnmount(saveConfidence)
     </header>
     <div class="page-body">
       <div class="content">
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <p v-if="error" class="page-error" role="alert">{{ error }}</p>
 
         <section>
           <h2>{{ t('settings.folders') }}</h2>
@@ -235,6 +223,7 @@ onBeforeUnmount(saveConfidence)
                 :min="EVENT_GAP_MIN"
                 :max="EVENT_GAP_MAX"
                 step="1"
+                class="field"
                 :value="lib.settings.eventGapHours"
                 @change="setEventGap"
               />
@@ -289,12 +278,6 @@ onBeforeUnmount(saveConfidence)
 
 .event-gap input {
   width: 80px;
-  min-height: 32px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  background: var(--surface-2);
-  color: var(--text);
 }
 
 .content {

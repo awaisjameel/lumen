@@ -44,15 +44,13 @@ func named(ctx context.Context, q querier, table, name string, except int64) (in
 	return id, err
 }
 
-// foldName is fold(name), the column's core.Fold key. fold() is a call into
-// Go for every row, so ASCII names (a byte per character) and NULL use
-// SQLite's lower(), which is what core.Fold does to them.
-const foldName = "(CASE WHEN octet_length(name) != length(name) THEN fold(name) ELSE lower(name) END)"
+// foldName is the name column's core.Fold key (see foldKey).
+var foldName = foldKey("name")
 
 // nameMatch is the condition for a name column to contain the folded text
 // ?1, and nameFirst orders names starting with it first: suggestions as the
 // user types.
-const (
+var (
 	nameMatch = "instr(" + foldName + ", ?1) > 0"
 	nameFirst = "instr(" + foldName + ", ?1) = 1 DESC, length(name), name"
 )

@@ -22,8 +22,8 @@ import (
 // versions (see Indexer.versions): a video's stand if its part is the same,
 // a photo's if its part is, or if it decodes as it did then.
 func thumbnailsStand(j store.JobItem) bool {
-	photo, video, ok := strings.Cut(j.Prior, "+")
-	if !ok || video != media.VideoThumbnailVersion {
+	photo, ok := strings.CutSuffix(j.Prior, "+"+media.VideoThumbnailVersion)
+	if !ok {
 		return false
 	}
 	if j.Kind == core.KindVideo {
@@ -35,7 +35,7 @@ func thumbnailsStand(j store.JobItem) bool {
 // facesBeforeAnalysis is the faces version from before ai.FaceAnalysisVersion
 // was part of it, for the current face models.
 func (ix *Indexer) facesBeforeAnalysis() string {
-	return ix.people.Model().Version + core.VideoFramesVersion
+	return ix.people.Model().Version + media.VideoFramesVersion
 }
 
 // facesStanding returns which of items' faces, found at their Prior version,
@@ -44,7 +44,7 @@ func (ix *Indexer) facesBeforeAnalysis() string {
 // every file with faces runs again. One where none were found still has none
 // to find: the models are the same, and so are its pixels if it decodes as
 // it did then (photos) or its frames are sampled the same way (videos:
-// core.VideoFramesVersion).
+// media.VideoFramesVersion).
 func (ix *Indexer) facesStanding(ctx context.Context, items []store.JobItem) (map[int64]bool, error) {
 	before := ix.facesBeforeAnalysis()
 	var ids []int64

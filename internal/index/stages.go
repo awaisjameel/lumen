@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"runtime"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"lumen/internal/ai"
@@ -33,10 +34,28 @@ type stage[R any] struct {
 	fail func(msg string)
 	// process handles a batch. An error means the stage itself can't run
 	// right now (e.g. the model won't load): nothing is saved and the batch
-	// is retried later. Per-file failures go in the results instead.
+	// is retried later, with the model freed; a storeError (the database
+	// failed) is retried soon, keeping it. Per-file failures go in the
+	// results instead.
 	process func(context.Context, []store.JobItem) ([]R, error)
 	save    func(context.Context, []R) error
 }
+
+// storeError is a process error from the database rather than the stage's
+// model: nothing the AI state should show, and no reason to free the model.
+type storeError struct{ error }
+
+func (e storeError) Unwrap() error { return e.error }
+
+// modelError is a model's failure while processing one file: it fails the
+// whole batch (see stage.process), since every other file would fail too.
+type modelError struct{ error }
+
+func (e modelError) Unwrap() error { return e.error }
+
+// saveAttempts is how many times a batch's results are saved before they are
+// given up and the batch is fetched (and processed) again.
+const saveAttempts = 3
 
 // releaser frees a model (see model).
 type releaser interface {
@@ -89,6 +108,12 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 		if ctx.Err() != nil {
 			return // don't save half-cancelled work; it simply re-runs next time
 		}
+		var serr storeError
+		if errors.As(err, &serr) {
+			slog.Error("stage can't read the library", "stage", s.name, "err", err)
+			sleep(ctx, retryDelay)
+			continue
+		}
 		if err != nil {
 			slog.Error("stage can't run", "stage", s.name, "err", err, "retry in", retry)
 			if s.model != nil {
@@ -102,12 +127,8 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 			retry = min(2*retry, stageRetryMax)
 			continue
 		}
-		if err := s.save(ctx, results); err != nil {
-			if ctx.Err() == nil {
-				slog.Error("save results", "stage", s.name, "err", err)
-			}
-			sleep(ctx, retryDelay)
-			continue
+		if !saveResults(ctx, s, results) {
+			continue // fetched and processed again
 		}
 		if failing {
 			failing, retry = false, stageRetry
@@ -120,6 +141,25 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 		}
 		for _, ch := range s.next {
 			nudge(ch)
+		}
+	}
+}
+
+// saveResults saves a processed batch, retrying a failed save a few times
+// before giving the results up: processing them again costs far more.
+func saveResults[R any](ctx context.Context, s stage[R], results []R) bool {
+	for attempt := 1; ; attempt++ {
+		err := s.save(ctx, results)
+		if err == nil {
+			return true
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		slog.Error("save results", "stage", s.name, "attempt", attempt, "err", err)
+		sleep(ctx, retryDelay)
+		if attempt == saveAttempts {
+			return false
 		}
 	}
 }
@@ -281,8 +321,9 @@ const embedWorkers = 4
 
 // doEmbeddings embeds a batch of photos and videos with SigLIP and tags
 // them. Photo inputs come from the 1024 px thumbnails (upright, small,
-// already decoded once), rebuilt first if they were evicted; videos are
-// sampled frame by frame.
+// already decoded once), rebuilt first if they are missing; videos are
+// sampled frame by frame. Photos and video frames share the model's batches
+// (see modelBatch), so a short clip doesn't cost a whole batch of its own.
 func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]store.EmbedResult, error) {
 	if err := ix.search.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("search engine: %w", err)
@@ -291,6 +332,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 	if err != nil {
 		return nil, err
 	}
+	ix.embedLabels = ix.search.LabelsGeneration() // before any is tagged
 	side := ix.search.Model().ImageSize
 	results := make([]store.EmbedResult, len(items))
 	inputs := make([][]byte, len(items))
@@ -322,38 +364,39 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 		return nil, ctx.Err()
 	}
 
-	// Run the model on full batches of whatever decoded.
-	var todo []int
+	b := &modelBatch{enc: enc}
 	for i, in := range inputs {
-		if in != nil {
-			todo = append(todo, i)
+		if in == nil {
+			continue
 		}
-	}
-	for lo := 0; lo < len(todo); lo += enc.BatchSize() {
-		chunk := todo[lo:min(lo+enc.BatchSize(), len(todo))]
-		batch := make([][]byte, len(chunk))
-		for k, i := range chunk {
-			batch[k] = inputs[i]
-		}
-		vecs, err := enc.Encode(batch)
-		if err != nil {
+		r := &results[i]
+		if err := b.add(in, func(v []float32) {
+			if v == nil {
+				r.Err = errNoVector
+				return
+			}
+			r.Vec, r.Scale = search.Quantize(v)
+			r.Tags = ix.search.Tags(v)
+		}); err != nil {
 			return nil, err
 		}
-		for k, i := range chunk {
-			if vecs[k] == nil {
-				results[i].Err = errNoVector
-				continue
-			}
-			results[i].Vec, results[i].Scale = search.Quantize(vecs[k])
-			results[i].Tags = ix.search.Tags(vecs[k])
-		}
 	}
+	var videos []*videoEmbedding
 	for i, j := range items {
 		if j.Kind == core.KindVideo {
-			if err := ix.embedVideoSafely(ctx, j, enc, side, &results[i]); err != nil {
-				return nil, err
+			v := &videoEmbedding{r: &results[i], tags: ix.search.Tags, mean: make([]float32, ix.search.Model().Dim)}
+			videos = append(videos, v)
+			ix.sampleVideoSafely(ctx, j, side, b, v)
+			if b.err != nil {
+				return nil, b.err
 			}
 		}
+	}
+	if err := b.flush(); err != nil {
+		return nil, err
+	}
+	for _, v := range videos {
+		v.finish()
 	}
 	ix.setAIState(func() { ix.aiDevice = enc.Device() }) // it may have moved to the CPU
 	return results, nil
@@ -363,85 +406,112 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 // usable vector of.
 const errNoVector = "the image model gave no usable result"
 
-// embedVideoSafely is embedVideo, turning a panic (a corrupt file finding a
-// decoder bug) into the video's error, as the per-file stages do.
-func (ix *Indexer) embedVideoSafely(ctx context.Context, j store.JobItem, enc *ai.ImageEncoder, side int,
-	r *store.EmbedResult) error {
-	defer recoverInto(&r.Err, j.Path)
-	return ix.embedVideo(ctx, j, enc, side, r)
+// modelBatch gathers image model inputs from any number of files and runs
+// the model whenever a full batch is waiting, handing each vector to the
+// input's owner. At most one batch of inputs is held at a time.
+type modelBatch struct {
+	enc    *ai.ImageEncoder
+	inputs [][]byte
+	owners []func(vec []float32) // vec is nil where the model made no usable one
+	err    error                 // the model failed: the stage can't run
 }
 
-// embedVideo keeps each sampled moment searchable and stores a normalised
-// mean for the asset-level vector.
-func (ix *Indexer) embedVideo(ctx context.Context, j store.JobItem, enc *ai.ImageEncoder, side int,
-	r *store.EmbedResult) error {
-	var inputs [][]byte
-	var times []int64
+func (b *modelBatch) add(px []byte, owner func(vec []float32)) error {
+	if b.err != nil {
+		return b.err
+	}
+	b.inputs, b.owners = append(b.inputs, px), append(b.owners, owner)
+	if len(b.inputs) < b.enc.BatchSize() {
+		return nil
+	}
+	return b.flush()
+}
+
+func (b *modelBatch) flush() error {
+	if b.err != nil || len(b.inputs) == 0 {
+		return b.err
+	}
+	vecs, err := b.enc.Encode(b.inputs)
+	if err != nil {
+		b.err = err
+		return err
+	}
+	for k, owner := range b.owners {
+		owner(vecs[k])
+	}
+	b.inputs, b.owners = b.inputs[:0], b.owners[:0]
+	return nil
+}
+
+// videoEmbedding collects one video's frame vectors as the model makes them.
+type videoEmbedding struct {
+	r       *store.EmbedResult
+	tags    func(vec []float32) []store.TagScore // search.Engine.Tags
+	mean    []float32
+	sampled int // frames sent to the model
+}
+
+// sampleVideoSafely sends a video's sampled frames to the model, recording
+// a decoding failure (or a panic: a corrupt file finding a decoder bug) as
+// the video's error. A model failure is left in b.err for the caller.
+func (ix *Indexer) sampleVideoSafely(ctx context.Context, j store.JobItem, side int, b *modelBatch, v *videoEmbedding) {
+	defer recoverInto(&v.r.Err, j.Path)
 	seen := map[int64]bool{}
 	err := ix.cache.Decoder.Frames(ctx, j.Path, media.SampleCount(j.Duration), core.ThumbLarge, func(f media.Frame) error {
 		if seen[f.At] {
 			return nil
 		}
 		px, err := media.ModelInputPixels(f.Image, side)
-		if err == nil {
-			seen[f.At] = true
-			inputs = append(inputs, px)
-			times = append(times, f.At)
-		}
-		return err
-	})
-	switch {
-	case errors.Is(err, media.ErrUnsupported):
-		r.Skipped = true
-		return nil
-	case err != nil:
-		r.Err = err.Error()
-		//nolint:nilerr // per-file decoding failures are recorded in the job result
-		return nil
-	case len(inputs) == 0:
-		r.Skipped = true
-		return nil
-	}
-	mean := make([]float32, ix.search.Model().Dim)
-	for lo := 0; lo < len(inputs); lo += enc.BatchSize() {
-		vecs, err := enc.Encode(inputs[lo:min(lo+enc.BatchSize(), len(inputs))])
 		if err != nil {
 			return err
 		}
-		for k, v := range vecs {
-			if v == nil {
-				continue // that frame alone is left out
-			}
-			q, scale := search.Quantize(v)
-			r.Frames = append(r.Frames, store.FrameEmbedding{At: times[lo+k], Vec: q, Scale: scale})
-			for d, x := range v {
-				mean[d] += x
-			}
-			r.Tags = search.BestTags(r.Tags, ix.search.Tags(v))
-		}
+		seen[f.At] = true
+		v.sampled++
+		at := f.At
+		return b.add(px, func(vec []float32) { v.frame(at, vec) })
+	})
+	switch {
+	case b.err != nil: // the model's failure, not the file's
+	case errors.Is(err, media.ErrUnsupported):
+		v.r.Skipped = true
+	case err != nil:
+		v.r.Err = err.Error()
 	}
-	if !ai.Normalise(mean) {
-		r.Frames, r.Tags, r.Err = nil, nil, errNoVector
-		return nil
+}
+
+// frame keeps one sampled moment searchable, unless the video already failed
+// or the model made nothing of that frame (it alone is left out).
+func (v *videoEmbedding) frame(at int64, vec []float32) {
+	if vec == nil || v.r.Err != "" || v.r.Skipped {
+		return
 	}
-	r.Vec, r.Scale = search.Quantize(mean)
-	return nil
+	q, scale := search.Quantize(vec)
+	v.r.Frames = append(v.r.Frames, store.FrameEmbedding{At: at, Vec: q, Scale: scale})
+	for d, x := range vec {
+		v.mean[d] += x
+	}
+	v.r.Tags = search.BestTags(v.r.Tags, v.tags(vec)) // the best of its frames' tags
+}
+
+// finish stores the normalised mean of the frames as the asset's vector.
+func (v *videoEmbedding) finish() {
+	switch {
+	case v.r.Err != "" || v.r.Skipped:
+		v.r.Frames, v.r.Tags = nil, nil
+	case v.sampled == 0:
+		v.r.Skipped = true // no picture to look at
+	case !ai.Normalise(v.mean):
+		v.r.Frames, v.r.Tags, v.r.Err = nil, nil, errNoVector
+	default:
+		v.r.Vec, v.r.Scale = search.Quantize(v.mean)
+	}
 }
 
 // saveEmbeddings stores a batch, then makes it searchable.
 func (ix *Indexer) saveEmbeddings(ctx context.Context, rs []store.EmbedResult) error {
-	if err := ix.store.SaveEmbeddings(ctx, ix.search.Model().Version, ix.version[core.StageEmbedding], rs); err != nil {
-		return err
-	}
-	for _, r := range rs {
-		if r.Vec != nil {
-			ix.search.Add(r.AssetID, r.Vec, r.Scale)
-			if r.Frames != nil {
-				ix.search.AddVideo(r.AssetID, r.Frames)
-			}
-		}
-	}
-	return nil
+	return ix.search.Commit(ix.embedLabels, rs, func(rs []store.EmbedResult) error {
+		return ix.store.SaveEmbeddings(ctx, ix.search.Model().Version, ix.version[core.StageEmbedding], rs)
+	})
 }
 
 // Face finding. Photos are decoded at faceSide for it: the detector sees the
@@ -461,7 +531,7 @@ const (
 func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.FaceResult, error) {
 	stand, err := ix.facesStanding(ctx, items)
 	if err != nil {
-		return nil, err
+		return nil, storeError{err}
 	}
 	results := make([]store.FaceResult, len(items))
 	var run []int
@@ -481,19 +551,28 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 	if err != nil {
 		return nil, err
 	}
+	var failed atomic.Pointer[modelError] // the models failed: the batch can't be done
 	parallel.For(ctx, len(run), faceWorkers, func(k int) {
 		j := items[run[k]]
 		r := &results[run[k]]
 		defer recoverInto(&r.Err, j.Path)
+		// A bad image is this file's problem; any other failure of the
+		// models is every file's.
+		modelErr := func(err error) error {
+			if errors.Is(err, ai.ErrBadImage) {
+				return err
+			}
+			return modelError{err}
+		}
 		process := func(im media.Image, at int64) error {
 			found, err := faces.Detect(im.Pix, im.W, im.H, faceMinScore)
 			if err != nil {
-				return err
+				return modelErr(err)
 			}
 			found = slices.DeleteFunc(found, func(f ai.Face) bool { return min(f.W, f.H) < faceMinSide })
 			ids, err := faces.Embed(im.Pix, im.W, im.H, found)
 			if err != nil {
-				return err
+				return modelErr(err)
 			}
 			w, h := float64(im.W), float64(im.H)
 			for k, f := range found {
@@ -521,14 +600,21 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 				err = process(im, 0)
 			}
 		}
-		if errors.Is(err, media.ErrUnsupported) {
+		var merr modelError
+		switch {
+		case errors.As(err, &merr):
+			failed.Store(&merr)
+		case errors.Is(err, media.ErrUnsupported):
 			r.Skipped = true
-		} else if err != nil {
+		case err != nil:
 			r.Err = err.Error()
 		}
 	})
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
+	}
+	if merr := failed.Load(); merr != nil {
+		return nil, merr.error
 	}
 	return results, nil
 }

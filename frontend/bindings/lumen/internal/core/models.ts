@@ -183,7 +183,7 @@ export enum BlockMode {
  */
 export interface Changes {
     /**
-     * assets came, went, or their dates or sizes changed
+     * assets came, went, were blocked or unblocked, or their dates or sizes changed
      */
     "assets": boolean;
 
@@ -450,7 +450,6 @@ export interface Person {
      * "" until the user names them
      */
     "name": string;
-    "hidden": boolean;
 
     /**
      * visible photos they appear in
@@ -613,7 +612,6 @@ export interface Tag {
     "id": number;
     "name": string;
     "kind": TagKind;
-    "hidden": boolean;
     "count": number;
 
     /**

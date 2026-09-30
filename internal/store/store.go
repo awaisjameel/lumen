@@ -68,8 +68,11 @@ type Store struct {
 	}
 
 	// settings caches every setting read or written: only the Store writes
-	// them, and some (the tag confidence) are read on every scroll.
-	settings sync.Map // key -> string
+	// them, and some (the tag confidence) are read on every scroll. settingsMu
+	// orders each write with its cache update, so the cache ends as the
+	// database does whichever of two writes commits last.
+	settings   sync.Map // key -> string
+	settingsMu sync.Mutex
 }
 
 // Open opens (creating if needed) and migrates the database at path.
@@ -178,14 +181,16 @@ func (s *Store) read(ctx context.Context, fn func(*sql.Tx) error) error {
 	return fn(tx)
 }
 
-// tx runs fn in a write transaction, committing on success.
+// tx runs fn in a write transaction, committing on success. The deferred
+// rollback also runs if fn panics, so the single writer connection is never
+// left inside a transaction (every later write would wait on it).
 func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := s.w.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }() // after Commit: sql.ErrTxDone, ignored; else fn's error is the one that matters
 	if err := fn(tx); err != nil {
-		_ = tx.Rollback() // fn's error is the one that matters
 		return err
 	}
 	return tx.Commit()
@@ -236,57 +241,95 @@ func isUnique(err error) bool {
 // Which assets a query sees. Each query picks one on purpose:
 //
 //   - visible: what the user browses (grid, counts, search results, albums,
-//     People and Things). It is the WHERE clause of the assets_timeline
-//     partial index, and must be repeated exactly for SQLite to use it.
-//   - present: every asset with a file on disk, hidden or trashed ones too.
-//     The indexer processes these (so a restored photo is ready at once), and
-//     their details and files can still be opened.
+//     People and Things): not hidden, trashed or missing, and not covered by
+//     a block. Its first three terms are the WHERE clause of the
+//     assets_timeline partial index; baseVisibleOf spells them the one way
+//     SQLite must see them to use it.
+//   - present: every asset with a file on disk, hidden, trashed or blocked
+//     ones too. The indexer processes these (so a restored or unblocked
+//     photo is ready at once).
 const present = "missing_since IS NULL"
 
-// blockVisible is correlated with one assets row. The base predicate remains
-// literal in every query so SQLite can still use assets_timeline. A block is
-// evaluated against current metadata, membership and file paths: newly indexed
-// media is covered without an extra queue or stale saved membership.
+var (
+	visible  = baseVisibleOf("") + " AND " + blockVisible("assets")
+	visibleA = baseVisibleOf("a") + " AND " + blockVisible("a")
+	visibleX = baseVisibleOf("x") + " AND " + blockVisible("x")
+	// baseVisibleA is visibleA without blocks: face clustering must see a
+	// blocked person's photos, so new faces of them are still recognised.
+	baseVisibleA = baseVisibleOf("a")
+)
+
+// baseVisibleOf is the index's visibility clause for the assets row alias
+// ("" for the bare table).
+func baseVisibleOf(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	return alias + "hidden = 0 AND " + alias + "trashed_at IS NULL AND " + alias + "missing_since IS NULL"
+}
+
+// blockVisible is true when no photo block covers the assets row alias. A
+// block is evaluated against current metadata, membership and file paths, so
+// newly indexed media is covered without a second queue or saved membership.
+// Its own aliases (blk_*) never collide with the caller's.
+//
+// The triggers of migrations 0014-0016 bump event_revision whenever an input
+// read here changes; keep them in step with this predicate.
 func blockVisible(asset string) string {
-	return `NOT EXISTS (SELECT 1 FROM blocks b WHERE b.mode = 'photos' AND (
-		(b.kind = 'asset' AND b.target_id = ` + asset + `.id)
-		OR (b.kind = 'person' AND EXISTS (SELECT 1 FROM faces f WHERE f.asset_id = ` + asset + `.id AND f.person_id = b.target_id))
-		OR (b.kind = 'tag' AND EXISTS (SELECT 1 FROM asset_tags x WHERE x.asset_id = ` + asset + `.id
-			AND x.tag_id = b.target_id AND (x.source = 'user' OR (x.source = 'ai' AND x.score >=
-			COALESCE((SELECT CAST(value AS REAL) FROM settings WHERE key = 'tag_confidence'), 0.02)))))
-		OR (b.kind = 'place' AND b.target_id = ` + asset + `.place_id)
-		OR (b.kind = 'folder' AND EXISTS (SELECT 1 FROM files f WHERE f.asset_id = ` + asset + `.id
-			AND (fold(f.path) = fold(b.path) OR instr(fold(f.path), fold(rtrim(b.path, '\') || '\')) = 1)))
-		OR (b.kind = 'album' AND EXISTS (SELECT 1 FROM albums ab WHERE ab.id = b.target_id AND (
-			(ab.kind = 'manual' AND EXISTS (SELECT 1 FROM album_items i WHERE i.asset_id = ` + asset + `.id AND i.album_id = ab.id))
-			OR (ab.kind = 'smart'
-				AND (COALESCE(json_extract(ab.rule_json, '$.kind'), '') = '' OR json_extract(ab.rule_json, '$.kind') = ` + asset + `.kind)
-				AND (COALESCE(json_extract(ab.rule_json, '$.favourites'), 0) = 0 OR ` + asset + `.favourite = 1)
-				AND (COALESCE(json_extract(ab.rule_json, '$.from'), '') = '' OR
-					strftime('%Y-%m-%d', ` + asset + `.taken_at, 'unixepoch') >= json_extract(ab.rule_json, '$.from'))
-				AND (COALESCE(json_extract(ab.rule_json, '$.to'), '') = '' OR
-					strftime('%Y-%m-%d', ` + asset + `.taken_at, 'unixepoch') <= json_extract(ab.rule_json, '$.to'))
-				AND (COALESCE(json_extract(ab.rule_json, '$.tag'), 0) = 0 OR EXISTS
-					(SELECT 1 FROM asset_tags x WHERE x.asset_id = ` + asset + `.id AND x.tag_id = json_extract(ab.rule_json, '$.tag')
-					AND (x.source = 'user' OR (x.source = 'ai' AND x.score >=
-					COALESCE((SELECT CAST(value AS REAL) FROM settings WHERE key = 'tag_confidence'), 0.02)))))
-				AND (COALESCE(json_extract(ab.rule_json, '$.person'), 0) = 0 OR EXISTS
-					(SELECT 1 FROM faces f WHERE f.asset_id = ` + asset + `.id AND f.person_id = json_extract(ab.rule_json, '$.person')))
+	id := asset + ".id"
+	takenDay := "strftime('%Y-%m-%d', " + asset + ".taken_at, 'unixepoch')"
+	rule := func(field string) string { return "json_extract(blk_album.rule_json, '$." + field + "')" }
+	return `NOT EXISTS (SELECT 1 FROM blocks blk WHERE blk.mode = 'photos' AND (
+		(blk.kind = 'asset' AND blk.target_id = ` + id + `)
+		OR (blk.kind = 'person' AND EXISTS (SELECT 1 FROM faces blk_face
+			WHERE blk_face.asset_id = ` + id + ` AND blk_face.person_id = blk.target_id))
+		OR (blk.kind = 'tag' AND EXISTS (SELECT 1 FROM asset_tags blk_tag
+			WHERE blk_tag.asset_id = ` + id + ` AND blk_tag.tag_id = blk.target_id AND ` + tagAppliesTo("blk_tag", tagConfidenceSQL) + `))
+		OR (blk.kind = 'place' AND blk.target_id = ` + asset + `.place_id)
+		OR (blk.kind = 'folder' AND EXISTS (SELECT 1 FROM files blk_file WHERE blk_file.asset_id = ` + id + ` AND (
+			` + foldKey("blk_file.path") + ` = ` + foldKey("blk.path") + `
+			OR instr(` + foldKey("blk_file.path") + `, ` + foldKey(`rtrim(blk.path, '\') || '\'`) + `) = 1)))
+		OR (blk.kind = 'album' AND EXISTS (SELECT 1 FROM albums blk_album WHERE blk_album.id = blk.target_id AND (
+			(blk_album.kind = 'manual' AND EXISTS (SELECT 1 FROM album_items blk_item
+				WHERE blk_item.asset_id = ` + id + ` AND blk_item.album_id = blk_album.id))
+			OR (blk_album.kind = 'smart'
+				AND (COALESCE(` + rule("kind") + `, '') = '' OR ` + rule("kind") + ` = ` + asset + `.kind)
+				AND (COALESCE(` + rule("favourites") + `, 0) = 0 OR ` + asset + `.favourite = 1)
+				AND (COALESCE(` + rule("from") + `, '') = '' OR ` + takenDay + ` >= ` + rule("from") + `)
+				AND (COALESCE(` + rule("to") + `, '') = '' OR ` + takenDay + ` <= ` + rule("to") + `)
+				AND (COALESCE(` + rule("tag") + `, 0) = 0 OR EXISTS (SELECT 1 FROM asset_tags blk_rule_tag
+					WHERE blk_rule_tag.asset_id = ` + id + ` AND blk_rule_tag.tag_id = ` + rule("tag") + `
+					AND ` + tagAppliesTo("blk_rule_tag", tagConfidenceSQL) + `))
+				AND (COALESCE(` + rule("person") + `, 0) = 0 OR EXISTS (SELECT 1 FROM faces blk_rule_face
+					WHERE blk_rule_face.asset_id = ` + id + ` AND blk_rule_face.person_id = ` + rule("person") + `))
 			)
 		)))
 	))`
 }
 
-var (
-	visible  = baseVisible + " AND " + blockVisible("assets")
-	visibleA = baseVisibleA + " AND " + blockVisible("a")
-	visibleX = "x.hidden = 0 AND x.trashed_at IS NULL AND x.missing_since IS NULL AND " + blockVisible("x")
-)
+// tagAppliesTo is the condition for the asset_tags row alias to count: the
+// user put it there, or the AI did with at least threshold (an SQL
+// expression) confidence.
+func tagAppliesTo(alias, threshold string) string {
+	return "(" + alias + ".source = 'user' OR (" + alias + ".source = 'ai' AND " + alias + ".score >= " + threshold + "))"
+}
 
-const (
-	baseVisible  = "hidden = 0 AND trashed_at IS NULL AND missing_since IS NULL"
-	baseVisibleA = "a.hidden = 0 AND a.trashed_at IS NULL AND a.missing_since IS NULL"
-)
+// tagApplies is tagAppliesTo for alias x, with the confidence as an argument.
+// Callers pass the setting as read by tagConfidence (a float64, as SQLite
+// stores it, so both spellings of the threshold agree to the last bit).
+var tagApplies = tagAppliesTo("x", "?")
+
+// tagConfidenceSQL is the user's tag confidence, for predicates that cannot
+// take it as an argument (the block predicate is part of visible).
+var tagConfidenceSQL = "COALESCE((SELECT CAST(value AS REAL) FROM settings WHERE key = '" + core.SettingTagConfidence + "'), " +
+	strconv.FormatFloat(core.TagConfidenceDefault, 'g', -1, 64) + ")"
+
+// foldKey is the SQL for core.Fold(expr). fold() is a call into Go for every
+// row, so ASCII text (a byte per character) and NULL use SQLite's lower(),
+// which is what core.Fold does to them.
+func foldKey(expr string) string {
+	return "(CASE WHEN octet_length(" + expr + ") != length(" + expr + ") THEN fold(" + expr + ") ELSE lower(" + expr + ") END)"
+}
 
 // What a smart album's rule selects by (albums.rule_json holds a core.AlbumRule).
 const (
@@ -306,11 +349,14 @@ func (s *Store) setting(ctx context.Context, key string) (v string, ok bool, err
 	if err != nil {
 		return "", false, err
 	}
-	s.settings.Store(key, v)
-	return v, true, nil
+	// A write that raced this read has cached the newer value: keep it.
+	cached, _ := s.settings.LoadOrStore(key, v)
+	return cached.(string), true, nil
 }
 
 func (s *Store) setSetting(ctx context.Context, key, value string) error {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
 	_, err := s.w.ExecContext(ctx,
 		"INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
 		key, value)

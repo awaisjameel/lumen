@@ -39,6 +39,27 @@ beforeEach(() => {
 })
 
 describe('library requests', () => {
+  it('cancels a superseded timeline read in the engine, without reporting it', async () => {
+    // What the runtime rejects a cancelled call with (the bridge alone imports the runtime).
+    const { CancelError } = await vi.importActual<{ CancelError: new (message: string) => Error }>('@wailsio/runtime')
+    const lib = shownLibrary()
+    const signals: (AbortSignal | undefined)[] = []
+    vi.mocked(engine.timeline).mockImplementation(
+      (_view, signal) =>
+        new Promise((resolve, reject) => {
+          signals.push(signal)
+          signal?.addEventListener('abort', () => reject(new CancelError('superseded')))
+          if (signals.length > 1) resolve(buckets)
+        }),
+    )
+    const first = lib.setScope(all)
+    await lib.setScope(favourites)
+    await first
+    expect(signals[0]?.aborted).toBe(true)
+    expect(signals[1]?.aborted).toBe(false)
+    expect(lib.loadError).toBe('')
+    expect(lib.buckets).toEqual(buckets)
+  })
   it('keeps place and event timelines in separate request scopes', () => {
     const place = scopeKey({ kind: 'timeline', view: { filter: Filter.FilterAll, place: 12 } })
     const event = scopeKey({ kind: 'timeline', view: { filter: Filter.FilterAll, event: 12 } })

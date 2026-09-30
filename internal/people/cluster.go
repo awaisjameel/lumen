@@ -56,19 +56,29 @@ var DefaultParams = Params{Threshold: 0.42, MinFaces: 3, MinSharpness: 15, MaxYa
 //     no one has placed yet
 //   - two faces in one photo are never one person
 //   - a face the user took out of a person never goes back to them
-//   - two confirmed people (named, or with faces the user placed) are never
+//   - two confirmed people (named, blocked, or with faces the user placed) are never
 //     merged; an unconfirmed person may fold into anyone
 //
 // in.Links may carry each unplaced face's most similar faces from an earlier
-// run (see Linker); without them they are worked out from scratch.
-func Cluster(in Input, p Params) store.ClusterChanges {
+// run (see Linker); without them they are worked out from scratch. If ctx
+// ends first, its error is returned (a big library takes seconds).
+func Cluster(ctx context.Context, in Input, p Params) (store.ClusterChanges, error) {
 	if in.Links == nil {
-		in.Links, _ = NewLinker(p).Update(context.Background(), in.Faces) // never cancelled: never fails
+		links, err := NewLinker(p).Update(ctx, in.Faces)
+		if err != nil {
+			return store.ClusterChanges{}, err
+		}
+		in.Links = links
 	}
 	c := newClustering(in.Faces, in.People, in.Rejections)
-	c.link(in.Links, p)
-	c.merge(p.Threshold)
-	return c.changes(p)
+	c.link(ctx, in.Links, p)
+	if err := ctx.Err(); err != nil {
+		return store.ClusterChanges{}, err
+	}
+	if err := c.merge(ctx, p.Threshold); err != nil {
+		return store.ClusterChanges{}, err
+	}
+	return c.changes(p), nil
 }
 
 // Input is what Cluster works from.
@@ -105,7 +115,7 @@ type clustering struct {
 func newClustering(faces []store.ClusterFace, people []store.ClusterPerson, rejections []store.Rejection) *clustering {
 	c := &clustering{faces: faces, groupOf: make(map[int64]int, len(faces)), confirm: map[int64]bool{}}
 	for _, p := range people {
-		if p.Named {
+		if p.Confirmed {
 			c.confirm[p.ID] = true
 		}
 	}
@@ -147,7 +157,7 @@ func newClustering(faces []store.ClusterFace, people []store.ClusterPerson, reje
 
 // link connects every unplaced face to its most similar faces (links) and
 // people, and people to each other.
-func (c *clustering) link(links map[int64][]int64, p Params) {
+func (c *clustering) link(ctx context.Context, links map[int64][]int64, p Params) {
 	connect := func(i, j int) {
 		if i != j {
 			c.groups[i].links[j] = struct{}{}
@@ -176,7 +186,7 @@ func (c *clustering) link(links map[int64][]int64, p Params) {
 		means[i] = scaled(c.groups[i].sum, 1/float32(c.groups[i].n))
 	}
 	near := make([][]scored, len(loose))
-	parallel.For(context.Background(), len(loose), runtime.NumCPU(), func(k int) {
+	parallel.For(ctx, len(loose), runtime.NumCPU(), func(k int) {
 		v := c.groups[loose[k]].sum // a single face: its sum is its vector
 		for _, j := range placed {
 			if s := ai.Dot(v, means[j]); s >= p.Threshold {
@@ -199,7 +209,7 @@ func (c *clustering) link(links map[int64][]int64, p Params) {
 }
 
 // merge joins the most similar linked groups while they reach threshold.
-func (c *clustering) merge(threshold float32) {
+func (c *clustering) merge(ctx context.Context, threshold float32) error {
 	q := &queue{}
 	push := func(a, b int) {
 		if s := c.similarity(a, b); s >= threshold {
@@ -213,7 +223,10 @@ func (c *clustering) merge(threshold float32) {
 			}
 		}
 	}
-	for q.Len() > 0 {
+	for n := 0; q.Len() > 0; n++ {
+		if n%4096 == 0 && ctx.Err() != nil {
+			return ctx.Err()
+		}
 		e := heap.Pop(q).(pair)
 		a, b := c.groups[e.a], c.groups[e.b]
 		if a.dead || b.dead || a.version != e.va || b.version != e.vb || !c.allowed(a, b) {
@@ -229,6 +242,7 @@ func (c *clustering) merge(threshold float32) {
 			push(keep, j)
 		}
 	}
+	return nil
 }
 
 func (c *clustering) similarity(a, b int) float32 {

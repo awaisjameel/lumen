@@ -6,33 +6,33 @@ import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
 import { useList } from '../shared/listStore'
+import { useRename } from '../shared/rename'
 import EmptyState from '../shared/EmptyState.vue'
 import GroupCard from '../shared/GroupCard.vue'
 import Icon from '../shared/Icon.vue'
 import SearchBox from '../search/SearchBox.vue'
 
 const { list, loaded, error, load } = useList(engine.events)
-const editing = ref(0)
-const name = ref('')
+const rename = useRename<number>()
+const { editing, draft } = rename
 const busy = ref(false)
+const actionError = ref('') // a rename's; the list's own reloads don't clear it
 useLiveReload(load, (c) => c.assets || c.thumbs)
 
 function edit(event: Event) {
-  if (busy.value) return
-  editing.value = event.id
-  name.value = event.name
+  if (!busy.value) void rename.open(event.id, event.name)
 }
 
 async function save(id: number, value: string) {
   if (busy.value) return
   busy.value = true
-  error.value = ''
+  actionError.value = ''
   try {
     await engine.setEventName(id, value)
-    editing.value = 0
     await load()
+    void rename.close()
   } catch (e) {
-    error.value = errorText(e)
+    actionError.value = errorText(e)
   } finally {
     busy.value = false
   }
@@ -48,8 +48,8 @@ async function save(id: number, value: string) {
     </header>
     <div class="page-body">
       <p class="muted intro">{{ t('events.intro') }}</p>
-      <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-      <div v-if="list.length" class="groups">
+      <p v-if="actionError || error" class="page-error" role="alert">{{ actionError || error }}</p>
+      <div v-if="list.length" class="group-cards">
         <GroupCard
           v-for="event in list"
           :id="event.id"
@@ -61,10 +61,22 @@ async function save(id: number, value: string) {
           :cover-thumb="event.coverThumb"
           icon="calendar"
         >
-          <form v-if="editing === event.id" class="rename" @submit.prevent="save(event.id, name)">
-            <input v-model="name" class="field" :aria-label="t('events.name')" :maxlength="MAX_NAME_LEN" required />
+          <form
+            v-if="editing === event.id"
+            class="rename"
+            @submit.prevent="save(event.id, draft)"
+            @keydown.esc.stop="rename.close()"
+          >
+            <input
+              :ref="rename.fieldRef"
+              v-model="draft"
+              class="field"
+              :aria-label="t('events.name')"
+              :maxlength="MAX_NAME_LEN"
+              required
+            />
             <button class="btn" type="submit" :disabled="busy">{{ t('events.save') }}</button>
-            <button class="btn btn-subtle" type="button" :disabled="busy" @click="editing = 0">
+            <button class="btn btn-subtle" type="button" :disabled="busy" @click="rename.close()">
               {{ t('common.cancel') }}
             </button>
             <button class="btn btn-subtle" type="button" :disabled="busy" @click="save(event.id, '')">
@@ -73,6 +85,7 @@ async function save(id: number, value: string) {
           </form>
           <button
             v-else
+            :ref="rename.triggerRef(event.id)"
             class="icon-btn"
             :disabled="busy"
             :aria-label="t('events.rename', { name: event.name })"
@@ -93,16 +106,6 @@ async function save(id: number, value: string) {
 </template>
 
 <style scoped>
-.intro {
-  margin: 0 0 16px;
-}
-
-.groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
-  gap: 12px;
-}
-
 .rename {
   display: flex;
   flex: 0 0 100%;

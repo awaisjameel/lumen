@@ -41,9 +41,9 @@ func TestRemovedAssetsDoNotSuppressVisibleSearchResults(t *testing.T) {
 	e, photo, video := searchFixture(t)
 	ctx := context.Background()
 	e.queries["beach"] = []float32{1, 0}
-	e.Add(photo, []int8{50, 87}, 0.01)
-	e.Add(video, []int8{100, 0}, 0.01)
-	e.AddVideo(video, []store.FrameEmbedding{{At: 1000, Vec: []int8{100, 0}, Scale: 0.01}})
+	e.index.Put(photo, []int8{50, 87}, 0.01)
+	e.index.Put(video, []int8{100, 0}, 0.01)
+	e.video.replace(video, []store.FrameEmbedding{{At: 1000, Vec: []int8{100, 0}, Scale: 0.01}})
 	sources, err := e.store.ListSources(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -70,8 +70,8 @@ func TestVideoTagsUseMomentsWhenRescoringAndRetagging(t *testing.T) {
 	}
 	l := label{id: tag, vecs: [][]float32{{1, 0}}}
 	e.labels = []label{l}
-	e.Add(video, []int8{0, 100}, 0.01) // mean doesn't resemble this moment
-	e.AddVideo(video, []store.FrameEmbedding{{At: 1000, Vec: []int8{100, 0}, Scale: 0.01}})
+	e.index.Put(video, []int8{0, 100}, 0.01) // mean doesn't resemble this moment
+	e.video.replace(video, []store.FrameEmbedding{{At: 1000, Vec: []int8{100, 0}, Scale: 0.01}})
 	for _, run := range []struct {
 		name string
 		fn   func() error
@@ -91,8 +91,8 @@ func TestVideoTagsUseMomentsWhenRescoringAndRetagging(t *testing.T) {
 	}
 	// A mean vector may resemble a label that none of the sampled moments do.
 	// Creating that label must agree with indexing and vocabulary updates.
-	e.Add(video, []int8{100, 0}, 0.01)
-	e.AddVideo(video, []store.FrameEmbedding{{At: 1000, Vec: []int8{0, 100}, Scale: 0.01}})
+	e.index.Put(video, []int8{100, 0}, 0.01)
+	e.video.replace(video, []store.FrameEmbedding{{At: 1000, Vec: []int8{0, 100}, Scale: 0.01}})
 	if err := e.rescore(ctx, l); err != nil {
 		t.Fatal(err)
 	}
@@ -143,5 +143,27 @@ func TestVocabularyUpdateRemainsPendingUntilLoadCompletes(t *testing.T) {
 	changed, err := e.syncVocabulary(ctx)
 	if err != nil || changed {
 		t.Fatalf("completed update should not repeat: changed=%v, err=%v", changed, err)
+	}
+}
+
+// A batch tagged before a Thing was created is tagged again as it is
+// committed, so the Thing's re-scoring of the index can't have missed it.
+func TestCommitRetagsABatchTaggedUnderOlderThings(t *testing.T) {
+	e, photo, _ := searchFixture(t)
+	gen := e.LabelsGeneration()
+	batch := []store.EmbedResult{{AssetID: photo, Vec: []int8{127, 0}, Scale: 1.0 / 127}} // tagged: nothing
+	e.labelsMu.Lock()
+	e.labels = append(e.labels, label{id: 42, vecs: [][]float32{{1, 0}}}) // as CreateLabel does
+	e.labelsGen.Add(1)
+	e.labelsMu.Unlock()
+	var saved []store.EmbedResult
+	if err := e.Commit(gen, batch, func(rs []store.EmbedResult) error { saved = rs; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 1 || len(saved[0].Tags) != 1 || saved[0].Tags[0].TagID != 42 {
+		t.Fatalf("saved tags = %+v, want the new Thing", saved)
+	}
+	if e.index.Len() != 1 {
+		t.Fatalf("committed batch not searchable: %d", e.index.Len())
 	}
 }

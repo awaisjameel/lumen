@@ -52,7 +52,7 @@ func TestSweepAndEmptyFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := c.Sweep(); err != nil {
+	if err := errors.Join(c.SweepTemp(), c.SweepFrames()); err != nil {
 		t.Fatal(err)
 	}
 	if left, _ := filepath.Glob(filepath.Join(c.Dir, "*")); len(left) != 0 {

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Fetches and prepares everything Lumen needs besides Go and Node: libvips,
 # ONNX Runtime with DirectML, FFmpeg, the SigLIP 2 and face models, and the
-# linters. Every download is pinned and checked against its SHA-256. Run from
-# Git Bash; safe to re-run (finished steps are skipped). Needs curl, unzip,
-# Go and Python 3 (model prep only).
+# linters. Every download is pinned and checked against its SHA-256 (the two
+# values model prep reads from the SigLIP checkpoint are pinned in
+# prepare_models.py; its Python packages are pinned by version). Run from Git
+# Bash; safe to re-run (finished steps are skipped). Needs curl, unzip, Go and
+# Python 3.14 (model prep only).
 #
 #   deps/cache/     downloads
 #   deps/vips/      libvips headers and import library (for cgo)

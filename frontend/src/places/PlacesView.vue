@@ -13,7 +13,7 @@ const { list, loaded, error, load } = useList(engine.places)
 useLiveReload(load, (c) => c.assets || c.thumbs)
 
 async function blockPlace(id: number, name: string) {
-  if (await block(BlockKind.BlockPlace, id, name)) await load()
+  if (await block(BlockKind.BlockPlace, id, name)) await load() // Places is not a shared list
 }
 </script>
 
@@ -27,7 +27,7 @@ async function blockPlace(id: number, name: string) {
     <div class="page-body">
       <p class="muted intro">{{ t('places.intro') }}</p>
       <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-      <div v-if="list.length" class="groups">
+      <div v-if="list.length" class="group-cards">
         <GroupCard
           v-for="place in list"
           :id="place.id"
@@ -54,15 +54,3 @@ async function blockPlace(id: number, name: string) {
     </div>
   </div>
 </template>
-
-<style scoped>
-.intro {
-  margin: 0 0 16px;
-}
-
-.groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
-  gap: 12px;
-}
-</style>

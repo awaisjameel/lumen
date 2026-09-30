@@ -44,6 +44,8 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"EVENT_GAP_MIN":          core.EventGapMin,
 		"EVENT_GAP_MAX":          core.EventGapMax,
 		"MAX_NAME_LEN":           core.MaxNameLen,
+		"PIN_MIN_LEN":            core.PINMinLen,
+		"PIN_MAX_LEN":            core.PINMaxLen,
 	} {
 		if got := constant(name); got != want {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)

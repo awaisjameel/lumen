@@ -192,8 +192,10 @@ type ClusterFace struct {
 
 // ClusterPerson is a person as clustering sees them.
 type ClusterPerson struct {
-	ID    int64
-	Named bool // the user named them: never merged into anyone automatically
+	ID int64
+	// Confirmed: the user named or blocked them, so they are never merged
+	// into anyone automatically (a block must not move to someone else).
+	Confirmed bool
 }
 
 // Rejection is the user saying a face is not a person.
@@ -214,9 +216,9 @@ func (s *Store) ClusterData(ctx context.Context, model string) ([]ClusterFace, [
 		return nil, nil, nil, err
 	}
 	people, err := queryAll(ctx, s.r, func(r *sql.Rows) (p ClusterPerson, err error) {
-		err = r.Scan(&p.ID, &p.Named)
+		err = r.Scan(&p.ID, &p.Confirmed)
 		return p, err
-	}, "SELECT id, name IS NOT NULL FROM people ORDER BY id")
+	}, "SELECT id, name IS NOT NULL OR "+labelBlocked(core.BlockPerson, "people.id")+" FROM people ORDER BY id")
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -239,8 +241,8 @@ type Merge struct{ From, Into int64 }
 
 // ApplyClusters saves a clustering run in one transaction. The run worked
 // from a snapshot, so anything the user changed since wins: only faces still
-// unassigned are placed, and only unnamed people without user-placed faces
-// are merged away.
+// unassigned are placed, and only unnamed, unblocked people without
+// user-placed faces are merged away.
 func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		// Two faces in one photo (or one video frame) are never one person:
@@ -276,7 +278,8 @@ func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 		for _, m := range c.Merges {
 			var ok bool
 			err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM people WHERE id = ?1 AND name IS NULL
-					AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = ?1 AND assigned_by = 'user'))
+					AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = ?1 AND assigned_by = 'user')
+					AND NOT `+labelBlocked(core.BlockPerson, "?1")+`)
 				AND EXISTS (SELECT 1 FROM people WHERE id = ?2)
 				AND NOT EXISTS (SELECT 1 FROM face_rejections r JOIN faces f ON f.id = r.face_id
 					WHERE (f.person_id = ?1 AND r.person_id = ?2)
@@ -338,6 +341,6 @@ func dropEmptyPeople(ctx context.Context, tx *sql.Tx) error {
 		AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = people.id)
 		AND NOT EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND `+rulePerson+` = people.id)
 		AND NOT EXISTS (SELECT 1 FROM face_rejections WHERE person_id = people.id)
-		AND NOT EXISTS (SELECT 1 FROM blocks WHERE kind = 'person' AND target_id = people.id)`)
+		AND NOT `+labelBlocked(core.BlockPerson, "people.id"))
 	return err
 }

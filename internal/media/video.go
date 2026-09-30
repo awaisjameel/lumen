@@ -142,9 +142,9 @@ func parseProbe(p ffprobeOutput, now time.Time) (videoInfo, error) {
 // captureTime is when the video was recorded, as its local clock read. Apple
 // writes the local time with its offset; everyone else writes UTC, which is
 // read as this computer's local time (the best guess without a time zone).
-// Zero and far-future dates (unset clocks) are ignored.
+// Implausible dates (unset clocks, see PlausibleAt) are ignored.
 func captureTime(format, stream map[string]string, now time.Time) time.Time {
-	plausible := func(t time.Time) bool { return t.Year() > 1970 && t.Before(now.AddDate(0, 0, 2)) }
+	plausible := func(t time.Time) bool { return PlausibleAt(t, now) }
 	if t, err := time.Parse("2006-01-02T15:04:05-0700", format["com.apple.quicktime.creationdate"]); err == nil && plausible(t) {
 		return t
 	}

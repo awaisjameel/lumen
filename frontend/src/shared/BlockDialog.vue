@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import { BlockMode, engine } from '../bridge'
-import { useLibrary } from '../library/store'
-import { blockRequest, showBlockUndo } from './block'
+import { blockRequest, showBlocksChanged, showBlockUndo } from './block'
 import type { BlockRequest } from './block'
 import { errorText, reportError } from './errors'
 import { t } from './i18n'
+import PinFields from './PinFields.vue'
 
-const lib = useLibrary()
 const dialog = ref<HTMLDialogElement | null>(null)
 const mode = ref<BlockMode>(BlockMode.BlockPhotos)
 const configured = ref(true)
@@ -67,7 +66,7 @@ async function save() {
     const change = await engine.setBlock(request.kind, request.targetID, request.path, requestedMode)
     if (change.created) showBlockUndo(change.id, request.name)
     close(request, true)
-    void lib.refreshVisibility().catch(reportError)
+    void showBlocksChanged().catch(reportError)
   } catch (e) {
     if (blockRequest.value === request) error.value = errorText(e)
   } finally {
@@ -77,9 +76,9 @@ async function save() {
 </script>
 
 <template>
-  <dialog ref="dialog" class="block-dialog" @cancel.prevent="cancel">
+  <dialog ref="dialog" class="dialog block-dialog" aria-labelledby="block-title" @cancel.prevent="cancel">
     <form v-if="blockRequest" @submit.prevent="save">
-      <h2>{{ t('blocked.confirmTitle', { name: blockRequest.name }) }}</h2>
+      <h2 id="block-title">{{ t('blocked.confirmTitle', { name: blockRequest.name }) }}</h2>
       <p>{{ t('blocked.confirmText') }}</p>
       <fieldset v-if="blockRequest.labelOnly && blockRequest.photosAllowed">
         <legend>{{ t('blocked.mode') }}</legend>
@@ -91,28 +90,7 @@ async function save() {
       <p v-else>{{ t(blockRequest.photosAllowed ? 'blocked.photosOnly' : 'blocked.labelOnly') }}</p>
       <template v-if="!configured">
         <p>{{ t('blocked.createPINHint') }}</p>
-        <input
-          v-model="pin"
-          class="field"
-          type="password"
-          inputmode="numeric"
-          autocomplete="new-password"
-          pattern="[0-9]{6,12}"
-          required
-          :aria-label="t('blocked.newPIN')"
-          :placeholder="t('blocked.newPIN')"
-        />
-        <input
-          v-model="confirmPIN"
-          class="field"
-          type="password"
-          inputmode="numeric"
-          autocomplete="new-password"
-          pattern="[0-9]{6,12}"
-          required
-          :aria-label="t('blocked.confirmPIN')"
-          :placeholder="t('blocked.confirmPIN')"
-        />
+        <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" creating />
       </template>
       <p v-if="error" class="page-error" role="alert">{{ error }}</p>
       <div class="actions">
@@ -127,20 +105,6 @@ async function save() {
 .block-dialog {
   width: min(440px, calc(100vw - 32px));
   padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow);
-}
-
-.block-dialog::backdrop {
-  background: var(--backdrop);
-}
-
-h2 {
-  margin: 0 0 8px;
-  font: 600 17px var(--font-display);
 }
 
 p {
@@ -166,16 +130,13 @@ label {
   gap: 8px;
 }
 
-.field {
+:deep(.field) {
   display: block;
   width: 100%;
   margin: 8px 0;
 }
 
 .actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
   margin-top: 20px;
 }
 </style>

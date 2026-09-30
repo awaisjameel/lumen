@@ -16,7 +16,6 @@ vi.mock('../bridge', async (importOriginal) => ({
 const person = (id: number, name: string): Person => ({
   id,
   name,
-  hidden: false,
   count: 1,
   cover: {
     id: 0,

@@ -3,6 +3,7 @@ package ai
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -226,20 +227,24 @@ func (f *Faces) Detect(pix []byte, w, h int, minScore float32) ([]Face, error) {
 		st := float64(stride)
 		for i := range cls {
 			score := float32(math.Sqrt(float64(clamp01(cls[i]) * clamp01(obj[i]))))
-			if score < minScore {
+			if !(score >= minScore) { // also drops NaN, which compares false
 				continue
 			}
 			r, c := float64(i/cols), float64(i%cols)
 			cx, cy := (c+float64(box[4*i]))*st, (r+float64(box[4*i+1]))*st
 			bw, bh := math.Exp(float64(box[4*i+2]))*st, math.Exp(float64(box[4*i+3]))*st
 			fc := Face{X: (cx - bw/2) / scale, Y: (cy - bh/2) / scale, W: bw / scale, H: bh / scale, Score: score}
+			ok := finite(fc.X, fc.Y, fc.W, fc.H)
 			for j := range 5 {
 				fc.Landmarks[j] = [2]float64{
 					(float64(kps[10*i+2*j]) + c) * st / scale,
 					(float64(kps[10*i+2*j+1]) + r) * st / scale,
 				}
+				ok = ok && finite(fc.Landmarks[j][0], fc.Landmarks[j][1])
 			}
-			found = append(found, clip(fc, float64(w), float64(h)))
+			if ok { // a broken output would sample outside the image when aligned
+				found = append(found, clip(fc, float64(w), float64(h)))
+			}
 		}
 	}
 	return nonMaxSuppress(found, 0.3), nil
@@ -434,7 +439,7 @@ func resample(pix []byte, w, h, dw, dh int) []byte {
 	if sx <= 1 && sy <= 1 {
 		for y := range dh {
 			for x := range dw {
-				c := bilinear(pix, w, h, min(float64(w-1), (float64(x)+0.5)*sx-0.5), min(float64(h-1), (float64(y)+0.5)*sy-0.5))
+				c := bilinear(pix, w, h, max(0, min(float64(w-1), (float64(x)+0.5)*sx-0.5)), max(0, min(float64(h-1), (float64(y)+0.5)*sy-0.5)))
 				o := (y*dw + x) * 3
 				out[o], out[o+1], out[o+2] = uint8(c[0]+0.5), uint8(c[1]+0.5), uint8(c[2]+0.5)
 			}
@@ -495,10 +500,24 @@ func clip(f Face, w, h float64) Face {
 
 func clamp01(x float32) float32 { return max(0, min(1, x)) }
 
+// finite reports whether none of xs is NaN or infinite.
+func finite(xs ...float64) bool {
+	for _, x := range xs {
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// ErrBadImage is what Detect and Embed return for pixels that aren't a w x h
+// 8-bit RGB image: a problem of that file. Their other errors are the models'.
+var ErrBadImage = errors.New("faces: bad image")
+
 // checkRGB rejects pixels that aren't a w x h 8-bit RGB image.
 func checkRGB(pix []byte, w, h int) error {
 	if w <= 0 || h <= 0 || len(pix) != w*h*3 {
-		return fmt.Errorf("faces: bad image (%dx%d, %d bytes)", w, h, len(pix))
+		return fmt.Errorf("%w (%dx%d, %d bytes)", ErrBadImage, w, h, len(pix))
 	}
 	return nil
 }

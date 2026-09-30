@@ -91,7 +91,7 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int64, size int) {
 	path := m.cache.Path(id, size)
 	if _, err := os.Stat(path); err != nil {
-		// Evicted from the cache (or cleared): rebuild it now if the asset had one.
+		// Missing from the cache (the folder was cleared): rebuild it now if the asset had one.
 		f, path, ok := assetFile(r.Context(), m.store, id, w)
 		if !ok {
 			return
@@ -195,9 +195,11 @@ func serveCached(w http.ResponseWriter, r *http.Request, path string) {
 	serveFile(w, r, path, "image/jpeg")
 }
 
-// serveFile serves a file with Range support and revalidates visibility.
+// serveFile serves a file with Range support. Callers check the asset is
+// visible first (AssetFile, AssetVisible). The file is opened sharing
+// deletion: a video paused in the viewer must not stop Explorer moving it.
 func serveFile(w http.ResponseWriter, r *http.Request, path, contentType string) {
-	file, err := os.Open(path)
+	file, err := core.OpenShared(path)
 	if err != nil {
 		served(w, err, 0)
 		return

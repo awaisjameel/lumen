@@ -109,10 +109,18 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 }
 
 // Plausible reports whether a date read from a file can be when it was
-// taken: from 1900 until a couple of days from now (time zones), not a
-// camera clock that was never set or set wrong.
-func Plausible(t time.Time) bool {
-	return t.Year() >= 1900 && t.Before(time.Now().AddDate(0, 0, 2))
+// taken (see PlausibleAt), as of now.
+func Plausible(t time.Time) bool { return PlausibleAt(t, time.Now()) }
+
+// PlausibleAt reports whether a date read from a file can be when it was
+// taken, as of now: from 1900 (scanned prints carry old dates) until a
+// couple of days from now (time zones), and not the zero of a clock that
+// was never set: the Unix or QuickTime epoch.
+func PlausibleAt(t, now time.Time) bool {
+	y, m, d := t.Date()
+	h, mi, sec := t.Clock()
+	epoch := (y == 1970 || y == 1904) && m == time.January && d == 1 && h == 0 && mi == 0 && sec == 0
+	return y >= 1900 && t.Before(now.AddDate(0, 0, 2)) && !epoch
 }
 
 var goexifFormats = map[string]bool{".jpg": true, ".jpeg": true, ".jpe": true, ".tif": true, ".tiff": true}
