@@ -87,11 +87,12 @@ func (s *Store) Places(ctx context.Context) ([]core.Place, error) {
 		err = r.Scan(&p.ID, &p.Name, &p.Region, &p.Country, &p.Lat, &p.Lon, &p.Count, &p.Cover, &p.CoverThumb)
 		return p, err
 	}, `SELECT p.id, p.name, p.region, p.country, p.lat, p.lon, count(a.id),
-		COALESCE((SELECT x.id FROM assets x WHERE x.place_id = p.id AND `+visible+` AND x.thumb_version > 0
+		COALESCE((SELECT x.id FROM assets x WHERE x.place_id = p.id AND `+visibleX+` AND x.thumb_version > 0
 			ORDER BY x.taken_at DESC, x.id DESC LIMIT 1), 0),
-		COALESCE((SELECT x.thumb_version FROM assets x WHERE x.place_id = p.id AND `+visible+` AND x.thumb_version > 0
+		COALESCE((SELECT x.thumb_version FROM assets x WHERE x.place_id = p.id AND `+visibleX+` AND x.thumb_version > 0
 			ORDER BY x.taken_at DESC, x.id DESC LIMIT 1), 0)
 		FROM places p JOIN assets a ON a.place_id = p.id AND `+visibleA+`
+		WHERE NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'place' AND b.target_id = p.id)
 		GROUP BY p.id ORDER BY count(a.id) DESC, p.name`)
 }
 
@@ -99,7 +100,8 @@ func (s *Store) Places(ctx context.Context) ([]core.Place, error) {
 func (s *Store) Place(ctx context.Context, id int64) (core.Place, error) {
 	var p core.Place
 	err := s.r.QueryRowContext(ctx, `SELECT p.id, p.name, p.region, p.country, p.lat, p.lon, count(a.id)
-		FROM places p JOIN assets a ON a.place_id = p.id AND `+visibleA+` WHERE p.id = ? GROUP BY p.id`, id).
+		FROM places p JOIN assets a ON a.place_id = p.id AND `+visibleA+` WHERE p.id = ?
+		AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'place' AND b.target_id = p.id) GROUP BY p.id`, id).
 		Scan(&p.ID, &p.Name, &p.Region, &p.Country, &p.Lat, &p.Lon, &p.Count)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound

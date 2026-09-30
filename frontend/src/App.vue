@@ -5,6 +5,7 @@ import IndexStatus from './library/IndexStatus.vue'
 import { useLibrary } from './library/store'
 import Welcome from './onboarding/Welcome.vue'
 import ConfirmDialog from './shared/ConfirmDialog.vue'
+import BlockDialog from './shared/BlockDialog.vue'
 import { errorText } from './shared/errors'
 import Icon from './shared/Icon.vue'
 import { t } from './shared/i18n'
@@ -58,6 +59,7 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
   </template>
   <p v-else-if="failed" class="failed" role="alert">{{ failed }}</p>
   <ConfirmDialog />
+  <BlockDialog />
   <Notice />
 </template>
 

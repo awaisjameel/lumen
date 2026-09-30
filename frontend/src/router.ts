@@ -4,6 +4,7 @@ import LibraryView from './library/LibraryView.vue'
 import PeopleView from './people/PeopleView.vue'
 import PersonFaces from './people/PersonFaces.vue'
 import SettingsView from './settings/SettingsView.vue'
+import BlockedView from './settings/BlockedView.vue'
 import ThingsView from './things/ThingsView.vue'
 import AlbumsView from './albums/AlbumsView.vue'
 import DuplicatesView from './duplicates/DuplicatesView.vue'
@@ -40,6 +41,7 @@ export const router = createRouter({
     { path: '/duplicates', name: 'duplicates', component: DuplicatesView },
     { path: '/search', name: 'search', component: LibraryView },
     { path: '/settings', name: 'settings', component: SettingsView },
+    { path: '/settings/blocked', name: 'blocked', component: BlockedView },
     { path: '/:rest(.*)*', redirect: '/' },
   ],
 })

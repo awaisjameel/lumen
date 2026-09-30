@@ -28,6 +28,14 @@ func (s *Store) UnavailableAssets(ctx context.Context) (map[int64]bool, error) {
 	return out, nil
 }
 
+// VisibilityRevision changes whenever browsing membership can change. Search
+// checks it before reusing its excluded-ID cache.
+func (s *Store) VisibilityRevision(ctx context.Context) (int64, error) {
+	var revision int64
+	err := s.r.QueryRowContext(ctx, "SELECT value FROM event_revision WHERE id = 1").Scan(&revision)
+	return revision, err
+}
+
 // DayBuckets counts the view's assets per calendar day, newest day first.
 // The grid builds its entire layout, and the timeline scrubber, from this
 // list. AI tags count from minScore up.
@@ -45,6 +53,21 @@ func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float32) (
 
 // viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
 func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float32) (where string, args []any, err error) {
+	for _, target := range []struct {
+		kind core.BlockKind
+		id   int64
+	}{{core.BlockTag, v.Tag}, {core.BlockPerson, v.Person}} {
+		if target.id == 0 {
+			continue
+		}
+		blocked, err := s.IsBlocked(ctx, target.kind, target.id)
+		if err != nil {
+			return "", nil, err
+		}
+		if blocked {
+			return "", nil, ErrNotFound
+		}
+	}
 	if v.Album != 0 {
 		a, err := album(ctx, s.r, v.Album)
 		if err != nil {
@@ -233,10 +256,12 @@ func (s *Store) AssetDetail(ctx context.Context, id int64) (core.AssetDetail, er
 	var duration sql.NullInt64
 	var videoCodec, audioCodec sql.NullString
 	var lat, lon sql.NullFloat64
-	err := s.r.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon, favourite,
+	err := s.r.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
+		CASE WHEN EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'place' AND b.target_id = assets.place_id)
+		THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
 		duration_ms, video_codec, audio_codec
-		FROM assets WHERE id = ? AND `+present, id).
-		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.Favourite,
+		FROM assets WHERE id = ? AND `+visible, id).
+		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.PlaceID, &d.Favourite,
 			&duration, &videoCodec, &audioCodec)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
@@ -288,7 +313,7 @@ func (s *Store) AssetFile(ctx context.Context, id int64) (MediaFile, error) {
 	err := s.read(ctx, func(tx *sql.Tx) error {
 		err := tx.QueryRowContext(ctx, `SELECT ext, kind, orientation, thumb_version,
 			COALESCE(video_codec, ''), COALESCE(audio_codec, ''), COALESCE(duration_ms, 0)
-			FROM assets WHERE id = ? AND `+present, id).
+			FROM assets WHERE id = ? AND `+visible, id).
 			Scan(&m.Ext, &m.Kind, &m.Orientation, &m.ThumbVersion, &m.VideoCodec, &m.AudioCodec, &m.Duration)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
@@ -318,4 +343,12 @@ func (s *Store) CountVisible(ctx context.Context) (int, error) {
 	var n int
 	err := s.r.QueryRowContext(ctx, "SELECT count(*) FROM assets WHERE "+visible).Scan(&n)
 	return n, err
+}
+
+// AssetVisible checks the same browse predicate used by grid queries. Media
+// handlers call this before serving even a cached thumbnail or video sprite.
+func (s *Store) AssetVisible(ctx context.Context, id int64) (bool, error) {
+	var ok bool
+	err := s.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM assets WHERE id = ? AND "+visible+")", id).Scan(&ok)
+	return ok, err
 }

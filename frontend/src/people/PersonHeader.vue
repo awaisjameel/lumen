@@ -3,9 +3,10 @@
 // how many photos, and what can be done about them.
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { engine, MAX_NAME_LEN } from '../bridge'
+import { BlockKind, engine, MAX_NAME_LEN } from '../bridge'
 import type { Person } from '../bridge'
 import { errorText, logError } from '../shared/errors'
+import { block } from '../shared/block'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
@@ -84,9 +85,11 @@ async function toggleHidden() {
   if (!person.value) return
   const requested = revision
   try {
-    await engine.setPersonHidden(props.id, !person.value.hidden)
-    if (requested === revision) await load()
-    void people.load().catch(logError)
+    const saved = await block(BlockKind.BlockPerson, props.id, person.value.name || t('person.unnamed'))
+    if (saved && requested === revision) {
+      void people.load().catch(logError)
+      await router.push({ name: 'people' })
+    }
   } catch (e) {
     if (requested === revision) error.value = errorText(e)
   }
@@ -120,11 +123,11 @@ async function toggleHidden() {
     </RouterLink>
     <button
       class="icon-btn"
-      :title="person.hidden ? t('people.unhide') : t('people.hide')"
-      :aria-label="person.hidden ? t('people.unhide') : t('people.hide')"
+      :title="t('blocked.block')"
+      :aria-label="t('blocked.confirmTitle', { name: person.name || t('person.unnamed') })"
       @click="toggleHidden"
     >
-      <Icon :name="person.hidden ? 'eye' : 'eye-off'" :size="18" />
+      <Icon name="eye-off" :size="18" />
     </button>
   </div>
   <p v-else-if="error" class="error" role="alert">{{ error }}</p>

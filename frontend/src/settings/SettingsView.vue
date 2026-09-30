@@ -14,6 +14,8 @@ import { useLibrary } from '../library/store'
 import { confirm } from '../shared/confirm'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
+import { block } from '../shared/block'
+import { BlockKind } from '../bridge'
 import Icon from '../shared/Icon.vue'
 import { theme } from '../shared/theme'
 import type { Theme } from '../shared/theme'
@@ -56,6 +58,10 @@ async function removeFolder(s: Source) {
     await engine.removeSource(s.id)
     await lib.sourcesChanged()
   })
+}
+
+async function blockFolder(s: Source) {
+  if (await block(BlockKind.BlockFolder, 0, s.path, false, s.path)) await lib.refresh()
 }
 
 // Settings change at once in the UI and go back if the engine refuses, so
@@ -174,6 +180,9 @@ onBeforeUnmount(saveConfidence)
             <li v-for="s in lib.sources" :key="s.id">
               <Icon name="folder" :size="18" />
               <span class="path" :title="s.path">{{ s.path }}</span>
+              <button class="btn" :aria-label="t('blocked.confirmTitle', { name: s.path })" @click="blockFolder(s)">
+                {{ t('blocked.block') }}
+              </button>
               <button class="btn" :aria-label="t('settings.removeNamed', { path: s.path })" @click="removeFolder(s)">
                 {{ t('settings.remove') }}
               </button>
@@ -262,6 +271,7 @@ onBeforeUnmount(saveConfidence)
         <section>
           <h2>{{ t('settings.privacy') }}</h2>
           <p class="muted hint"><Icon name="lock" :size="16" /> {{ t('settings.privacyText') }}</p>
+          <RouterLink to="/settings/blocked" class="btn">{{ t('blocked.title') }}</RouterLink>
         </section>
       </div>
     </div>

@@ -14,6 +14,9 @@ import (
 // ErrPersonExists means someone else already has that name.
 var ErrPersonExists = errors.New("someone already has that name")
 
+// ErrBlockedName keeps a blocked person out of ordinary merge and naming flows.
+var ErrBlockedName = errors.New("that person is blocked")
+
 // A core.Face is read (in scanFace order) from faces f joined with its
 // asset a and person p.
 const (
@@ -42,6 +45,7 @@ func (s *Store) People(ctx context.Context) ([]core.Person, error) {
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
 		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), p.hidden, count(DISTINCT f.asset_id)
 			FROM people p JOIN faces f ON f.person_id = p.id JOIN assets a ON a.id = f.asset_id AND `+visibleA+`
+			WHERE NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = p.id)
 			GROUP BY p.id ORDER BY p.name IS NULL, count(DISTINCT f.asset_id) DESC, p.name, p.id`)
 		if err != nil {
 			return err
@@ -58,7 +62,8 @@ func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), p.hidden,
 				(SELECT count(DISTINCT f.asset_id) FROM faces f JOIN assets a ON a.id = f.asset_id
 					WHERE f.person_id = p.id AND `+visibleA+`)
-			FROM people p WHERE p.id = ?`, id)
+			FROM people p WHERE p.id = ? AND NOT EXISTS
+			(SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = p.id)`, id)
 		if err != nil {
 			return err
 		}
@@ -113,7 +118,9 @@ func (s *Store) PersonFaces(ctx context.Context, id int64) (faces []core.Face, v
 		x.vec = bytesFloat32(vec)
 		return x, err
 	}, "SELECT "+faceColumns+", f.vec"+faceFrom+
-		` WHERE f.person_id = ? AND `+visibleA+` ORDER BY a.taken_at DESC, f.id`, id)
+		` WHERE f.person_id = ? AND `+visibleA+` AND NOT EXISTS
+		(SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = f.person_id)
+		ORDER BY a.taken_at DESC, f.id`, id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,7 +133,8 @@ func (s *Store) PersonFaces(ctx context.Context, id int64) (faces []core.Face, v
 
 // AssetFaces returns the faces in one photo, left to right.
 func (s *Store) AssetFaces(ctx context.Context, assetID int64) ([]core.Face, error) {
-	return queryAll(ctx, s.r, scanFace, faceSelect+" WHERE f.asset_id = ? ORDER BY f.x", assetID)
+	return queryAll(ctx, s.r, scanFace, faceSelect+` WHERE f.asset_id = ? AND `+visibleA+` AND NOT EXISTS
+		(SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = f.person_id) ORDER BY f.x`, assetID)
 }
 
 // NamedPeople returns everyone the user has named (for finding names in a
@@ -135,7 +143,19 @@ func (s *Store) NamedPeople(ctx context.Context) ([]core.Person, error) {
 	return queryAll(ctx, s.r, func(r *sql.Rows) (p core.Person, err error) {
 		err = r.Scan(&p.ID, &p.Name, &p.Hidden)
 		return p, err
-	}, "SELECT id, name, hidden FROM people WHERE name IS NOT NULL ORDER BY length(name) DESC, name")
+	}, `SELECT id, name, hidden FROM people WHERE name IS NOT NULL AND NOT EXISTS
+		(SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = people.id)
+		ORDER BY length(name) DESC, name`)
+}
+
+// BlockedNamedPeople is used only to recognise an exact blocked name in a
+// submitted search. It is never offered in suggestions or ordinary lists.
+func (s *Store) BlockedNamedPeople(ctx context.Context) ([]core.Person, error) {
+	return queryAll(ctx, s.r, func(r *sql.Rows) (p core.Person, err error) {
+		err = r.Scan(&p.ID, &p.Name)
+		return p, err
+	}, `SELECT p.id, p.name FROM people p JOIN blocks b ON b.kind = 'person' AND b.target_id = p.id
+		WHERE p.name IS NOT NULL ORDER BY length(p.name) DESC`)
 }
 
 // PeopleAssets returns the visible assets in which every one of people
@@ -168,6 +188,7 @@ func (s *Store) SearchPeople(ctx context.Context, text string, limit int) ([]cor
 			err = r.Scan(&p.ID, &p.Name, &p.Hidden)
 			return p, err
 		}, `SELECT id, name, hidden FROM people WHERE name IS NOT NULL AND `+nameMatch+` AND hidden = 0
+			AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = people.id)
 			ORDER BY `+nameFirst+` LIMIT ?2`, core.Fold(text), limit)
 		if err != nil {
 			return err
@@ -180,6 +201,15 @@ func (s *Store) SearchPeople(ctx context.Context, text string, limit int) ([]cor
 // PersonByName finds someone by name, whatever its case.
 func (s *Store) PersonByName(ctx context.Context, name string) (int64, error) {
 	id, err := named(ctx, s.r, peopleNames, strings.TrimSpace(name), 0)
+	if err == nil && id != 0 {
+		blocked, berr := s.IsBlocked(ctx, core.BlockPerson, id)
+		if berr != nil {
+			return 0, berr
+		}
+		if blocked {
+			return 0, ErrNotFound
+		}
+	}
 	if err == nil && id == 0 {
 		err = ErrNotFound
 	}
@@ -202,16 +232,19 @@ func (s *Store) NamePerson(ctx context.Context, id int64, name string) error {
 			case err != nil:
 				return err
 			case other != 0:
+				var blocked bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM blocks
+					WHERE kind = 'person' AND target_id = ?)`, other).Scan(&blocked); err != nil {
+					return err
+				}
+				if blocked {
+					return ErrBlockedName
+				}
 				return ErrPersonExists
 			}
 		}
 		return affected(tx.ExecContext(ctx, "UPDATE people SET name = NULLIF(?, '') WHERE id = ?", name, id))
 	})
-}
-
-// SetPersonHidden hides a person from People, or shows them again.
-func (s *Store) SetPersonHidden(ctx context.Context, id int64, hidden bool) error {
-	return affected(s.w.ExecContext(ctx, "UPDATE people SET hidden = ? WHERE id = ?", hidden, id))
 }
 
 // SetPersonCover makes one of a person's faces the one shown for them.
@@ -286,6 +319,13 @@ func (s *Store) NameFaces(ctx context.Context, faces []int64, name string) (int6
 		}
 		if name != "" {
 			person, err = named(ctx, tx, peopleNames, name, 0)
+			if err == nil && person != 0 {
+				var blocked bool
+				err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM blocks WHERE kind = 'person' AND target_id = ?)`, person).Scan(&blocked)
+				if err == nil && blocked {
+					return ErrBlockedName
+				}
+			}
 		}
 		if err == nil && person == 0 {
 			var res sql.Result

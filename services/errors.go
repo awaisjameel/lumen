@@ -21,6 +21,7 @@ const (
 	CodeAlbumExists    ErrorCode = "album_exists"    // another album has that name
 	CodeInvalidAlbum   ErrorCode = "invalid_album"   // the rule can't be saved; the message says why
 	CodePersonExists   ErrorCode = "person_exists"   // someone else has that name
+	CodeBlockedName    ErrorCode = "blocked_name"    // a name belongs to a blocked person
 	CodeTagExists      ErrorCode = "tag_exists"      // another Thing has that name
 	CodeBuiltinTag     ErrorCode = "builtin_tag"     // built-in Things can be hidden, not deleted
 	CodeTagInAlbum     ErrorCode = "tag_in_album"    // a smart album's rule uses the Thing
@@ -44,6 +45,7 @@ var errorCodes = []struct {
 	{store.ErrAlbumExists, CodeAlbumExists},
 	{store.ErrInvalidAlbum, CodeInvalidAlbum},
 	{store.ErrPersonExists, CodePersonExists},
+	{store.ErrBlockedName, CodeBlockedName},
 	{store.ErrTagExists, CodeTagExists},
 	{store.ErrBuiltinTag, CodeBuiltinTag},
 	{store.ErrTagInAlbum, CodeTagInAlbum},

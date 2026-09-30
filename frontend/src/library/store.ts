@@ -48,6 +48,7 @@ export interface SearchInfo {
   complete: boolean
   people: string[] // people named in the query
   noAI: boolean // the description couldn't be searched
+  blocked: boolean // an exact blocked person's name was searched
 }
 
 function loadZoom(): number {
@@ -144,7 +145,13 @@ export const useLibrary = defineStore('library', () => {
       if (s.kind === 'search') {
         const r = await engine.search(s.query)
         if (current !== generation || request !== loadRequest) return
-        searchInfo.value = { pending: r.pending, complete: r.complete, people: r.people, noAI: r.noAI }
+        searchInfo.value = {
+          pending: r.pending,
+          complete: r.complete,
+          people: r.people,
+          noAI: r.noAI,
+          blocked: r.blocked,
+        }
         buckets.value = r.items.length ? [{ day: RESULTS, count: r.items.length }] : []
         days.value = new Map(r.items.length ? [[RESULTS, r.items]] : [])
         fresh.add(RESULTS)
@@ -203,6 +210,21 @@ export const useLibrary = defineStore('library', () => {
       }
     })()
     return refreshing
+  }
+
+  /** A privacy change must remove covered search hits immediately. */
+  async function refreshVisibility() {
+    if (scope.value.kind === 'search') await setScope(scope.value)
+    else {
+      generation++
+      dayRevision++
+      inflight.clear()
+      fresh.clear()
+      days.value = new Map()
+      selected.value = null
+      viewer.value = null
+      await refresh({ assets: true, thumbs: false, tags: true, people: true })
+    }
   }
 
   /** Whether any of the days is neither loaded nor on its way. */
@@ -403,6 +425,7 @@ export const useLibrary = defineStore('library', () => {
     selAt,
     init,
     refresh,
+    refreshVisibility,
     needsDays,
     ensureDays,
     neighbour,

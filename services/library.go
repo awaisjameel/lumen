@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sync"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -53,13 +55,22 @@ func (e *Emitter) LibraryChanged(c core.Changes) {
 
 // LibraryService is everything about browsing and managing the library.
 type LibraryService struct {
-	store *store.Store
-	ix    *index.Indexer
+	store   *store.Store
+	ix      *index.Indexer
+	events  *Emitter
+	blocked struct {
+		sync.Mutex
+		unlocked bool
+		failures int
+		retryAt  time.Time
+		lastID   int64
+		lastAt   time.Time
+	}
 }
 
 // NewLibraryService returns the library service.
-func NewLibraryService(st *store.Store, ix *index.Indexer) *LibraryService {
-	return &LibraryService{store: st, ix: ix}
+func NewLibraryService(st *store.Store, ix *index.Indexer, events *Emitter) *LibraryService {
+	return &LibraryService{store: st, ix: ix, events: events}
 }
 
 // Sources lists the folders in the library.

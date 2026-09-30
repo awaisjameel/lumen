@@ -44,10 +44,10 @@ func TestSearchWithoutAI(t *testing.T) {
 	if err != nil || len(faces) != 1 {
 		t.Fatalf("faces: %v, %v", faces, err)
 	}
-	if _, err := st.NameFaces(ctx, []int64{faces[0].ID}, "Ali"); err != nil {
+	person, err := st.NameFaces(ctx, []int64{faces[0].ID}, "Ali")
+	if err != nil {
 		t.Fatal(err)
 	}
-
 	s := NewSearchService(st, nil, true)
 	for _, c := range []struct {
 		query string
@@ -72,6 +72,13 @@ func TestSearchWithoutAI(t *testing.T) {
 			t.Errorf("%q: items %v, noAI %v; want %v, %v", c.query, ids, r.NoAI, c.ids, c.noAI)
 		}
 	}
+	if _, err := st.SetBlock(ctx, core.BlockPerson, person, "", core.BlockLabel); err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := s.Search(ctx, "Ali at the beach")
+	if err != nil || !blocked.Blocked || len(blocked.Items) != 0 {
+		t.Errorf("blocked name search = %+v, %v", blocked, err)
+	}
 	if _, err := s.CreateLabel(ctx, "Eiffel Tower"); !errors.Is(err, ErrNoAI) {
 		t.Errorf("CreateLabel without AI: %v, want ErrNoAI", err)
 	}
@@ -91,7 +98,7 @@ func TestAddSourcesIsAllOrNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil)
+	s := NewLibraryService(st, nil, nil)
 	dir := t.TempDir()
 	if _, err := s.AddSources(ctx, []string{dir, filepath.Join(dir, "missing")}); !errors.Is(err, ErrFolderNotFound) {
 		t.Fatalf("AddSources with a missing folder: %v", err)

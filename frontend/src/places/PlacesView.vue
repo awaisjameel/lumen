@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { engine } from '../bridge'
+import { BlockKind, engine } from '../bridge'
+import { block } from '../shared/block'
+import Icon from '../shared/Icon.vue'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
 import { useList } from '../shared/listStore'
@@ -9,6 +11,10 @@ import SearchBox from '../search/SearchBox.vue'
 
 const { list, loaded, error, load } = useList(engine.places)
 useLiveReload(load, (c) => c.assets || c.thumbs)
+
+async function blockPlace(id: number, name: string) {
+  if (await block(BlockKind.BlockPlace, id, name)) await load()
+}
 </script>
 
 <template>
@@ -33,7 +39,16 @@ useLiveReload(load, (c) => c.assets || c.thumbs)
           :cover="place.cover"
           :cover-thumb="place.coverThumb"
           icon="pin"
-        />
+        >
+          <button
+            class="icon-btn"
+            :title="t('blocked.block')"
+            :aria-label="t('blocked.confirmTitle', { name: place.name })"
+            @click="blockPlace(place.id, place.name)"
+          >
+            <Icon name="eye-off" :size="16" />
+          </button>
+        </GroupCard>
       </div>
       <EmptyState v-else-if="loaded && !error" icon="pin" :title="t('places.empty')" :text="t('places.emptyHint')" />
     </div>

@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { AlbumKind, DateSource, engine, Kind } from '../bridge'
+import { AlbumKind, BlockKind, DateSource, engine, Kind } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { AssetDetail } from '../bridge'
 import { emptyRule } from '../albums/store'
+import { block } from '../shared/block'
 import DetailsPanel from './DetailsPanel.vue'
+
+vi.mock('../shared/block', () => ({ block: vi.fn().mockResolvedValue(false) }))
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -37,6 +40,7 @@ const detail = (id: number, camera = ''): AssetDetail => ({
   height: 100,
   lat: null,
   lon: null,
+  placeId: 0,
   favourite: false,
   paths: [],
   size: 100,
@@ -101,4 +105,12 @@ it('puts an album checkbox back when the change fails', async () => {
   await flushPromises()
   expect(box.element.checked).toBe(false)
   expect(wrapper.text()).toContain('album deleted')
+})
+
+it('preserves the drive-root separator when blocking a root-level file folder', async () => {
+  vi.mocked(engine.asset).mockResolvedValueOnce({ ...detail(1), paths: ['C:\\photo.jpg'] })
+  wrapper = mount(DetailsPanel, { props: { sel: { day: 'results', id: 1 } } })
+  await flushPromises()
+  await wrapper.get('.path button').trigger('click')
+  expect(block).toHaveBeenCalledWith(BlockKind.BlockFolder, 0, 'C:\\', false, 'C:\\')
 })

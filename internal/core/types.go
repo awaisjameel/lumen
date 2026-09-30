@@ -125,6 +125,45 @@ type Source struct {
 	Enabled bool   `json:"enabled"`
 }
 
+// BlockKind is the kind of item excluded from browsing.
+type BlockKind string
+
+// Items supported by blocking. More kinds can be added without changing the
+// existing block records.
+const (
+	BlockAsset  BlockKind = "asset"
+	BlockPerson BlockKind = "person"
+	BlockTag    BlockKind = "tag"
+	BlockPlace  BlockKind = "place"
+	BlockFolder BlockKind = "folder"
+	BlockAlbum  BlockKind = "album"
+)
+
+// BlockMode chooses whether only the label or also its covered media vanish.
+type BlockMode string
+
+// The two scopes supported by label blocks.
+const (
+	BlockLabel  BlockMode = "label"
+	BlockPhotos BlockMode = "photos"
+)
+
+// Block is a user-created visibility rule. Path is set only for folders.
+type Block struct {
+	ID       int64     `json:"id"`
+	Kind     BlockKind `json:"kind"`
+	TargetID int64     `json:"targetId"`
+	Path     string    `json:"path"`
+	Mode     BlockMode `json:"mode"`
+	Name     string    `json:"name"`
+}
+
+// BlockChange identifies a saved block and whether it was just created.
+type BlockChange struct {
+	ID      int64 `json:"id"`
+	Created bool  `json:"created"`
+}
+
 // GridItem is the minimum the grid needs to lay out and draw one cell.
 // Field names are short on purpose: a big library sends many of these.
 type GridItem struct {
@@ -291,6 +330,7 @@ type SearchResult struct {
 	Pending  int        `json:"pending"`  // photos not yet understood, so not searchable yet
 	Complete bool       `json:"complete"` // false: more matched than are shown
 	NoAI     bool       `json:"noAI"`     // the description could not be searched: the AI isn't available (see AI.Error)
+	Blocked  bool       `json:"blocked"`  // a blocked person's name occurred in the query
 }
 
 // Face is one face in a photo or video: where it is, and who it is.
@@ -345,6 +385,7 @@ type AssetDetail struct {
 	Camera    string     `json:"camera"`
 	Lat       *float64   `json:"lat"`
 	Lon       *float64   `json:"lon"`
+	PlaceID   int64      `json:"placeId"` // resolved nearby city; 0 if unknown
 	Favourite bool       `json:"favourite"`
 	Paths     []string   `json:"paths"`
 	Size      int64      `json:"size"`

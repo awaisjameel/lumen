@@ -97,13 +97,40 @@ describe('library requests', () => {
         pending: 0,
         complete: true,
         noAI: false,
+        blocked: false,
       })
     const scope = { kind: 'search', query: 'beach' } as const
     const pending = lib.setScope(scope)
     await lib.setScope(scope)
-    old.resolve({ items: result(1)[0]?.items ?? [], people: [], pending: 0, complete: true, noAI: false })
+    old.resolve({
+      items: result(1)[0]?.items ?? [],
+      people: [],
+      pending: 0,
+      complete: true,
+      noAI: false,
+      blocked: false,
+    })
     await pending
     expect(lib.days.get('results')?.[0]?.id).toBe(2)
+  })
+
+  it('removes blocked search hits immediately after a visibility change', async () => {
+    const lib = shownLibrary()
+    vi.mocked(engine.search)
+      .mockResolvedValueOnce({
+        items: result(1)[0]?.items ?? [],
+        people: [],
+        pending: 0,
+        complete: true,
+        noAI: false,
+        blocked: false,
+      })
+      .mockResolvedValueOnce({ items: [], people: [], pending: 0, complete: true, noAI: false, blocked: true })
+    await lib.setScope({ kind: 'search', query: 'Ali' })
+    expect(lib.days.get('results')?.[0]?.id).toBe(1)
+    await lib.refreshVisibility()
+    expect(lib.days.get('results')).toBeUndefined()
+    expect(lib.searchInfo?.blocked).toBe(true)
   })
 
   it('exposes failed searches instead of leaving only an indefinite loading indicator', async () => {
@@ -111,6 +138,40 @@ describe('library requests', () => {
     vi.mocked(engine.search).mockRejectedValueOnce(new Error('model unavailable'))
     await expect(lib.setScope({ kind: 'search', query: 'beach' })).rejects.toThrow('model unavailable')
     expect(lib.loadError).toContain('model unavailable')
+  })
+
+  it('clears rendered timeline media before a visibility reload finishes', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+    await lib.ensureDays([day])
+    lib.selected = { day, id: 1 }
+    lib.viewer = { day, id: 1 }
+    const pending = deferred<DayBucket[]>()
+    vi.mocked(engine.timeline).mockReturnValueOnce(pending.promise)
+    const refresh = lib.refreshVisibility()
+    expect(lib.days.size).toBe(0)
+    expect(lib.selected).toBeNull()
+    expect(lib.viewer).toBeNull()
+    pending.resolve(buckets)
+    await refresh
+  })
+
+  it('discards pre-block day requests even while the grid is detached', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    const old = deferred<DayItems[]>()
+    vi.mocked(engine.days).mockReturnValueOnce(old.promise).mockResolvedValueOnce(result(2))
+    const pending = lib.ensureDays([day])
+    lib.detach()
+    await lib.refreshVisibility()
+    old.resolve(result(1))
+    await pending
+    expect(lib.days.size).toBe(0)
+    lib.attach()
+    await lib.setScope(all)
+    await lib.ensureDays([day])
+    expect(lib.days.get(day)?.[0]?.id).toBe(2)
   })
 
   it('does not drop a change received while refreshing', async () => {

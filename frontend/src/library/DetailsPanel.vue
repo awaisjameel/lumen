@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { AlbumKind, DateSource, engine, MAX_NAME_LEN, TagSource } from '../bridge'
+import { AlbumKind, BlockKind, DateSource, engine, MAX_NAME_LEN, TagSource } from '../bridge'
 import type { AssetDetail, AssetTag, Face } from '../bridge'
 import { errorText, logError } from '../shared/errors'
+import { block } from '../shared/block'
 import { bytes, dateTime, duration, megapixels } from '../shared/format'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
@@ -205,6 +206,37 @@ function removeTag(tag: AssetTag) {
     )
 }
 
+async function blockAsset() {
+  const item = detail.value
+  if (!item) return
+  if (await block(BlockKind.BlockAsset, item.id, item.paths[0] || String(item.id), false)) {
+    lib.showDetails = false
+    lib.viewer = null
+    lib.selected = null
+  }
+}
+
+async function blockThing(tag: AssetTag) {
+  if (await block(BlockKind.BlockTag, tag.id, tag.name)) await loadExtras(props.sel?.id)
+}
+
+async function blockPerson(face: Face) {
+  if (face.person && (await block(BlockKind.BlockPerson, face.person, face.name || t('person.unnamed'))))
+    await loadExtras(props.sel?.id)
+}
+
+async function blockPlace() {
+  const id = detail.value?.placeId
+  if (id && (await block(BlockKind.BlockPlace, id, t('details.location')))) await loadExtras(props.sel?.id)
+}
+
+async function blockFolder(path: string) {
+  const cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'))
+  if (cut <= 0) return
+  const folder = path.slice(0, cut === 2 && path[1] === ':' ? cut + 1 : cut)
+  if (await block(BlockKind.BlockFolder, 0, folder, false, folder)) await loadExtras(props.sel?.id)
+}
+
 function nameFace(face: Face, name: string) {
   const id = detail.value?.id
   if (id)
@@ -295,6 +327,7 @@ function showInFolder(id: number) {
       <section v-if="detail.lat !== null && detail.lon !== null">
         <h3>{{ t('details.location') }}</h3>
         <p class="mono">{{ detail.lat.toFixed(5) }}, {{ detail.lon.toFixed(5) }}</p>
+        <button v-if="detail.placeId" class="btn btn-subtle" @click="blockPlace">{{ t('blocked.blockPlace') }}</button>
       </section>
 
       <section>
@@ -313,6 +346,13 @@ function showInFolder(id: number) {
               @click="removeTag(tag)"
             >
               <Icon name="close" :size="12" />
+            </button>
+            <button
+              :title="t('blocked.confirmTitle', { name: tag.name })"
+              :aria-label="t('blocked.confirmTitle', { name: tag.name })"
+              @click="blockThing(tag)"
+            >
+              <Icon name="eye-off" :size="12" />
             </button>
           </li>
         </ul>
@@ -369,6 +409,14 @@ function showInFolder(id: number) {
               >
                 <Icon name="close" :size="12" />
               </button>
+              <button
+                class="not"
+                :title="t('blocked.confirmTitle', { name: f.name || t('person.unnamed') })"
+                :aria-label="t('blocked.confirmTitle', { name: f.name || t('person.unnamed') })"
+                @click="blockPerson(f)"
+              >
+                <Icon name="eye-off" :size="12" />
+              </button>
             </template>
             <PersonPicker v-else class="who" :placeholder="t('details.whoIsThis')" @pick="(n) => nameFace(f, n)" />
           </li>
@@ -380,10 +428,16 @@ function showInFolder(id: number) {
         <p v-if="detail.paths.length > 1" class="muted small">
           {{ t('details.copies', { n: detail.paths.length }) }}
         </p>
-        <p v-for="p in detail.paths" :key="p" class="path" :title="p">{{ p }}</p>
+        <div v-for="p in detail.paths" :key="p" class="path" :title="p">
+          {{ p }}
+          <button class="btn btn-subtle" :aria-label="t('blocked.blockFolder', { path: p })" @click="blockFolder(p)">
+            {{ t('blocked.blockFolderShort') }}
+          </button>
+        </div>
       </section>
 
       <div class="actions">
+        <button class="btn" @click="blockAsset"><Icon name="eye-off" :size="16" />{{ t('blocked.block') }}</button>
         <button class="btn" @click="lib.toggleFavourite(props.sel)">
           <Icon :name="detail.favourite ? 'heart-filled' : 'heart'" :size="16" />
           {{ detail.favourite ? t('details.unfavourite') : t('details.favourite') }}
@@ -405,14 +459,17 @@ function showInFolder(id: number) {
   gap: 8px;
   margin: 6px 0;
 }
+
 .album-new {
   display: flex;
   align-items: center;
   margin-top: 8px;
 }
+
 .album-new .field {
   flex: 1;
 }
+
 .details {
   width: var(--details-w);
   flex-shrink: 0;
@@ -421,6 +478,7 @@ function showInFolder(id: number) {
   overflow-y: auto;
   user-select: text;
 }
+
 header {
   display: flex;
   align-items: center;
@@ -428,16 +486,20 @@ header {
   height: var(--topbar-h);
   padding: 0 8px 0 20px;
 }
+
 h2 {
   margin: 0;
   font: 600 16px var(--font-display);
 }
+
 .pad {
   padding: 0 20px 20px;
 }
+
 section {
   margin-bottom: 18px;
 }
+
 h3 {
   margin: 0 0 4px;
   font-size: 12px;
@@ -446,30 +508,37 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
 p {
   margin: 0;
 }
+
 .small {
   font-size: 12px;
 }
+
 .mono {
   font-variant-numeric: tabular-nums;
 }
+
 .path {
   font-size: 12px;
   color: var(--text-2);
   word-break: break-all;
   margin-bottom: 4px;
 }
+
 .error {
   margin-top: 12px;
   color: var(--danger);
 }
+
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
+
 .tags {
   display: flex;
   flex-wrap: wrap;
@@ -478,6 +547,7 @@ p {
   padding: 0;
   list-style: none;
 }
+
 .tags li {
   display: flex;
   align-items: center;
@@ -488,17 +558,21 @@ p {
   background: var(--accent-soft);
   font-size: 12px;
 }
+
 .tags li.ai {
   border-color: var(--border);
   background: var(--surface-2);
 }
+
 .tags a {
   color: var(--text);
   text-decoration: none;
 }
+
 .tags a:hover {
   text-decoration: underline;
 }
+
 .tags button {
   display: grid;
   place-items: center;
@@ -510,13 +584,16 @@ p {
   color: var(--text-3);
   cursor: pointer;
 }
+
 .tags button:hover {
   color: var(--text);
 }
+
 .add-tag {
   width: 100%;
   margin-top: 4px;
 }
+
 .faces {
   display: flex;
   flex-direction: column;
@@ -525,11 +602,13 @@ p {
   padding: 0;
   list-style: none;
 }
+
 .faces li {
   display: flex;
   align-items: center;
   gap: 10px;
 }
+
 .who {
   flex: 1;
   min-width: 0;
@@ -539,9 +618,11 @@ p {
   color: var(--text);
   text-decoration: none;
 }
+
 a.who:hover {
   text-decoration: underline;
 }
+
 .not {
   display: grid;
   place-items: center;
@@ -554,6 +635,7 @@ a.who:hover {
   color: var(--text-3);
   cursor: pointer;
 }
+
 .not:hover {
   background: var(--surface-hover);
   color: var(--text);

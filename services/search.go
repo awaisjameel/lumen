@@ -36,6 +36,13 @@ func NewSearchService(st *store.Store, engine *search.Engine, faces bool) *Searc
 // the description can't be searched (the result says so): named people's
 // photos are still found.
 func (s *SearchService) Search(ctx context.Context, query string) (core.SearchResult, error) {
+	blocked, err := s.store.BlockedNamedPeople(ctx)
+	if err != nil {
+		return core.SearchResult{}, err
+	}
+	if ids, _, _ := people.FindNames(query, blocked); len(ids) > 0 {
+		return core.SearchResult{Items: []core.GridItem{}, People: []string{}, Complete: true, Blocked: true}, nil
+	}
 	named, err := s.store.NamedPeople(ctx)
 	if err != nil {
 		return core.SearchResult{}, err
@@ -150,11 +157,6 @@ func (s *SearchService) DeleteTag(ctx context.Context, id int64) error {
 		s.engine.ForgetLabel(ctx, id)
 	}
 	return nil
-}
-
-// SetTagHidden hides a Thing from the Things view, or shows it again.
-func (s *SearchService) SetTagHidden(ctx context.Context, id int64, hidden bool) error {
-	return s.store.SetTagHidden(ctx, id, hidden)
 }
 
 // AssetTags lists the tags on one photo.

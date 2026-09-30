@@ -57,13 +57,6 @@ export function Search(query: string): $CancellablePromise<core$0.SearchResult> 
 }
 
 /**
- * SetTagHidden hides a Thing from the Things view, or shows it again.
- */
-export function SetTagHidden(id: number, hidden: boolean): $CancellablePromise<void> {
-    return $Call.ByID(3211371424, id, hidden);
-}
-
-/**
  * SuggestTags returns Things whose names contain text, for the search box
  * (their id, name and kind; no counts).
  */

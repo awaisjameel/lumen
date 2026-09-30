@@ -241,10 +241,51 @@ func isUnique(err error) bool {
 //   - present: every asset with a file on disk, hidden or trashed ones too.
 //     The indexer processes these (so a restored photo is ready at once), and
 //     their details and files can still be opened.
+const present = "missing_since IS NULL"
+
+// blockVisible is correlated with one assets row. The base predicate remains
+// literal in every query so SQLite can still use assets_timeline. A block is
+// evaluated against current metadata, membership and file paths: newly indexed
+// media is covered without an extra queue or stale saved membership.
+func blockVisible(asset string) string {
+	return `NOT EXISTS (SELECT 1 FROM blocks b WHERE b.mode = 'photos' AND (
+		(b.kind = 'asset' AND b.target_id = ` + asset + `.id)
+		OR (b.kind = 'person' AND EXISTS (SELECT 1 FROM faces f WHERE f.asset_id = ` + asset + `.id AND f.person_id = b.target_id))
+		OR (b.kind = 'tag' AND EXISTS (SELECT 1 FROM asset_tags x WHERE x.asset_id = ` + asset + `.id
+			AND x.tag_id = b.target_id AND (x.source = 'user' OR (x.source = 'ai' AND x.score >=
+			COALESCE((SELECT CAST(value AS REAL) FROM settings WHERE key = 'tag_confidence'), 0.02)))))
+		OR (b.kind = 'place' AND b.target_id = ` + asset + `.place_id)
+		OR (b.kind = 'folder' AND EXISTS (SELECT 1 FROM files f WHERE f.asset_id = ` + asset + `.id
+			AND (fold(f.path) = fold(b.path) OR instr(fold(f.path), fold(rtrim(b.path, '\') || '\')) = 1)))
+		OR (b.kind = 'album' AND EXISTS (SELECT 1 FROM albums ab WHERE ab.id = b.target_id AND (
+			(ab.kind = 'manual' AND EXISTS (SELECT 1 FROM album_items i WHERE i.asset_id = ` + asset + `.id AND i.album_id = ab.id))
+			OR (ab.kind = 'smart'
+				AND (COALESCE(json_extract(ab.rule_json, '$.kind'), '') = '' OR json_extract(ab.rule_json, '$.kind') = ` + asset + `.kind)
+				AND (COALESCE(json_extract(ab.rule_json, '$.favourites'), 0) = 0 OR ` + asset + `.favourite = 1)
+				AND (COALESCE(json_extract(ab.rule_json, '$.from'), '') = '' OR
+					strftime('%Y-%m-%d', ` + asset + `.taken_at, 'unixepoch') >= json_extract(ab.rule_json, '$.from'))
+				AND (COALESCE(json_extract(ab.rule_json, '$.to'), '') = '' OR
+					strftime('%Y-%m-%d', ` + asset + `.taken_at, 'unixepoch') <= json_extract(ab.rule_json, '$.to'))
+				AND (COALESCE(json_extract(ab.rule_json, '$.tag'), 0) = 0 OR EXISTS
+					(SELECT 1 FROM asset_tags x WHERE x.asset_id = ` + asset + `.id AND x.tag_id = json_extract(ab.rule_json, '$.tag')
+					AND (x.source = 'user' OR (x.source = 'ai' AND x.score >=
+					COALESCE((SELECT CAST(value AS REAL) FROM settings WHERE key = 'tag_confidence'), 0.02)))))
+				AND (COALESCE(json_extract(ab.rule_json, '$.person'), 0) = 0 OR EXISTS
+					(SELECT 1 FROM faces f WHERE f.asset_id = ` + asset + `.id AND f.person_id = json_extract(ab.rule_json, '$.person')))
+			)
+		)))
+	))`
+}
+
+var (
+	visible  = baseVisible + " AND " + blockVisible("assets")
+	visibleA = baseVisibleA + " AND " + blockVisible("a")
+	visibleX = "x.hidden = 0 AND x.trashed_at IS NULL AND x.missing_since IS NULL AND " + blockVisible("x")
+)
+
 const (
-	visible  = "hidden = 0 AND trashed_at IS NULL AND missing_since IS NULL"
-	visibleA = "a.hidden = 0 AND a.trashed_at IS NULL AND a.missing_since IS NULL" // assets joined as "a"
-	present  = "missing_since IS NULL"
+	baseVisible  = "hidden = 0 AND trashed_at IS NULL AND missing_since IS NULL"
+	baseVisibleA = "a.hidden = 0 AND a.trashed_at IS NULL AND a.missing_since IS NULL"
 )
 
 // What a smart album's rule selects by (albums.rule_json holds a core.AlbumRule).

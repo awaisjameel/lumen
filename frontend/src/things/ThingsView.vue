@@ -1,15 +1,14 @@
 <script setup lang="ts">
 // Things: what's in the photos, as cards (cover, name, count). The AI fills
 // the built-in ones; people add their own ("Eiffel Tower") and the AI finds
-// those across the library straight away. Built-ins can be hidden, the
-// user's own deleted.
+// those across the library straight away. User labels can be deleted.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { engine, MAX_NAME_LEN, TagKind, thumbUrl } from '../bridge'
+import { BlockKind, engine, MAX_NAME_LEN, TagKind, thumbUrl } from '../bridge'
 import type { Tag } from '../bridge'
 import { confirm } from '../shared/confirm'
+import { block } from '../shared/block'
 import { errorText, logError } from '../shared/errors'
-import { useHidden } from '../shared/hidden'
 import { t } from '../shared/i18n'
 import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
@@ -28,11 +27,10 @@ const error = ref('')
 let active = true
 onBeforeUnmount(() => (active = false))
 
-// Built-ins without photos never show, hidden or not.
-const listed = computed(() => things.list.filter((x) => x.kind !== TagKind.TagBuiltin || x.count > 0))
-const { showHidden, hiddenCount, shown, toggleLabel } = useHidden(listed)
-const mine = computed(() => shown.value.filter((x) => x.kind !== TagKind.TagBuiltin))
-const builtin = computed(() => shown.value.filter((x) => x.kind === TagKind.TagBuiltin))
+// Built-ins without photos and the internal sink kind never show.
+const listed = computed(() => things.list.filter((x) => !x.hidden && (x.kind !== TagKind.TagBuiltin || x.count > 0)))
+const mine = computed(() => listed.value.filter((x) => x.kind !== TagKind.TagBuiltin))
+const builtin = computed(() => listed.value.filter((x) => x.kind === TagKind.TagBuiltin))
 const aiError = computed(() => lib.progress?.ai.error ?? '')
 const understanding = computed(() => lib.progress?.embedding ?? 0)
 
@@ -68,7 +66,10 @@ async function act(fn: () => Promise<void>) {
   }
 }
 
-const hide = (tag: Tag) => act(() => engine.setTagHidden(tag.id, !tag.hidden))
+const blockTag = (tag: Tag) =>
+  act(async () => {
+    await block(BlockKind.BlockTag, tag.id, tag.name)
+  })
 
 async function remove(tag: Tag) {
   if (await confirm(t('things.deleteTitle', { name: tag.name }), t('things.deleteText'), t('things.delete'))) {
@@ -108,7 +109,7 @@ async function remove(tag: Tag) {
       <template v-if="mine.length">
         <h2>{{ t('things.yours') }}</h2>
         <div class="cards">
-          <div v-for="x in mine" :key="x.id" class="card" :class="{ hidden: x.hidden }">
+          <div v-for="x in mine" :key="x.id" class="card">
             <RouterLink :to="{ name: 'thing', params: { id: x.id } }" class="card-cover" :aria-label="x.name">
               <img
                 v-if="x.cover"
@@ -125,6 +126,14 @@ async function remove(tag: Tag) {
               <span class="card-count">{{ x.count ? t('status.items', { n: x.count }) : t('things.noPhotos') }}</span>
             </div>
             <button
+              class="icon-btn card-act block-act"
+              :title="t('blocked.block')"
+              :aria-label="t('blocked.confirmTitle', { name: x.name })"
+              @click="blockTag(x)"
+            >
+              <Icon name="eye-off" :size="16" />
+            </button>
+            <button
               class="icon-btn card-act"
               :title="t('things.delete')"
               :aria-label="t('things.deleteNamed', { name: x.name })"
@@ -138,7 +147,7 @@ async function remove(tag: Tag) {
 
       <h2 v-if="mine.length && builtin.length">{{ t('nav.things') }}</h2>
       <div v-if="builtin.length" class="cards">
-        <div v-for="x in builtin" :key="x.id" class="card" :class="{ hidden: x.hidden }">
+        <div v-for="x in builtin" :key="x.id" class="card">
           <RouterLink :to="{ name: 'thing', params: { id: x.id } }" class="card-cover" :aria-label="x.name">
             <img
               v-if="x.cover"
@@ -156,11 +165,11 @@ async function remove(tag: Tag) {
           </div>
           <button
             class="icon-btn card-act"
-            :title="x.hidden ? t('things.unhide') : t('things.hide')"
-            :aria-label="x.hidden ? t('things.unhide') : t('things.hide')"
-            @click="hide(x)"
+            :title="t('blocked.block')"
+            :aria-label="t('blocked.confirmTitle', { name: x.name })"
+            @click="blockTag(x)"
           >
-            <Icon :name="x.hidden ? 'eye' : 'eye-off'" :size="16" />
+            <Icon name="eye-off" :size="16" />
           </button>
         </div>
       </div>
@@ -172,10 +181,6 @@ async function remove(tag: Tag) {
         :title="t('things.empty')"
         :text="understanding ? t('things.emptyWorking', { n: understanding }) : t('things.emptyHint')"
       />
-
-      <button v-if="hiddenCount" class="btn btn-subtle show-hidden" @click="showHidden = !showHidden">
-        {{ toggleLabel }}
-      </button>
     </div>
   </div>
 </template>
@@ -201,7 +206,7 @@ h2 {
 .empty {
   margin-top: 36px;
 }
-.show-hidden {
-  margin-top: 20px;
+.block-act {
+  right: 42px;
 }
 </style>

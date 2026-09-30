@@ -159,7 +159,8 @@ func (s *Store) DeleteAlbum(ctx context.Context, id int64) error {
 }
 
 func album(ctx context.Context, q querier, id int64) (core.Album, error) {
-	albums, err := queryAll(ctx, q, scanAlbum, `SELECT id, name, kind, COALESCE(rule_json, '{}') FROM albums WHERE id = ?`, id)
+	albums, err := queryAll(ctx, q, scanAlbum, `SELECT id, name, kind, COALESCE(rule_json, '{}') FROM albums WHERE id = ?
+		AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'album' AND b.target_id = albums.id)`, id)
 	if err != nil {
 		return core.Album{}, err
 	}
@@ -176,6 +177,7 @@ func (s *Store) Albums(ctx context.Context, minScore float32) ([]core.Album, err
 	var albums []core.Album
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
 		albums, err = queryAll(ctx, tx, scanAlbum, `SELECT id, name, kind, COALESCE(rule_json, '{}') FROM albums
+			WHERE NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'album' AND b.target_id = albums.id)
 			ORDER BY name COLLATE NOCASE`)
 		if err != nil {
 			return err
@@ -226,7 +228,9 @@ func albumFilter(a core.Album) assetFilter {
 // AssetAlbums returns the manual collections an asset belongs to. Smart albums
 // are computed from their rule and shown in the album browser.
 func (s *Store) AssetAlbums(ctx context.Context, assetID int64) ([]int64, error) {
-	return queryAll(ctx, s.r, scanID, `SELECT album_id FROM album_items WHERE asset_id = ?`, assetID)
+	return queryAll(ctx, s.r, scanID, `SELECT i.album_id FROM album_items i WHERE i.asset_id = ?
+		AND EXISTS (SELECT 1 FROM assets WHERE id = i.asset_id AND `+visible+`)
+		AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'album' AND b.target_id = i.album_id)`, assetID)
 }
 
 // SetAlbumItem adds or removes an asset from a manual album.

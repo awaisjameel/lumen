@@ -6,6 +6,8 @@ import { Events } from '@wailsio/runtime'
 import { LibraryService, MediaService, PeopleService, SearchService } from '../../bindings/lumen/services'
 import {
   AlbumKind,
+  BlockKind,
+  BlockMode,
   DateSource,
   Device,
   DuplicateKind,
@@ -17,6 +19,8 @@ import {
 } from '../../bindings/lumen/internal/core'
 import type {
   Album,
+  Block,
+  BlockChange,
   AlbumRule,
   AssetDetail as RawAssetDetail,
   AssetTag,
@@ -38,10 +42,24 @@ import type {
   View,
 } from '../../bindings/lumen/internal/core'
 
-export { AlbumKind, DateSource, Device, DuplicateKind, Filter, Kind, Playback, TagKind, TagSource }
+export {
+  AlbumKind,
+  BlockKind,
+  BlockMode,
+  DateSource,
+  Device,
+  DuplicateKind,
+  Filter,
+  Kind,
+  Playback,
+  TagKind,
+  TagSource,
+}
 export type {
   Album,
   AlbumRule,
+  Block,
+  BlockChange,
   AssetTag,
   Changes,
   DayBucket,
@@ -99,6 +117,7 @@ export const ErrorCode = {
   AlbumExists: 'album_exists',
   InvalidAlbum: 'invalid_album',
   PersonExists: 'person_exists',
+  BlockedName: 'blocked_name',
   TagExists: 'tag_exists',
   BuiltinTag: 'builtin_tag',
   TagInAlbum: 'tag_in_album',
@@ -115,6 +134,14 @@ export function errorCode(e: unknown): ErrorCode | undefined {
   if (typeof cause !== 'object' || cause === null || !('code' in cause)) return undefined
   const code = cause.code
   return typeof code === 'string' && errorCodes.has(code) ? (code as ErrorCode) : undefined
+}
+
+let blockSession = Promise.resolve()
+
+function queueBlockSession(action: () => Promise<void>): Promise<void> {
+  const next = blockSession.then(action)
+  blockSession = next.catch(() => undefined)
+  return next
 }
 
 export const engine = {
@@ -166,6 +193,16 @@ export const engine = {
   setTagConfidence: (v: number): Promise<void> => LibraryService.SetTagConfidence(v),
   setEventGapHours: (hours: number): Promise<void> => LibraryService.SetEventGapHours(hours),
 
+  blockPINConfigured: (): Promise<boolean> => LibraryService.BlockPINConfigured(),
+  createBlockPIN: (pin: string): Promise<void> => LibraryService.CreateBlockPIN(pin),
+  unlockBlocks: (pin: string): Promise<void> => queueBlockSession(() => LibraryService.UnlockBlocks(pin)),
+  lockBlocks: (): Promise<void> => queueBlockSession(() => LibraryService.LockBlocks()),
+  blocks: async (): Promise<Block[]> => (await LibraryService.Blocks()) ?? [],
+  setBlock: (kind: BlockKind, targetID: number, path: string, mode: BlockMode): Promise<BlockChange> =>
+    LibraryService.SetBlock(kind, targetID, path, mode),
+  removeBlock: (id: number): Promise<void> => LibraryService.RemoveBlock(id),
+  undoBlock: (id: number): Promise<void> => LibraryService.UndoBlock(id),
+
   search: async (query: string): Promise<SearchResults> => {
     const r = await SearchService.Search(query)
     return { ...r, items: r.items ?? [], people: r.people ?? [] }
@@ -175,7 +212,6 @@ export const engine = {
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],
   createLabel: (name: string): Promise<number> => SearchService.CreateLabel(name),
   deleteTag: (id: number): Promise<void> => SearchService.DeleteTag(id),
-  setTagHidden: (id: number, hidden: boolean): Promise<void> => SearchService.SetTagHidden(id, hidden),
   assetTags: async (id: number): Promise<AssetTag[]> => (await SearchService.AssetTags(id)) ?? [],
   tagAsset: (id: number, name: string): Promise<void> => SearchService.TagAsset(id, name),
   untagAsset: (id: number, tagID: number): Promise<void> => SearchService.UntagAsset(id, tagID),
@@ -188,7 +224,6 @@ export const engine = {
   personByName: (name: string): Promise<number> => PeopleService.PersonByName(name),
   namePerson: (id: number, name: string): Promise<void> => PeopleService.NamePerson(id, name),
   mergePeople: (from: number, into: number): Promise<void> => PeopleService.MergePeople(from, into),
-  setPersonHidden: (id: number, hidden: boolean): Promise<void> => PeopleService.SetPersonHidden(id, hidden),
   setPersonCover: (id: number, face: number): Promise<void> => PeopleService.SetPersonCover(id, face),
   rejectFaces: (person: number, faces: number[]): Promise<void> => PeopleService.RejectFaces(person, faces),
   nameFaces: (faces: number[], name: string): Promise<number> => PeopleService.NameFaces(faces, name),

@@ -72,11 +72,6 @@ func (s *PeopleService) MergePeople(ctx context.Context, from, into int64) error
 	return s.edited(s.store.MergePeople(ctx, from, into))
 }
 
-// SetPersonHidden hides someone from People, or shows them again.
-func (s *PeopleService) SetPersonHidden(ctx context.Context, id int64, hidden bool) error {
-	return s.store.SetPersonHidden(ctx, id, hidden)
-}
-
 // SetPersonCover shows one of a person's faces for them.
 func (s *PeopleService) SetPersonCover(ctx context.Context, id, face int64) error {
 	return s.store.SetPersonCover(ctx, id, face)

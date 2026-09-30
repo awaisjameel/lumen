@@ -3,6 +3,8 @@
 
 export {
     AlbumKind,
+    BlockKind,
+    BlockMode,
     DateSource,
     Device,
     DuplicateKind,
@@ -19,6 +21,8 @@ export type {
     AlbumRule,
     AssetDetail,
     AssetTag,
+    Block,
+    BlockChange,
     Changes,
     DayBucket,
     DayItems,

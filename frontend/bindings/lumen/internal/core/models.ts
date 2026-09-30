@@ -83,6 +83,11 @@ export interface AssetDetail {
     "camera": string;
     "lat": number | null;
     "lon": number | null;
+
+    /**
+     * resolved nearby city; 0 if unknown
+     */
+    "placeId": number;
     "favourite": boolean;
     "paths": string[] | null;
     "size": number;
@@ -113,6 +118,63 @@ export interface AssetTag {
      */
     "score": number;
 }
+
+/**
+ * Block is a user-created visibility rule. Path is set only for folders.
+ */
+export interface Block {
+    "id": number;
+    "kind": BlockKind;
+    "targetId": number;
+    "path": string;
+    "mode": BlockMode;
+    "name": string;
+}
+
+/**
+ * BlockChange identifies a saved block and whether it was just created.
+ */
+export interface BlockChange {
+    "id": number;
+    "created": boolean;
+}
+
+/**
+ * BlockKind is the kind of item excluded from browsing.
+ */
+export enum BlockKind {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * Items supported by blocking. More kinds can be added without changing the
+     * existing block records.
+     */
+    BlockAsset = "asset",
+    BlockPerson = "person",
+    BlockTag = "tag",
+    BlockPlace = "place",
+    BlockFolder = "folder",
+    BlockAlbum = "album",
+};
+
+/**
+ * BlockMode chooses whether only the label or also its covered media vanish.
+ */
+export enum BlockMode {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The two scopes supported by label blocks.
+     */
+    BlockLabel = "label",
+    BlockPhotos = "photos",
+};
 
 /**
  * Changes says what changed in the library: the payload of library:changed,
@@ -514,6 +576,11 @@ export interface SearchResult {
      * the description could not be searched: the AI isn't available (see AI.Error)
      */
     "noAI": boolean;
+
+    /**
+     * a blocked person's name occurred in the query
+     */
+    "blocked": boolean;
 }
 
 /**

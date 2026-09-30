@@ -66,9 +66,10 @@ type Engine struct {
 	queries  map[string][]float32 // recent query embeddings
 	shipped  map[string][]float32 // the built-in Things' prompts, encoded when Lumen was built
 
-	unavailableMu sync.Mutex
-	unavailable   map[int64]bool
-	unavailableAt time.Time
+	unavailableMu       sync.Mutex
+	unavailable         map[int64]bool
+	unavailableAt       time.Time
+	unavailableRevision int64
 
 	labelsMu sync.RWMutex
 	labels   []label
@@ -199,7 +200,7 @@ func (e *Engine) syncVocabulary(ctx context.Context) (bool, error) {
 	}
 	labels := make([]store.VocabLabel, len(Vocabulary))
 	for i, l := range Vocabulary {
-		labels[i] = store.VocabLabel{Name: l.Name, Prompts: l.Prompts, Exclusive: l.Exclusive, Hidden: l.Sink}
+		labels[i] = store.VocabLabel{Name: l.Name, Prompts: l.Prompts, Exclusive: l.Exclusive, Hidden: l.Sink, Sink: l.Sink}
 	}
 	if err := e.store.SyncVocabulary(ctx, labels); err != nil {
 		return false, err
@@ -540,7 +541,11 @@ func cleanQuery(query string) string {
 func (e *Engine) unavailableAssets(ctx context.Context) (map[int64]bool, error) {
 	e.unavailableMu.Lock()
 	defer e.unavailableMu.Unlock()
-	if e.unavailable != nil && time.Since(e.unavailableAt) < unavailableTTL {
+	revision, err := e.store.VisibilityRevision(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if e.unavailable != nil && e.unavailableRevision == revision && time.Since(e.unavailableAt) < unavailableTTL {
 		return e.unavailable, nil
 	}
 	set, err := e.store.UnavailableAssets(ctx)
@@ -548,6 +553,7 @@ func (e *Engine) unavailableAssets(ctx context.Context) (map[int64]bool, error) 
 		return nil, err
 	}
 	e.unavailable, e.unavailableAt = set, time.Now()
+	e.unavailableRevision = revision
 	return set, nil
 }
 

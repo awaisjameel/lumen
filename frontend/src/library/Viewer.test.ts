@@ -22,6 +22,7 @@ const detail: AssetDetail = {
   camera: '',
   lat: null,
   lon: null,
+  placeId: 0,
   favourite: false,
   paths: [],
   size: 100,

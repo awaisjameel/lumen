@@ -418,6 +418,9 @@ const searchNotes = computed(() => {
       </header>
 
       <p v-for="n in searchNotes" :key="n" class="note">{{ n }}</p>
+      <p v-if="lib.isSearch && lib.searchInfo?.blocked" class="note">
+        {{ t('search.blocked') }} <RouterLink to="/settings/blocked">{{ t('search.openBlocked') }}</RouterLink>
+      </p>
 
       <div class="grid-wrap">
         <div

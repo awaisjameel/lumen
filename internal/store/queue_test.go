@@ -199,9 +199,11 @@ func TestUpgradeMovesBlockedJobsToWaiting(t *testing.T) {
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE places")))
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX assets_pending_place")))
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX assets_event_cover")))
-	for _, trigger := range []string{"event_asset_added", "event_asset_changed", "event_asset_deleted", "event_name_added", "event_name_changed", "event_name_deleted", "event_cover_changed"} {
-		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER "+trigger))) // added by v12
+	for _, trigger := range []string{"event_asset_added", "event_asset_changed", "event_asset_deleted", "event_name_added", "event_name_changed", "event_name_deleted", "event_cover_changed", "event_block_added", "event_block_changed", "event_block_deleted", "event_block_face_added", "event_block_face_changed", "event_block_face_deleted", "event_block_tag_added", "event_block_tag_changed", "event_block_tag_deleted", "event_block_album_added", "event_block_album_deleted", "event_block_album_rule_changed", "event_block_favourite_changed", "event_block_confidence_changed", "event_block_confidence_added", "event_block_file_added", "event_block_file_changed", "event_block_file_deleted", "block_asset_deleted", "block_person_deleted", "block_tag_deleted", "block_place_deleted", "block_album_deleted"} {
+		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER IF EXISTS "+trigger))) // added after v7
 	}
+	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE blocks")))
+	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE tags DROP COLUMN is_sink")))
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE event_revision")))
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE event_names"))) // added by v11
 	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE assets DROP COLUMN place_checked")))

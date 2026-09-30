@@ -91,13 +91,6 @@ export function SetPersonCover(id: number, face: number): $CancellablePromise<vo
 }
 
 /**
- * SetPersonHidden hides someone from People, or shows them again.
- */
-export function SetPersonHidden(id: number, hidden: boolean): $CancellablePromise<void> {
-    return $Call.ByID(4093825544, id, hidden);
-}
-
-/**
  * SuggestPeople returns named people whose names contain text.
  */
 export function SuggestPeople(text: string): $CancellablePromise<core$0.Person[] | null> {

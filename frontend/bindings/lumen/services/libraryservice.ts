@@ -45,11 +45,32 @@ export function AssetAlbums(id: number): $CancellablePromise<number[] | null> {
 }
 
 /**
+ * BlockPINConfigured reports whether the first block must establish a PIN.
+ */
+export function BlockPINConfigured(): $CancellablePromise<boolean> {
+    return $Call.ByID(2718993985);
+}
+
+/**
+ * Blocks lists the user's visibility rules after PIN unlock.
+ */
+export function Blocks(): $CancellablePromise<core$0.Block[] | null> {
+    return $Call.ByID(2232310235);
+}
+
+/**
  * CreateAlbum saves a new manual album holding items, or a smart rule (no
  * items), in one step.
  */
 export function CreateAlbum(name: string, kind: core$0.AlbumKind, rule: core$0.AlbumRule, items: number[] | null): $CancellablePromise<number> {
     return $Call.ByID(1673588108, name, kind, rule, items);
+}
+
+/**
+ * CreateBlockPIN establishes the local PIN once, before the first block.
+ */
+export function CreateBlockPIN(pin: string): $CancellablePromise<void> {
+    return $Call.ByID(2028167545, pin);
 }
 
 /**
@@ -95,6 +116,13 @@ export function Focus($from: string, to: string): $CancellablePromise<void> {
 }
 
 /**
+ * LockBlocks closes access to the private list as the user leaves the screen.
+ */
+export function LockBlocks(): $CancellablePromise<void> {
+    return $Call.ByID(3334848804);
+}
+
+/**
  * PickFolder opens the native folder picker. It returns "" if cancelled.
  */
 export function PickFolder(): $CancellablePromise<string> {
@@ -120,6 +148,13 @@ export function Places(): $CancellablePromise<core$0.Place[] | null> {
  */
 export function Progress(): $CancellablePromise<core$0.Progress> {
     return $Call.ByID(893265502);
+}
+
+/**
+ * RemoveBlock restores the current view of a blocked item.
+ */
+export function RemoveBlock(id: number): $CancellablePromise<void> {
+    return $Call.ByID(72840834, id);
 }
 
 /**
@@ -149,6 +184,13 @@ export function SetAIOnBattery(on: boolean): $CancellablePromise<void> {
  */
 export function SetAlbumItem(albumID: number, assetID: number, include: boolean): $CancellablePromise<void> {
     return $Call.ByID(1841706489, albumID, assetID, include);
+}
+
+/**
+ * SetBlock adds or changes one visibility rule.
+ */
+export function SetBlock(kind: core$0.BlockKind, targetID: number, path: string, mode: core$0.BlockMode): $CancellablePromise<core$0.BlockChange> {
+    return $Call.ByID(1878060628, kind, targetID, path, mode);
 }
 
 /**
@@ -229,6 +271,21 @@ export function SuggestedFolders(): $CancellablePromise<string[] | null> {
  */
 export function Timeline(view: core$0.View): $CancellablePromise<core$0.DayBucket[] | null> {
     return $Call.ByID(636808110, view);
+}
+
+/**
+ * UndoBlock removes the most recent new block during its short Undo window.
+ */
+export function UndoBlock(id: number): $CancellablePromise<void> {
+    return $Call.ByID(2625728520, id);
+}
+
+/**
+ * UnlockBlocks unlocks the private list until LockBlocks is called. Repeated
+ * guesses are delayed in the process; reopening the application relocks it.
+ */
+export function UnlockBlocks(pin: string): $CancellablePromise<void> {
+    return $Call.ByID(394854155, pin);
 }
 
 /**

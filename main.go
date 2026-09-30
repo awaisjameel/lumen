@@ -94,7 +94,7 @@ func run() error {
 
 	for _, svc := range []application.Service{
 		application.NewService(&background{ix: ix, search: models.Search, cache: cache, stream: stream}),
-		application.NewService(services.NewLibraryService(st, ix)),
+		application.NewService(services.NewLibraryService(st, ix, events)),
 		application.NewService(services.NewSearchService(st, models.Search, models.People != nil)),
 		application.NewService(services.NewPeopleService(st, models.People)),
 		application.NewServiceWithOptions(services.NewMediaService(st, cache, stream),

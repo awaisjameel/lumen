@@ -10,6 +10,7 @@ const codeText: Record<Exclude<ErrorCode, typeof ErrorCode.InvalidAlbum>, Messag
   [ErrorCode.InvalidName]: 'error.invalidName',
   [ErrorCode.AlbumExists]: 'error.albumExists',
   [ErrorCode.PersonExists]: 'error.personExists',
+  [ErrorCode.BlockedName]: 'error.blockedName',
   [ErrorCode.TagExists]: 'error.tagExists',
   [ErrorCode.BuiltinTag]: 'error.builtinTag',
   [ErrorCode.TagInAlbum]: 'error.tagInAlbum',

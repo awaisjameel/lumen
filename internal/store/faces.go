@@ -209,7 +209,7 @@ func (s *Store) ClusterData(ctx context.Context, model string) ([]ClusterFace, [
 		return f, err
 	}, `SELECT f.id, f.asset_id, f.at_ms, COALESCE(f.person_id, 0), COALESCE(f.assigned_by = 'user', 0), f.sharpness, f.yaw, f.vec
 		FROM faces f JOIN assets a ON a.id = f.asset_id
-		WHERE f.model = ? AND `+visibleA+` ORDER BY f.id`, model)
+		WHERE f.model = ? AND `+baseVisibleA+` ORDER BY f.id`, model)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -313,6 +313,11 @@ func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64) error {
 			SELECT face_id, ?2 FROM face_rejections WHERE person_id = ?1`,
 		// A face now in into can't also be rejected by it.
 		"DELETE FROM face_rejections WHERE person_id = ?2 AND face_id IN (SELECT id FROM faces WHERE person_id = ?2)",
+		`UPDATE blocks SET mode = 'photos' WHERE kind = 'person' AND target_id = ?2
+			AND EXISTS (SELECT 1 FROM blocks WHERE kind = 'person' AND target_id = ?1 AND mode = 'photos')`,
+		`UPDATE blocks SET target_id = ?2 WHERE kind = 'person' AND target_id = ?1
+			AND NOT EXISTS (SELECT 1 FROM blocks WHERE kind = 'person' AND target_id = ?2)`,
+		"DELETE FROM blocks WHERE kind = 'person' AND target_id = ?1",
 		"DELETE FROM people WHERE id = ?1",
 	} {
 		if _, err := tx.ExecContext(ctx, q, from, into); err != nil {
@@ -332,6 +337,7 @@ func dropEmptyPeople(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `DELETE FROM people WHERE name IS NULL
 		AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = people.id)
 		AND NOT EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND `+rulePerson+` = people.id)
-		AND NOT EXISTS (SELECT 1 FROM face_rejections WHERE person_id = people.id)`)
+		AND NOT EXISTS (SELECT 1 FROM face_rejections WHERE person_id = people.id)
+		AND NOT EXISTS (SELECT 1 FROM blocks WHERE kind = 'person' AND target_id = people.id)`)
 	return err
 }

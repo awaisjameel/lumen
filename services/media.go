@@ -55,6 +55,15 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	visible, err := m.store.AssetVisible(r.Context(), id)
+	if err != nil {
+		http.Error(w, "the file could not be read", http.StatusInternalServerError)
+		return
+	}
+	if !visible {
+		http.NotFound(w, r)
+		return
+	}
 	switch {
 	case parts[0] == "thumb" && len(parts) == 3:
 		size, err := strconv.Atoi(parts[2])
@@ -95,7 +104,7 @@ func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int
 			return
 		}
 	}
-	serveCached(w, r, m.cache.Path(id, size), r.URL.Query().Has("v"))
+	serveCached(w, r, m.cache.Path(id, size))
 }
 
 func (m *MediaService) serveSprite(w http.ResponseWriter, r *http.Request, id int64) {
@@ -113,7 +122,7 @@ func (m *MediaService) serveSprite(w http.ResponseWriter, r *http.Request, id in
 			return
 		}
 	}
-	serveCached(w, r, path, r.URL.Query().Has("v"))
+	serveCached(w, r, path)
 }
 
 func (m *MediaService) serveFrame(w http.ResponseWriter, r *http.Request, id, at int64) {
@@ -129,8 +138,7 @@ func (m *MediaService) serveFrame(w http.ResponseWriter, r *http.Request, id, at
 	if !served(w, err, id) {
 		return
 	}
-	w.Header().Set("Cache-Control", "private, max-age=86400") // the next version of Lumen may frame it better
-	serveCached(w, r, frame, false)
+	serveCached(w, r, frame)
 }
 
 func (m *MediaService) serveOriginal(w http.ResponseWriter, r *http.Request, id int64) {
@@ -182,17 +190,12 @@ func served(w http.ResponseWriter, err error, id int64) bool {
 	return false
 }
 
-// serveCached serves a JPEG from the thumbnail cache. versioned URLs (?v=)
-// never change: a new version gets a new URL.
-func serveCached(w http.ResponseWriter, r *http.Request, path string, versioned bool) {
-	if versioned {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	}
+// serveCached serves a JPEG from the thumbnail cache.
+func serveCached(w http.ResponseWriter, r *http.Request, path string) {
 	serveFile(w, r, path, "image/jpeg")
 }
 
-// serveFile serves a file with Range support. An asset's content never
-// changes under its id (new content is a new asset), so it may be cached.
+// serveFile serves a file with Range support and revalidates visibility.
 func serveFile(w http.ResponseWriter, r *http.Request, path, contentType string) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -207,7 +210,7 @@ func serveFile(w http.ResponseWriter, r *http.Request, path, contentType string)
 	}
 	w.Header().Set("Content-Type", contentType)
 	if w.Header().Get("Cache-Control") == "" {
-		w.Header().Set("Cache-Control", "private, max-age=86400")
+		w.Header().Set("Cache-Control", "private, no-cache")
 	}
 	http.ServeContent(w, r, "", fi.ModTime(), file)
 }

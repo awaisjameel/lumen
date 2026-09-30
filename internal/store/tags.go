@@ -27,6 +27,7 @@ type VocabLabel struct {
 	Prompts   []string
 	Exclusive bool // a broad kind of photo (see search.Label)
 	Hidden    bool // never shown (a sink kind); otherwise hiding is the user's choice
+	Sink      bool // a built-in kind the UI never shows
 }
 
 // AutoTag is a tag the AI applies, with the text embeddings of its prompts.
@@ -51,10 +52,10 @@ const tagApplies = "(x.source = 'user' OR (x.source = 'ai' AND x.score >= ?))"
 func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := time.Now().Unix()
-		up, err := tx.PrepareContext(ctx, `INSERT INTO tags (name, kind, prompts, exclusive, hidden, created_at)
-			VALUES (?1, 'builtin', ?2, ?3, ?5, ?4)
+		up, err := tx.PrepareContext(ctx, `INSERT INTO tags (name, kind, prompts, exclusive, hidden, created_at, is_sink)
+			VALUES (?1, 'builtin', ?2, ?3, ?5, ?4, ?6)
 			ON CONFLICT (name) DO UPDATE SET kind = 'builtin', prompts = ?2, exclusive = ?3,
-				hidden = CASE WHEN ?5 THEN 1 ELSE hidden END,
+				is_sink = ?6, hidden = CASE WHEN ?5 THEN 1 ELSE hidden END,
 				model = CASE WHEN prompts IS ?2 AND exclusive = ?3 THEN model END,
 				vecs = CASE WHEN prompts IS ?2 AND exclusive = ?3 THEN vecs END`)
 		if err != nil {
@@ -67,7 +68,7 @@ func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 			if err != nil {
 				return err
 			}
-			if _, err := up.ExecContext(ctx, l.Name, string(p), l.Exclusive, now, l.Hidden); err != nil {
+			if _, err := up.ExecContext(ctx, l.Name, string(p), l.Exclusive, now, l.Hidden, l.Sink); err != nil {
 				return err
 			}
 			names = append(names, l.Name)
@@ -154,6 +155,7 @@ func (s *Store) Things(ctx context.Context, minScore float32) ([]core.Tag, error
 			FROM tags t
 			LEFT JOIN asset_tags x ON x.tag_id = t.id AND `+tagApplies+`
 			LEFT JOIN assets a ON a.id = x.asset_id AND `+visibleA+`
+			WHERE NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'tag' AND b.target_id = t.id)
 			GROUP BY t.id ORDER BY count(a.id) DESC, t.name`, minScore)
 		if err != nil {
 			return err
@@ -168,7 +170,7 @@ func (s *Store) Things(ctx context.Context, minScore float32) ([]core.Tag, error
 // order and stops at the first photo that can be shown, rather than sorting
 // every row of a tag the whole library carries.
 func addTagCovers(ctx context.Context, tx *sql.Tx, tags []core.Tag, minScore float32) error {
-	const pick = `SELECT a.id, a.thumb_version FROM asset_tags x JOIN assets a ON a.id = x.asset_id
+	pick := `SELECT a.id, a.thumb_version FROM asset_tags x JOIN assets a ON a.id = x.asset_id
 		WHERE x.tag_id = ?1 AND ` + visibleA + ` AND a.thumb_version > 0 AND `
 	byUser, err := tx.PrepareContext(ctx, pick+`x.source = 'user' LIMIT 1`)
 	if err != nil {
@@ -283,11 +285,6 @@ func (s *Store) DeleteTag(ctx context.Context, id int64) error {
 	})
 }
 
-// SetTagHidden hides a tag from Things, or shows it again.
-func (s *Store) SetTagHidden(ctx context.Context, id int64, hidden bool) error {
-	return affected(s.w.ExecContext(ctx, "UPDATE tags SET hidden = ? WHERE id = ?", hidden, id))
-}
-
 // AssetTags returns the tags on one asset: the user's, then the AI's from
 // minScore up, surest first.
 func (s *Store) AssetTags(ctx context.Context, assetID int64, minScore float32) ([]core.AssetTag, error) {
@@ -296,7 +293,9 @@ func (s *Store) AssetTags(ctx context.Context, assetID int64, minScore float32) 
 		return t, err
 	}, `SELECT t.id, t.name, t.kind, x.source, COALESCE(x.score, 0)
 		FROM asset_tags x JOIN tags t ON t.id = x.tag_id
-		WHERE x.asset_id = ? AND `+tagApplies+`
+		WHERE x.asset_id = ? AND EXISTS (SELECT 1 FROM assets WHERE id = x.asset_id AND `+visible+`)
+		AND `+tagApplies+` AND NOT EXISTS
+		(SELECT 1 FROM blocks b WHERE b.kind = 'tag' AND b.target_id = t.id)
 		ORDER BY x.source = 'user' DESC, x.score DESC, t.name`, assetID, minScore)
 }
 
@@ -354,5 +353,6 @@ func (s *Store) SearchTags(ctx context.Context, text string, limit int) ([]core.
 		err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Hidden)
 		return t, err
 	}, `SELECT id, name, kind, hidden FROM tags WHERE `+nameMatch+` AND hidden = 0
+		AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'tag' AND b.target_id = tags.id)
 		ORDER BY `+nameFirst+` LIMIT ?2`, core.Fold(text), limit)
 }

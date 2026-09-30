@@ -224,7 +224,7 @@ func TestPeopleEdits(t *testing.T) {
 	if p, err := st.Person(ctx, pa); err != nil || p.Count != 0 {
 		t.Errorf("named person after rejecting every face = %+v (%v)", p, err)
 	}
-	if err := st.SetPersonHidden(ctx, 9999, true); !errors.Is(err, ErrNotFound) {
-		t.Errorf("hiding nobody: %v", err)
+	if _, err := st.SetBlock(ctx, core.BlockPerson, 9999, "", core.BlockPhotos); !errors.Is(err, ErrNotFound) {
+		t.Errorf("blocking nobody: %v", err)
 	}
 }

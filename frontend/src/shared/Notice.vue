@@ -2,12 +2,36 @@
 // The app-wide notice: a failure of something the user did that has no
 // place of its own to say so (see reportError).
 import { notice } from './errors'
+import { engine } from '../bridge'
+import { useLibrary } from '../library/store'
+import { blockUndo, clearBlockUndo } from './block'
+import { reportError } from './errors'
 import { t } from './i18n'
 import Icon from './Icon.vue'
+
+const lib = useLibrary()
+async function undo() {
+  const item = blockUndo.value
+  if (!item) return
+  clearBlockUndo()
+  try {
+    await engine.undoBlock(item.id)
+    await lib.refreshVisibility()
+  } catch (e) {
+    reportError(e)
+  }
+}
 </script>
 
 <template>
   <div class="notice-region">
+    <p v-if="blockUndo" class="notice success" role="status">
+      <span>{{ t('blocked.saved', { name: blockUndo.name }) }}</span>
+      <button class="btn btn-subtle" @click="undo">{{ t('blocked.undo') }}</button>
+      <button class="icon-btn" :title="t('common.dismiss')" :aria-label="t('common.dismiss')" @click="clearBlockUndo">
+        <Icon name="close" :size="16" />
+      </button>
+    </p>
     <p v-if="notice" class="notice" role="alert">
       <span>{{ notice }}</span>
       <button class="icon-btn" :title="t('common.dismiss')" :aria-label="t('common.dismiss')" @click="notice = ''">
@@ -37,5 +61,8 @@ import Icon from './Icon.vue'
   background: var(--surface);
   color: var(--danger);
   box-shadow: var(--shadow);
+}
+.success {
+  color: var(--text);
 }
 </style>

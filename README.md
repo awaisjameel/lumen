@@ -45,8 +45,9 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 - Duplicates review lists exact file copies and likely similar photos using the existing perceptual hashes. It only suggests matches and opens their folder; files are never changed automatically.
 - Places groups GPS-tagged media by nearby city using a bundled, offline GeoNames index. Existing libraries are resolved in the background after an upgrade. Places show live visible counts and open filtered timelines.
 - Events groups visible media after a configurable time gap (12 hours by default) or a location jump over 100 km. Events open filtered timelines and regroup as the library changes. Renames follow current members through later splits or removal of the oldest member; reset restores automatic names for the current group.
+- Blocking has started: people, Things, places, albums, photos/videos and folders can be blocked. Labels can be hidden alone or with their covered photos; photos and folders always hide media. The shared visibility rule feeds grids, search, counts, covers and media URLs. Settings has a PIN-protected Blocked list with mode changes and unblocking; a new block offers brief Undo. Earlier hidden people and user-hidden Things become photo blocks on upgrade; the internal sink Thing does not.
 
-Not yet in Phase 5: blocking, organise-on-disk with dry run and undo, XMP sidecar export. Trash, the 2 GB cache cap and OCR also remain future work.
+Still to finish in Phase 5: face and event blocks, browsing covered photos from Blocked, forgotten-PIN recovery through Windows sign-in, then organise-on-disk with dry run and undo and XMP sidecar export. Trash, the 2 GB cache cap and OCR also remain future work. See [the blocking implementation note](docs/blocking-phase5-2026-09-30.md) for current coverage and acceptance limits.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 

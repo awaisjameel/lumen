@@ -81,14 +81,17 @@ func TestVideoMediaRoutes(t *testing.T) {
 	for _, tc := range []struct {
 		url, kind string
 	}{
-		{fmt.Sprintf("/thumb/%d/256", id), "image/jpeg"},
-		{fmt.Sprintf("/sprite/%d", id), "image/jpeg"},
+		{fmt.Sprintf("/thumb/%d/256?v=1", id), "image/jpeg"},
+		{fmt.Sprintf("/sprite/%d?v=1", id), "image/jpeg"},
 		{fmt.Sprintf("/frame/%d/1000", id), "image/jpeg"},
 	} {
 		rec := httptest.NewRecorder()
 		m.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, tc.url, http.NoBody))
 		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != tc.kind || rec.Body.Len() == 0 {
 			t.Errorf("%s: status %d, content type %q, bytes %d", tc.url, rec.Code, rec.Header().Get("Content-Type"), rec.Body.Len())
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "private, no-cache" {
+			t.Errorf("%s: cache control = %q", tc.url, got)
 		}
 	}
 	for _, url := range []string{fmt.Sprintf("/thumb/%d/300", id), fmt.Sprintf("/original/%d", id), "/thumb/x/256"} {
@@ -143,5 +146,27 @@ func TestVideoMediaRoutes(t *testing.T) {
 	}
 	if r := get(fmt.Sprintf("%s/video/%d", base, id), "", "evil.example"); r.status != http.StatusForbidden {
 		t.Errorf("other host: status %d, want 403", r.status)
+	}
+	blockID, err := st.SetBlock(ctx, core.BlockAsset, id, "", core.BlockPhotos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, url := range []string{fmt.Sprintf("/thumb/%d/256?v=1", id), fmt.Sprintf("/sprite/%d?v=1", id), fmt.Sprintf("/frame/%d/1000", id)} {
+		rec := httptest.NewRecorder()
+		m.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("blocked cached %s: status %d, want 404", url, rec.Code)
+		}
+	}
+	for _, url := range []string{fmt.Sprintf("%s/video/%d", base, id), fmt.Sprintf("%s/play/%d", base, id)} {
+		if r := get(url, "bytes=0-15", ""); r.status != http.StatusNotFound {
+			t.Errorf("blocked video %s: status %d, want 404", url, r.status)
+		}
+	}
+	if err := st.RemoveBlock(ctx, blockID); err != nil {
+		t.Fatal(err)
+	}
+	if r := get(fmt.Sprintf("%s/video/%d", base, id), "bytes=0-15", ""); r.status != http.StatusPartialContent {
+		t.Errorf("unblocked video: status %d, want 206", r.status)
 	}
 }

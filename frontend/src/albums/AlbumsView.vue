@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlbumKind, engine, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
+import { AlbumKind, BlockKind, engine, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
 import type { Album, AlbumRule } from '../bridge'
 import { usePeople } from '../people/store'
 import { confirm } from '../shared/confirm'
+import { block } from '../shared/block'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
@@ -85,6 +86,10 @@ async function remove(album: Album) {
   } catch (e) {
     error.value = errorText(e)
   }
+}
+
+async function blockAlbum(album: Album) {
+  if (await block(BlockKind.BlockAlbum, album.id, album.name)) await albums.load()
 }
 </script>
 
@@ -178,6 +183,14 @@ async function remove(album: Album) {
             }}</span>
           </div>
           <div class="actions">
+            <button
+              class="icon-btn"
+              :title="t('blocked.block')"
+              :aria-label="t('blocked.confirmTitle', { name: album.name })"
+              @click="blockAlbum(album)"
+            >
+              <Icon name="eye-off" :size="16" />
+            </button>
             <button
               class="icon-btn"
               :title="t('albums.edit')"
