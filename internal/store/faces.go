@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"slices"
 	"time"
 
@@ -26,6 +27,30 @@ type FaceResult struct {
 	Faces   []DetectedFace
 	Err     string
 	Skipped bool // nothing to look at (an undecodable format, or a video without frames)
+	// Unchanged: the faces found at the job's prior version stand (see
+	// JobItem.Prior); nothing but the version is saved.
+	Unchanged bool
+}
+
+// WithFaces returns which of ids have faces found in them.
+func (s *Store) WithFaces(ctx context.Context, ids []int64) (map[int64]bool, error) {
+	out := map[int64]bool{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	list, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	found, err := queryAll(ctx, s.r, func(r *sql.Rows) (id int64, err error) {
+		err = r.Scan(&id)
+		return id, err
+	}, `SELECT ids.value FROM json_each(?) ids
+		WHERE EXISTS (SELECT 1 FROM faces WHERE asset_id = ids.value)`, string(list))
+	for _, id := range found {
+		out[id] = true
+	}
+	return out, err
 }
 
 // SaveFaces stores a batch of face results made by model and closes their
@@ -67,7 +92,7 @@ func (s *Store) SaveFaces(ctx context.Context, model, version string, rs []FaceR
 		defer job.Close()
 
 		for _, r := range rs {
-			if r.Err == "" && !r.Skipped {
+			if r.Err == "" && !r.Skipped && !r.Unchanged {
 				rows, err := old.QueryContext(ctx, r.AssetID)
 				before, err := collect(rows, err, func(rows *sql.Rows) (f storedBox, err error) {
 					err = rows.Scan(&f.id, &f.Frame, &f.X, &f.Y, &f.W, &f.H)

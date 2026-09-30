@@ -4,9 +4,9 @@
 // comes back.
 //
 // ONNX Runtime 1.24.4 (the last DirectML build) and DirectML ship beside the
-// executable (deps/runtime in development). The image model runs on the GPU
-// through DirectML when one is usable, and on the CPU otherwise; the small
-// text and face models always run on the CPU.
+// executable (deps/runtime in development). The image and face models run
+// on the GPU through DirectML when one is usable, and on the CPU otherwise;
+// the small text model always runs on the CPU, where one query is quickest.
 package ai
 
 import (
@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	ort "github.com/yalue/onnxruntime_go"
 
@@ -183,9 +184,43 @@ func modelIO(path string) (in string, out []string, err error) {
 // errClosed means the model was freed (or failed to reload after a GPU error).
 var errClosed = errors.New("model is not loaded")
 
+// gpu lets one model at a time run on the GPU: DirectML can't run one
+// session from several threads, and models taking turns share it without
+// fighting over its memory and queue. The image model comes first: it has
+// only the GPU to run on quickly, where the face models run nearly as well on
+// the CPU. So they take the GPU only when it is free and the image model
+// isn't waiting for it (tryRun), and run on the CPU otherwise; the image
+// model then waits for one face run at most, a few milliseconds.
+var gpu struct {
+	mu      sync.Mutex
+	waiting atomic.Int32 // run calls waiting for mu
+}
+
 // run feeds one input and returns each output's data (copied), in the order
-// openSession named them. Safe for concurrent use.
+// openSession named them, waiting for the GPU if it runs there. Safe for
+// concurrent use.
 func (s *session) run(in ort.Value) ([][]float32, error) {
+	if s != nil && s.device == GPU {
+		gpu.waiting.Add(1)
+		gpu.mu.Lock()
+		gpu.waiting.Add(-1)
+		defer gpu.mu.Unlock()
+	}
+	return s.exec(in)
+}
+
+// tryRun is run on the GPU if it is free and no run is waiting for it,
+// reporting whether it ran.
+func (s *session) tryRun(in ort.Value) (out [][]float32, ran bool, err error) {
+	if gpu.waiting.Load() > 0 || !gpu.mu.TryLock() {
+		return nil, false, nil
+	}
+	defer gpu.mu.Unlock()
+	out, err = s.exec(in)
+	return out, true, err
+}
+
+func (s *session) exec(in ort.Value) ([][]float32, error) {
 	if s == nil || s.s == nil {
 		return nil, errClosed
 	}

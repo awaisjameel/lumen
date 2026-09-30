@@ -4,7 +4,9 @@ import (
 	"context"
 	"math"
 	"path/filepath"
+	"slices"
 	"testing"
+	"time"
 
 	"lumen/internal/core"
 	"lumen/internal/media"
@@ -84,7 +86,7 @@ func TestFacesOnRealPhotos(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := OpenFaces(m, 2)
+	f, err := OpenFaces(m, CPU, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +158,105 @@ func TestFacesOnRealPhotos(t *testing.T) {
 	if different > 0 && bestDifferent >= worstSame {
 		t.Errorf("different faces (%.3f) as alike as one face at two sizes (%.3f)", bestDifferent, worstSame)
 	}
+}
+
+// On the GPU the face models must find the faces the CPU finds and give
+// them the same identity vectors, so faces found on either cluster together
+// (a library indexed partly on each, or moved to the CPU when the GPU fails).
+func TestFacesOnTheGPUMatchTheCPU(t *testing.T) {
+	photos := testenv.FacePhotos(t, 24)
+	rt := testenv.Runtime(t)
+	if err := Init(rt); err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadFaceModel(filepath.Join(rt, "models", "faces"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	onGPU, err := OpenFaces(m, GPU, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer onGPU.Close()
+	if onGPU.Device() != GPU {
+		t.Skip("no usable GPU")
+	}
+	onCPU, err := OpenFaces(m, CPU, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer onCPU.Close()
+	var faces, missed int
+	worst := float32(1)
+	for _, p := range photos {
+		im, err := media.Decoders{}.Decode(context.Background(), p, core.KindPhoto, 1, 2048)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fc, err := onCPU.Detect(im.Pix, im.W, im.H, 0.8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fg, err := onGPU.Detect(im.Pix, im.W, im.H, 0.75) // a face just over the line on one is just under on the other
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pc, pg []Face
+		for _, a := range fc {
+			k := slices.IndexFunc(fg, func(b Face) bool { return iou(a, b) > 0.8 })
+			if k < 0 {
+				missed++
+				continue
+			}
+			pc, pg = append(pc, a), append(pg, fg[k])
+		}
+		faces += len(fc)
+		if len(pc) == 0 {
+			continue
+		}
+		vc, err := onCPU.Embed(im.Pix, im.W, im.H, pc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		vg, err := onGPU.Embed(im.Pix, im.W, im.H, pg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k := range vc {
+			worst = min(worst, dot(vc[k].Vec, vg[k].Vec))
+		}
+	}
+	t.Logf("%d photos: %d faces, %d not found on the GPU; worst cosine between the devices %.5f", len(photos), faces, missed, worst)
+	if faces == 0 {
+		t.Fatal("no faces found")
+	}
+	if missed > 0 {
+		t.Errorf("%d faces the CPU found were not found on the GPU", missed)
+	}
+	if worst < 0.99 {
+		t.Errorf("a face's vectors on the two devices have a cosine of %.5f, want >= 0.99", worst)
+	}
+
+	// While the image model has the GPU, faces are still found, on the CPU.
+	im, err := media.Decoders{}.Decode(context.Background(), photos[0], core.KindPhoto, 1, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gpu.mu.Lock() // as the image model does while it runs
+	done := make(chan error, 1)
+	go func() {
+		_, err := onGPU.Detect(im.Pix, im.W, im.H, 0.8)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Error("face detection waited for the GPU")
+	}
+	gpu.mu.Unlock()
 }
 
 func TestYaw(t *testing.T) {

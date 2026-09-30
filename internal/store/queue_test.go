@@ -194,6 +194,7 @@ func TestUpgradeMovesBlockedJobsToWaiting(t *testing.T) {
 	a, b := jobs[0].AssetID, jobs[1].AssetID
 	check(t, st.SaveMetadata(ctx, "m", []MetadataResult{{AssetID: b, Orientation: 1}}))
 	check(t, errOf(st.w.ExecContext(ctx, "UPDATE asset_jobs SET status = 'pending' WHERE status = 'waiting'")))
+	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE asset_jobs DROP COLUMN prior_version"))) // added by v9
 	check(t, errOf(st.w.ExecContext(ctx, "PRAGMA user_version = 7")))
 	check(t, st.Close())
 
@@ -211,5 +212,69 @@ func TestUpgradeMovesBlockedJobsToWaiting(t *testing.T) {
 		if s, _ := readJob(t, st, c.asset, c.stage); s != c.want {
 			t.Errorf("asset %d %s is %s, want %s", c.asset, c.stage, s, c.want)
 		}
+	}
+}
+
+func TestUpgradeRemembersWhatMadeTheOutput(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b")})))
+	var a, b int64
+	check(t, st.r.QueryRowContext(ctx, "SELECT id FROM assets WHERE content_hash = ?", []byte("a")).Scan(&a))
+	check(t, st.r.QueryRowContext(ctx, "SELECT id FROM assets WHERE content_hash = ?", []byte("b")).Scan(&b))
+	check(t, st.SaveMetadata(ctx, "m1", []MetadataResult{{AssetID: a, Orientation: 1}, {AssetID: b, Orientation: 1}}))
+	ph := uint64(42)
+	check(t, st.SaveThumbnails(ctx, "t1", []ThumbResult{{AssetID: a, PHash: &ph}, {AssetID: b, Err: "unreadable"}}))
+	check(t, st.SaveFaces(ctx, "f", "f1", []FaceResult{
+		{AssetID: a, Faces: []DetectedFace{{X: 0.1, Y: 0.1, W: 0.2, H: 0.2, Score: 0.9, Vec: []float32{1, 0}}}},
+		{AssetID: b},
+	}))
+	thumbOf := func(id int64) (phash int64, version int) {
+		t.Helper()
+		check(t, st.r.QueryRowContext(ctx, "SELECT COALESCE(phash, 0), thumb_version FROM assets WHERE id = ?", id).Scan(&phash, &version))
+		return phash, version
+	}
+	_, before := thumbOf(a)
+
+	check(t, errOf(st.RequeueOutdated(ctx, map[core.Stage]string{core.StageThumbnail: "t2", core.StageFaces: "f2"})))
+	jobs, err := st.PendingJobs(ctx, core.StageThumbnail, nil, 10)
+	check(t, err)
+	prior := map[int64]string{}
+	for _, j := range jobs {
+		prior[j.AssetID] = j.Prior
+	}
+	// Only a job that had succeeded has output to keep.
+	if len(jobs) != 2 || prior[a] != "t1" || prior[b] != "" {
+		t.Fatalf("requeued thumbnails = %+v, want a from t1 and b from nothing", jobs)
+	}
+	if got, err := st.WithFaces(ctx, []int64{a, b}); err != nil || !got[a] || got[b] {
+		t.Fatalf("WithFaces = %v, %v", got, err)
+	}
+
+	// Output that stands keeps everything but the version.
+	check(t, st.SaveThumbnails(ctx, "t2", []ThumbResult{{AssetID: a, Unchanged: true}}))
+	if p, v := thumbOf(a); p != 42 || v != before {
+		t.Fatalf("an unchanged thumbnail has phash %d, version %d; want 42, %d", p, v, before)
+	}
+	check(t, st.SaveFaces(ctx, "f", "f2", []FaceResult{{AssetID: a, Unchanged: true}}))
+	if got, _ := st.WithFaces(ctx, []int64{a}); !got[a] {
+		t.Fatal("unchanged faces were dropped")
+	}
+	var version string
+	var kept sql.NullString
+	check(t, st.r.QueryRowContext(ctx, "SELECT model_version, prior_version FROM asset_jobs WHERE asset_id = ? AND stage = 'thumbnail'", a).
+		Scan(&version, &kept))
+	if s, _ := readJob(t, st, a, core.StageThumbnail); s != core.JobDone || version != "t2" || kept.Valid {
+		t.Fatalf("closed job is %s at %q with prior %v", s, version, kept)
+	}
+
+	// A requeue for another reason (the photo turned out sideways) redoes it in full.
+	check(t, errOf(st.RequeueOutdated(ctx, map[core.Stage]string{core.StageThumbnail: "t3"})))
+	check(t, st.SaveMetadata(ctx, "m1", []MetadataResult{{AssetID: a, Orientation: 6}}))
+	jobs, err = st.PendingJobsOf(ctx, core.StageThumbnail, []int64{a})
+	check(t, err)
+	if len(jobs) != 1 || jobs[0].Prior != "" {
+		t.Fatalf("thumbnail after an orientation change = %+v, want no prior version", jobs)
 	}
 }

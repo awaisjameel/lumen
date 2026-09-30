@@ -604,7 +604,7 @@ listed for triage.
   difference lies later in the run or in contention with the UI.
 - **Run count:** two real-app runs per case; treat differences under 10% as noise.
 
-## Fixes applied (same day, uncommitted)
+## Fixes applied (same day, commit 03f8031)
 
 Measured against HEAD (the branch above). The real-app runs used two runs per
 build, alternating builds; the store benchmarks used 5–6 runs, interleaved.
@@ -678,6 +678,210 @@ A later single office run of the final build was fully indexed in 31.7 s with
 - **The details panel's four calls** and **grid cell labels**: cheap enough
   (0.1 ms per call in the store) not to change.
 
+## Follow-up (2026-09-30, uncommitted)
+
+This round took on the four items left open above: the upgrade cost (#10),
+the formats the benchmark missed, the face models on the GPU, and the
+branch's extra engine CPU. Builds compared:
+
+- **HEAD:** commit 03f8031, the fixes above.
+- **Upgrade fix:** HEAD plus the upgrade change.
+- **Final:** the upgrade fix plus the face models on the GPU.
+
+Real-app runs used two runs per build, alternating builds. Upgrades ran on
+copies of libraries main had built.
+
+### 10. Upgrading a main library
+
+**What changed.** A finished job that an upgrade puts back in the queue now
+remembers the version that made its output: migration 0009 adds
+`asset_jobs.prior_version`. Each stage checks whether the new version would
+make the same output, and if so records the new version without redoing the
+work:
+
+- **Thumbnails** stand for:
+  - videos, whose part of the version did not change;
+  - photos that decode as they did, meaning no colour profile or an sRGB
+    one. libvips reads only the header to check. HEIC, whose WIC decode now
+    converts colour, and BMP, which now keeps straight alpha, are always
+    remade.
+- **Faces** stand for:
+  - files where none were found, whose pixels are unchanged (for photos) or
+    whose frames are sampled the same way (for videos).
+
+  Files with faces re-run: yaw and sharpness are now worked out from the
+  landmarks, which are not stored. The faces stage loads its models only
+  for files that re-run.
+
+- **Metadata** still re-runs everywhere. It reads only headers, and only
+  reading them tells whether a date changed.
+
+The rules live in `internal/index/upgrade.go`. A job whose prior version no
+rule knows runs in full, so a version change the rules don't account for is
+always safe. A test caught one case the first draft got wrong: metadata that
+re-runs and finds a new orientation now clears the prior version of the jobs
+already requeued, so a sideways thumbnail is never kept.
+
+The sRGB check was tested with Windows' sRGB profile on a 12 MP photo.
+Converting from the profile changed pixels by at most 1 level, and the
+perceptual hash was identical.
+
+| Library (copy of a main build)          | HEAD wall   | Upgrade fix wall | HEAD CPU  | Upgrade fix CPU | Thumbnails remade |
+| --------------------------------------- | ----------- | ---------------- | --------- | --------------- | ----------------- |
+| 3,000 synthetic (no faces, no profiles) | 107–113 s   | **3.6–5.6 s**    | 931–980 s | 21–27 s         | 3,000 → 0         |
+| 77 mixed (HEIC, videos, P3, sRGB, BMP)  | 15.3–16.5 s | **8.4–10.0 s**   | 62–63 s   | 33–34 s         | 77 → 19           |
+| 204 office photos (185 with faces)      | 28–46 s     | 30–35 s          | 171–265 s | 145–166 s       | 204 → 0           |
+
+The office library barely changes because 185 of its 204 photos have faces,
+which must re-run. The 19 thumbnails remade in the mixed library are exactly:
+
+- the 11 P3 photos;
+- the 7 HEICs;
+- the BMP.
+
+At 100,000 assets:
+
+- The migration from v6 to v9 takes 0.68 s.
+- Requeueing 300,000 jobs (metadata, thumbnails and faces) takes 1.9 s,
+  once at startup.
+
+The hour of thumbnails becomes a header read per photo, plus remaking the
+HEICs and the photos with a colour profile other than sRGB. Faces re-run
+only for files that have faces.
+
+### Formats the benchmark missed
+
+The mixed corpus (`mkmixed.py`) is 77 files:
+
+- **Office photos:** 20 plain, 10 tagged Display P3, 10 tagged with
+  Windows' sRGB profile.
+- **Synthetic JPEGs:** 20.
+- **HEICs:** 7 (one an iPhone Display P3 file).
+- **Videos:** 7. They include:
+  - an AVI (MPEG-4);
+  - a 45 s 1080p AV1;
+  - a video rotated 90°;
+  - a video starting at 7 s;
+  - a slideshow of office photos, so a video has faces.
+- **Other:** a BMP, `red-p3.jpg`, and a small JPEG.
+
+Videos were switched on.
+
+- **Every file indexed on both builds, with no errors or skips.** Both read
+  the rotated video as 720×1280 and the AV1 codec, and both found 110 faces
+  in the slideshow video.
+- **Fresh index:** main took 51–57 s and 300–360 CPU-s. The final build took
+  22.6–24.5 s and 76–98 CPU-s.
+- **Per format:** each subset indexed alone (7 HEICs, 7 videos, 11 P3
+  photos). Main's totals are dominated by its 30 s of Things text vectors
+  at start, so the stages compare better:
+  - thumbnails finished within 3.3 s on both builds for every subset;
+  - faces finished in 7.9–10.1 s for the videos on main, 5.7–6.7 s on the
+    final build.
+- **Viewer:** all 77 items opened on both builds (`viewcheck.mjs`, two runs
+  each).
+
+  | Item                       | main       | final      |
+  | -------------------------- | ---------- | ---------- |
+  | Video, first frame playing | 45–185 ms  | 44–151 ms  |
+  | — 45 s 1080p AV1 (17 MB)   | 167–185 ms | 45–60 ms   |
+  | — AVI (transcoded)         | 151–180 ms | 121–151 ms |
+  | HEIC preview               | 13–31 ms   | 13–31 ms   |
+
+  The AV1 file is faster because the branch streams videos from its own
+  loopback server; main buffered each file whole.
+
+- **Colour:** measured as the mean difference in the average colour of
+  16 px blocks between each thumbnail and the photo as a colour-managed
+  viewer shows it (0–255 scale). WebView2 colour-manages the original, so
+  this is the jump when the original replaces the preview.
+
+  | Photos                    | main | final |
+  | ------------------------- | ---- | ----- |
+  | Plain JPEG                | 0.4  | 0.4   |
+  | JPEG with an sRGB profile | 0.4  | 0.4   |
+  | JPEG in Display P3        | 4.4  | 0.4   |
+  | iPhone HEIC (Display P3)  | 1.2  | 0.6   |
+  | HEIC without a profile    | 0.5  | 1.2   |
+
+  The last row is resampling, not colour. HEICs between 1,024 and 2,048 px
+  now get their thumbnails from the pixels decoded for faces, and libvips
+  resizes those rather than WIC's scaler. The difference is under 0.5% of
+  the range.
+
+### Face models on the GPU
+
+**Agreement.** Both models run entirely on DirectML: the sessions open with
+the CPU fallback disabled. On all 204 office photos they found the same
+1,000 faces as the CPU:
+
+- scores and landmarks within 10⁻⁵;
+- identity vectors with cosines of 0.99999 or more.
+
+Libraries indexed with the faces on the GPU and on the CPU hold the same
+1,000 faces: boxes within 0.0004, worst cosine 0.999999. So no re-run and no
+version change is needed, and faces found on either device cluster
+together.
+
+**Sharing the GPU.** The first version put the faces on the GPU, taking
+turns with the image model:
+
+- office: wall time unchanged, 35% less CPU;
+- synthetic: 13–21% less CPU, but 25–40% longer. That corpus is GPU-bound on
+  the image model, and face runs slowed it.
+
+The final version gives the image model the GPU first. Face runs use it only
+when it is free and the image model is not waiting, and otherwise run on
+CPU sessions, which stay loaded. The image model waits for at most one face
+run, a few milliseconds. A GPU that fails is dropped, and the CPU runs
+everything. The code is in `internal/ai/runtime.go` (`gpu`, `tryRun`) and
+`internal/ai/faces.go`.
+
+Fresh index, faces on the CPU against the final build:
+
+| Corpus            | CPU faces wall | Final wall      | CPU faces CPU | Final CPU     |
+| ----------------- | -------------- | --------------- | ------------- | ------------- |
+| 204 office photos | 39.3–41.6 s    | **28.8–32.4 s** | 250–262 s     | **157–177 s** |
+| 3,000 synthetic   | 203–231 s      | 192–230 s       | 1,456–1,627 s | 1,324–1,554 s |
+| 77 mixed          | 23.3–23.4 s    | 22.6–24.5 s     | 93–99 s       | 76–98 s       |
+
+The number of people found on the office photos varied between 27 and 28
+across runs of the same build. Clustering is incremental: faces placed in an
+earlier run stay placed, and each run sees whichever faces exist by then.
+The result therefore depends on when faces arrive. This happens on main too
+and is not tied to the device; in the paired comparison, both builds found 28.
+
+### The branch's extra engine CPU
+
+Profiles covered a later window than before: 60–180 s on the synthetic
+corpus, 25–55 s on the office photos. They compared main with the branch as
+it was before the fixes (`prof2.mjs`). In that window the branch spent less
+CPU per item than main in every stage:
+
+| Stage (synthetic, 60–180 s) | main           | branch         |
+| --------------------------- | -------------- | -------------- |
+| Faces                       | 0.22 s / photo | 0.19 s / photo |
+| Thumbnails                  | 0.22 s / photo | 0.19 s / photo |
+| Image embedding             | 0.063 s / item | 0.054 s / item |
+
+Over the whole run, Lumen.exe used:
+
+- office: 561 CPU-s on the branch, 550 on main (+2%);
+- synthetic: 1,683 on the branch, 1,746 on main (−4%).
+
+Identical runs of one build varied more than the original gap. Office runs
+of the same build today ranged from 171 to 265 CPU-s, and synthetic ones
+from 1,378 to 1,627. This laptop's CPU-seconds swing with its clock speed
+and temperature. The +6–22% was that variation, not the code, and nothing
+was changed for it.
+
+### Other findings
+
+- **A second instance exits silently.** Launching Lumen while the previous
+  instance is still closing exits at once with an empty log, because of the
+  single-instance lock. The harness now fails fast when that happens.
+- **The README** now says the face models use the GPU.
+
 ## Reproducing
 
 Everything is in `D:\tmp\lumen-bench`:
@@ -694,7 +898,18 @@ Everything is in `D:\tmp\lumen-bench`:
   - Run `bash run_app.sh <name> <folder> <reps>`, then `node analyze.mjs` for the tables.
   - `appbench.mjs` is the driver. It needs `node/` (axe-core).
 - **Profiles:** add `zz_pprof.go` to the module root, build, then run
-  `node prof.mjs <tree> <folder> <label> <seconds> <delay>`.
+  `node prof.mjs <tree> <folder> <label> <seconds> <delay>`. `prof2.mjs`
+  takes the same arguments and also records the jobs finished and the
+  process CPU during the window.
+- **Follow-up runs (2026-09-30):**
+  - `upgrade.mjs` times either an upgrade of a copied library or a fresh
+    index, without the UI driver. Its drivers are `run_upgrade.sh` (#10),
+    `run_gpu.sh` and `run_gpu2.sh` (faces on the GPU), and `run_formats.sh`
+    (per format).
+  - `mkmixed.py` builds the mixed corpus in `mixed/`.
+  - `viewcheck.mjs` steps through the viewer.
+  - `facecmp.mjs` compares the faces of two libraries.
+  - Results are in `results5/`.
 - **Raw data:**
 
   | Path                                   | Contents                 |

@@ -26,7 +26,7 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 
 **Phase 3 (people)** is working:
 
-- **Faces**: YuNet finds faces (with five landmarks) in each photo decoded at 2048 px; each is aligned to SFace's template and turned into a 128-dim identity vector. Both models run on the CPU, loaded only while there is work; a 1,466-photo library took about 45 s on a laptop
+- **Faces**: YuNet finds faces (with five landmarks) in each photo decoded at 2048 px; each is aligned to SFace's template and turned into a 128-dim identity vector. Both models run on the GPU through DirectML (CPU fallback; the two give the same faces and vectors), taking turns with the image model, loaded only while there is work; a 1,466-photo library took about 45 s on a laptop
 - **People**: faces are grouped by average-linkage clustering (a group's similarity is the dot product of mean vectors, so merging is cheap), incrementally as photos arrive. Two faces in one photo are never one person; blurred or turned-away faces may join someone but never start a new person
 - **User corrections always win**: naming, merging (naming someone with a name already taken asks "same person?"), hiding, "not this person" (never put back), moving faces to someone else or a new person (splitting), choosing their picture. A face placed by the user never moves; a named person is never merged automatically
 - **People view**, a person's photos (their page is the timeline, filtered), a face review that lists the least-alike faces first, people in the details panel ("Who is this?" for faces not recognised yet)

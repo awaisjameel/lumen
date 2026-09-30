@@ -155,12 +155,15 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 	if m.People != nil {
 		ix.faces = &model[*ai.Faces]{
 			name: "face models", idle: modelIdle,
-			open: func() (*ai.Faces, error) { return ai.OpenFaces(m.People.Model(), faceThreads) },
+			open: func() (*ai.Faces, error) { return ai.OpenFaces(m.People.Model(), ai.GPU, faceThreads) },
 			close: func(f *ai.Faces) {
 				f.Close()
 				ix.pixels.clear() // idle, held or failed: nothing will take them soon
 			},
-			report: func(_ *ai.Faces, _ bool, err error) {
+			report: func(f *ai.Faces, loaded bool, err error) {
+				if loaded {
+					slog.Info("face models ready", "device", f.Device())
+				}
 				ix.setAIState(func() {
 					ix.facesError = ""
 					if err != nil {
@@ -269,8 +272,9 @@ func (ix *Indexer) Start(ctx context.Context) {
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.ThumbResult]{
 			name: core.StageThumbnail, batch: thumbnailBatch, wake: ix.wakeThum, next: []chan struct{}{ix.wakeEmbed, ix.wakeFaces},
-			changes: core.Changes{Thumbs: true}, // the timeline's days and counts stay as they are
-			process: ix.doThumbnails,
+			changes:   core.Changes{Thumbs: true}, // the timeline's days and counts stay as they are
+			unchanged: func(r store.ThumbResult) bool { return r.Unchanged },
+			process:   ix.doThumbnails,
 			save: func(ctx context.Context, rs []store.ThumbResult) error {
 				return ix.store.SaveThumbnails(ctx, ix.version[core.StageThumbnail], rs)
 			},
@@ -291,10 +295,11 @@ func (ix *Indexer) Start(ctx context.Context) {
 		ix.run(func() {
 			runStage(ctx, ix, stage[store.FaceResult]{
 				name: core.StageFaces, batch: facesBatch, wake: ix.wakeFaces, model: ix.faces,
-				changes: core.Changes{People: true},
-				process: ix.doFaces,
-				save:    ix.saveFaces,
-				fail:    func(msg string) { ix.setAIState(func() { ix.facesError = msg }) },
+				changes:   core.Changes{People: true},
+				unchanged: facesUnchanged,
+				process:   ix.doFaces,
+				save:      ix.saveFaces,
+				fail:      func(msg string) { ix.setAIState(func() { ix.facesError = msg }) },
 			})
 		})
 		ix.run(func() { ix.people.Run(ctx, func() { ix.markChanged(core.Changes{People: true}) }) })

@@ -21,6 +21,10 @@ type JobItem struct {
 	Ext         string
 	Orientation int
 	Duration    int64
+	// Prior is the version that made the output this job would replace,
+	// when an upgrade put the finished job back in the queue: the stage may
+	// keep that output where it would come out the same. "" otherwise.
+	Prior string
 }
 
 // TimeRange limits a job query to assets taken in [From, To) (wall-clock seconds).
@@ -99,7 +103,7 @@ const primaryFile = "(SELECT min(id) FROM files WHERE asset_id = a.id)"
 func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeRange, limit int) ([]JobItem, error) {
 	q, args := pendingJobsQuery(stage, within, limit)
 	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
-		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration)
+		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior)
 		return j, err
 	}, q, args...)
 }
@@ -117,7 +121,7 @@ func pendingJobsQuery(stage core.Stage, within *TimeRange, limit int) (q string,
 // runnableQuery selects the jobs of stage a worker can run, as JobItems,
 // from the tables in from (which name the jobs j), with args for from.
 func runnableQuery(from string, fromArgs []any, stage core.Stage) (q string, args []any) {
-	q = `SELECT a.id, f.path, a.kind, a.ext, a.orientation, COALESCE(a.duration_ms, 0)
+	q = `SELECT a.id, f.path, a.kind, a.ext, a.orientation, COALESCE(a.duration_ms, 0), COALESCE(j.prior_version, '')
 		FROM ` + from + `
 		JOIN assets a ON a.id = j.asset_id
 		JOIN files f ON f.id = ` + primaryFile + `
@@ -146,7 +150,7 @@ func (s *Store) PendingJobsOf(ctx context.Context, stage core.Stage, ids []int64
 	// CROSS JOIN: look each one up by key, rather than walk the stage's queue.
 	q, args := runnableQuery("json_each(?) ids CROSS JOIN asset_jobs j ON j.asset_id = ids.value", []any{string(list)}, stage)
 	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
-		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration)
+		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior)
 		return j, err
 	}, q+" ORDER BY j.taken_at DESC, j.asset_id DESC", args...)
 }
@@ -220,16 +224,22 @@ type ThumbResult struct {
 	PHash   *uint64
 	Err     string
 	Skipped bool // the format isn't supported by this build yet
+	// Unchanged: the thumbnails made at the job's prior version stand (see
+	// JobItem.Prior); nothing but the version is saved.
+	Unchanged bool
 }
 
 // RequeueOutdated puts back in the queue every finished job whose stage now
 // has a different version (a better decoder, an upgraded model). Every job
 // records the version that ran it, so only that stage re-runs; other stages
-// and all user edits are untouched. It returns how many jobs were requeued.
+// and all user edits are untouched. A job that had succeeded keeps that
+// version as its prior_version (JobItem.Prior), for the stage to check
+// whether its output would change. It returns how many jobs were requeued.
 func (s *Store) RequeueOutdated(ctx context.Context, versions map[core.Stage]string) (total int64, err error) {
 	err = s.tx(ctx, func(tx *sql.Tx) error {
 		for stage, version := range versions {
-			res, err := tx.ExecContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?
+			res, err := tx.ExecContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?,
+					prior_version = CASE WHEN status = 'done' THEN model_version END
 				WHERE stage = ? AND status NOT IN `+unfinished+` AND COALESCE(model_version, '') != ?`,
 				time.Now().Unix(), stage, version)
 			if err != nil {
@@ -270,9 +280,12 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 		}
 		defer upd.Close()
 		// Thumbnails, embeddings and faces made with another orientation are
-		// sideways: redo them (unless they are still waiting anyway).
-		redo, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?1
-			WHERE asset_id = ?2 AND status NOT IN `+unfinished+` AND (SELECT orientation FROM assets WHERE id = ?2) != ?3
+		// sideways: redo them in full (unless they are still to do anyway, with
+		// no output to keep). The job is settled below, with the metadata job.
+		redo, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?1,
+				prior_version = NULL
+			WHERE asset_id = ?2 AND (status NOT IN `+unfinished+` OR prior_version IS NOT NULL)
+			AND (SELECT orientation FROM assets WHERE id = ?2) != ?3
 			AND stage IN (`+placeholders(len(afterMetadata))+`)`) // ?4 on, as SQLite numbers them after ?3
 		if err != nil {
 			return err
@@ -305,7 +318,8 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 	})
 }
 
-// SaveThumbnails records a batch of finished thumbnails and closes their jobs.
+// SaveThumbnails records a batch of finished thumbnails and closes their
+// jobs. An Unchanged result only records the version.
 func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbResult) error {
 	if len(rs) == 0 {
 		return nil
@@ -323,7 +337,7 @@ func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbRe
 		}
 		defer job.Close()
 		for _, r := range rs {
-			if r.Err == "" && !r.Skipped {
+			if r.Err == "" && !r.Skipped && !r.Unchanged {
 				var ph any
 				if r.PHash != nil {
 					ph = int64(*r.PHash) // SQLite integers are signed; the bits are what matter
@@ -348,7 +362,7 @@ type jobCloser struct {
 
 func prepareJobUpdate(ctx context.Context, tx *sql.Tx) (*jobCloser, error) {
 	update, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = ?1, model_version = ?2, error = NULLIF(?3, ''), updated_at = ?4,
-			attempts = CASE WHEN ?1 = 'error' THEN attempts + 1 ELSE 0 END
+			prior_version = NULL, attempts = CASE WHEN ?1 = 'error' THEN attempts + 1 ELSE 0 END
 		WHERE asset_id = ?5 AND stage = ?6`)
 	if err != nil {
 		return nil, err

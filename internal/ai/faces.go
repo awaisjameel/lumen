@@ -4,10 +4,12 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -67,41 +69,120 @@ func (f Face) Yaw() float32 {
 // Faces finds and recognises faces. YuNet detects them with five landmarks,
 // the landmarks align each face to SFace's template, and SFace turns it into
 // an identity vector: two photos of one person give vectors with a high
-// cosine similarity. Both models are small and run on the CPU. Safe for
+// cosine similarity. Both models run on the GPU while the image model leaves
+// it free (see gpu), and on the CPU otherwise or without one: the two find
+// the same faces with the same vectors (1,000 faces measured: the same
+// boxes, cosines above 0.99999), so any mix clusters together. Safe for
 // concurrent use.
 type Faces struct {
-	m        FaceModel
-	det, rec *session
+	m FaceModel
+	// mu is held for reading while a model runs, and for writing to drop
+	// the GPU's.
+	mu         sync.RWMutex
+	det, rec   *session // on the CPU
+	gdet, grec *session // on the GPU; nil without one, or after it failed
+	// turn queues face runs for the GPU, so while the image model leaves it
+	// free they all run there, one after another, rather than on the CPU.
+	turn sync.Mutex
 }
 
 // yunetStrides are the detector's three feature map strides; each has
 // cls/obj/bbox/kps outputs.
 var yunetStrides = [...]int{8, 16, 32}
 
-// OpenFaces loads both face models. threads limits each model's CPU threads.
-func OpenFaces(m FaceModel, threads int) (*Faces, error) {
+// OpenFaces loads both face models on the CPU and, with device GPU, on the
+// GPU too where one is usable. threads limits each model's CPU threads.
+func OpenFaces(m FaceModel, device Device, threads int) (*Faces, error) {
+	f := &Faces{m: m}
+	var err error
+	if f.det, f.rec, err = openFaceModels(m, CPU, threads); err != nil {
+		return nil, err
+	}
+	if device == GPU {
+		if f.gdet, f.grec, err = openFaceModels(m, GPU, 0); err != nil {
+			slog.Warn("face models can't use the GPU; using the CPU", "err", err)
+		}
+	}
+	return f, nil
+}
+
+func openFaceModels(m FaceModel, device Device, threads int) (det, rec *session, err error) {
 	var outputs []string
 	for _, kind := range []string{"cls", "obj", "bbox", "kps"} {
 		for _, s := range yunetStrides {
 			outputs = append(outputs, fmt.Sprintf("%s_%d", kind, s))
 		}
 	}
-	det, err := openSession(filepath.Join(m.Dir, "yunet.onnx"), CPU, threads, outputs...)
+	det, err = openSession(filepath.Join(m.Dir, "yunet.onnx"), device, threads, outputs...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	rec, err := openSession(filepath.Join(m.Dir, "sface.onnx"), CPU, threads)
+	rec, err = openSession(filepath.Join(m.Dir, "sface.onnx"), device, threads)
 	if err != nil {
 		det.close()
-		return nil, err
+		return nil, nil, err
 	}
-	return &Faces{m: m, det: det, rec: rec}, nil
+	return det, rec, nil
 }
 
-// Close frees both models.
+// Device reports where the models run while the GPU is free: the GPU, or
+// the CPU without one (or after it failed).
+func (f *Faces) Device() Device {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.gdet != nil {
+		return GPU
+	}
+	return CPU
+}
+
+// run runs the detector (or, with rec, the recogniser): on the GPU if the
+// image model leaves it free, else on the CPU. A GPU that fails (a driver
+// update, a removed device) is dropped, and the CPU runs everything.
+func (f *Faces) run(rec bool, in ort.Value) ([][]float32, error) {
+	f.mu.RLock()
+	c, g := f.det, f.gdet
+	if rec {
+		c, g = f.rec, f.grec
+	}
+	if g != nil {
+		f.turn.Lock()
+		out, ran, err := g.tryRun(in)
+		f.turn.Unlock()
+		if ran {
+			f.mu.RUnlock()
+			if err == nil {
+				return out, nil
+			}
+			f.dropGPU(g, err)
+			return f.run(rec, in)
+		}
+	}
+	defer f.mu.RUnlock()
+	return c.run(in)
+}
+
+// dropGPU frees the GPU's models after a run failed on failed, unless
+// another run already did.
+func (f *Faces) dropGPU(failed *session, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if failed != f.gdet && failed != f.grec {
+		return
+	}
+	slog.Warn("face models failed on the GPU; using the CPU", "err", err)
+	f.gdet.close()
+	f.grec.close()
+	f.gdet, f.grec = nil, nil
+}
+
+// Close frees the models.
 func (f *Faces) Close() {
-	f.det.close()
-	f.rec.close()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range []*session{f.det, f.rec, f.gdet, f.grec} {
+		s.close()
+	}
 }
 
 // Detect finds the faces in an 8-bit RGB image scoring at least minScore,
@@ -130,7 +211,7 @@ func (f *Faces) Detect(pix []byte, w, h int, minScore float32) ([]Face, error) {
 		return nil, err
 	}
 	defer destroy(in)
-	outs, err := f.det.run(in)
+	outs, err := f.run(false, in)
 	if err != nil {
 		return nil, fmt.Errorf("run face detector: %w", err)
 	}
@@ -208,7 +289,7 @@ func (f *Faces) Embed(pix []byte, w, h int, faces []Face) ([]Identity, error) {
 		if err != nil {
 			return nil, err
 		}
-		res, err := f.rec.run(in)
+		res, err := f.run(true, in)
 		destroy(in)
 		if err != nil {
 			return nil, fmt.Errorf("run face recognizer: %w", err)

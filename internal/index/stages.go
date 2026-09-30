@@ -26,6 +26,9 @@ type stage[R any] struct {
 	model releaser        // the model the stage runs, freed when idle or held; may be nil
 	// changes is what a saved batch changes in the library, for the UI.
 	changes core.Changes
+	// unchanged, if set, reports a result that only records the new version
+	// (see upgrade.go): a batch of nothing else changes nothing to show.
+	unchanged func(R) bool
 	// fail, if set, shows why the stage can't run ("" once it runs again).
 	fail func(msg string)
 	// process handles a batch. An error means the stage itself can't run
@@ -112,7 +115,9 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 				s.fail("")
 			}
 		}
-		ix.markChanged(s.changes)
+		if s.unchanged == nil || !all(results, s.unchanged) {
+			ix.markChanged(s.changes)
+		}
 		for _, ch := range s.next {
 			nudge(ch)
 		}
@@ -127,6 +132,16 @@ func eachItem[R any](workers int, fn func(context.Context, store.JobItem) R) fun
 		parallel.For(ctx, len(items), workers, func(i int) { results[i] = fn(ctx, items[i]) })
 		return results, nil
 	}
+}
+
+// all reports whether f holds for every one of rs.
+func all[R any](rs []R, f func(R) bool) bool {
+	for _, r := range rs {
+		if !f(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (ix *Indexer) fetch(ctx context.Context, stage core.Stage, n int) ([]store.JobItem, error) {
@@ -216,6 +231,10 @@ func (ix *Indexer) keepForFaces(ctx context.Context, items []store.JobItem) map[
 func (ix *Indexer) doThumbnail(ctx context.Context, j store.JobItem, keep bool) (r store.ThumbResult) {
 	r.AssetID = j.AssetID
 	defer recoverInto(&r.Err, j.Path)
+	if j.Prior != "" && thumbnailsStand(j) {
+		r.Unchanged = true
+		return r
+	}
 	var t media.Thumbs
 	var err error
 	if keep && ix.pixels.room() {
@@ -437,17 +456,34 @@ const (
 	faceThreads  = 2 // CPU threads per face model run
 )
 
-// doFaces finds, aligns and recognises the faces in a batch of photos.
+// doFaces finds, aligns and recognises the faces in a batch of photos,
+// except where those found before an upgrade stand (see facesStanding).
 func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.FaceResult, error) {
-	faces, err := ix.faces.get()
+	stand, err := ix.facesStanding(ctx, items)
 	if err != nil {
 		return nil, err
 	}
 	results := make([]store.FaceResult, len(items))
-	parallel.For(ctx, len(items), faceWorkers, func(i int) {
-		j := items[i]
-		r := &results[i]
-		r.AssetID = j.AssetID
+	var run []int
+	for i, j := range items {
+		results[i].AssetID = j.AssetID
+		if stand[j.AssetID] {
+			results[i].Unchanged = true
+			ix.pixels.take(j.AssetID, j.Orientation) // if the thumbnail stage kept it, it isn't wanted
+		} else {
+			run = append(run, i)
+		}
+	}
+	if len(run) == 0 {
+		return results, nil // without loading the models
+	}
+	faces, err := ix.faces.get()
+	if err != nil {
+		return nil, err
+	}
+	parallel.For(ctx, len(run), faceWorkers, func(k int) {
+		j := items[run[k]]
+		r := &results[run[k]]
 		defer recoverInto(&r.Err, j.Path)
 		process := func(im media.Image, at int64) error {
 			found, err := faces.Detect(im.Pix, im.W, im.H, faceMinScore)
@@ -502,9 +538,13 @@ func (ix *Indexer) saveFaces(ctx context.Context, rs []store.FaceResult) error {
 	if err := ix.store.SaveFaces(ctx, ix.people.Model().Version, ix.version[core.StageFaces], rs); err != nil {
 		return err
 	}
-	ix.people.Nudge()
+	if !all(rs, facesUnchanged) {
+		ix.people.Nudge()
+	}
 	return nil
 }
+
+func facesUnchanged(r store.FaceResult) bool { return r.Unchanged }
 
 // recoverInto turns a panic in a decoder (corrupt files find bugs) into a
 // per-file error instead of taking the whole app down.
