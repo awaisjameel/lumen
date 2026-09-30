@@ -40,8 +40,9 @@ A Windows-first desktop app that organizes large photo and video libraries autom
 ### Key flows
 
 - **Search:** a single box handles everything. Natural language (CLIP), person names, tags, dates ("June 2023"), places, file types. Filter chips appear under the box to refine.
-- **People:** faces are auto-clustered into unnamed groups. User names a cluster once; the app applies it everywhere. Merge, split, hide, and "not this person" corrections feed back into clustering.
-- **Things & Events:** auto-suggested categories (Beach, Food, Documents, Screenshots, Pets…) and auto-detected events (a burst of photos in one place over a day or weekend). Users can rename, hide or pin any of them.
+- **People:** faces are auto-clustered into unnamed groups. User names a cluster once; the app applies it everywhere. Merge, split, block, and "not this person" corrections feed back into clustering.
+- **Things & Events:** auto-suggested categories (Beach, Food, Documents, Screenshots, Pets…) and auto-detected events (a burst of photos in one place over a day or weekend). Users can rename, block or pin any of them.
+- **Blocking:** block a person, a face, a Thing, a place, an event, a photo, a folder or an album, and it disappears from the whole app: library, search, albums, People, Things, Places, Events, Duplicates and every count. It shows only in a PIN-locked **Blocked** screen in Settings. See *Blocking* in section 9.
 - **Albums:** manual albums plus **Smart Albums** built from rules ("person = Mom AND tag = garden AND year ≥ 2022"). Smart Albums are the main power-user feature.
 - **Organize on disk (optional, explicit):** a preview-first tool to move/rename files into a folder scheme the user defines (e.g. `Year/Month/Event`). Always shows a dry run and supports undo.
 
@@ -327,6 +328,7 @@ Rough durations assume one experienced developer part-time-to-full-time and new 
 - Albums and Smart Albums (rule builder).
 - Duplicates and near-duplicates review screen.
 - Events and Places (offline geocoding).
+- Blocking, built after Events and Places so it covers every kind at once: blocks, a PIN-locked Blocked screen in Settings, and existing hidden people and Things converted. Replaces "hide".
 - Optional organize-on-disk with dry run and undo; XMP sidecar export.
 
 ### Phase 6 — Polish & ship v1 (3–4 weeks)
@@ -409,6 +411,44 @@ Rough durations assume one experienced developer part-time-to-full-time and new 
 - **Data location:** Lumen's own files (database, thumbnail cache, AI models) live in the standard Windows app-data folder by default. A setting lets the user move the thumbnail cache — or the whole Lumen data folder — to another drive, since the cache can grow to several gigabytes and the C drive is often small or full.
 
 * **Thumbnail cache cap:** Default maximum **2 GB**, adjustable in settings. When full, Lumen drops the least-recently-viewed thumbnails and regenerates them on demand, so the cache never grows out of control.
+
+- **Blocking (decided 2026-09-30):** a blocked item disappears from everywhere and is seen only in the Blocked screen. It replaces the older "hide", which only tidied the People and Things lists.
+  - **What can be blocked:** people, named or not; single faces; Things; places; events; single photos and videos; folders inside a source; albums.
+  - **Two modes, chosen per block.** The choice applies to people, faces, Things, places, events and albums:
+    - **Label only:** the item goes, but its photos stay visible. A person blocked this way loses their face boxes, name and details-panel entry in every photo.
+    - **Label and photos:** every photo it covers goes too.
+    - Photos and folders always hide their photos.
+  - **What a block covers:**
+    - **Person:** every face grouped as them, now and later.
+    - **Single face:** when blocking, you choose that face only, or that face plus close look-alikes in existing and future photos.
+    - **Place:** exactly what Lumen groups under that place's entry.
+    - **Event:** whatever the event holds as Lumen regroups it. Photos that join it hide, and photos that leave it come back.
+    - **Folder:** indexing continues, so faces, Things and blocks stay current. It is only hidden.
+  - **Where blocked items disappear:**
+    - library, search and search suggestions;
+    - albums, including counts and covers;
+    - People, Things, Places, Events and Duplicates;
+    - every count and the indexing status;
+    - organise-on-disk, which never moves or renames blocked photos.
+
+    The exceptions:
+    - **Search:** searching a blocked name says that it is blocked and links to the Blocked screen.
+    - **Trash:** deleted blocked photos appear in Trash like any other.
+  - **Albums keep membership:** a hidden photo leaves the album's view, count and cover, and returns when unblocked.
+  - **New photos:** blocks apply automatically. A blocked person keeps gathering new faces silently, so their new photos hide too. A blocked person is never offered in merges or suggestions outside the Blocked screen.
+  - **Overlaps:** a photo stays hidden while any block covers it. The Blocked screen says which block still hides it.
+  - **Blocking** is done from:
+    - the People, Things, Places, Events and Albums views;
+    - the viewer and details panel: the photo, one of its faces or people, its place or its event;
+    - the folders in Settings.
+
+    There is no grid multi-select. Blocking asks you to confirm and pick the mode, then offers a few seconds of Undo.
+  - **The Blocked screen** (Settings → Blocked):
+    - It lists every block. You can unblock, switch modes, browse and open the covered photos, and move them to Trash.
+    - The first block asks you to create a Lumen PIN. After that, blocking needs no PIN, but opening the Blocked screen does, every time; leaving the screen locks it again.
+    - A forgotten PIN is reset after confirming with Windows sign-in (Windows Hello or the PC password). Blocks survive the reset.
+  - **Privacy is in-app only.** Thumbnails and AI data stay on disk unchanged, so unblocking is instant and blocks keep matching. Someone browsing Lumen's data folder could still see them.
+  - **Upgrade:** people and Things hidden today become blocks in label-and-photos mode. This excludes the built-in "sink" Things the vocabulary hides; they share the same `hidden` column and must not convert.
 
 ## 10. Module Architecture
 
