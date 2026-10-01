@@ -74,7 +74,10 @@ func (l *Linker) Update(ctx context.Context, faces []store.ClusterFace) (map[int
 	back := make([][]near, len(fresh)) // (old face, similarity to this new face)
 	parallel.For(ctx, len(fresh), runtime.NumCPU(), func(k int) {
 		v := loose[fresh[k]]
-		for _, o := range loose {
+		for i, o := range loose {
+			if i%1024 == 0 && ctx.Err() != nil {
+				return
+			}
 			if o.ID == v.ID {
 				continue
 			}

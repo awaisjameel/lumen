@@ -57,6 +57,54 @@ func TestLinkExistingPeopleStopsDuringCancellation(t *testing.T) {
 	}
 }
 
+func TestMergeStopsWhileBuildingCandidateQueue(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	checked := &cancelOnCheck{Context: ctx, cancel: cancel}
+	var faces []store.ClusterFace
+	for i := range 64 {
+		id := int64(i + 1)
+		faces = append(faces, store.ClusterFace{ID: id, AssetID: id, Person: id, Vec: []float32{1}})
+	}
+	c := newClustering(faces, nil, nil)
+	if err := c.link(ctx, map[int64][]int64{}, DefaultParams); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.merge(checked, DefaultParams.Threshold); !errors.Is(err, context.Canceled) {
+		t.Fatalf("merge cancellation = %v", err)
+	}
+	for _, g := range c.groups {
+		if g.dead {
+			t.Fatal("groups merged after cancellation while building the queue")
+		}
+	}
+}
+
+func TestLinkerStopsWhileComparingOneNewFace(t *testing.T) {
+	l := NewLinker(DefaultParams)
+	faces := make([]store.ClusterFace, 0, 2049)
+	for i := range 2048 {
+		faces = append(faces, store.ClusterFace{ID: int64(i + 1), Vec: []float32{1}})
+	}
+	if _, err := l.Update(t.Context(), faces); err != nil {
+		t.Fatal(err)
+	}
+	fresh := store.ClusterFace{ID: 2049, Vec: []float32{1}}
+	faces = append(faces, fresh)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	checked := &cancelOnCheck{Context: ctx, cancel: cancel}
+	if _, err := l.Update(checked, faces); !errors.Is(err, context.Canceled) {
+		t.Fatalf("comparison cancellation = %v", err)
+	}
+	if _, remembered := l.near[fresh.ID]; remembered {
+		t.Fatal("cancelled comparisons were cached as finished")
+	}
+	if got, err := l.Update(t.Context(), faces); err != nil || len(got[fresh.ID]) != DefaultParams.Neighbours {
+		t.Fatalf("retry after cancellation = %v, %v", got[fresh.ID], err)
+	}
+}
+
 // world makes identity vectors: each person has a random direction, and
 // each face of them is that direction plus noise (same person ~0.7 cosine,
 // different people ~0).

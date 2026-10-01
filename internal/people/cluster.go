@@ -222,6 +222,9 @@ func (c *clustering) link(ctx context.Context, links map[int64][]int64, p Params
 
 // merge joins the most similar linked groups while they reach threshold.
 func (c *clustering) merge(ctx context.Context, threshold float32) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	q := &queue{}
 	push := func(a, b int) {
 		if s := c.similarity(a, b); s >= threshold {
@@ -229,6 +232,9 @@ func (c *clustering) merge(ctx context.Context, threshold float32) error {
 		}
 	}
 	for i, g := range c.groups {
+		if i%16 == 0 && ctx.Err() != nil {
+			return ctx.Err()
+		}
 		for j := range g.links {
 			if i < j {
 				push(i, j)
@@ -254,7 +260,7 @@ func (c *clustering) merge(ctx context.Context, threshold float32) error {
 			push(keep, j)
 		}
 	}
-	return nil
+	return ctx.Err()
 }
 
 func (c *clustering) similarity(a, b int) float32 {
