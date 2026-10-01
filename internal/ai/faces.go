@@ -2,6 +2,7 @@ package ai
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -280,8 +281,8 @@ type Identity struct {
 }
 
 // Embed aligns each face of an 8-bit RGB image (as Detect found it there)
-// and recognises it.
-func (f *Faces) Embed(pix []byte, w, h int, faces []Face) ([]Identity, error) {
+// and recognises it, stopping between batches when ctx ends.
+func (f *Faces) Embed(ctx context.Context, pix []byte, w, h int, faces []Face) ([]Identity, error) {
 	if err := checkRGB(pix, w, h); err != nil {
 		return nil, err
 	}
@@ -289,6 +290,9 @@ func (f *Faces) Embed(pix []byte, w, h int, faces []Face) ([]Identity, error) {
 	plane := side * side
 	out := make([]Identity, 0, len(faces))
 	for lo := 0; lo < len(faces); lo += embedBatch {
+		if err := ctx.Err(); err != nil { // a group photo runs several batches
+			return nil, err
+		}
 		batch := faces[lo:min(lo+embedBatch, len(faces))]
 		data := make([]float32, len(batch)*3*plane)
 		sharp := make([]float32, len(batch))

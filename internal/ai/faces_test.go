@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"math"
 	"path/filepath"
 	"slices"
@@ -159,7 +160,7 @@ func TestFacesOnRealPhotos(t *testing.T) {
 		if len(big) == 0 {
 			continue
 		}
-		vecs, err := f.Embed(im.Pix, im.W, im.H, big)
+		vecs, err := f.Embed(t.Context(), im.Pix, im.W, im.H, big)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -176,7 +177,7 @@ func TestFacesOnRealPhotos(t *testing.T) {
 				scaled[i].Landmarks[j] = [2]float64{fc.Landmarks[j][0] * k, fc.Landmarks[j][1] * k}
 			}
 		}
-		again, err := f.Embed(small.Pix, small.W, small.H, scaled)
+		again, err := f.Embed(t.Context(), small.Pix, small.W, small.H, scaled)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -259,11 +260,11 @@ func TestFacesOnTheGPUMatchTheCPU(t *testing.T) {
 		if len(pc) == 0 {
 			continue
 		}
-		vc, err := onCPU.Embed(im.Pix, im.W, im.H, pc)
+		vc, err := onCPU.Embed(t.Context(), im.Pix, im.W, im.H, pc)
 		if err != nil {
 			t.Fatal(err)
 		}
-		vg, err := onGPU.Embed(im.Pix, im.W, im.H, pg)
+		vg, err := onGPU.Embed(t.Context(), im.Pix, im.W, im.H, pg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -335,5 +336,30 @@ func BenchmarkAlign(b *testing.B) {
 	lm := [5][2]float64{{900, 600}, {1150, 600}, {1025, 750}, {930, 900}, {1120, 900}}
 	for b.Loop() {
 		Align(pix, w, h, lm, 112)
+	}
+}
+
+// A group photo runs several recognition batches; a cancelled context stops
+// before the next one instead of finishing the photo.
+func TestEmbedStopsWhenCancelled(t *testing.T) {
+	rt := testenv.Runtime(t)
+	if err := Init(rt); err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadFaceModel(filepath.Join(rt, "models", "faces"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := OpenFaces(m, CPU, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	const w, h = 64, 64
+	face := Face{X: 8, Y: 8, W: 48, H: 48, Landmarks: [5][2]float64{{24, 28}, {40, 28}, {32, 36}, {26, 46}, {38, 46}}}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := f.Embed(ctx, make([]byte, w*h*3), w, h, []Face{face}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Embed: %v", err)
 	}
 }

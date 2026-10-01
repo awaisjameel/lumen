@@ -615,7 +615,7 @@ func findFaces(ctx context.Context, faces *ai.Faces, im media.Image, at int64, r
 		return err
 	}
 	found = slices.DeleteFunc(found, func(f ai.Face) bool { return min(f.W, f.H) < faceMinSide })
-	ids, err := faces.Embed(im.Pix, im.W, im.H, found)
+	ids, err := faces.Embed(ctx, im.Pix, im.W, im.H, found)
 	if err != nil {
 		return fmt.Errorf("embed faces: %w", err)
 	}
