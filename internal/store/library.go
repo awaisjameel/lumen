@@ -69,10 +69,11 @@ func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float64) (
 
 // viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
 func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float64) (where string, args []any, err error) {
-	for _, target := range []struct {
+	targets := []struct {
 		kind core.BlockKind
 		id   int64
-	}{{core.BlockTag, v.Tag}, {core.BlockPerson, v.Person}} {
+	}{{core.BlockTag, v.Tag}, {core.BlockPerson, v.Person}, {core.BlockAlbum, v.Album}, {core.BlockPlace, v.Place}}
+	for _, target := range targets {
 		if target.id == 0 {
 			continue
 		}
@@ -84,6 +85,22 @@ func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float64) (whe
 			return "", nil, ErrNotFound
 		}
 	}
+	where, args, err = s.viewFilterSQL(ctx, v, minScore)
+	if err != nil {
+		return "", nil, err
+	}
+	// A label-only block can be committed after the checks above, before the
+	// grid query runs. Check its targets again in that query's snapshot.
+	for _, target := range targets {
+		if target.id != 0 {
+			where += " AND NOT " + labelBlocked(target.kind, "?")
+			args = append(args, target.id)
+		}
+	}
+	return where, args, nil
+}
+
+func (s *Store) viewFilterSQL(ctx context.Context, v core.View, minScore float64) (where string, args []any, err error) {
 	if v.Album != 0 {
 		a, err := album(ctx, s.r, v.Album)
 		if err != nil {
@@ -272,12 +289,21 @@ func (s *Store) GridItems(ctx context.Context, ids []int64) ([]core.GridItem, er
 // AssetDetail returns everything the details panel shows for one asset.
 func (s *Store) AssetDetail(ctx context.Context, id int64) (core.AssetDetail, error) {
 	var d core.AssetDetail
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		d, err = assetDetail(ctx, tx, id)
+		return err
+	})
+	return d, err
+}
+
+func assetDetail(ctx context.Context, q querier, id int64) (core.AssetDetail, error) {
+	var d core.AssetDetail
 	var w, h sql.NullInt64
 	var camera sql.NullString
 	var duration sql.NullInt64
 	var videoCodec, audioCodec sql.NullString
 	var lat, lon sql.NullFloat64
-	err := s.r.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
+	err := q.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
 		CASE WHEN `+placeBlocked("assets.place_id")+` THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
 		duration_ms, video_codec, audio_codec
 		FROM assets WHERE id = ? AND `+visible, id).
@@ -299,7 +325,7 @@ func (s *Store) AssetDetail(ctx context.Context, id int64) (core.AssetDetail, er
 			Play: core.PlaybackOf(d.Ext, videoCodec.String, audioCodec.String)}
 	}
 
-	rows, err := s.r.QueryContext(ctx, "SELECT path, size FROM files WHERE asset_id = ? ORDER BY path", id)
+	rows, err := q.QueryContext(ctx, "SELECT path, size FROM files WHERE asset_id = ? ORDER BY path", id)
 	if err != nil {
 		return d, err
 	}

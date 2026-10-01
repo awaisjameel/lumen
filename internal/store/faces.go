@@ -207,9 +207,21 @@ type ClusterPerson struct {
 type Rejection struct{ Face, Person int64 }
 
 // ClusterData returns what clustering works from: the faces made by model in
-// visible photos, every person, and the user's rejections.
+// present photos that are neither hidden nor trashed, every person, and the
+// user's rejections, from one snapshot. Blocks do not stop recognition.
 func (s *Store) ClusterData(ctx context.Context, model string) ([]ClusterFace, []ClusterPerson, []Rejection, error) {
-	faces, err := queryAll(ctx, s.r, func(r *sql.Rows) (f ClusterFace, err error) {
+	var faces []ClusterFace
+	var people []ClusterPerson
+	var rejections []Rejection
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		faces, people, rejections, err = clusterData(ctx, tx, model)
+		return err
+	})
+	return faces, people, rejections, err
+}
+
+func clusterData(ctx context.Context, q querier, model string) ([]ClusterFace, []ClusterPerson, []Rejection, error) {
+	faces, err := queryAll(ctx, q, func(r *sql.Rows) (f ClusterFace, err error) {
 		var vec []byte
 		err = r.Scan(&f.ID, &f.AssetID, &f.Frame, &f.Person, &f.ByUser, &f.Sharpness, &f.Yaw, &vec)
 		f.Vec = bytesFloat32(vec)
@@ -220,14 +232,14 @@ func (s *Store) ClusterData(ctx context.Context, model string) ([]ClusterFace, [
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	people, err := queryAll(ctx, s.r, func(r *sql.Rows) (p ClusterPerson, err error) {
+	people, err := queryAll(ctx, q, func(r *sql.Rows) (p ClusterPerson, err error) {
 		err = r.Scan(&p.ID, &p.Confirmed)
 		return p, err
 	}, "SELECT id, name IS NOT NULL OR "+labelBlocked(core.BlockPerson, "people.id")+" FROM people ORDER BY id")
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	rejections, err := queryAll(ctx, s.r, func(r *sql.Rows) (x Rejection, err error) {
+	rejections, err := queryAll(ctx, q, func(r *sql.Rows) (x Rejection, err error) {
 		err = r.Scan(&x.Face, &x.Person)
 		return x, err
 	}, "SELECT face_id, person_id FROM face_rejections")

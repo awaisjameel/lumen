@@ -168,6 +168,7 @@ func (s *Store) PeopleAssets(ctx context.Context, people []int64) ([]int64, erro
 	},
 		`SELECT f.asset_id FROM faces f JOIN assets a ON a.id = f.asset_id
 		WHERE f.person_id IN (SELECT value FROM json_each(?1)) AND `+visibleA+`
+		AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+`
 		GROUP BY f.asset_id HAVING count(DISTINCT f.person_id) = (SELECT count(DISTINCT value) FROM json_each(?1))
 		ORDER BY max(a.taken_at) DESC, f.asset_id DESC`, string(list))
 }

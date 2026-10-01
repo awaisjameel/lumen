@@ -576,14 +576,13 @@ func (s *Store) CountPending(ctx context.Context, stages ...core.Stage) (int, er
 	return n, err
 }
 
-// JobCounts returns how many jobs are still to do per stage, and how many failed
-// or were skipped. It reads only unfinished jobs (the asset_jobs_status
-// index), and ignores assets whose files are gone: their jobs wait, unrun,
-// until the content reappears.
+// JobCounts returns how many visible jobs are still to do per stage, and how
+// many failed or were skipped. Hidden assets keep being indexed, but their
+// jobs must not appear in the UI's progress counts.
 func (s *Store) JobCounts(ctx context.Context) (pending map[core.Stage]int, failed, skipped int, err error) {
 	rows, err := s.r.QueryContext(ctx, `SELECT j.stage, j.status, count(*) FROM asset_jobs j
 		JOIN assets a ON a.id = j.asset_id
-		WHERE j.status IN ('pending', 'waiting', 'error', 'skipped') AND a.`+present+`
+		WHERE j.status IN ('pending', 'waiting', 'error', 'skipped') AND `+visibleA+`
 		GROUP BY j.stage, j.status`)
 	if err != nil {
 		return nil, 0, 0, err

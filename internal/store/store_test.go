@@ -6,8 +6,11 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/mattn/go-sqlite3"
 
 	"lumen/internal/core"
 )
@@ -20,6 +23,109 @@ func openTest(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { st.Close() })
 	return st
+}
+
+func TestAssetDetailReadsPathsFromItsMetadataSnapshot(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	before := item(src.ID, `C:\Photos\before.jpg`, "photo")
+	check(t, errOf(st.Ingest(ctx, []IngestItem{before})))
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 1)
+	check(t, err)
+	if len(jobs) != 1 {
+		t.Fatal("missing fixture job")
+	}
+	id := jobs[0].AssetID
+	_, err = st.SetBlock(ctx, core.BlockFolder, 0, `C:\Photos\privé`, core.BlockPhotos)
+	check(t, err)
+	// The Unicode block calls fold during the metadata read. Commit a rename
+	// and date change there, so the later paths read must keep that snapshot.
+	st.r.SetMaxOpenConns(1)
+	conn, err := st.r.Conn(ctx)
+	check(t, err)
+	defer func() { _ = conn.Close() }() // also release the connection if fixture setup fails
+	var changed sync.Once
+	var changeErr error
+	check(t, conn.Raw(func(raw any) error {
+		sqlite, ok := raw.(*sqlite3.SQLiteConn)
+		if !ok {
+			return errors.New("unexpected SQLite connection")
+		}
+		return sqlite.RegisterFunc("fold", func(v any) (any, error) {
+			changed.Do(func() {
+				changeErr = st.tx(ctx, func(tx *sql.Tx) error {
+					if _, err := tx.ExecContext(ctx, "UPDATE assets SET taken_at = ? WHERE id = ?", before.TakenAt+1, id); err != nil {
+						return err
+					}
+					_, err := tx.ExecContext(ctx, "UPDATE files SET path = ? WHERE asset_id = ?", `C:\Photos\after.jpg`, id)
+					return err
+				})
+			})
+			return foldSQL(v), changeErr
+		}, false)
+	}))
+	check(t, conn.Close())
+	detail, err := st.AssetDetail(ctx, id)
+	check(t, err)
+	check(t, changeErr)
+	if detail.TakenAt != before.TakenAt || len(detail.Paths) != 1 || detail.Paths[0] != before.Path {
+		t.Fatalf("mixed metadata and paths from different snapshots: %+v", detail)
+	}
+	var after string
+	check(t, st.r.QueryRowContext(ctx, "SELECT path FROM files WHERE asset_id = ?", id).Scan(&after))
+	if after != `C:\Photos\after.jpg` {
+		t.Fatalf("concurrent rename did not commit: %q", after)
+	}
+}
+
+func TestClusterDataReadsCorrectionsFromItsFacesSnapshot(t *testing.T) {
+	st, ctx, asset, _, _ := peopleFixture(t)
+	face := facesOf(t, st, asset)[0].ID
+	person, err := st.NameFaces(ctx, []int64{face}, "Alice")
+	check(t, err)
+	st.r.SetMaxOpenConns(1)
+	conn, err := st.r.Conn(ctx)
+	check(t, err)
+	defer func() { _ = conn.Close() }() // also release the connection if fixture setup fails
+	var changed sync.Once
+	var changeErr error
+	check(t, conn.Raw(func(raw any) error {
+		sqlite, ok := raw.(*sqlite3.SQLiteConn)
+		if !ok {
+			return errors.New("unexpected SQLite connection")
+		}
+		return sqlite.RegisterFunc("read_face", func(id int64) (int64, error) {
+			changed.Do(func() { changeErr = st.RejectFaces(ctx, person, []int64{face}) })
+			return id, changeErr
+		}, false)
+	}))
+	// Commit a correction while faces are read. The later people and rejection
+	// reads must describe that same snapshot, before the correction.
+	check(t, errOf(conn.ExecContext(ctx, `PRAGMA query_only = OFF;
+		CREATE TEMP VIEW faces AS SELECT read_face(id) AS id, asset_id, at_ms, person_id, assigned_by, sharpness, yaw, vec, model FROM main.faces;
+		PRAGMA query_only = ON;`)))
+	check(t, conn.Close())
+	faces, people, rejections, err := st.ClusterData(ctx, "f1")
+	check(t, err)
+	check(t, changeErr)
+	if len(people) != 1 || people[0].ID != person || len(rejections) != 0 {
+		t.Fatalf("corrections did not describe the faces snapshot: people %+v, rejections %+v", people, rejections)
+	}
+	found := false
+	for _, f := range faces {
+		if f.ID == face {
+			found = f.Person == person
+		}
+	}
+	if !found {
+		t.Fatalf("snapshot lost the pre-correction face assignment: %+v", faces)
+	}
+	var stored int
+	check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM face_rejections WHERE face_id = ? AND person_id = ?", face, person).Scan(&stored))
+	if stored != 1 {
+		t.Fatal("concurrent correction did not commit")
+	}
 }
 
 func TestReopenKeepsSchemaVersion(t *testing.T) {
