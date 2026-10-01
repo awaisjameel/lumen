@@ -216,7 +216,16 @@ func (f *Faces) Detect(pix []byte, w, h int, minScore float32) ([]Face, error) {
 	if err != nil {
 		return nil, fmt.Errorf("run face detector: %w", err)
 	}
+	return detectFaces(outs, side, w, h, minScore)
+}
+
+// detectFaces validates the detector's outputs before decoding image-space faces.
+func detectFaces(outs [][]float32, side, w, h int, minScore float32) ([]Face, error) {
+	scale := float64(side) / float64(max(w, h))
 	n := len(yunetStrides)
+	if len(outs) != 4*n {
+		return nil, fmt.Errorf("face detector: got %d outputs, want %d", len(outs), 4*n)
+	}
 	var found []Face
 	for k, stride := range yunetStrides {
 		cls, obj, box, kps := outs[k], outs[n+k], outs[2*n+k], outs[3*n+k]
@@ -226,6 +235,9 @@ func (f *Faces) Detect(pix []byte, w, h int, minScore float32) ([]Face, error) {
 		}
 		st := float64(stride)
 		for i := range cls {
+			if !finite(float64(cls[i]), float64(obj[i])) {
+				continue
+			}
 			score := float32(math.Sqrt(float64(clamp01(cls[i]) * clamp01(obj[i]))))
 			if !(score >= minScore) { // also drops NaN, which compares false
 				continue

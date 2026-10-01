@@ -13,6 +13,51 @@ import (
 	"lumen/internal/testenv"
 )
 
+func TestDetectorDropsNonFiniteOutputsBeforeDecodingFaces(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output int
+		value  float32
+	}{
+		{"infinite class", 0, float32(math.Inf(1))},
+		{"infinite objectness", 3, float32(math.Inf(1))},
+		{"NaN class", 0, float32(math.NaN())},
+		{"NaN objectness", 3, float32(math.NaN())},
+		{"infinite box", 6, float32(math.Inf(1))},
+		{"NaN box", 6, float32(math.NaN())},
+		{"infinite landmark", 9, float32(math.Inf(1))},
+		{"NaN landmark", 9, float32(math.NaN())},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outs := detectorOutputs()
+			outs[tc.output][0] = tc.value
+			got, err := detectFaces(outs, 32, 32, 32, 0.8)
+			if err != nil || len(got) != 0 {
+				t.Fatalf("invalid output produced faces: %+v, %v", got, err)
+			}
+		})
+	}
+	got, err := detectFaces(detectorOutputs(), 32, 32, 32, 0.8)
+	if err != nil || len(got) != 1 || got[0].Score != 1 {
+		t.Fatalf("valid output = %+v, %v, want one face", got, err)
+	}
+	if _, err := detectFaces(nil, 32, 32, 32, 0.8); err == nil {
+		t.Fatal("missing detector outputs were accepted")
+	}
+}
+
+func detectorOutputs() [][]float32 {
+	outs := make([][]float32, 4*len(yunetStrides))
+	for k, stride := range yunetStrides {
+		n := (32 / stride) * (32 / stride)
+		outs[k], outs[3+k] = make([]float32, n), make([]float32, n)
+		outs[6+k], outs[9+k] = make([]float32, 4*n), make([]float32, 10*n)
+	}
+	outs[0][0], outs[3][0] = 1, 1
+	outs[6][0], outs[6][1] = 2, 2
+	return outs
+}
+
 // Five dots placed by a known rotation, scale and shift of the template must
 // land back on the template's points after alignment.
 func TestAlignUndoesRotationAndScale(t *testing.T) {
