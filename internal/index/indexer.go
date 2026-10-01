@@ -75,6 +75,7 @@ type Indexer struct {
 	wakeEmbed chan struct{}
 	wakeFaces chan struct{}
 	wakeVideo chan struct{}
+	wakeFS    chan struct{}
 
 	encoder *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
@@ -100,7 +101,7 @@ type Indexer struct {
 	discovered  int
 	pendingFS   map[string]bool // changed paths waiting for the debounce
 	fsSince     time.Time       // when the oldest of them arrived
-	fsTimer     *time.Timer
+	fsDue       time.Time       // Next flush deadline, protected by mu.
 	watchStop   context.CancelFunc
 
 	// Set by whoever changes things and cleared by reportLoop, which only then
@@ -130,6 +131,7 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 		wakeEmbed: make(chan struct{}, 1),
 		wakeFaces: make(chan struct{}, 1),
 		wakeVideo: make(chan struct{}, 1),
+		wakeFS:    make(chan struct{}, 1),
 		resume:    make(chan struct{}),
 		pendingFS: map[string]bool{},
 	}
@@ -350,6 +352,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	}
 	ix.run(func() { ix.reportLoop(ctx) })
 	ix.run(func() { ix.powerLoop(ctx) })
+	ix.run(func() { ix.fsLoop(ctx, ix.flushFSChanges) })
 }
 
 // wakeStages nudges every stage to look for work.
@@ -365,9 +368,9 @@ func (ix *Indexer) Stop() {
 		return
 	}
 	ix.cancel()
-	ix.mu.Lock() // after cancel: restartWatchers starts no more watchers
-	if ix.fsTimer != nil {
-		ix.fsTimer.Stop()
+	ix.mu.Lock() // Barrier: restartWatchers starts no more watchers after cancellation.
+	if ix.watchStop != nil {
+		ix.watchStop()
 	}
 	ix.mu.Unlock()
 	ix.wg.Wait()
@@ -455,6 +458,9 @@ func (ix *Indexer) held(stage core.Stage) bool {
 // any). It returns false if ctx ends.
 func (ix *Indexer) waitTurn(ctx context.Context, stage core.Stage, m releaser) bool {
 	for {
+		if ctx.Err() != nil {
+			return false
+		}
 		ix.mu.Lock()
 		held, resume := ix.held(stage), ix.resume
 		ix.mu.Unlock()
@@ -700,17 +706,44 @@ func (ix *Indexer) onFSChange(path string) {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 	if ix.rootCtx.Err() != nil {
-		return // stopping; Stop cancels the timer
+		return // stopping
 	}
 	if len(ix.pendingFS) == 0 {
 		ix.fsSince = time.Now()
 	}
 	ix.pendingFS[path] = true
-	switch {
-	case ix.fsTimer == nil:
-		ix.fsTimer = time.AfterFunc(debounce, ix.flushFSChanges)
-	case time.Since(ix.fsSince) < debounceMax:
-		ix.fsTimer.Reset(debounce)
+	ix.fsDue = time.Now().Add(debounce)
+	if latest := ix.fsSince.Add(debounceMax); latest.Before(ix.fsDue) {
+		ix.fsDue = latest
+	}
+	nudge(ix.wakeFS)
+}
+
+// fsLoop owns the debounce timer so Stop also waits for a running flush.
+func (ix *Indexer) fsLoop(ctx context.Context, flush func()) {
+	timer := time.NewTimer(time.Hour)
+	defer timer.Stop()
+	timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ix.wakeFS:
+			ix.mu.Lock()
+			due := ix.fsDue
+			pending := len(ix.pendingFS) > 0
+			ix.mu.Unlock()
+			if pending {
+				timer.Reset(time.Until(due))
+			} else {
+				timer.Stop()
+			}
+		case <-timer.C:
+			if ctx.Err() != nil {
+				return
+			}
+			flush()
+		}
 	}
 }
 
@@ -792,7 +825,10 @@ func (ix *Indexer) flushFSChanges() {
 // big library, so it spends at most a fifth of the time doing it.
 func (ix *Indexer) reportLoop(ctx context.Context) {
 	wait := time.Second
-	visibility, _ := ix.store.VisibilityRevision(ctx) // 0 on failure: at worst one extra reload
+	visibility, err := ix.store.VisibilityRevision(ctx) // 0 on failure: at worst one extra reload
+	if err != nil && ctx.Err() == nil {
+		slog.Error("read visibility revision", "err", err)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -811,6 +847,8 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 					bits |= changedAssets
 				}
 				visibility = rev
+			} else if ctx.Err() == nil {
+				slog.Error("read visibility revision", "err", err)
 			}
 		}
 		start := time.Now()
