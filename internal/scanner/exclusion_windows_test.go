@@ -35,3 +35,11 @@ func TestExclusionSaysWhyAndWhere(t *testing.T) {
 		t.Errorf("recycle bin: at %q, by attribute %v, excluded %v", at, byAttribute, excluded)
 	}
 }
+
+func TestExclusionRecognisesDotDotPrefixedFoldersInsideSource(t *testing.T) {
+	root := t.TempDir()
+	folder := filepath.Join(root, "..Private")
+	if at, byAttribute, excluded := Exclusion(root, filepath.Join(folder, "a.jpg"), nil); !excluded || byAttribute || at != folder {
+		t.Fatalf("dot folder: at %q, by attribute %v, excluded %v", at, byAttribute, excluded)
+	}
+}
