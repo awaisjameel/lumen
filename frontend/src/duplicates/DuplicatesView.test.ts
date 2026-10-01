@@ -152,6 +152,27 @@ it('closes the preview when its asset disappears from refreshed groups', async (
   expect(wrapper.get('dialog').text()).not.toContain('one.jpg')
 })
 
+it('updates the open preview when its paths and thumbnail change', async () => {
+  wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
+  await flushPromises()
+  const dialog = wrapper.get<HTMLDialogElement>('dialog').element
+  dialog.showModal = vi.fn()
+  const close = vi.fn()
+  dialog.close = close
+  await wrapper.get('.preview-button').trigger('click')
+  await flushPromises()
+  vi.mocked(engine.duplicateGroups).mockResolvedValue([
+    { kind: DuplicateKind.DuplicateSimilar, items: [{ ...photo(1, 'C:\\renamed.jpg'), thumb: 2 }] },
+  ])
+  await useDuplicates().load()
+  await flushPromises()
+  expect(close).not.toHaveBeenCalled()
+  expect(wrapper.get('dialog img').attributes('src')).toContain('?v=2')
+  expect(wrapper.get('dialog img').attributes('alt')).toBe('renamed.jpg')
+  expect(wrapper.get('dialog').text()).toContain('C:\\renamed.jpg')
+  expect(wrapper.get('dialog').text()).not.toContain('one.jpg')
+})
+
 it('does not show cached paths on remount after visibility changes, even if the refresh fails', async () => {
   wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
   await flushPromises()

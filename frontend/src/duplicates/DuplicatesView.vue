@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Duplicates: exact file copies and similar-looking photos, for review only.
 // Lumen never deletes or moves files; each copy can be shown in Explorer.
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { DuplicateKind, engine, THUMB_LARGE, thumbUrl } from '../bridge'
@@ -18,7 +18,7 @@ import { useDuplicates } from './store'
 const duplicates = useDuplicates()
 const busy = ref(false)
 const error = ref('')
-const preview = ref<DuplicateItem | null>(null)
+const preview = shallowRef<DuplicateItem | null>(null)
 const previewDialog = ref<HTMLDialogElement | null>(null)
 
 const exact = computed(() => duplicates.list.filter((g) => g.kind === DuplicateKind.DuplicateExact))
@@ -74,10 +74,15 @@ watch(rows, (current, previous) => {
 watch(
   () => duplicates.list,
   (groups) => {
-    if (preview.value && !groups.some((group) => group.items.some((item) => item.id === preview.value?.id))) {
-      previewDialog.value?.close()
-      preview.value = null
+    const id = preview.value?.id
+    if (id === undefined) return
+    let current: DuplicateItem | undefined
+    for (const group of groups) {
+      current = group.items.find((item) => item.id === id)
+      if (current) break
     }
+    if (!current) previewDialog.value?.close()
+    preview.value = current ?? null
   },
 )
 function measureRow(element: Element | ComponentPublicInstance | null) {
