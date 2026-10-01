@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { AlbumKind, engine, MAX_NAME_LEN } from '../bridge'
+import { AlbumKind, engine, ErrorCode, MAX_NAME_LEN } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Album } from '../bridge'
 import { blockRequest } from '../shared/block'
@@ -85,4 +85,25 @@ it('validates names by code point before creating an album', async () => {
   await w.get('form').trigger('submit')
   await flushPromises()
   expect(engine.createAlbum).toHaveBeenCalledOnce()
+})
+
+it.each([
+  [ErrorCode.AlbumExists, 'An album already has that name.'],
+  [ErrorCode.InvalidAlbum, 'This album can’t be saved.'],
+  [ErrorCode.AlbumMediaKind, 'Choose photos, videos, or all media.'],
+  [ErrorCode.AlbumSelection, 'Choose a valid Thing or person.'],
+  [ErrorCode.AlbumDate, 'Enter a valid date in YYYY-MM-DD format.'],
+  [ErrorCode.AlbumDateOrder, 'The start date must not follow the end date.'],
+  [ErrorCode.AlbumSmartItems, 'Smart albums choose their own items.'],
+  [ErrorCode.AlbumKind, 'Choose a manual or smart album.'],
+  [ErrorCode.AlbumReference, 'The selected Thing or person no longer exists.'],
+  [ErrorCode.AlbumManualOnly, 'Only manual albums accept items.'],
+])('explains %s in the album editor and keeps the unsaved draft', async (code, message) => {
+  vi.mocked(engine.createAlbum).mockRejectedValue(new Error('engine details', { cause: { code } }))
+  const w = await mounted()
+  await w.get('form input').setValue('New trip')
+  await w.get('form').trigger('submit')
+  await flushPromises()
+  expect(w.get('[role="alert"]').text()).toBe(message)
+  expect(w.get<HTMLInputElement>('form input').element.value).toBe('New trip')
 })
