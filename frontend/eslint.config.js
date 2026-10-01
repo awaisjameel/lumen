@@ -71,6 +71,40 @@ export default defineConfigWithVueTs(
     },
   },
 
+  // Shared code sits below the features: it never imports one (features
+  // register with it instead, as stores do with shared/block). This block
+  // replaces bridge-only's patterns for these files, so it repeats them.
+  {
+    name: 'lumen/shared-below-features',
+    files: ['src/shared/**/*.{ts,vue}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['**/bindings/**'], message: 'Call the engine through src/bridge.' },
+            { group: ['@wailsio/runtime', '@wailsio/runtime/*'], message: 'Use the runtime through src/bridge.' },
+            {
+              group: [
+                'library',
+                'people',
+                'albums',
+                'things',
+                'duplicates',
+                'events',
+                'places',
+                'settings',
+                'search',
+                'onboarding',
+              ].map((feature) => `../${feature}/*`),
+              message: 'Shared code must not depend on a feature folder.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // Tool configs run in Node and sit outside the app's tsconfig.
   {
     name: 'lumen/configs',

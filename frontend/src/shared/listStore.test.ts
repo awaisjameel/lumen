@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
+import { showBlocksChanged } from './block'
 import { defineCollectionStore, defineListStore, useList } from './listStore'
 
 it('supersedes an initial collection read when visibility changes', async () => {
@@ -108,4 +109,24 @@ it('coalesces mounted list reloads and ignores pending work after unmount', asyn
   expect(fetch).toHaveBeenCalledOnce()
   expect(state.list).toEqual([])
   expect(state.loaded).toBe(false)
+})
+
+it('refreshes the loaded lists of its own app when blocks change, and no other', async () => {
+  const other = createPinia()
+  setActivePinia(other)
+  const otherFetch = vi.fn<() => Promise<string[]>>().mockResolvedValue(['other app'])
+  await defineCollectionStore('blocks-other', otherFetch)().load()
+
+  setActivePinia(createPinia())
+  const fetch = vi.fn<() => Promise<{ id: number }[]>>().mockResolvedValue([{ id: 1 }])
+  const unopened = vi.fn<() => Promise<string[]>>().mockResolvedValue([])
+  const store = defineListStore('blocks-loaded', fetch)()
+  defineCollectionStore('blocks-unopened', unopened)()
+  await store.load()
+  fetch.mockResolvedValue([])
+  await showBlocksChanged()
+  expect(store.list).toEqual([])
+  expect(fetch).toHaveBeenCalledTimes(2)
+  expect(unopened).not.toHaveBeenCalled()
+  expect(otherFetch).toHaveBeenCalledOnce()
 })

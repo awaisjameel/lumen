@@ -11,6 +11,7 @@ import {
   TAG_CONFIDENCE_DEFAULT,
 } from '../bridge'
 import type { Changes, DayBucket, GridItem, Progress, SearchResults, Settings, Source, View } from '../bridge'
+import { onBlocksChanged } from '../shared/block'
 import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { latestSave } from '../shared/latestSave'
@@ -216,7 +217,9 @@ export const useLibrary = defineStore('library', () => {
     stopChanges ??= onLibraryChanged((c) => void refresh(c).catch(logError))
     await initialise()
   }
+  const stopBlocks = onBlocksChanged(() => refreshVisibility())
   onScopeDispose(() => {
+    stopBlocks()
     disposed = true
     stopProgress?.()
     stopChanges?.()

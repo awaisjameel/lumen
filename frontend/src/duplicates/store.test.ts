@@ -10,7 +10,6 @@ vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   engine: { duplicateGroups: vi.fn() },
 }))
-vi.mock('../library/store', () => ({ useLibrary: () => ({ refreshVisibility: vi.fn().mockResolvedValue(undefined) }) }))
 
 const groups: DuplicateGroup[] = [
   {

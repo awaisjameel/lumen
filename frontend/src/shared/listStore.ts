@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef } from 'vue'
+import { onBlocksChanged } from './block'
 import { errorText, logError } from './errors'
 
 /**
@@ -89,7 +90,11 @@ export function useList<T>(fetch: () => Promise<T[]>) {
  * also rejects, for callers that wait on it.
  */
 export function defineCollectionStore<T>(id: string, fetch: () => Promise<T[]>) {
-  return defineStore(id, () => listState(fetch))
+  return defineStore(id, () => {
+    const state = listState(fetch)
+    onScopeDispose(onBlocksChanged(state.invalidate))
+    return state
+  })
 }
 
 /**
@@ -99,6 +104,7 @@ export function defineCollectionStore<T>(id: string, fetch: () => Promise<T[]>) 
 export function defineListStore<T extends { id: number }>(id: string, fetch: () => Promise<T[]>) {
   return defineStore(id, () => {
     const state = listState(fetch)
+    onScopeDispose(onBlocksChanged(state.invalidate))
     const byId = computed(() => new Map(state.list.value.map((item) => [item.id, item])))
     return { ...state, byId }
   })

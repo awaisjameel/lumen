@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { BLOCK_UNLOCK_IDLE_MINUTES, BlockKind, BlockMode, engine, ErrorCode } from '../bridge'
 import type * as Bridge from '../bridge'
+import type * as Block from '../shared/block'
 import BlockedView from './BlockedView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -16,7 +17,10 @@ vi.mock('../bridge', async (importOriginal) => ({
     removeBlock: vi.fn(),
   },
 }))
-vi.mock('../shared/block', () => ({ showBlocksChanged: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('../shared/block', async (importOriginal) => ({
+  ...(await importOriginal<typeof Block>()),
+  showBlocksChanged: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock('../shared/confirm', () => ({ confirm: vi.fn().mockResolvedValue(true) }))
 
 const privateBlock = {

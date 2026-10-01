@@ -1,10 +1,7 @@
+import { getActivePinia } from 'pinia'
+import type { Pinia } from 'pinia'
 import { shallowRef } from 'vue'
 import type { BlockKind } from '../bridge'
-import { useAlbums } from '../albums/store'
-import { useDuplicates } from '../duplicates/store'
-import { useLibrary } from '../library/store'
-import { usePeople } from '../people/store'
-import { useThings } from '../things/store'
 
 export interface BlockRequest {
   kind: BlockKind
@@ -32,14 +29,35 @@ export function clearBlockUndo(): void {
   blockUndo.value = null
 }
 
+// What showBlocksChanged refreshes, per app (Pinia instance): each store
+// registers itself when it is created, so this shared code needs no
+// knowledge of the features whose lists it refreshes.
+const refreshers = new WeakMap<Pinia, Set<() => Promise<unknown>>>()
+
+/**
+ * Has showBlocksChanged run refresh, for the app whose store is being
+ * created: call it from a store's setup. Returns the function that
+ * unregisters it, for the store's disposal.
+ */
+export function onBlocksChanged(refresh: () => Promise<unknown>): () => void {
+  const pinia = getActivePinia()
+  if (!pinia) return () => undefined // not in a store's setup: nothing to refresh
+  let set = refreshers.get(pinia)
+  if (!set) refreshers.set(pinia, (set = new Set()))
+  set.add(refresh)
+  return () => set.delete(refresh)
+}
+
 /**
  * After a block was made, changed, undone or removed: the grid and every
- * list loaded or loading (Things, People, Albums, Duplicates) show what is
- * visible now, so a blocked item never shows again on the way back to its list.
+ * list (Things, People, Albums, Duplicates…) show what is visible now, so a
+ * blocked item never shows again on the way back to its list. A list that
+ * was never loaded is not read.
  */
 export async function showBlocksChanged(): Promise<void> {
-  const lists = [useThings(), usePeople(), useAlbums(), useDuplicates()].filter((s) => s.loaded || s.loading)
-  await Promise.all([...lists.map((s) => s.invalidate()), useLibrary().refreshVisibility()])
+  const pinia = getActivePinia()
+  const refresh = pinia ? [...(refreshers.get(pinia) ?? [])] : []
+  await Promise.all(refresh.map((r) => r()))
 }
 
 /**

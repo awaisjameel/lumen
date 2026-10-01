@@ -3,13 +3,17 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { AlbumKind, BlockKind, DateSource, engine, Kind, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
+import type * as Block from '../shared/block'
 import type { AssetDetail, Changes } from '../bridge'
 import { emptyRule } from '../albums/store'
 import { block } from '../shared/block'
 import { useLibrary } from './store'
 import DetailsPanel from './DetailsPanel.vue'
 
-vi.mock('../shared/block', () => ({ block: vi.fn().mockResolvedValue(false) }))
+vi.mock('../shared/block', async (importOriginal) => ({
+  ...(await importOriginal<typeof Block>()),
+  block: vi.fn().mockResolvedValue(false),
+}))
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
