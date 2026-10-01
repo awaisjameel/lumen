@@ -49,7 +49,7 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 
 Search reports exact blocked person, Thing, place and album names, with whole-word Unicode matching and longer-name precedence.
 
-Still to finish in Phase 5: face and event blocks, browsing covered photos from Blocked, forgotten-PIN recovery through Windows sign-in, then organise-on-disk with dry run and undo and XMP sidecar export. Trash, the 2 GB cache cap and OCR also remain future work. See [the blocking implementation note](docs/blocking-phase5-2026-09-30.md) for current coverage and acceptance limits.
+Still to finish in Phase 5: face and event blocks, browsing covered photos from Blocked, forgotten-PIN recovery through Windows sign-in, renaming and pinning Things and pinning Events, then organise-on-disk with dry run and undo and XMP sidecar export. Trash, with the Duplicates review pre-selecting the best copy for it (never deleting without confirmation), the 2 GB cache cap and OCR also remain future work. Pausing indexing for full-screen apps or a busy CPU, and an "index only when idle" setting, are deferred to Phase 6's performance pass; indexing pauses on battery and by hand today. See [the blocking implementation note](docs/blocking-phase5-2026-09-30.md) for current coverage and acceptance limits.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
@@ -167,8 +167,12 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **Large files are hash-sampled**: files over 64 MB (mostly videos) hash size plus three 4 MB windows instead of every byte.
 - **Folder watching** uses `ReadDirectoryChangesW` directly (fsnotify has no recursive watch on Windows yet).
 - **One writer connection** instead of a writer goroutine: SQLite writes serialise on it, and callers batch hundreds of rows per transaction.
+- **Stages hand work on through SQLite job queues**, not in-memory channels: each stage reads bounded batches of its pending jobs, so work survives crashes and restarts, and the batches bound memory as channels would.
 - **People are clusters, named or not** (no separate `cluster_id`): a new group of faces is an unnamed person, and naming is how the user confirms it. Face vectors live in the `faces` table (float32 BLOBs), not a vector extension.
+- **New faces cluster with named and unnamed people together**, rather than matching named people first: named people are never merged away automatically, and this order was tuned on real photos.
+- **About 180 built-in Things**, not 300–1,000: each was kept because it measured well on a real library. More are added only with measurement.
 - **Faces are decoded at 2048 px** for their stage (not the 1024 px preview): nearly every face is then big enough to recognise. Detecting on tiles as well found only 3% more faces, for five times the work.
 - **Videos stream from a loopback server**, not the app's asset handler: on Windows, Wails buffers each response until it is complete, which would hold a whole conversion in memory before playback started.
 - **Names and paths compare with Unicode case folding** (`core.Fold`, also the SQL function `fold()`), not SQLite's `NOCASE`, which folds only A–Z: "Émile" and "émile" are one person, as Windows treats "ÉTÉ" and "été" as one folder.
+- **AI models ship beside `Lumen.exe`** (`models\` in the runtime folder), read-only from the installer, rather than in the per-user app-data folder; the database and thumbnail cache are in `%LOCALAPPDATA%\Lumen`.
 - **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). Trim it when packaging the installer (Phase 6), after the video decoder and encoder set is finalized.
