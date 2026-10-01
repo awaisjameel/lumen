@@ -49,8 +49,8 @@ tooling; this file covers how code is written.
   `Stop`, and `Stop` waits for them.
 - **State.** No mutable package-level state. Package-level `var`s are
   constants computed once (`sync.OnceValue`, lookup tables, SQL fragments). The
-  exception is native-library state that is process-wide by nature (ONNX
-  Runtime's GPU probe in `ai`). Shared fields have a mutex or atomic beside
+  exception is native-library state that is process-wide by nature (`ai`'s
+  GPU lock, which the models take turns on). Shared fields have a mutex or atomic beside
   them, and a comment names what it guards.
 - **SQLite**
   - Write transactions go through `Store.tx`, and multi-query reads go
