@@ -61,6 +61,9 @@ type Engine struct {
 	stopped chan struct{} // closed once Start's goroutine (loading and retrying) ended
 	loadMu  sync.Mutex
 	loadErr error // why the last load failed; nil once one succeeded
+	// loadMu guards loader startup, cancellation and shutdown as well as loadErr.
+	loadCancel context.CancelFunc
+	stopping   bool
 
 	textMu   sync.Mutex
 	text     *ai.TextEncoder
@@ -131,12 +134,20 @@ const (
 	loadRetryMax = 10 * time.Minute
 )
 
-// Start loads the index and the Things in the background. Cancel ctx before
-// Close to stop a load in progress.
+// Start loads the index and the Things in the background, once. Close or
+// cancellation of ctx stops loading and its retries.
 func (e *Engine) Start(ctx context.Context) {
+	e.loadMu.Lock()
+	if e.started.Load() || e.stopping {
+		e.loadMu.Unlock()
+		return
+	}
+	ctx, e.loadCancel = context.WithCancel(ctx)
 	e.started.Store(true)
+	e.loadMu.Unlock()
 	go func() {
 		defer close(e.stopped)
+		defer e.loadCancel()
 		first := true
 		for retry := loadRetry; ; retry = min(2*retry, loadRetryMax) {
 			t := time.Now()
@@ -173,12 +184,21 @@ func (e *Engine) Start(ctx context.Context) {
 func (e *Engine) Wait(ctx context.Context) error {
 	done := func() error {
 		e.loadMu.Lock()
+		defer e.loadMu.Unlock()
+		if e.stopping {
+			return ErrClosed
+		}
 		err := e.loadErr
-		e.loadMu.Unlock()
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return fmt.Errorf("%w: %w", ErrNotLoaded, err)
 		}
 		return err
+	}
+	e.loadMu.Lock()
+	stopping := e.stopping
+	e.loadMu.Unlock()
+	if stopping {
+		return ErrClosed
 	}
 	select {
 	case <-e.loaded:
@@ -199,6 +219,12 @@ func (e *Engine) Wait(ctx context.Context) error {
 // Close waits for Start's loading to end, then frees the text model for
 // good: searches after Close fail with ErrClosed.
 func (e *Engine) Close() {
+	e.loadMu.Lock()
+	e.stopping = true
+	if e.loadCancel != nil {
+		e.loadCancel()
+	}
+	e.loadMu.Unlock()
 	if e.started.Load() {
 		<-e.stopped
 	}
@@ -712,6 +738,7 @@ func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, 
 		hi := min(lo+textBatch, len(todo))
 		vecs, err := e.text.Encode(todo[lo:hi])
 		if err != nil {
+			e.closeText() // A failed session must be loaded afresh on the next attempt.
 			return nil, err
 		}
 		for k, v := range vecs {

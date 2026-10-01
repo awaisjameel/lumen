@@ -2,13 +2,106 @@ package search
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"lumen/internal/ai"
 	"lumen/internal/core"
 	"lumen/internal/store"
+	"lumen/internal/testenv"
 )
+
+func TestEncodeTextReleasesAFailedSessionAndRecovers(t *testing.T) {
+	rt := testenv.Runtime(t)
+	if err := ai.Init(rt); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ai.LoadModel(filepath.Join(rt, "models", "siglip2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := NewEngine(nil, m)
+	t.Cleanup(e.Close)
+	e.text, err = ai.OpenTextEncoder(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.text.Close() // Simulate a session that cannot run anymore.
+	if _, err := e.EncodeText(t.Context(), "a query absent from shipped prompts"); err == nil {
+		t.Fatal("failed session encoded a query")
+	}
+	if e.text != nil || e.textIdle != nil {
+		t.Fatal("failed text session or its idle timer was retained")
+	}
+	vecs, err := e.EncodeText(t.Context(), "a query absent from shipped prompts")
+	if err != nil || len(vecs) != 1 || len(vecs[0]) != m.Dim {
+		t.Fatalf("next query did not recover: %v, %v", vecs, err)
+	}
+}
+
+func TestCloseStopsLoadRetriesWithoutCancellingTheCaller(t *testing.T) {
+	fixture, _, _ := searchFixture(t)
+	if err := fixture.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEngine(fixture.store, fixture.model)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	e.Start(ctx)
+	if err := e.Wait(ctx); !errors.Is(err, ErrNotLoaded) {
+		t.Fatalf("load of closed database = %v, want ErrNotLoaded", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		e.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		cancel() // Release the old loader too, so a failure cannot leak it.
+		<-done
+		t.Fatal("Close waited for the caller to cancel the retry loop")
+	}
+	if ctx.Err() != nil {
+		t.Fatal("Close cancelled the caller's context")
+	}
+	if err := e.Wait(ctx); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Wait after Close = %v, want ErrClosed", err)
+	}
+}
+
+func TestStartAfterCloseCannotRestartTheLoader(t *testing.T) {
+	e := NewEngine(nil, ai.Model{Dim: 2})
+	e.Close()
+	e.Start(t.Context())
+	if e.started.Load() {
+		t.Fatal("closed engine started a loader")
+	}
+	if err := e.Wait(t.Context()); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Wait after Close = %v, want ErrClosed", err)
+	}
+}
+
+func TestConcurrentStartsShareOneLoader(t *testing.T) {
+	fixture, _, _ := searchFixture(t)
+	if err := fixture.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEngine(fixture.store, fixture.model)
+	t.Cleanup(e.Close)
+	var starts sync.WaitGroup
+	for range 4 {
+		starts.Go(func() { e.Start(t.Context()) })
+	}
+	starts.Wait()
+	if err := e.Wait(t.Context()); !errors.Is(err, ErrNotLoaded) {
+		t.Fatalf("load of closed database = %v, want ErrNotLoaded", err)
+	}
+}
 
 func searchFixture(t *testing.T) (engine *Engine, photo, video int64) {
 	t.Helper()
