@@ -64,18 +64,6 @@ function blockFolder(s: Source) {
   void block(BlockKind.BlockFolder, 0, s.path, false, s.path) // the dialog refreshes what it hides
 }
 
-// Settings change at once in the UI and go back if the engine refuses, so
-// a checkbox never shows what isn't so.
-async function setVideos(on: boolean) {
-  lib.settings.videos = on
-  if (!(await run(() => engine.setVideos(on)))) lib.settings.videos = !on
-}
-
-async function setAIOnBattery(on: boolean) {
-  lib.settings.aiOnBattery = on
-  if (!(await run(() => engine.setAIOnBattery(on)))) lib.settings.aiOnBattery = !on
-}
-
 // A number typed in and the slider change faster than they save: each saves
 // its newest value, and a failure of the newest puts back the last saved.
 function setEventGap(e: Event) {
@@ -173,7 +161,7 @@ onBeforeUnmount(saveConfidence)
         <section>
           <h2>{{ t('settings.indexing') }}</h2>
           <label class="toggle">
-            <input type="checkbox" :checked="lib.settings.videos" @change="setVideos(checked($event))" />
+            <input type="checkbox" :checked="lib.settings.videos" @change="lib.saveVideos(checked($event))" />
             <span>
               {{ t('settings.videos') }}
               <small class="muted">{{ t('settings.videosHint') }}</small>
@@ -193,7 +181,7 @@ onBeforeUnmount(saveConfidence)
             {{ t('settings.peopleError', { error: lib.progress.ai.facesError }) }}
           </p>
           <label class="toggle">
-            <input type="checkbox" :checked="lib.settings.aiOnBattery" @change="setAIOnBattery(checked($event))" />
+            <input type="checkbox" :checked="lib.settings.aiOnBattery" @change="lib.saveAIOnBattery(checked($event))" />
             <span>
               {{ t('settings.aiOnBattery') }}
               <small class="muted">{{ t('settings.aiOnBatteryHint') }}</small>

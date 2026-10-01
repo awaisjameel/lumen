@@ -11,6 +11,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   engine: {
     setTagConfidence: vi.fn<() => Promise<void>>().mockResolvedValue(),
     setVideos: vi.fn<() => Promise<void>>(),
+    setAIOnBattery: vi.fn<() => Promise<void>>(),
     setEventGapHours: vi.fn<(hours: number) => Promise<void>>(),
   },
 }))
@@ -20,8 +21,63 @@ beforeEach(() => {
   vi.mocked(engine.setTagConfidence).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setEventGapHours).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setVideos).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setAIOnBattery).mockReset().mockResolvedValue(undefined)
 })
 afterEach(() => vi.useRealTimers())
+
+it.each(['videos', 'aiOnBattery'] as const)(
+  'serializes %s saves across remounts and ignores an older failure',
+  async (key) => {
+    setActivePinia(createPinia())
+    const lib = useLibrary()
+    const save = vi.mocked(key === 'videos' ? engine.setVideos : engine.setAIOnBattery)
+    let fail: (error: Error) => void = () => {
+      throw new Error('the pending save has not started')
+    }
+    save
+      .mockReturnValueOnce(
+        new Promise((_resolve, reject) => {
+          fail = reject
+        }),
+      )
+      .mockResolvedValueOnce()
+    const selector = key === 'videos' ? '.toggle input' : 'input[type="checkbox"]'
+    const first = mount(SettingsView)
+    const firstBox = key === 'videos' ? first.get(selector) : first.findAll(selector).at(-1)
+    if (!firstBox) throw new Error('missing settings checkbox')
+    await firstBox.setValue(true)
+    first.unmount()
+    const next = mount(SettingsView)
+    try {
+      const nextBox = key === 'videos' ? next.get(selector) : next.findAll(selector).at(-1)
+      if (!nextBox) throw new Error('missing settings checkbox')
+      await nextBox.setValue(false)
+      expect(save).toHaveBeenCalledExactlyOnceWith(true)
+      fail(new Error('older toggle failed'))
+      await flushPromises()
+      expect(save).toHaveBeenNthCalledWith(2, false)
+      expect(lib.settings[key]).toBe(false)
+      expect(next.text()).not.toContain('older toggle failed')
+    } finally {
+      next.unmount()
+    }
+  },
+)
+
+it.each(['videos', 'aiOnBattery'] as const)(
+  'rolls back the latest failed %s save to the last persisted value',
+  async (key) => {
+    setActivePinia(createPinia())
+    const lib = useLibrary()
+    const save = vi.mocked(key === 'videos' ? engine.setVideos : engine.setAIOnBattery)
+    save.mockResolvedValueOnce().mockRejectedValueOnce(new Error('latest toggle failed'))
+    const set = key === 'videos' ? lib.saveVideos : lib.saveAIOnBattery
+    await set(true)
+    await set(false)
+    expect(lib.settings[key]).toBe(true)
+    expect(lib.settingsError).toContain('latest toggle failed')
+  },
+)
 
 it('keeps a newer slider input when the previous save fails before its debounce fires', async () => {
   vi.useFakeTimers()
