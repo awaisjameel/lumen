@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref, shallowRef } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import {
   engine,
   EVENT_GAP_DEFAULT,
@@ -10,7 +10,7 @@ import {
   startMedia,
   TAG_CONFIDENCE_DEFAULT,
 } from '../bridge'
-import type { Changes, DayBucket, GridItem, Progress, Settings, Source, View } from '../bridge'
+import type { Changes, DayBucket, GridItem, Progress, SearchResults, Settings, Source, View } from '../bridge'
 import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { latestSave } from '../shared/latestSave'
@@ -46,13 +46,7 @@ export interface Sel {
 }
 
 /** What a search found beyond its items. */
-export interface SearchInfo {
-  pending: number // photos the AI hasn't seen yet
-  complete: boolean
-  people: string[] // people named in the query
-  noAI: boolean // the description couldn't be searched
-  blocked: boolean // an exact blocked person's name was searched
-}
+type SearchInfo = Omit<SearchResults, 'items'>
 
 function loadZoom(): number {
   try {
@@ -83,7 +77,29 @@ export const useLibrary = defineStore('library', () => {
   const settingsError = ref('')
   let eventGapSave: LatestSave<number> | null = null
   let confidenceSave: LatestSave<number> | null = null
+  let videosSave: LatestSave<boolean> | null = null
+  let batterySave: LatestSave<boolean> | null = null
   const settingFailed = (e: unknown) => (settingsError.value = errorText(e))
+
+  function saveVideos(on: boolean) {
+    videosSave ??= latestSave(engine.setVideos, settings.value.videos, {
+      rollback: (value) => (settings.value.videos = value),
+      failed: settingFailed,
+    })
+    settings.value.videos = on
+    settingsError.value = ''
+    return videosSave(on)
+  }
+
+  function saveAIOnBattery(on: boolean) {
+    batterySave ??= latestSave(engine.setAIOnBattery, settings.value.aiOnBattery, {
+      rollback: (value) => (settings.value.aiOnBattery = value),
+      failed: settingFailed,
+    })
+    settings.value.aiOnBattery = on
+    settingsError.value = ''
+    return batterySave(on)
+  }
 
   function saveEventGap(hours: number) {
     eventGapSave ??= latestSave(engine.setEventGapHours, settings.value.eventGapHours, {
@@ -174,26 +190,50 @@ export const useLibrary = defineStore('library', () => {
     return it ? { day, id: it.id } : null
   }
 
+  let stopProgress: (() => void) | null = null
+  let stopChanges: (() => void) | null = null
+  let disposed = false
+  const initialise = coalescedLoad(
+    async () => {
+      const [s, set, p] = await Promise.all([engine.sources(), engine.settings(), engine.progress(), startMedia()])
+      return { s, set, p }
+    },
+    ({ s, set, p }) => {
+      if (disposed) return
+      sources.value = s
+      settings.value = set
+      progress.value ??= p // an event is newer than the snapshot
+      ready.value = true
+    },
+  )
   /**
    * Load the initial state. Throws if the engine can't be reached. Events
    * are followed first, so none sent while this loads is missed.
    */
   async function init() {
-    onProgress((p) => (progress.value = p))
-    onLibraryChanged((c) => void refresh(c).catch(logError))
-    const [s, set, p] = await Promise.all([engine.sources(), engine.settings(), engine.progress(), startMedia()])
-    sources.value = s
-    settings.value = set
-    progress.value ??= p // an event is newer than the snapshot
-    ready.value = true
+    if (ready.value || disposed) return
+    stopProgress ??= onProgress((p) => (progress.value = p))
+    stopChanges ??= onLibraryChanged((c) => void refresh(c).catch(logError))
+    await initialise()
   }
+  onScopeDispose(() => {
+    disposed = true
+    stopProgress?.()
+    stopChanges?.()
+    generation++
+    loadRequest++
+    visibilityRequest++
+    loadAbort.abort()
+    daysAbort.abort()
+    visibilityAbort.abort()
+  })
 
   /** Load the current scope's groups (and, for a search, its results). */
   async function load() {
     const s = scope.value
     const current = generation
     const request = ++loadRequest
-    const visibility = visibilityRevision
+    let visibility = visibilityRevision
     visibilityAbort.abort()
     visibilityRequest++
     loadAbort.abort()
@@ -205,6 +245,17 @@ export const useLibrary = defineStore('library', () => {
       if (s.kind === 'search') {
         const r = await engine.search(s.query, signal)
         if (current !== generation || request !== loadRequest) return
+        let items = r.items
+        // A pre-change answer must pass visibility before any of its hits
+        // reach the grid. Repeat if another change arrived during the check.
+        while (visibility !== visibilityRevision) {
+          visibility = visibilityRevision
+          items = await visibleItems(items, signal)
+          if (current !== generation || request !== loadRequest) return
+        }
+        // A prune of the previous results must not replace these verified hits.
+        visibilityAbort.abort()
+        visibilityRequest++
         searchInfo.value = {
           pending: r.pending,
           complete: r.complete,
@@ -212,11 +263,9 @@ export const useLibrary = defineStore('library', () => {
           noAI: r.noAI,
           blocked: r.blocked,
         }
-        buckets.value = r.items.length ? [{ day: RESULTS, count: r.items.length }] : []
-        days.value = new Map(r.items.length ? [[RESULTS, r.items]] : [])
+        buckets.value = items.length ? [{ day: RESULTS, count: items.length }] : []
+        days.value = new Map(items.length ? [[RESULTS, items]] : [])
         fresh.add(RESULTS)
-        if (visibility !== visibilityRevision) await pruneSearch()
-        if (current !== generation || request !== loadRequest) return
       } else {
         const b = await engine.timeline(s.view, signal)
         if (current !== generation || request !== loadRequest) return
@@ -241,6 +290,16 @@ export const useLibrary = defineStore('library', () => {
     daysAbort = new AbortController()
   }
 
+  async function visibleItems(items: GridItem[], signal: AbortSignal): Promise<GridItem[]> {
+    const visible = new Set(
+      await engine.visibleAssets(
+        items.map((item) => item.id),
+        signal,
+      ),
+    )
+    return items.filter((item) => visible.has(item.id))
+  }
+
   async function pruneSearch() {
     const current = generation
     const load = loadRequest
@@ -249,14 +308,8 @@ export const useLibrary = defineStore('library', () => {
     visibilityAbort = new AbortController()
     const items = days.value.get(RESULTS) ?? []
     try {
-      const visible = new Set(
-        await engine.visibleAssets(
-          items.map((item) => item.id),
-          visibilityAbort.signal,
-        ),
-      )
+      const kept = await visibleItems(items, visibilityAbort.signal)
       if (current !== generation || load !== loadRequest || request !== visibilityRequest) return
-      const kept = items.filter((item) => visible.has(item.id))
       buckets.value = kept.length ? [{ day: RESULTS, count: kept.length }] : []
       days.value = new Map(kept.length ? [[RESULTS, kept]] : [])
       if (selected.value && !itemAt(selected.value)) selected.value = null
@@ -307,9 +360,15 @@ export const useLibrary = defineStore('library', () => {
       try {
         for (;;) {
           const revision = refreshRevision
-          await load()
+          try {
+            await load()
+          } catch (e) {
+            if (revision === refreshRevision || isSearch.value || disposed) throw e
+            // A failed older read must not discard a newer library change.
+            continue
+          }
           notifyDays() // the view re-requests what it shows
-          if (revision === refreshRevision || isSearch.value) break
+          if (revision === refreshRevision || isSearch.value || disposed) break
         }
       } finally {
         refreshing = null
@@ -456,7 +515,7 @@ export const useLibrary = defineStore('library', () => {
    * refuses. Clicks on one asset take turns, so the flag always ends as the
    * engine has it.
    */
-  const favouriting = new Map<number, Promise<void>>()
+  const favouriting = new Map<number, LatestSave<boolean>>()
   async function toggleFavourite(p: Sel | null) {
     const it = itemAt(p)
     if (!p || !it) return
@@ -468,38 +527,40 @@ export const useLibrary = defineStore('library', () => {
         notifyDays()
       }
     }
+    let save = favouriting.get(it.id)
+    if (!save) {
+      save = latestSave((value) => engine.setFavourite(it.id, value), it.f ?? false, {
+        rollback: set,
+        failed: reportError,
+        saved: async () => {
+          const s = scope.value
+          if (s.kind === 'timeline' && (s.view.filter === Filter.FilterFavourites || !!s.view.album))
+            await refresh().catch(logError)
+        },
+      })
+      favouriting.set(it.id, save)
+    }
     set(fav)
-    const before = favouriting.get(it.id) ?? Promise.resolve()
-    const saving = before.then(async () => {
-      try {
-        await engine.setFavourite(it.id, fav)
-      } catch (e) {
-        set(!fav)
-        reportError(e)
-        return
-      }
-      const s = scope.value
-      if (s.kind === 'timeline' && (s.view.filter === Filter.FilterFavourites || !!s.view.album))
-        await refresh().catch(logError)
-    })
-    favouriting.set(it.id, saving)
+    const saving = save(fav)
     await saving
-    if (favouriting.get(it.id) === saving) favouriting.delete(it.id)
+    if (favouriting.get(it.id) === save) favouriting.delete(it.id)
   }
 
   /**
    * Pause or resume indexing: shown at once, put back (and said) if the
    * engine refuses. The next progress event confirms it.
    */
-  async function setPaused(paused: boolean) {
+  let pauseSave: LatestSave<boolean> | null = null
+  function setPaused(paused: boolean) {
     const p = progress.value
+    pauseSave ??= latestSave(engine.setPaused, p?.paused ?? false, {
+      rollback: (value) => {
+        if (progress.value) progress.value = { ...progress.value, paused: value }
+      },
+      failed: reportError,
+    })
     if (p) progress.value = { ...p, paused }
-    try {
-      await engine.setPaused(paused)
-    } catch (e) {
-      if (progress.value) progress.value = { ...progress.value, paused: !paused }
-      reportError(e)
-    }
+    return pauseSave(paused)
   }
 
   /** Reload the folders (after adding or removing one), then what they hold. */
@@ -514,6 +575,8 @@ export const useLibrary = defineStore('library', () => {
     sources,
     settings,
     settingsError,
+    saveVideos,
+    saveAIOnBattery,
     saveEventGap,
     intendTagConfidence,
     saveTagConfidence,

@@ -1,14 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, watch } from 'vue'
-import { engine, Filter } from '../bridge'
+import { Device, engine, Filter, onLibraryChanged, onProgress, startMedia } from '../bridge'
 import type * as Bridge from '../bridge'
-import type { DayBucket, DayItems, SearchResults } from '../bridge'
+import type * as Errors from '../shared/errors'
+import type { DayBucket, DayItems, Progress, SearchResults } from '../bridge'
 import { affects, scopeKey, useLibrary } from './store'
+import { reportError } from '../shared/errors'
+
+vi.mock('../shared/errors', async (importOriginal) => ({
+  ...(await importOriginal<typeof Errors>()),
+  reportError: vi.fn(),
+}))
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
-  engine: { timeline: vi.fn(), days: vi.fn(), search: vi.fn(), visibleAssets: vi.fn() },
+  engine: {
+    timeline: vi.fn(),
+    days: vi.fn(),
+    search: vi.fn(),
+    visibleAssets: vi.fn(),
+    sources: vi.fn(),
+    settings: vi.fn(),
+    progress: vi.fn(),
+    setFavourite: vi.fn(),
+    setPaused: vi.fn(),
+  },
+  onLibraryChanged: vi.fn(),
+  onProgress: vi.fn(),
+  startMedia: vi.fn(),
 }))
 
 function deferred<T>() {
@@ -24,6 +44,20 @@ const buckets: DayBucket[] = [{ day, count: 1 }]
 const all = { kind: 'timeline', view: { filter: Filter.FilterAll } } as const
 const favourites = { kind: 'timeline', view: { filter: Filter.FilterFavourites } } as const
 const result = (id: number): DayItems[] => [{ day, items: [{ id, w: 100, h: 100, t: 1 }] }]
+const progress: Progress = {
+  scanning: false,
+  discovered: 0,
+  total: 0,
+  metadata: 0,
+  thumbnail: 0,
+  embedding: 0,
+  faces: 0,
+  errors: 0,
+  skipped: 0,
+  paused: false,
+  onBattery: false,
+  ai: { device: Device.DeviceCPU, error: '', facesError: '' },
+}
 
 /** The library store with a grid showing it, as LibraryView does. */
 function shownLibrary() {
@@ -38,9 +72,209 @@ beforeEach(() => {
   vi.mocked(engine.days).mockReset()
   vi.mocked(engine.search).mockReset()
   vi.mocked(engine.visibleAssets).mockReset()
+  vi.mocked(engine.sources).mockReset().mockResolvedValue([])
+  vi.mocked(engine.settings)
+    .mockReset()
+    .mockResolvedValue({ videos: false, aiOnBattery: false, tagConfidence: 0.02, eventGapHours: 12 })
+  vi.mocked(engine.progress).mockReset().mockResolvedValue(progress)
+  vi.mocked(startMedia).mockReset().mockResolvedValue(undefined)
+  vi.mocked(onProgress).mockReset().mockReturnValue(vi.fn())
+  vi.mocked(onLibraryChanged).mockReset().mockReturnValue(vi.fn())
+  vi.mocked(engine.setFavourite).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setPaused).mockReset().mockResolvedValue(undefined)
+  vi.mocked(reportError).mockClear()
+})
+
+describe('library lifetime', () => {
+  it('subscribes once across initialisation retries and releases both listeners on disposal', async () => {
+    const stopProgress = vi.fn()
+    const stopChanges = vi.fn()
+    vi.mocked(onProgress).mockReturnValue(stopProgress)
+    vi.mocked(onLibraryChanged).mockReturnValue(stopChanges)
+    vi.mocked(engine.sources).mockRejectedValueOnce(new Error('not ready'))
+    const lib = useLibrary()
+    await expect(lib.init()).rejects.toThrow('not ready')
+    await lib.init()
+    await lib.init()
+    expect(lib.ready).toBe(true)
+    expect(onProgress).toHaveBeenCalledTimes(1)
+    expect(onLibraryChanged).toHaveBeenCalledTimes(1)
+    lib.$dispose()
+    expect(stopProgress).toHaveBeenCalledTimes(1)
+    expect(stopChanges).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels day reads and discards initialisation that finishes after disposal', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    const pendingDay = deferred<DayItems[]>()
+    vi.mocked(engine.days).mockReturnValueOnce(pendingDay.promise)
+    const dayLoad = lib.ensureDays([day])
+    const signal = vi.mocked(engine.days).mock.calls[0]?.[3]
+    const pendingSources = deferred<Bridge.Source[]>()
+    vi.mocked(engine.sources).mockReturnValueOnce(pendingSources.promise)
+    const initialising = lib.init()
+    lib.$dispose()
+    expect(signal?.aborted).toBe(true)
+    pendingSources.resolve([])
+    pendingDay.resolve(result(1))
+    await Promise.all([initialising, dayLoad])
+    expect(lib.ready).toBe(false)
+    expect(lib.days.size).toBe(0)
+  })
+})
+
+describe('optimistic actions', () => {
+  it('restores the persisted favourite when two queued toggles both fail', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+    await lib.ensureDays([day])
+    let fail: (error: Error) => void = () => {
+      throw new Error('the pending save has not started')
+    }
+    vi.mocked(engine.setFavourite)
+      .mockReturnValueOnce(
+        new Promise((_resolve, reject) => {
+          fail = reject
+        }),
+      )
+      .mockRejectedValueOnce(new Error('latest favourite failed'))
+    const selected = { day, id: 1 }
+    const first = lib.toggleFavourite(selected)
+    const second = lib.toggleFavourite(selected)
+    await nextTick()
+    expect(engine.setFavourite).toHaveBeenCalledExactlyOnceWith(1, true)
+    fail(new Error('older favourite failed'))
+    await Promise.all([first, second])
+    expect(engine.setFavourite).toHaveBeenLastCalledWith(1, false)
+    expect(lib.itemAt(selected)?.f).toBe(false)
+    expect(reportError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: 'latest favourite failed' }))
+  })
+
+  it('serializes pause changes and restores the persisted state when both fail', async () => {
+    const lib = useLibrary()
+    lib.progress = progress
+    let fail: (error: Error) => void = () => {
+      throw new Error('the pending save has not started')
+    }
+    vi.mocked(engine.setPaused)
+      .mockReturnValueOnce(
+        new Promise((_resolve, reject) => {
+          fail = reject
+        }),
+      )
+      .mockRejectedValueOnce(new Error('latest pause failed'))
+    const first = lib.setPaused(true)
+    const second = lib.setPaused(false)
+    expect(engine.setPaused).toHaveBeenCalledExactlyOnceWith(true)
+    fail(new Error('older pause failed'))
+    await Promise.all([first, second])
+    expect(engine.setPaused).toHaveBeenLastCalledWith(false)
+    expect(lib.progress.paused).toBe(false)
+    expect(reportError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: 'latest pause failed' }))
+  })
 })
 
 describe('library requests', () => {
+  it('keeps a pre-change search answer out of the grid until visibility is confirmed', async () => {
+    const lib = shownLibrary()
+    const search = deferred<SearchResults>()
+    const visibility = deferred<number[]>()
+    vi.mocked(engine.search).mockReturnValueOnce(search.promise)
+    vi.mocked(engine.visibleAssets).mockResolvedValueOnce([]).mockReturnValueOnce(visibility.promise)
+    const loading = lib.setScope({ kind: 'search', query: 'beach' })
+    await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+    search.resolve({
+      items: result(1)[0]?.items ?? [],
+      people: [],
+      pending: 0,
+      complete: true,
+      noAI: false,
+      blocked: false,
+    })
+    await nextTick()
+    expect(engine.visibleAssets).toHaveBeenLastCalledWith([1], expect.any(AbortSignal))
+    expect(lib.days.size).toBe(0)
+    expect(lib.total).toBe(0)
+    visibility.resolve([])
+    await loading
+    expect(lib.days.size).toBe(0)
+    expect(lib.timelineLoaded).toBe(true)
+  })
+
+  it('checks a pending search again when visibility changes during its check', async () => {
+    const lib = shownLibrary()
+    const search = deferred<SearchResults>()
+    const visibility = deferred<number[]>()
+    vi.mocked(engine.search).mockReturnValueOnce(search.promise)
+    vi.mocked(engine.visibleAssets)
+      .mockResolvedValueOnce([])
+      .mockReturnValueOnce(visibility.promise)
+      .mockResolvedValue([])
+    const loading = lib.setScope({ kind: 'search', query: 'beach' })
+    await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+    search.resolve({
+      items: result(1)[0]?.items ?? [],
+      people: [],
+      pending: 0,
+      complete: true,
+      noAI: false,
+      blocked: false,
+    })
+    await nextTick()
+    await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+    visibility.resolve([1])
+    await loading
+    expect(engine.visibleAssets).toHaveBeenCalledTimes(4)
+    expect(lib.days.size).toBe(0)
+  })
+
+  it('does not let a prune of previous results clear a newly verified search', async () => {
+    const lib = shownLibrary()
+    const search = deferred<SearchResults>()
+    const oldPrune = deferred<number[]>()
+    vi.mocked(engine.search).mockReturnValueOnce(search.promise)
+    vi.mocked(engine.visibleAssets).mockReturnValueOnce(oldPrune.promise).mockResolvedValueOnce([1])
+    const loading = lib.setScope({ kind: 'search', query: 'beach' })
+    const refreshing = lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+    search.resolve({
+      items: result(1)[0]?.items ?? [],
+      people: [],
+      pending: 0,
+      complete: true,
+      noAI: false,
+      blocked: false,
+    })
+    await loading
+    expect(lib.days.get('results')?.[0]?.id).toBe(1)
+    oldPrune.resolve([])
+    await refreshing
+    expect(lib.days.get('results')?.[0]?.id).toBe(1)
+  })
+
+  it('runs a queued timeline refresh even when the older read fails', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    let fail: (error: Error) => void = () => {
+      throw new Error('the pending read has not started')
+    }
+    vi.mocked(engine.timeline)
+      .mockReturnValueOnce(
+        new Promise((_resolve, reject) => {
+          fail = reject
+        }),
+      )
+      .mockResolvedValueOnce([{ day, count: 2 }])
+    const first = lib.refresh()
+    const second = lib.refresh()
+    fail(new Error('older read failed'))
+    await Promise.all([first, second])
+    expect(lib.total).toBe(2)
+    expect(lib.loadError).toBe('')
+    expect(engine.timeline).toHaveBeenCalledTimes(3)
+  })
+
   it('prunes hidden search hits without changing order or rerunning the search', async () => {
     const lib = shownLibrary()
     vi.mocked(engine.search).mockResolvedValueOnce({
