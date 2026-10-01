@@ -12,6 +12,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/image/bmp"
@@ -154,8 +155,12 @@ func TestThumbnailRejectsVideosAndBrokenFiles(t *testing.T) {
 	if _, err := (Decoders{}).Thumbnail(ctx, "clip.mp4", core.KindVideo, 1); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("video: got %v, want ErrUnsupported", err)
 	}
-	if _, err := (Decoders{}).Thumbnail(ctx, write(t, "junk.jpg", []byte("not an image")), core.KindPhoto, 1); err == nil {
-		t.Error("junk: want an error")
+	junk := write(t, "junk.jpg", []byte("not an image"))
+	if _, err := (Decoders{}).Thumbnail(ctx, junk, core.KindPhoto, 1); err == nil || !strings.Contains(err.Error(), junk) {
+		t.Errorf("junk thumbnail: want file context, got %v", err)
+	}
+	if _, err := (Decoders{}).Decode(ctx, junk, core.KindPhoto, 1, core.ThumbSmall); err == nil || !strings.Contains(err.Error(), junk) {
+		t.Errorf("junk decode: want file context, got %v", err)
 	}
 	if _, err := (Decoders{}).Thumbnail(ctx, filepath.Join(t.TempDir(), "gone.png"), core.KindPhoto, 1); err == nil {
 		t.Error("missing file: want an error")
@@ -394,5 +399,21 @@ func TestPixelsConvertFromTheirProfile(t *testing.T) {
 	}
 	if d := meanDiff(unmanaged.Pix, want.Pix); d <= 2 {
 		t.Errorf("the profile made no difference (%.2f): the test photo shows nothing", d)
+	}
+}
+
+func TestInvalidProfilesLeavePixelsUsable(t *testing.T) {
+	p := vips.RGBPixels(bytes.Repeat([]byte{180, 80, 40}, 16*12), 16, 12)
+	want, err := vips.DecodePixels(p, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.ICC = []byte("invalid ICC profile")
+	got, err := vips.DecodePixels(p, 16)
+	if err != nil || !bytes.Equal(got.Pix, want.Pix) {
+		t.Fatalf("decode with invalid profile: %v, pixels match %v", err, bytes.Equal(got.Pix, want.Pix))
+	}
+	if _, err := vips.ThumbnailPixels(p, sizes); err != nil {
+		t.Fatalf("thumbnail with invalid profile: %v", err)
 	}
 }

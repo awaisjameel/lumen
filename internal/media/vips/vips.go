@@ -239,6 +239,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"unsafe"
@@ -390,14 +391,15 @@ func collectRGB(rc C.int, buf unsafe.Pointer, n C.size_t, w, h C.int) (RGB, erro
 	if rc != 0 {
 		return RGB{}, lastError()
 	}
-	if int(n) != int(w)*int(h)*3 {
+	if w <= 0 || h <= 0 || n > math.MaxInt32 || uint64(n) != uint64(w)*uint64(h)*3 {
 		return RGB{}, errors.New("vips: unexpected image size")
 	}
 	return RGB{Pix: C.GoBytes(buf, C.int(n)), W: int(w), H: int(h)}, nil
 }
 
 func checkPixels(pix []byte, w, h, bands int) error {
-	if w <= 0 || h <= 0 || (bands != 3 && bands != 4) || len(pix) != w*h*bands {
+	if w <= 0 || h <= 0 || w > math.MaxInt32 || h > math.MaxInt32 || (bands != 3 && bands != 4) ||
+		len(pix)%bands != 0 || len(pix)/bands%h != 0 || len(pix)/bands/h != w {
 		return fmt.Errorf("vips: bad pixel buffer (%dx%dx%d, %d bytes)", w, h, bands, len(pix))
 	}
 	return nil
