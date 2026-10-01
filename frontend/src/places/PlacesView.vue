@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { BlockKind, engine } from '../bridge'
 import { block } from '../shared/block'
+import { logError } from '../shared/errors'
 import Icon from '../shared/Icon.vue'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
@@ -9,11 +10,11 @@ import EmptyState from '../shared/EmptyState.vue'
 import GroupCard from '../shared/GroupCard.vue'
 import SearchBox from '../search/SearchBox.vue'
 
-const { list, loaded, error, load } = useList(engine.places)
+const { list, loaded, error, load, invalidate } = useList(engine.places)
 useLiveReload(load, (c) => c.assets || c.thumbs)
 
 async function blockPlace(id: number, name: string) {
-  if (await block(BlockKind.BlockPlace, id, name)) await load() // Places is not a shared list
+  if (await block(BlockKind.BlockPlace, id, name)) await invalidate().catch(logError)
 }
 </script>
 
