@@ -145,16 +145,6 @@ func (s *Store) NamedPeople(ctx context.Context) ([]core.Person, error) {
 		ORDER BY length(name) DESC, name`)
 }
 
-// BlockedNamedPeople is used only to recognise an exact blocked name in a
-// submitted search. It is never offered in suggestions or ordinary lists.
-func (s *Store) BlockedNamedPeople(ctx context.Context) ([]core.Person, error) {
-	return queryAll(ctx, s.r, func(r *sql.Rows) (p core.Person, err error) {
-		err = r.Scan(&p.ID, &p.Name)
-		return p, err
-	}, `SELECT p.id, p.name FROM people p JOIN blocks b ON b.kind = 'person' AND b.target_id = p.id
-		WHERE p.name IS NOT NULL ORDER BY length(p.name) DESC`)
-}
-
 // PeopleAssets returns the visible assets in which every one of people
 // appears, newest first.
 func (s *Store) PeopleAssets(ctx context.Context, people []int64) ([]int64, error) {
