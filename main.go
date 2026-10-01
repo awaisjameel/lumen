@@ -226,7 +226,7 @@ type background struct {
 // with a sweep that is still running.
 type backgroundCache interface {
 	SweepTemp() error
-	SweepFrames() error
+	SweepFrames(context.Context) error
 }
 
 // backgroundIndexer is the lifecycle the application owns; tests can check
@@ -254,7 +254,7 @@ func (b *background) ServiceStartup(ctx context.Context, _ application.ServiceOp
 		b.workers.Go(b.stream.Run)
 	}
 	b.workers.Go(func() {
-		if err := b.cache.SweepFrames(); err != nil {
+		if err := b.cache.SweepFrames(ctx); err != nil && ctx.Err() == nil {
 			slog.Warn("tidy thumbnail cache", "err", err)
 		}
 	})

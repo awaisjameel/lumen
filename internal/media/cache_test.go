@@ -52,7 +52,7 @@ func TestSweepAndEmptyFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := errors.Join(c.SweepTemp(), c.SweepFrames()); err != nil {
+	if err := errors.Join(c.SweepTemp(), c.SweepFrames(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	if left, _ := filepath.Glob(filepath.Join(c.Dir, "*")); len(left) != 0 {
@@ -123,7 +123,7 @@ func TestFrameSweepKeepsCurrentWritesInLiteralCacheDirectory(t *testing.T) {
 		}
 	})
 	for range 16 {
-		if err := c.SweepFrames(); err != nil {
+		if err := c.SweepFrames(t.Context()); err != nil {
 			t.Error(err)
 		}
 	}
@@ -135,5 +135,35 @@ func TestFrameSweepKeepsCurrentWritesInLiteralCacheDirectory(t *testing.T) {
 		if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, data) {
 			t.Errorf("current cache file %s: %q, %v", path, got, err)
 		}
+	}
+}
+
+// Shutdown waits for the frame sweep, so a cancelled one stops between
+// folders and leaves the rest for the next start.
+func TestFrameSweepStopsWhenCancelled(t *testing.T) {
+	c := NewCache(t.TempDir(), &countingDecoder{})
+	old := filepath.Join(c.Dir, "frame-old")
+	for _, id := range []string{"1", "2", "3"} {
+		p := filepath.Join(old, id, "0.jpg")
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := c.SweepFrames(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled sweep: %v", err)
+	}
+	if left, _ := os.ReadDir(old); len(left) != 3 {
+		t.Fatalf("cancelled sweep removed %d of 3 folders", 3-len(left))
+	}
+	if err := c.SweepFrames(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old frames still there: %v", err)
 	}
 }

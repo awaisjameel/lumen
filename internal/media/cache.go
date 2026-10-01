@@ -100,8 +100,10 @@ func (c *Cache) tmpDir() string { return filepath.Join(c.Dir, "tmp") }
 func (c *Cache) SweepTemp() error { return os.RemoveAll(c.tmpDir()) }
 
 // SweepFrames removes video frames made by older versions of the code.
-// Call it once at startup; it may run alongside everything else.
-func (c *Cache) SweepFrames() error {
+// Call it once at startup; it may run alongside everything else. A version
+// bump leaves one old folder per video, so it stops between them when ctx
+// ends: shutdown waits for it.
+func (c *Cache) SweepFrames(ctx context.Context) error {
 	var errs []error
 	entries, err := os.ReadDir(c.Dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -112,9 +114,32 @@ func (c *Cache) SweepFrames() error {
 	}
 	for _, entry := range entries {
 		if name := entry.Name(); strings.HasPrefix(name, "frame") && name != framesDir {
-			errs = append(errs, os.RemoveAll(filepath.Join(c.Dir, name)))
+			if err := removeTree(ctx, filepath.Join(c.Dir, name)); err != nil {
+				if ctx.Err() != nil {
+					return err
+				}
+				errs = append(errs, err)
+			}
 		}
 	}
+	return errors.Join(errs...)
+}
+
+// removeTree is os.RemoveAll of dir, one child at a time, stopping when ctx
+// ends; the rest is removed by the next sweep.
+func removeTree(ctx context.Context, dir string) error {
+	children, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return os.RemoveAll(dir) // not a folder, or unreadable: one attempt
+	}
+	var errs []error
+	for _, child := range children {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		errs = append(errs, os.RemoveAll(filepath.Join(dir, child.Name())))
+	}
+	errs = append(errs, os.RemoveAll(dir))
 	return errors.Join(errs...)
 }
 

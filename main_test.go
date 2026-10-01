@@ -57,7 +57,7 @@ type heldCacheSweep struct {
 
 func (c *heldCacheSweep) SweepTemp() error { c.tempSwept = true; return nil }
 
-func (c *heldCacheSweep) SweepFrames() error {
+func (c *heldCacheSweep) SweepFrames(context.Context) error {
 	close(c.started)
 	<-c.release
 	return nil
