@@ -28,7 +28,7 @@ const (
 	MetadataVersion       = "imagemeta-1.1+goexif+vips-4" // unset epoch capture dates are ignored
 	ThumbnailVersion      = "vips-8.18-3"                 // colour profiles converted to sRGB, also in HEIC FFmpeg decodes
 	VideoMetadataVersion  = "ffprobe-9.0-2"
-	VideoThumbnailVersion = "ffmpeg-9.0+vips-8.18-1"
+	VideoThumbnailVersion = "ffmpeg-9.0+vips-8.18-2" // frame times are relative to playback, including offset containers
 )
 
 // ErrUnsupported means this machine cannot decode the file: HEIC with
@@ -133,7 +133,7 @@ func (d Decoders) Thumbnail(ctx context.Context, path string, kind core.Kind, or
 		t, err = vips.ThumbnailPixels(src.pixels, sizes)
 	}
 	if err != nil {
-		return Thumbs{}, err
+		return Thumbs{}, fmt.Errorf("thumbnail %s: %w", path, err)
 	}
 	ph, err := perceptualHash(t.Square)
 	if err != nil {
@@ -171,7 +171,10 @@ func (d Decoders) Decode(ctx context.Context, path string, kind core.Kind, orien
 	} else {
 		im, err = vips.DecodePixels(src.pixels, side)
 	}
-	return Image{Pix: im.Pix, W: im.W, H: im.H}, err
+	if err != nil {
+		return Image{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	return Image{Pix: im.Pix, W: im.W, H: im.H}, nil
 }
 
 // source is a photo ready for libvips: a file it decodes itself (shrinking
