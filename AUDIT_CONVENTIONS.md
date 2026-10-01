@@ -20,9 +20,12 @@ tooling; this file covers how code is written.
   If two copies exist, keep the one in the lower layer (`core` before
   `store` before `services`; `shared` before a feature folder) and delete
   the other.
-- **Scope.** Phase 5's remaining work (face and event blocks, browsing covered
-  photos, PIN reset, organise-on-disk, Trash, the 2 GB cache cap, OCR) is
-  out of scope. Report gaps; don't build them.
+- **Scope.** Phase 5's remaining work is in scope: Thing rename and pin,
+  Event pin, face and event blocks, browsing covered photos, PIN reset,
+  Trash with best-copy Duplicates, organise-on-disk, XMP sidecar export, the
+  2 GB cache cap and OCR. `docs/phase5-design-2026-10-01.md` sets out how
+  each is built. Phase 6 (politeness controls, the installer) stays out of
+  scope: report gaps there; don't build them.
 
 ## Go
 
