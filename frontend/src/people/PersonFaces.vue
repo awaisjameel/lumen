@@ -4,7 +4,7 @@
 // to someone else or a new person (splitting), or used as their picture.
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { engine } from '../bridge'
+import { engine, ErrorCode, errorCode } from '../bridge'
 import type { Face, Person } from '../bridge'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
@@ -79,8 +79,10 @@ async function act(fn: (ids: number[]) => Promise<unknown>) {
     void people.load().catch(logError)
     if (requested !== revision) return
     selected.value = new Set()
-    await load().catch(async () => {
-      if (requested === revision) await router.replace({ name: 'people' }) // nothing left of them
+    await load().catch(async (e: unknown) => {
+      if (requested !== revision) return
+      if (errorCode(e) !== ErrorCode.NotFound) throw e
+      await router.replace({ name: 'people' }) // nothing left of them
     })
   } catch (e) {
     if (requested === revision) error.value = errorText(e)

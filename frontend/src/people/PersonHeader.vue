@@ -25,6 +25,7 @@ const rename = useRename<true>() // one editor: the name
 const { editing, draft } = rename
 const error = ref('')
 const actionError = ref('') // a rename's; the list's own reloads don't clear it
+const busy = ref(false)
 let revision = 0
 let loadRequest = 0
 onBeforeUnmount(() => {
@@ -59,16 +60,17 @@ watch(
 useLiveReload(load, (c) => c.people || c.assets || c.thumbs)
 
 function edit() {
-  void rename.open(true, person.value?.name ?? '')
+  if (!busy.value) void rename.open(true, person.value?.name ?? '')
 }
 
 /** Saves the name typed; with refocus (Enter), focus returns to the name. */
 async function save(refocus: boolean) {
-  if (!editing.value || nameTooLong(draft.value)) return
+  if (!editing.value || nameTooLong(draft.value) || busy.value) return
   void rename.close(refocus) // leaving the field (blur) leaves focus where it went
   const name = draft.value.trim()
   if (name === (person.value?.name ?? '')) return
   actionError.value = ''
+  busy.value = true
   const requested = revision
   const id = props.id
   try {
@@ -79,6 +81,8 @@ async function save(refocus: boolean) {
     else await load()
   } catch (e) {
     if (requested === revision) actionError.value = errorText(e)
+  } finally {
+    busy.value = false
   }
 }
 
@@ -110,7 +114,13 @@ async function blockPerson() {
         @blur="save(false)"
       />
       <h1 v-else class="heading">
-        <button :ref="rename.triggerRef(true)" class="name" :title="t('person.rename')" @click="edit">
+        <button
+          :ref="rename.triggerRef(true)"
+          class="name"
+          :aria-disabled="busy || undefined"
+          :title="t('person.rename')"
+          @click="edit"
+        >
           <span class="name-text">{{ person.name || t('person.addName') }}</span>
           <Icon name="pencil" :size="14" />
         </button>
