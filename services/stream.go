@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"lumen/internal/core"
@@ -31,10 +33,20 @@ import (
 // user's files through it.
 type Streamer struct {
 	store   *store.Store
-	decoder media.Decoders
+	decoder videoConverter
 	srv     *http.Server
 	ln      net.Listener
 	secret  string
+	cancel  context.CancelFunc
+	mu      sync.Mutex // Guards closing and admission to active before Close waits.
+	closing bool
+	active  sync.WaitGroup
+}
+
+// videoConverter lets stream lifecycle tests hold a conversion until its
+// request is cancelled, without depending on a particular codec or speed.
+type videoConverter interface {
+	ConvertMP4(context.Context, string, int64) (func(io.Writer) error, error)
 }
 
 // NewStreamer starts listening on a free loopback port. Serve it with Run.
@@ -47,11 +59,13 @@ func NewStreamer(st *store.Store, d media.Decoders) (*Streamer, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Streamer{store: st, decoder: d, ln: ln, secret: hex.EncodeToString(b[:])}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Streamer{store: st, decoder: d, ln: ln, secret: hex.EncodeToString(b[:]), cancel: cancel}
 	s.srv = &http.Server{
 		Handler:           s,
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelDebug),
+		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 	return s, nil
 }
@@ -61,15 +75,36 @@ func (s *Streamer) Base() string { return "http://" + s.ln.Addr().String() + "/"
 
 // Run serves until Close.
 func (s *Streamer) Run() {
-	if err := s.srv.Serve(s.ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := s.srv.Serve(s.ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 		slog.Error("video server stopped", "err", err)
 	}
 }
 
 // Close stops the server and every stream (and conversion) in progress.
-func (s *Streamer) Close() error { return s.srv.Close() }
+func (s *Streamer) Close() error {
+	s.mu.Lock()
+	s.closing = true
+	s.cancel()
+	s.mu.Unlock()
+	err := s.srv.Close()
+	// Close can precede Run, before the HTTP server owns the listener.
+	if lerr := s.ln.Close(); lerr != nil && !errors.Is(lerr, net.ErrClosed) {
+		err = errors.Join(err, lerr)
+	}
+	s.active.Wait() // Request cancellation must finish probes and conversions before the store closes.
+	return err
+}
 
 func (s *Streamer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		http.Error(w, "server closed", http.StatusServiceUnavailable)
+		return
+	}
+	s.active.Add(1)
+	s.mu.Unlock()
+	defer s.active.Done()
 	// Only this computer's WebView, addressing the server by its own
 	// address (a web page renaming its host to 127.0.0.1 would not).
 	if r.Host != s.ln.Addr().String() {
@@ -125,7 +160,9 @@ func (s *Streamer) servePlay(w http.ResponseWriter, r *http.Request, id int64) {
 		http.NotFound(w, r)
 		return
 	}
-	convert, err := s.decoder.ConvertMP4(r.Context(), path, at)
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	convert, err := s.decoder.ConvertMP4(ctx, path, at)
 	if !served(w, err, id) { // a damaged file fails here, before any header is sent
 		return
 	}
@@ -134,7 +171,22 @@ func (s *Streamer) servePlay(w http.ResponseWriter, r *http.Request, id int64) {
 	if r.Method == http.MethodHead {
 		return
 	}
-	if err := convert(w); err != nil && r.Context().Err() == nil {
+	if err := convert(conversionWriter{Writer: w, cancel: cancel}); err != nil && ctx.Err() == nil {
 		slog.Warn("video conversion stopped", "asset", id, "err", err)
 	}
+}
+
+// conversionWriter stops FFmpeg if writing the response fails. A subprocess
+// must not keep running after its output pipe can no longer be copied.
+type conversionWriter struct {
+	io.Writer
+	cancel context.CancelFunc
+}
+
+func (w conversionWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	if err != nil {
+		w.cancel()
+	}
+	return n, err
 }
