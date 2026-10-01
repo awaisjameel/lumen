@@ -247,6 +247,19 @@ function select(day: string, item: GridItem | null) {
   lib.selected = { day, id: item.id }
 }
 
+/**
+ * The grid is one listbox: keyboard focus stays on the scroller (cells are
+ * not focusable, so none can take focus away and vanish with its row as the
+ * grid scrolls), and aria-activedescendant names the selected cell.
+ */
+function cellId(id: number): string {
+  return `cell-${id}`
+}
+const activeCell = computed(() => {
+  const sel = lib.selected
+  return sel && visible.value.some((v) => v.items.some((it) => it?.id === sel.id)) ? cellId(sel.id) : undefined
+})
+
 function open(day: string, item: GridItem | null) {
   if (!item) return
   lib.selected = { day, id: item.id }
@@ -427,8 +440,9 @@ const searchNotes = computed(() => {
           ref="scroller"
           class="scroller"
           tabindex="0"
-          role="group"
+          role="listbox"
           :aria-label="title"
+          :aria-activedescendant="activeCell"
           @scroll.passive="onScroll"
           @keydown="onKey"
         >
@@ -455,19 +469,22 @@ const searchNotes = computed(() => {
               class="row"
               :style="{ transform: `translateY(${v.top}px)`, height: v.height + 'px', padding: `0 ${PAD}px` }"
             >
-              <div v-if="v.row.kind === 'header'" class="day-header">
+              <!-- Each cell says its day, so the headings are for the eye only. -->
+              <div v-if="v.row.kind === 'header'" class="day-header" aria-hidden="true">
                 <h2>{{ dayLabel(v.row.day) }}</h2>
               </div>
-              <div v-else class="cells" :style="{ gap: GAP + 'px' }">
-                <button
+              <div v-else class="cells" role="presentation" :style="{ gap: GAP + 'px' }">
+                <div
                   v-for="(it, k) in v.items"
+                  :id="it ? cellId(it.id) : undefined"
                   :key="it?.id ?? `p${k}`"
                   class="cell"
                   :class="{ selected: it && lib.selected?.id === it.id }"
                   :style="{ width: layout.cell + 'px', height: layout.cell + 'px' }"
+                  :role="it ? 'option' : undefined"
                   :aria-label="it ? cellLabel(v.row.day, it) : undefined"
-                  :aria-current="it && lib.selected?.id === it.id ? 'true' : undefined"
-                  tabindex="-1"
+                  :aria-selected="it ? lib.selected?.id === it.id : undefined"
+                  :aria-hidden="it ? undefined : 'true'"
                   @click="select(v.row.day, it)"
                   @dblclick="open(v.row.day, it)"
                 >
@@ -488,7 +505,7 @@ const searchNotes = computed(() => {
                   <span v-if="it?.f" class="badge fav">
                     <Icon name="heart-filled" :size="16" />
                   </span>
-                </button>
+                </div>
               </div>
             </div>
           </div>
@@ -571,6 +588,11 @@ const searchNotes = computed(() => {
   /* the timeline scrubber replaces the scrollbar */
 }
 
+/* Keyboard focus is on the grid itself: show it on the selected cell. */
+.scroller:focus-visible .cell.selected {
+  box-shadow: inset 0 0 0 5px var(--bg);
+}
+
 .scroller::-webkit-scrollbar {
   display: none;
 }
@@ -607,8 +629,6 @@ const searchNotes = computed(() => {
 .cell {
   position: relative;
   flex-shrink: 0;
-  padding: 0;
-  border: 0;
   border-radius: var(--radius-s);
   overflow: hidden;
   background: var(--placeholder);

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef } from 'vue'
+import { onBlocksChanged } from './block'
 import { errorText, logError } from './errors'
 
 /**
@@ -37,6 +38,8 @@ export function coalescedLoad<T>(fetch: () => Promise<T>, apply: (value: T) => v
 function listState<T>(fetch: () => Promise<T[]>, active: () => boolean = () => true) {
   const list = shallowRef<T[]>([])
   const loaded = ref(false)
+  const pending = ref(0)
+  const loading = computed(() => pending.value > 0)
   const error = ref('')
   const read = coalescedLoad(
     () => (active() ? fetch() : Promise.resolve([])),
@@ -49,15 +52,26 @@ function listState<T>(fetch: () => Promise<T[]>, active: () => boolean = () => t
   )
   async function load() {
     if (!active()) return
+    pending.value++
     try {
       await read()
     } catch (e) {
       if (!active()) return
       error.value = errorText(e)
       throw e
+    } finally {
+      pending.value--
     }
   }
-  return { list, loaded, error, load }
+  async function invalidate() {
+    const refresh = loaded.value || loading.value
+    // Clear private entries before superseding any pre-block read.
+    list.value = []
+    loaded.value = false
+    error.value = ''
+    if (refresh) await load()
+  }
+  return { list, loaded, loading, error, load, invalidate }
 }
 
 export function useList<T>(fetch: () => Promise<T[]>) {
@@ -71,13 +85,26 @@ export function useList<T>(fetch: () => Promise<T[]>) {
 }
 
 /**
- * A store holding one list from the engine (Things, People, Albums), loaded on
- * demand, with an index by id. error says why the last load failed ("" once
- * one succeeds); load also rejects, for callers that wait on it.
+ * A store holding one list from the engine (duplicate groups), loaded on
+ * demand. error says why the last load failed ("" once one succeeds); load
+ * also rejects, for callers that wait on it.
+ */
+export function defineCollectionStore<T>(id: string, fetch: () => Promise<T[]>) {
+  return defineStore(id, () => {
+    const state = listState(fetch)
+    onScopeDispose(onBlocksChanged(state.invalidate))
+    return state
+  })
+}
+
+/**
+ * A collection store (see defineCollectionStore) of items with ids (Things,
+ * People, Albums), with an index by id.
  */
 export function defineListStore<T extends { id: number }>(id: string, fetch: () => Promise<T[]>) {
   return defineStore(id, () => {
     const state = listState(fetch)
+    onScopeDispose(onBlocksChanged(state.invalidate))
     const byId = computed(() => new Map(state.list.value.map((item) => [item.id, item])))
     return { ...state, byId }
   })

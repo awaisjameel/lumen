@@ -57,10 +57,11 @@ func (e *Emitter) LibraryChanged(c core.Changes) {
 type LibraryService struct {
 	store   *store.Store
 	ix      *index.Indexer
-	events  *Emitter
-	blocked struct {
+	now     func() time.Time // the clock: time.Now, or a test's
+	blocked struct {         // the PIN, rate limiting and Undo; guarded by its mutex
 		sync.Mutex
 		unlocked bool
+		usedAt   time.Time // the unlocked list's last use (see blockUnlockIdle)
 		failures int
 		retryAt  time.Time
 		lastID   int64
@@ -69,8 +70,8 @@ type LibraryService struct {
 }
 
 // NewLibraryService returns the library service.
-func NewLibraryService(st *store.Store, ix *index.Indexer, events *Emitter) *LibraryService {
-	return &LibraryService{store: st, ix: ix, events: events}
+func NewLibraryService(st *store.Store, ix *index.Indexer) *LibraryService {
+	return &LibraryService{store: st, ix: ix, now: time.Now}
 }
 
 // Sources lists the folders in the library.
@@ -131,7 +132,8 @@ func (s *LibraryService) PickFolder() (string, error) {
 
 // AddSources adds folders and starts scanning them, all or none: a folder
 // that doesn't exist fails the call before any is added. Folders already
-// inside the library are skipped.
+// inside the library are skipped; if that leaves nothing to add, the call
+// fails with store.ErrAlreadyCovered, so the UI can say so.
 func (s *LibraryService) AddSources(ctx context.Context, paths []string) ([]core.Source, error) {
 	for _, p := range paths {
 		if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
@@ -144,13 +146,19 @@ func (s *LibraryService) AddSources(ctx context.Context, paths []string) ([]core
 			s.ix.RescanAll() // scan what was added, even if a later folder failed
 		}
 	}()
+	covered := false
 	for _, p := range paths {
 		switch _, err := s.store.AddSource(ctx, p); {
 		case err == nil:
 			added = true
-		case !errors.Is(err, store.ErrAlreadyCovered):
+		case errors.Is(err, store.ErrAlreadyCovered):
+			covered = true
+		default:
 			return nil, err
 		}
+	}
+	if covered && !added {
+		return nil, store.ErrAlreadyCovered
 	}
 	return s.store.ListSources(ctx)
 }
@@ -173,7 +181,7 @@ func (s *LibraryService) Timeline(ctx context.Context, view core.View) ([]core.D
 	if err != nil {
 		return nil, err
 	}
-	return s.store.DayBuckets(ctx, view, float32(minScore))
+	return s.store.DayBuckets(ctx, view, minScore)
 }
 
 // Days returns the view's grid items for the days from..to (YYYY-MM-DD, inclusive).
@@ -182,7 +190,7 @@ func (s *LibraryService) Days(ctx context.Context, from, to string, view core.Vi
 	if err != nil {
 		return nil, err
 	}
-	return s.store.DayItems(ctx, from, to, view, float32(minScore))
+	return s.store.DayItems(ctx, from, to, view, minScore)
 }
 
 // Focus tells the indexer which days are on screen so they are processed first.
@@ -246,7 +254,7 @@ func (s *LibraryService) Albums(ctx context.Context) ([]core.Album, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.store.Albums(ctx, float32(minScore))
+	return s.store.Albums(ctx, minScore)
 }
 
 // CreateAlbum saves a new manual album holding items, or a smart rule (no
@@ -272,8 +280,8 @@ func (s *LibraryService) AssetAlbums(ctx context.Context, id int64) ([]int64, er
 }
 
 // SetAlbumItem changes membership in a manual album.
-func (s *LibraryService) SetAlbumItem(ctx context.Context, albumID, assetID int64, include bool) error {
-	return s.store.SetAlbumItem(ctx, albumID, assetID, include)
+func (s *LibraryService) SetAlbumItem(ctx context.Context, assetID, albumID int64, include bool) error {
+	return s.store.SetAlbumItem(ctx, assetID, albumID, include)
 }
 
 // ShowInFolder opens Explorer with one of the asset's files selected: path,

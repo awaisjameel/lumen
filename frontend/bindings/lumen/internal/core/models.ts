@@ -183,7 +183,7 @@ export enum BlockMode {
  */
 export interface Changes {
     /**
-     * assets came, went, or their dates or sizes changed
+     * assets came, went, were blocked or unblocked, or their dates or sizes changed
      */
     "assets": boolean;
 
@@ -450,7 +450,6 @@ export interface Person {
      * "" until the user names them
      */
     "name": string;
-    "hidden": boolean;
 
     /**
      * visible photos they appear in
@@ -510,11 +509,6 @@ export enum Playback {
  */
 export interface Progress {
     "scanning": boolean;
-
-    /**
-     * files found in this scan so far
-     */
-    "discovered": number;
 
     /**
      * assets in the library
@@ -578,7 +572,7 @@ export interface SearchResult {
     "noAI": boolean;
 
     /**
-     * a blocked person's name occurred in the query
+     * a blocked named entity occurred in the query
      */
     "blocked": boolean;
 }
@@ -613,7 +607,6 @@ export interface Tag {
     "id": number;
     "name": string;
     "kind": TagKind;
-    "hidden": boolean;
     "count": number;
 
     /**

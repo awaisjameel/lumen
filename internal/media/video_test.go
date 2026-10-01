@@ -3,10 +3,13 @@ package media
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"lumen/internal/core"
@@ -44,6 +47,17 @@ func TestVideoPipeline(t *testing.T) {
 			t.Fatalf("frame %d: %dx%d at %d", i, f.W, f.H, f.At)
 		}
 	}
+	stop := errors.New("consumer stopped")
+	calls := 0
+	if err := d.Frames(ctx, src, 4, 320, func(Frame) error { calls++; return stop }); !errors.Is(err, stop) || !strings.Contains(err.Error(), src) || calls != 1 {
+		t.Fatalf("stopped consumer: %d calls, %v", calls, err)
+	}
+	cancelled, cancel := context.WithCancel(t.Context())
+	calls = 0
+	if err := d.Frames(cancelled, src, 4, 320, func(Frame) error { calls++; cancel(); return nil }); !errors.Is(err, context.Canceled) || calls != 1 {
+		t.Fatalf("cancelled sampler: %d calls, %v", calls, err)
+	}
+	cancel()
 	thumb, err := d.Thumbnail(ctx, src, core.KindVideo, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -80,4 +94,43 @@ func TestVideoPipeline(t *testing.T) {
 	if err != nil || convertedMeta.VideoCodec != "h264" || convertedMeta.AudioCodec != "aac" {
 		t.Fatalf("converted metadata: %+v, %v", convertedMeta, err)
 	}
+}
+
+func TestVideoFrameTimesAreRelativeToPlaybackStart(t *testing.T) {
+	ffmpeg := testenv.File(t, "ffmpeg", "ffmpeg.exe")
+	ffprobe := testenv.File(t, "ffmpeg", "ffprobe.exe")
+	for _, interval := range []string{"5", "300"} {
+		t.Run(interval, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "offset.ts")
+			cmd := exec.CommandContext(t.Context(), ffmpeg, "-v", "error", "-f", "lavfi", "-i",
+				"testsrc2=size=64x48:rate=5", "-t", "6", "-c:v", "mpeg2video", "-g", interval, "-f", "mpegts", path)
+			hideWindow(cmd)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("make offset sample: %v: %s", err, out)
+			}
+			d := Decoders{FFmpeg: ffmpeg, FFprobe: ffprobe}
+			var out bytes.Buffer
+			if err := runTool(t.Context(), ffprobe, &out, "-v", "error", "-show_entries", "format=start_time", "-of", "default=nw=1:nk=1", path); err != nil {
+				t.Fatal(err)
+			}
+			if start, err := strconv.ParseFloat(strings.TrimSpace(out.String()), 64); err != nil || start <= 0 {
+				t.Fatalf("offset sample: start %v, %v", start, err)
+			}
+			var frames []Frame
+			if err := d.Frames(t.Context(), path, 3, 64, func(f Frame) error { frames = append(frames, f); return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if len(frames) != 3 || frames[0].At != 0 || frames[1].At != 2000 || frames[2].At != 4000 {
+				t.Fatalf("offset video frame times: %v", frameTimes(frames))
+			}
+		})
+	}
+}
+
+func frameTimes(frames []Frame) []int64 {
+	times := make([]int64, len(frames))
+	for i, f := range frames {
+		times[i] = f.At
+	}
+	return times
 }

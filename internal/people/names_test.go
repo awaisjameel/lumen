@@ -17,6 +17,7 @@ func TestFindNames(t *testing.T) {
 		{"Ali at the beach", []int64{1}, "at the beach"},
 		{"ali khan birthday cake", []int64{2}, "birthday cake"}, // the longer name wins
 		{"Ali and Sara", []int64{1, 3}, ""},                     // only fillers left
+		{"Ali Khan and Ali Khan", []int64{2}, ""},
 		{"photos of Sara", []int64{3}, ""},
 		{"Alice in the snow", nil, "Alice in the snow"}, // whole words only
 		{"Zoë's dog", []int64{4}, "'s dog"},

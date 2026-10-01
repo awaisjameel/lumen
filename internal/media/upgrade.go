@@ -14,20 +14,39 @@ import (
 // found in pixels decoded as it did.
 const UnmanagedThumbnailVersion = "vips-8.18-1"
 
+// HEIFProfilesVersion is the last ThumbnailVersion before HEIC decoded by
+// FFmpeg (on PCs without the HEVC extension) had its profile converted too.
+const HEIFProfilesVersion = "vips-8.18-2"
+
+// EpochDatesMetadataVersion is the last photo MetadataVersion that took an
+// unset clock's epoch (1970 or 1904) for a capture date.
+const EpochDatesMetadataVersion = "imagemeta-1.1+goexif+vips-3"
+
 // DecodesAsAt reports whether Thumbnail and Decode make the same pixels of
 // a photo now as they did at an earlier ThumbnailVersion, so what was made
 // from them then (thumbnails, faces) still stands and an upgrade needn't
 // decode the photo again. It reads at most the file's header, and is false
 // when unsure: a version it doesn't know, a header that won't read.
 func DecodesAsAt(path, version string) bool {
-	if version != UnmanagedThumbnailVersion {
+	ext := strings.ToLower(filepath.Ext(path))
+	heif := ext == ".heic" || ext == ".heif"
+	switch version {
+	case HEIFProfilesVersion:
+		// Only HEIC changed since, and only in a profile other than sRGB
+		// (which WIC converted then too, where it decoded the file).
+		if !heif {
+			return true
+		}
+		icc, err := vips.Profile(path)
+		return err == nil && (icc == nil || isSRGB(icc))
+	case UnmanagedThumbnailVersion:
+	default:
 		return false
 	}
 	// Since then colour profiles are converted to sRGB (by libvips, and by
 	// WIC for HEIC, which iPhones save in Display P3) and pixels Go decodes
 	// keep straight alpha.
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".heic", ".heif", ".bmp":
+	if heif || ext == ".bmp" {
 		return false
 	}
 	icc, err := vips.Profile(path)

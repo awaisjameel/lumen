@@ -24,8 +24,18 @@ func newVideoIndex(dim int) *videoIndex {
 	return &videoIndex{index: NewIndex(dim), frame: map[int64]videoFrame{}, byAsset: map[int64][]int64{}}
 }
 
-// add puts one frame in. Call with mu held (load holds it alone, before
-// the index is shared).
+// load replaces every frame with the ones each adds (the engine loading,
+// or loading again after a failed attempt).
+func (v *videoIndex) load(each func(add func(asset, at int64, q []int8, scale float32)) error) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.index, v.next = NewIndex(v.index.dim), 0
+	clear(v.frame)
+	clear(v.byAsset)
+	return each(v.add)
+}
+
+// add puts one frame in. Call with mu held.
 func (v *videoIndex) add(asset, at int64, q []int8, scale float32) {
 	v.next++
 	key := v.next

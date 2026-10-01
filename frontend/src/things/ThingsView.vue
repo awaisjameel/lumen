@@ -13,6 +13,7 @@ import { t } from '../shared/i18n'
 import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
+import { nameTooLong, trimName } from '../shared/names'
 import { useLibrary } from '../library/store'
 import SearchBox from '../search/SearchBox.vue'
 import { useThings } from './store'
@@ -28,7 +29,7 @@ let active = true
 onBeforeUnmount(() => (active = false))
 
 // Built-ins without photos and the internal sink kind never show.
-const listed = computed(() => things.list.filter((x) => !x.hidden && (x.kind !== TagKind.TagBuiltin || x.count > 0)))
+const listed = computed(() => things.list.filter((x) => x.kind !== TagKind.TagBuiltin || x.count > 0))
 const mine = computed(() => listed.value.filter((x) => x.kind !== TagKind.TagBuiltin))
 const builtin = computed(() => listed.value.filter((x) => x.kind === TagKind.TagBuiltin))
 const aiError = computed(() => lib.progress?.ai.error ?? '')
@@ -38,8 +39,8 @@ onMounted(() => void things.load().catch(logError))
 useLiveReload(things.load, (c) => c.tags || c.assets || c.thumbs) // counts grow while the AI works
 
 async function create() {
-  const n = name.value.trim()
-  if (!n || busy.value) return
+  const n = trimName(name.value)
+  if (!n || nameTooLong(name.value) || busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -66,10 +67,7 @@ async function act(fn: () => Promise<void>) {
   }
 }
 
-const blockTag = (tag: Tag) =>
-  act(async () => {
-    await block(BlockKind.BlockTag, tag.id, tag.name)
-  })
+const blockTag = (tag: Tag) => void block(BlockKind.BlockTag, tag.id, tag.name)
 
 async function remove(tag: Tag) {
   if (await confirm(t('things.deleteTitle', { name: tag.name }), t('things.deleteText'), t('things.delete'))) {
@@ -96,12 +94,15 @@ async function remove(tag: Tag) {
           :placeholder="t('things.new')"
           :aria-label="t('things.new')"
           :disabled="busy || !!aiError"
-          :maxlength="MAX_NAME_LEN"
+          :aria-invalid="nameTooLong(name) || undefined"
         />
-        <button class="btn btn-primary" :disabled="busy || !name.trim() || !!aiError">
+        <button class="btn btn-primary" :disabled="busy || !trimName(name) || nameTooLong(name) || !!aiError">
           {{ busy ? t('things.finding') : t('things.find') }}
         </button>
       </form>
+      <p v-if="nameTooLong(name)" class="page-error" role="alert">
+        {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
+      </p>
       <p v-if="error || things.error || aiError" class="page-error" role="alert">
         {{ error || things.error || t('settings.aiError', { error: aiError }) }}
       </p>
@@ -112,7 +113,7 @@ async function remove(tag: Tag) {
           <div v-for="x in mine" :key="x.id" class="card">
             <RouterLink :to="{ name: 'thing', params: { id: x.id } }" class="card-cover" :aria-label="x.name">
               <img
-                v-if="x.cover"
+                v-if="x.cover && x.coverThumb"
                 :src="thumbUrl(x.cover, x.coverThumb)"
                 alt=""
                 loading="lazy"
@@ -150,7 +151,7 @@ async function remove(tag: Tag) {
         <div v-for="x in builtin" :key="x.id" class="card">
           <RouterLink :to="{ name: 'thing', params: { id: x.id } }" class="card-cover" :aria-label="x.name">
             <img
-              v-if="x.cover"
+              v-if="x.cover && x.coverThumb"
               :src="thumbUrl(x.cover, x.coverThumb)"
               alt=""
               loading="lazy"
@@ -186,9 +187,6 @@ async function remove(tag: Tag) {
 </template>
 
 <style scoped>
-.intro {
-  margin: 0 0 12px;
-}
 .new {
   display: flex;
   gap: 8px;

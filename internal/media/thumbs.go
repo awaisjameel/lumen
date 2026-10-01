@@ -25,10 +25,10 @@ import (
 // a fix); the indexer then re-runs just that stage.
 // Photos and videos have their own, as different code serves them.
 const (
-	MetadataVersion       = "imagemeta-1.1+goexif+vips-3" // capture dates only (not modify dates); header sizes
-	ThumbnailVersion      = "vips-8.18-2"                 // colour profiles converted to sRGB
-	VideoMetadataVersion  = "ffprobe-9.0-1"
-	VideoThumbnailVersion = "ffmpeg-9.0+vips-8.18-1"
+	MetadataVersion       = "imagemeta-1.1+goexif+vips-4" // unset epoch capture dates are ignored
+	ThumbnailVersion      = "vips-8.18-3"                 // colour profiles converted to sRGB, also in HEIC FFmpeg decodes
+	VideoMetadataVersion  = "ffprobe-9.0-2"
+	VideoThumbnailVersion = "ffmpeg-9.0+vips-8.18-2" // frame times are relative to playback, including offset containers
 )
 
 // ErrUnsupported means this machine cannot decode the file: HEIC with
@@ -130,10 +130,10 @@ func (d Decoders) Thumbnail(ctx context.Context, path string, kind core.Kind, or
 	if src.file != "" {
 		t, err = vips.ThumbnailFile(src.file, sizes)
 	} else {
-		t, err = vips.ThumbnailPixels(src.pix, src.w, src.h, src.bands, src.orientation, sizes)
+		t, err = vips.ThumbnailPixels(src.pixels, sizes)
 	}
 	if err != nil {
-		return Thumbs{}, err
+		return Thumbs{}, fmt.Errorf("thumbnail %s: %w", path, err)
 	}
 	ph, err := perceptualHash(t.Square)
 	if err != nil {
@@ -146,7 +146,7 @@ func (d Decoders) Thumbnail(ctx context.Context, path string, kind core.Kind, or
 // photo Decode returned (upright sRGB, at least core.ThumbLarge where the
 // original is), so a photo also wanted as pixels is decoded once.
 func ThumbsFromImage(im Image) (Thumbs, error) {
-	t, err := vips.ThumbnailPixels(im.Pix, im.W, im.H, 3, 1, sizes)
+	t, err := vips.ThumbnailPixels(vips.RGBPixels(im.Pix, im.W, im.H), sizes)
 	if err != nil {
 		return Thumbs{}, err
 	}
@@ -169,19 +169,20 @@ func (d Decoders) Decode(ctx context.Context, path string, kind core.Kind, orien
 	if src.file != "" {
 		im, err = vips.DecodeFile(src.file, side)
 	} else {
-		im, err = vips.DecodePixels(src.pix, src.w, src.h, src.bands, src.orientation, side)
+		im, err = vips.DecodePixels(src.pixels, side)
 	}
-	return Image{Pix: im.Pix, W: im.W, H: im.H}, err
+	if err != nil {
+		return Image{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	return Image{Pix: im.Pix, W: im.W, H: im.H}, nil
 }
 
 // source is a photo ready for libvips: a file it decodes itself (shrinking
 // on load and applying the EXIF orientation), or pixels decoded elsewhere
 // with the orientation still to apply.
 type source struct {
-	file        string
-	pix         []byte // 8-bit, bands per pixel
-	w, h, bands int
-	orientation int
+	file   string
+	pixels vips.Pixels
 }
 
 // open picks the decoder for path. Pixels decoded outside libvips are at
@@ -204,7 +205,7 @@ func (d Decoders) open(ctx context.Context, path string, kind core.Kind, orienta
 func (d Decoders) heif(ctx context.Context, path string, orientation, maxSide int) (source, error) {
 	pix, w, h, werr := wic.Decode(path, maxSide)
 	if werr == nil {
-		return source{pix: pix, w: w, h: h, bands: 4, orientation: orientation}, nil
+		return source{pixels: vips.Pixels{Pix: pix, W: w, H: h, Bands: 4, Orientation: orientation}}, nil // WIC converts to sRGB
 	}
 	if d.FFmpeg == "" {
 		return source{}, ErrUnsupported
@@ -213,7 +214,13 @@ func (d Decoders) heif(ctx context.Context, path string, orientation, maxSide in
 	if ferr != nil {
 		return source{}, fmt.Errorf("decode HEIC: %w; %w", werr, ferr)
 	}
-	return source{pix: pix, w: w, h: h, bands: 3, orientation: orientation}, nil
+	// FFmpeg leaves the pixels in the file's profile (iPhones: Display P3),
+	// which libvips reads from the header and converts from.
+	icc, err := vips.Profile(path)
+	if err != nil {
+		icc = nil // as sRGB, as before profiles were read
+	}
+	return source{pixels: vips.Pixels{Pix: pix, W: w, H: h, Bands: 3, Orientation: orientation, ICC: icc}}, nil
 }
 
 // goDecode reads formats libvips lacks with Go's image packages. They carry
@@ -245,7 +252,7 @@ func goDecode(path string) (source, error) {
 	// delivers it: premultiplying first would darken see-through pixels twice.
 	rgba := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	draw.Draw(rgba, rgba.Bounds(), img, b.Min, draw.Src)
-	return source{pix: rgba.Pix, w: b.Dx(), h: b.Dy(), bands: 4, orientation: 1}, nil
+	return source{pixels: vips.Pixels{Pix: rgba.Pix, W: b.Dx(), H: b.Dy(), Bands: 4, Orientation: 1}}, nil
 }
 
 // perceptualHash is the 64-bit pHash of a hashSide x hashSide RGB square.
@@ -273,7 +280,7 @@ func (d Decoders) videoThumbnail(ctx context.Context, path string) (Thumbs, erro
 	var poster Image
 	best, found := -1.0, false
 	v, err := d.frames(ctx, path, core.SpriteCols*core.SpriteRows, core.ThumbLarge, func(f Frame) error {
-		small, err := vips.DecodePixels(f.Pix, f.W, f.H, 3, 1, core.ThumbSmall)
+		small, err := vips.DecodePixels(vips.RGBPixels(f.Pix, f.W, f.H), core.ThumbSmall)
 		if err != nil {
 			return err
 		}
@@ -289,7 +296,7 @@ func (d Decoders) videoThumbnail(ctx context.Context, path string) (Thumbs, erro
 	if len(tiles) == 0 {
 		return Thumbs{}, errors.New("ffmpeg: the video has no frames")
 	}
-	t, err := vips.ThumbnailPixels(poster.Pix, poster.W, poster.H, 3, 1, sizes)
+	t, err := vips.ThumbnailPixels(vips.RGBPixels(poster.Pix, poster.W, poster.H), sizes)
 	if err != nil {
 		return Thumbs{}, err
 	}

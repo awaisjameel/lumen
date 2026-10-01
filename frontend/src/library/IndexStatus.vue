@@ -26,7 +26,7 @@ const label = computed(() => {
   const v = p.value
   if (!v) return ''
   if (v.paused && left.value) return t('status.paused', { left: left.value })
-  if (v.scanning) return t('status.scanning', { n: v.discovered })
+  if (v.scanning) return t('status.scanning')
   if (preparing.value) return t('status.preparing', { left: preparing.value })
   if (understanding.value && v.onBattery) return t('status.battery', { left: understanding.value })
   if (understanding.value) return t('status.understanding', { left: understanding.value })

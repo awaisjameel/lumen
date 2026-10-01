@@ -78,8 +78,10 @@ func watch(ctx context.Context, dir string, onChange func(path string)) (<-chan 
 
 // readChanges reports changes on h until ctx ends (nil) or reading fails.
 func readChanges(ctx context.Context, h windows.Handle, dir string, onChange func(path string)) error {
+	// Attributes too: a folder hidden or shown in Explorer leaves or joins
+	// the library (scans skip hidden ones).
 	const mask = windows.FILE_NOTIFY_CHANGE_FILE_NAME | windows.FILE_NOTIFY_CHANGE_DIR_NAME |
-		windows.FILE_NOTIFY_CHANGE_SIZE | windows.FILE_NOTIFY_CHANGE_LAST_WRITE
+		windows.FILE_NOTIFY_CHANGE_SIZE | windows.FILE_NOTIFY_CHANGE_LAST_WRITE | windows.FILE_NOTIFY_CHANGE_ATTRIBUTES
 	buf := make([]byte, 64<<10) // must be DWORD-aligned; Go's allocator guarantees it
 	for {
 		var n uint32

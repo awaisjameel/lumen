@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { BlockKind, engine } from '../bridge'
 import { block } from '../shared/block'
+import { logError } from '../shared/errors'
 import Icon from '../shared/Icon.vue'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
@@ -9,11 +10,11 @@ import EmptyState from '../shared/EmptyState.vue'
 import GroupCard from '../shared/GroupCard.vue'
 import SearchBox from '../search/SearchBox.vue'
 
-const { list, loaded, error, load } = useList(engine.places)
+const { list, loaded, error, load, invalidate } = useList(engine.places)
 useLiveReload(load, (c) => c.assets || c.thumbs)
 
 async function blockPlace(id: number, name: string) {
-  if (await block(BlockKind.BlockPlace, id, name)) await load()
+  if (await block(BlockKind.BlockPlace, id, name)) await invalidate().catch(logError)
 }
 </script>
 
@@ -27,7 +28,7 @@ async function blockPlace(id: number, name: string) {
     <div class="page-body">
       <p class="muted intro">{{ t('places.intro') }}</p>
       <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-      <div v-if="list.length" class="groups">
+      <div v-if="list.length" class="group-cards">
         <GroupCard
           v-for="place in list"
           :id="place.id"
@@ -54,15 +55,3 @@ async function blockPlace(id: number, name: string) {
     </div>
   </div>
 </template>
-
-<style scoped>
-.intro {
-  margin: 0 0 16px;
-}
-
-.groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
-  gap: 12px;
-}
-</style>

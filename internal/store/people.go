@@ -14,8 +14,9 @@ import (
 // ErrPersonExists means someone else already has that name.
 var ErrPersonExists = errors.New("someone already has that name")
 
-// ErrBlockedName keeps a blocked person out of ordinary merge and naming flows.
-var ErrBlockedName = errors.New("that person is blocked")
+// ErrBlockedName means a name belongs to a blocked person or Thing: naming
+// someone with it, or tagging with it, would reveal or undo the block.
+var ErrBlockedName = errors.New("that name belongs to a blocked person or Thing")
 
 // A core.Face is read (in scanFace order) from faces f joined with its
 // asset a and person p.
@@ -43,9 +44,9 @@ const clearest = `f.id = (SELECT cover_face FROM people WHERE id = f.person_id) 
 func (s *Store) People(ctx context.Context) ([]core.Person, error) {
 	var people []core.Person
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
-		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), p.hidden, count(DISTINCT f.asset_id)
+		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), count(DISTINCT f.asset_id)
 			FROM people p JOIN faces f ON f.person_id = p.id JOIN assets a ON a.id = f.asset_id AND `+visibleA+`
-			WHERE NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = p.id)
+			WHERE NOT `+labelBlocked(core.BlockPerson, "p.id")+`
 			GROUP BY p.id ORDER BY p.name IS NULL, count(DISTINCT f.asset_id) DESC, p.name, p.id`)
 		if err != nil {
 			return err
@@ -59,11 +60,10 @@ func (s *Store) People(ctx context.Context) ([]core.Person, error) {
 func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 	var people []core.Person
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
-		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), p.hidden,
+		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''),
 				(SELECT count(DISTINCT f.asset_id) FROM faces f JOIN assets a ON a.id = f.asset_id
 					WHERE f.person_id = p.id AND `+visibleA+`)
-			FROM people p WHERE p.id = ? AND NOT EXISTS
-			(SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = p.id)`, id)
+			FROM people p WHERE p.id = ? AND NOT `+labelBlocked(core.BlockPerson, "p.id"), id)
 		if err != nil {
 			return err
 		}
@@ -79,7 +79,7 @@ func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 }
 
 func scanPerson(r *sql.Rows) (p core.Person, err error) {
-	err = r.Scan(&p.ID, &p.Name, &p.Hidden, &p.Count)
+	err = r.Scan(&p.ID, &p.Name, &p.Count)
 	return p, err
 }
 
@@ -118,8 +118,7 @@ func (s *Store) PersonFaces(ctx context.Context, id int64) (faces []core.Face, v
 		x.vec = bytesFloat32(vec)
 		return x, err
 	}, "SELECT "+faceColumns+", f.vec"+faceFrom+
-		` WHERE f.person_id = ? AND `+visibleA+` AND NOT EXISTS
-		(SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = f.person_id)
+		` WHERE f.person_id = ? AND `+visibleA+` AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+`
 		ORDER BY a.taken_at DESC, f.id`, id)
 	if err != nil {
 		return nil, nil, err
@@ -133,29 +132,17 @@ func (s *Store) PersonFaces(ctx context.Context, id int64) (faces []core.Face, v
 
 // AssetFaces returns the faces in one photo, left to right.
 func (s *Store) AssetFaces(ctx context.Context, assetID int64) ([]core.Face, error) {
-	return queryAll(ctx, s.r, scanFace, faceSelect+` WHERE f.asset_id = ? AND `+visibleA+` AND NOT EXISTS
-		(SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = f.person_id) ORDER BY f.x`, assetID)
+	return queryAll(ctx, s.r, scanFace, faceSelect+` WHERE f.asset_id = ? AND `+visibleA+` AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+` ORDER BY f.x`, assetID)
 }
 
 // NamedPeople returns everyone the user has named (for finding names in a
 // search).
 func (s *Store) NamedPeople(ctx context.Context) ([]core.Person, error) {
 	return queryAll(ctx, s.r, func(r *sql.Rows) (p core.Person, err error) {
-		err = r.Scan(&p.ID, &p.Name, &p.Hidden)
-		return p, err
-	}, `SELECT id, name, hidden FROM people WHERE name IS NOT NULL AND NOT EXISTS
-		(SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = people.id)
-		ORDER BY length(name) DESC, name`)
-}
-
-// BlockedNamedPeople is used only to recognise an exact blocked name in a
-// submitted search. It is never offered in suggestions or ordinary lists.
-func (s *Store) BlockedNamedPeople(ctx context.Context) ([]core.Person, error) {
-	return queryAll(ctx, s.r, func(r *sql.Rows) (p core.Person, err error) {
 		err = r.Scan(&p.ID, &p.Name)
 		return p, err
-	}, `SELECT p.id, p.name FROM people p JOIN blocks b ON b.kind = 'person' AND b.target_id = p.id
-		WHERE p.name IS NOT NULL ORDER BY length(p.name) DESC`)
+	}, `SELECT id, name FROM people WHERE name IS NOT NULL AND NOT `+labelBlocked(core.BlockPerson, "people.id")+`
+		ORDER BY length(name) DESC, name`)
 }
 
 // PeopleAssets returns the visible assets in which every one of people
@@ -171,7 +158,8 @@ func (s *Store) PeopleAssets(ctx context.Context, people []int64) ([]int64, erro
 	},
 		`SELECT f.asset_id FROM faces f JOIN assets a ON a.id = f.asset_id
 		WHERE f.person_id IN (SELECT value FROM json_each(?1)) AND `+visibleA+`
-		GROUP BY f.asset_id HAVING count(DISTINCT f.person_id) = json_array_length(?1)
+		AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+`
+		GROUP BY f.asset_id HAVING count(DISTINCT f.person_id) = (SELECT count(DISTINCT value) FROM json_each(?1))
 		ORDER BY max(a.taken_at) DESC, f.asset_id DESC`, string(list))
 }
 
@@ -185,10 +173,10 @@ func (s *Store) SearchPeople(ctx context.Context, text string, limit int) ([]cor
 	var people []core.Person
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
 		people, err = queryAll(ctx, tx, func(r *sql.Rows) (p core.Person, err error) {
-			err = r.Scan(&p.ID, &p.Name, &p.Hidden)
+			err = r.Scan(&p.ID, &p.Name)
 			return p, err
-		}, `SELECT id, name, hidden FROM people WHERE name IS NOT NULL AND `+nameMatch+` AND hidden = 0
-			AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'person' AND b.target_id = people.id)
+		}, `SELECT id, name FROM people WHERE name IS NOT NULL AND `+nameMatch+`
+			AND NOT `+labelBlocked(core.BlockPerson, "people.id")+`
 			ORDER BY `+nameFirst+` LIMIT ?2`, core.Fold(text), limit)
 		if err != nil {
 			return err
@@ -233,8 +221,7 @@ func (s *Store) NamePerson(ctx context.Context, id int64, name string) error {
 				return err
 			case other != 0:
 				var blocked bool
-				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM blocks
-					WHERE kind = 'person' AND target_id = ?)`, other).Scan(&blocked); err != nil {
+				if err := tx.QueryRowContext(ctx, `SELECT `+labelBlocked(core.BlockPerson, "?"), other).Scan(&blocked); err != nil {
 					return err
 				}
 				if blocked {
@@ -321,7 +308,7 @@ func (s *Store) NameFaces(ctx context.Context, faces []int64, name string) (int6
 			person, err = named(ctx, tx, peopleNames, name, 0)
 			if err == nil && person != 0 {
 				var blocked bool
-				err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM blocks WHERE kind = 'person' AND target_id = ?)`, person).Scan(&blocked)
+				err = tx.QueryRowContext(ctx, `SELECT `+labelBlocked(core.BlockPerson, "?"), person).Scan(&blocked)
 				if err == nil && blocked {
 					return ErrBlockedName
 				}

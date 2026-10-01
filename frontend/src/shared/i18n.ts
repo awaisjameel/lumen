@@ -32,7 +32,7 @@ const en = {
   'blocked.labelPhotos': 'Label and photos',
   'blocked.photosOnly': 'This hides the photo or folder and its media.',
   'blocked.createPINHint':
-    'Create a 6–12 digit PIN to protect the Blocked screen. Keep it safe: PIN reset is not available yet.',
+    'Create a {pinMin}–{pinMax} digit PIN to protect the Blocked screen. Keep it safe: PIN reset is not available yet.',
   'blocked.enterPINHint': 'Enter your PIN to open the Blocked screen.',
   'blocked.newPIN': 'New PIN',
   'blocked.confirmPIN': 'Confirm PIN',
@@ -69,7 +69,7 @@ const en = {
   'search.withPeople': 'Photos with {names}.',
   'search.onlyPeople': 'Only who is in them was searched: the rest needs the on-device AI, which isn’t available.',
   'search.title': '“{q}”',
-  'search.blocked': 'This search names someone who is blocked.',
+  'search.blocked': 'This search names a blocked person, Thing, place, or album.',
   'search.openBlocked': 'Open Blocked',
 
   'people.intro':
@@ -83,8 +83,6 @@ const en = {
     other: 'Lumen is still looking for faces: {n} photos to go.',
   },
   'people.emptyHint': 'Someone appears here once they are clearly in three or more photos.',
-  'people.hide': 'Hide from People',
-  'people.unhide': 'Show in People',
 
   'person.unnamed': 'Unnamed person',
   'person.addName': 'Add a name',
@@ -119,12 +117,10 @@ const en = {
   'things.empty': 'No things yet',
   'things.emptyWorking': 'Lumen is still understanding your photos: {n} to go.',
   'things.emptyHint': 'Things appear as Lumen understands your photos.',
-  'things.hide': 'Hide from Things',
   'things.delete': 'Delete',
   'things.deleteNamed': 'Delete “{name}”',
   'things.deleteTitle': 'Delete “{name}”?',
   'things.deleteText': 'Lumen stops looking for it, and it comes off every photo. Your photos stay as they are.',
-  'things.unhide': 'Show in Things',
   'things.yours': 'Made by you',
   'things.noPhotos': 'No photos yet',
   'things.viewEmpty': 'Nothing here right now',
@@ -200,7 +196,7 @@ const en = {
   'welcome.privacy':
     'Everything stays on this computer. Nothing is uploaded, and your files are never moved or changed.',
 
-  'status.scanning': 'Looking for photos… {n} found',
+  'status.scanning': 'Looking for photos…',
   'status.preparing': 'Preparing your library… {left} left',
   'status.upToDate': 'Up to date',
   'status.preparingPhase': 'Preparing your library',
@@ -270,6 +266,7 @@ const en = {
   'viewer.noPreview': 'No preview for this format yet',
   'viewer.seek': 'Seek video',
   'viewer.videoFailed': 'This video could not be played.',
+  'viewer.videoUnavailable': 'Videos can’t play: Lumen couldn’t start its video player. Restarting Lumen may help.',
   'details.duration': 'Duration',
   'details.videoCodec': 'Video codec',
   'details.audioCodec': 'Audio codec',
@@ -320,8 +317,6 @@ const en = {
   'common.close': 'Close',
   'common.dismiss': 'Dismiss',
   'common.showInFolder': 'Show in folder',
-  'common.showHidden': { one: 'Show 1 hidden', other: 'Show {n} hidden' },
-  'common.hideHidden': 'Hide hidden',
   'common.withKey': '{label} ({key})',
   'common.labelValue': '{label}: {value}',
 
@@ -330,14 +325,28 @@ const en = {
   'error.noAI': 'The on-device AI isn’t available on this computer.',
   'error.invalidName': 'A name must be 1 to {max} characters.',
   'error.albumExists': 'An album already has that name.',
-  'error.invalidAlbum': 'This album can’t be saved: {why}.',
+  'error.invalidAlbum': 'This album can’t be saved.',
+  'error.albumMediaKind': 'Choose photos, videos, or all media.',
+  'error.albumSelection': 'Choose a valid Thing or person.',
+  'error.albumDate': 'Enter a valid date in YYYY-MM-DD format.',
+  'error.albumDateOrder': 'The start date must not follow the end date.',
+  'error.albumSmartItems': 'Smart albums choose their own items.',
+  'error.albumKind': 'Choose a manual or smart album.',
+  'error.albumReference': 'The selected Thing or person no longer exists.',
+  'error.albumManualOnly': 'Only manual albums accept items.',
   'error.personExists': 'Someone already has that name.',
-  'error.blockedName': 'That name belongs to a blocked person. Open Blocked in Settings to manage them.',
+  'error.blockedName': 'That name belongs to a blocked person or Thing. Open Blocked in Settings to manage it.',
   'error.tagExists': 'A Thing already has that name.',
-  'error.builtinTag': 'Lumen’s own Things can be hidden, not deleted.',
+  'error.builtinTag': 'Lumen’s own Things can be blocked, not deleted.',
   'error.tagInAlbum': 'A smart album uses this Thing. Change that album’s rule first.',
   'error.alreadyCovered': 'That folder is already in your library.',
   'error.folderNotFound': 'That folder can’t be found.',
+  'error.invalidPIN': 'That PIN isn’t right. A PIN is {pinMin} to {pinMax} digits.',
+  'error.pinExists': 'A PIN has already been set. Enter it to continue.',
+  'error.pinRateLimited': 'Too many incorrect PINs. Try again in {pinCooldown} seconds.',
+  'error.blocksLocked': 'Enter your PIN on the Blocked screen first.',
+  'error.undoExpired': 'It’s too late to undo that block. Unblock it on the Blocked screen instead.',
+  'error.invalidBlock': 'That can’t be blocked.',
 } as const satisfies Record<string, Message>
 
 export type MessageKey = keyof typeof en
@@ -351,8 +360,31 @@ const plurals = new Intl.PluralRules(LOCALE)
 /** Joins names for a sentence: "Ali, Sara and Omar". */
 export const listFormat = new Intl.ListFormat(LOCALE, { type: 'conjunction' })
 
+/** The names of the {placeholders} in a message string. */
+type Placeholders<S> = S extends `${string}{${infer Name}}${infer Rest}` ? Name | Placeholders<Rest> : never
+
+/** The placeholders of key's message: all its plural forms', which select by n. */
+type VarNames<K extends MessageKey> = (typeof en)[K] extends infer M
+  ? M extends string
+    ? Placeholders<M>
+    : Placeholders<M[keyof M]> | 'n'
+  : never
+
+type Vars = Record<string, string | number>
+
+/**
+ * What t takes after the key: every placeholder of that message, which the
+ * compiler checks, so none is left showing as "{name}". A key only known as
+ * some MessageKey (chosen at run time) is checked when it is chosen.
+ */
+type VarsArg<K extends MessageKey> = MessageKey extends K
+  ? [vars?: Vars]
+  : [VarNames<K>] extends [never]
+    ? [vars?: Vars]
+    : [vars: Record<VarNames<K>, string | number> & Vars]
+
 /** Translate a key, filling {placeholders}. Numbers are locale-formatted. */
-export function t(key: MessageKey, vars?: Record<string, string | number>): string {
+export function t<K extends MessageKey>(key: K, ...[vars]: VarsArg<K>): string {
   const m: Message = en[key]
   let s = typeof m === 'string' ? m : (m[plurals.select(Number(vars?.n))] ?? m.other)
   if (vars) {

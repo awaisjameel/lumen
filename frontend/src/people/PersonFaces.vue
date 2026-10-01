@@ -2,9 +2,9 @@
 // Reviewing who someone is: all their faces, least alike first, so any that
 // aren't them stand out. Selected faces can be taken out ("not them"), moved
 // to someone else or a new person (splitting), or used as their picture.
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { engine } from '../bridge'
+import { engine, ErrorCode, errorCode } from '../bridge'
 import type { Face, Person } from '../bridge'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
@@ -20,8 +20,10 @@ const people = usePeople()
 
 const id = computed(() => Number(route.params.id))
 const person = ref<Person | null>(null)
-const faces = ref<Face[]>([])
-const selected = ref(new Set<number>())
+// Someone can have thousands of faces: the list is replaced, never changed
+// in place, so it needn't be deeply reactive; nor is the selection.
+const faces = shallowRef<Face[]>([])
+const selected = shallowRef(new Set<number>())
 const busy = ref(false)
 const error = ref('')
 let revision = 0
@@ -40,7 +42,8 @@ async function load() {
   if (request !== loadRequest) return
   person.value = p
   faces.value = f
-  selected.value = new Set([...selected.value].filter((x) => f.some((y) => y.id === x)))
+  const present = new Set(f.map((x) => x.id))
+  selected.value = new Set([...selected.value].filter((x) => present.has(x)))
 }
 watch(
   id,
@@ -76,8 +79,10 @@ async function act(fn: (ids: number[]) => Promise<unknown>) {
     void people.load().catch(logError)
     if (requested !== revision) return
     selected.value = new Set()
-    await load().catch(async () => {
-      if (requested === revision) await router.replace({ name: 'people' }) // nothing left of them
+    await load().catch(async (e: unknown) => {
+      if (requested !== revision) return
+      if (errorCode(e) !== ErrorCode.NotFound) throw e
+      await router.replace({ name: 'people' }) // nothing left of them
     })
   } catch (e) {
     if (requested === revision) error.value = errorText(e)
@@ -120,13 +125,15 @@ const useAsCover = () => act(async ([face]) => face !== undefined && engine.setP
         </button>
       </template>
     </div>
-    <p v-if="error" class="error bar-error" role="alert">{{ error }}</p>
+    <p v-if="error" class="page-error bar-error" role="alert">{{ error }}</p>
 
     <div class="page-body">
       <div class="grid">
+        <!-- A click changes one tile: v-memo leaves the others' vnodes as they were. -->
         <button
           v-for="(f, i) in faces"
           :key="f.id"
+          v-memo="[f, i, selected.has(f.id)]"
           class="tile"
           :class="{ on: selected.has(f.id) }"
           :title="f.byUser ? t('faces.byYou') : undefined"

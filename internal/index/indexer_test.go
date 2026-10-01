@@ -8,8 +8,10 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +25,98 @@ type fakeEvents struct{ changed atomic.Int32 }
 
 func (*fakeEvents) Progress(core.Progress)        {}
 func (f *fakeEvents) LibraryChanged(core.Changes) { f.changed.Add(1) }
+
+func TestReportLoopLogsVisibilityReadFailures(t *testing.T) {
+	paths := core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	// A cancelled read is normal shutdown and must not become a background error.
+	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	ix.reportLoop(ctx)
+	if logs.Len() != 0 {
+		t.Fatalf("shutdown was logged as a failure: %s", logs.String())
+	}
+	ctx, cancel = context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	ix.reportLoop(ctx)
+	if !strings.Contains(logs.String(), "read visibility revision") {
+		t.Fatalf("visibility failure was not logged: %s", logs.String())
+	}
+}
+
+func TestFilesystemDebounceDoesNotExtendPastItsMaximum(t *testing.T) {
+	ix := New(nil, core.PathsIn(t.TempDir()), nil, Models{}, &fakeEvents{})
+	ix.rootCtx = t.Context()
+	ix.pendingFS["older.jpg"] = true
+	ix.fsSince = time.Now().Add(-debounceMax)
+	ix.onFSChange("newer.jpg")
+	if !ix.fsDue.Equal(ix.fsSince.Add(debounceMax)) {
+		t.Fatalf("flush deadline = %v, want %v", ix.fsDue, ix.fsSince.Add(debounceMax))
+	}
+}
+
+func TestStopWaitsForAnActiveFilesystemFlush(t *testing.T) {
+	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix.rootCtx, ix.cancel = context.WithCancel(t.Context())
+	started, release := make(chan struct{}), make(chan struct{})
+	ix.run(func() {
+		ix.fsLoop(ix.rootCtx, func() { close(started); <-release })
+	})
+	ix.mu.Lock()
+	ix.pendingFS["photo.jpg"] = true
+	ix.fsDue = time.Now().Add(-time.Second)
+	ix.mu.Unlock()
+	nudge(ix.wakeFS)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		close(release)
+		ix.Stop()
+		t.Fatal("filesystem flush did not start")
+	}
+	done := make(chan struct{})
+	go func() { ix.Stop(); close(done) }()
+	<-ix.rootCtx.Done()
+	select {
+	case <-done:
+		close(release)
+		t.Fatal("Stop returned while the filesystem flush was active")
+	default:
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not finish after the filesystem flush returned")
+	}
+}
+
+func TestStopCancelsAPendingFilesystemFlush(t *testing.T) {
+	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix.rootCtx, ix.cancel = context.WithCancel(t.Context())
+	var flushes atomic.Int32
+	ix.run(func() { ix.fsLoop(ix.rootCtx, func() { flushes.Add(1) }) })
+	ix.mu.Lock()
+	ix.pendingFS["photo.jpg"] = true
+	ix.fsDue = time.Now().Add(time.Hour)
+	ix.mu.Unlock()
+	nudge(ix.wakeFS)
+	ix.Stop()
+	if flushes.Load() != 0 {
+		t.Fatal("filesystem changes were flushed after cancellation")
+	}
+}
 
 func TestDeletedDottedFolderTriggersReconciliation(t *testing.T) {
 	paths := core.PathsIn(t.TempDir())

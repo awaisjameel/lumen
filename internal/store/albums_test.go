@@ -19,8 +19,8 @@ func TestManualAlbumsKeepAssetIdentityAndRespectVisibility(t *testing.T) {
 	check(t, st.r.QueryRowContext(ctx, `SELECT id FROM files`).Scan(&file))
 	id, err := st.CreateAlbum(ctx, " Weekend ", core.AlbumManual, core.AlbumRule{}, nil)
 	check(t, err)
-	check(t, st.SetAlbumItem(ctx, id, asset, true))
-	check(t, st.SetAlbumItem(ctx, id, asset, true)) // idempotent
+	check(t, st.SetAlbumItem(ctx, asset, id, true))
+	check(t, st.SetAlbumItem(ctx, asset, id, true)) // idempotent
 	if ids, err := st.AssetAlbums(ctx, asset); err != nil || len(ids) != 1 || ids[0] != id {
 		t.Fatalf("membership = %v, %v", ids, err)
 	}
@@ -115,7 +115,7 @@ func TestAlbumValidation(t *testing.T) {
 	if _, err := st.CreateAlbum(ctx, "holiday", core.AlbumSmart, core.AlbumRule{}, nil); !errors.Is(err, ErrAlbumExists) {
 		t.Fatalf("duplicate name: %v", err)
 	}
-	if err := st.SetAlbumItem(ctx, id, 999, true); !errors.Is(err, ErrNotFound) {
+	if err := st.SetAlbumItem(ctx, 999, id, true); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing asset: %v", err)
 	}
 	if err := st.UpdateAlbum(ctx, 999, "missing", core.AlbumRule{}); !errors.Is(err, ErrNotFound) {

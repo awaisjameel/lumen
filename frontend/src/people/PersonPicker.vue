@@ -3,9 +3,11 @@
 // name and press Enter. Emits the name either way (the engine finds or
 // creates the person).
 import { computed, ref, useId, watch } from 'vue'
-import { engine } from '../bridge'
+import { engine, MAX_NAME_LEN } from '../bridge'
 import type { Person } from '../bridge'
 import { useSuggestions } from '../shared/suggest'
+import { t } from '../shared/i18n'
+import { nameTooLong, trimName } from '../shared/names'
 import FaceThumb from './FaceThumb.vue'
 
 const props = defineProps<{ placeholder: string; exclude?: number }>()
@@ -21,8 +23,8 @@ const options = computed(() => found.value.filter((p) => p.id !== props.exclude)
 watch(text, () => (active.value = -1))
 
 function pick(name: string) {
-  name = name.trim()
-  if (!name) return
+  name = trimName(name)
+  if (!name || nameTooLong(name)) return
   emit('pick', name)
   text.value = ''
   open.value = false
@@ -55,13 +57,14 @@ function onKey(e: KeyboardEvent) {
       :aria-activedescendant="open && active >= 0 ? `${id}-${active}` : undefined"
       :aria-label="placeholder"
       :placeholder="placeholder"
-      maxlength="60"
+      :aria-invalid="nameTooLong(text) || undefined"
       spellcheck="false"
       autocomplete="off"
       @focus="open = true"
       @input="open = true"
       @keydown="onKey"
     />
+    <p v-if="nameTooLong(text)" class="error" role="alert">{{ t('error.invalidName', { max: MAX_NAME_LEN }) }}</p>
     <ul v-if="open && options.length" :id="`${id}-list`" class="menu" role="listbox" @mousedown.prevent>
       <li
         v-for="(p, i) in options"

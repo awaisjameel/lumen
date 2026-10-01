@@ -28,24 +28,31 @@ func Root(tb testing.TB) string {
 	}
 }
 
-// Runtime returns deps/runtime, skipping the test if it is missing.
+// Runtime returns deps/runtime, skipping the test if it is missing (or
+// holds no models yet).
 func Runtime(tb testing.TB) string {
 	tb.Helper()
-	dir := filepath.Join(Root(tb), "deps", "runtime")
+	dir := runtimeDir(tb)
 	if _, err := os.Stat(filepath.Join(dir, "models")); err != nil {
 		tb.Skip("deps/runtime missing: run scripts/deps.sh")
 	}
 	return dir
 }
 
-// File returns a file inside deps/runtime, skipping the test if it is missing.
+// File returns a file inside deps/runtime, skipping the test if that file is
+// missing (whatever else is).
 func File(tb testing.TB, rel ...string) string {
 	tb.Helper()
-	p := filepath.Join(append([]string{Runtime(tb)}, rel...)...)
+	p := filepath.Join(append([]string{runtimeDir(tb)}, rel...)...)
 	if _, err := os.Stat(p); err != nil {
 		tb.Skipf("%s missing: run scripts/deps.sh", p)
 	}
 	return p
+}
+
+func runtimeDir(tb testing.TB) string {
+	tb.Helper()
+	return filepath.Join(Root(tb), "deps", "runtime")
 }
 
 // HEICSamples returns the public HEIC samples the Phase 0 spikes downloaded

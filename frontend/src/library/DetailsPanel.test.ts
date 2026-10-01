@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { AlbumKind, BlockKind, DateSource, engine, Kind } from '../bridge'
+import { AlbumKind, BlockKind, DateSource, engine, Kind, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
-import type { AssetDetail } from '../bridge'
+import type * as Block from '../shared/block'
+import type { AssetDetail, Changes } from '../bridge'
 import { emptyRule } from '../albums/store'
 import { block } from '../shared/block'
+import { useLibrary } from './store'
 import DetailsPanel from './DetailsPanel.vue'
 
-vi.mock('../shared/block', () => ({ block: vi.fn().mockResolvedValue(false) }))
+vi.mock('../shared/block', async (importOriginal) => ({
+  ...(await importOriginal<typeof Block>()),
+  block: vi.fn().mockResolvedValue(false),
+}))
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -21,6 +26,8 @@ vi.mock('../bridge', async (importOriginal) => ({
     albums: vi.fn(),
     createAlbum: vi.fn(),
     setAlbumItem: vi.fn(),
+    place: vi.fn(),
+    tagAsset: vi.fn(),
   },
 }))
 
@@ -60,8 +67,135 @@ beforeEach(() => {
   vi.mocked(engine.assetAlbums).mockReset().mockResolvedValue([])
   vi.mocked(engine.albums).mockReset().mockResolvedValue([])
   vi.mocked(engine.setAlbumItem).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.createAlbum).mockReset().mockResolvedValue(4)
+  vi.mocked(engine.place).mockReset()
+  vi.mocked(engine.tagAsset).mockReset().mockResolvedValue(undefined)
+  vi.mocked(onLibraryChanged)
+    .mockReset()
+    .mockReturnValue(() => undefined)
 })
-afterEach(() => wrapper?.unmount())
+afterEach(() => {
+  wrapper?.unmount()
+  wrapper = undefined
+  vi.useRealTimers()
+})
+
+function liveChanges() {
+  const callbacks: ((change: Changes) => void)[] = []
+  vi.mocked(onLibraryChanged).mockImplementation((callback) => {
+    callbacks.push(callback)
+    return () => undefined
+  })
+  return (change: Changes) => callbacks.forEach((callback) => callback(change))
+}
+
+it('does not reload metadata for grid updates or tag-only changes', async () => {
+  vi.useFakeTimers()
+  const changed = liveChanges()
+  const lib = useLibrary()
+  lib.days = new Map([['results', [{ id: 1, w: 100, h: 100, t: 1, f: false }]]])
+  wrapper = mount(DetailsPanel, { props: { sel: { day: 'results', id: 1 } } })
+  await flushPromises()
+  lib.days = new Map([['results', [{ id: 1, w: 100, h: 100, t: 2, f: false }]]])
+  changed({ assets: false, thumbs: false, tags: true, people: false })
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(engine.asset).toHaveBeenCalledTimes(1)
+})
+
+it('refreshes metadata and the place action on asset changes without clearing an edit failure', async () => {
+  vi.useFakeTimers()
+  const changed = liveChanges()
+  vi.mocked(engine.asset).mockResolvedValueOnce({ ...detail(1), width: 0, height: 0 })
+  vi.mocked(engine.setAlbumItem).mockRejectedValueOnce(new Error('album edit failed'))
+  vi.mocked(engine.albums).mockResolvedValue([
+    { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
+  ])
+  wrapper = mount(DetailsPanel, { props: { sel: { day: 'results', id: 1 } } })
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('Current')
+  await wrapper.get('.album-option input').setValue(true)
+  await flushPromises()
+  vi.mocked(engine.asset).mockResolvedValueOnce({
+    ...detail(1, 'Indexed camera'),
+    width: 3000,
+    height: 2000,
+    lat: 24.8,
+    lon: 67.0,
+    placeId: 9,
+  })
+  vi.mocked(engine.place).mockResolvedValueOnce({
+    id: 9,
+    name: 'Karachi',
+    count: 1,
+    cover: 1,
+    coverThumb: 1,
+    lat: 24.8,
+    lon: 67.0,
+    country: 'PK',
+    region: 'Sindh',
+  })
+  changed({ assets: true, thumbs: false, tags: false, people: false })
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(wrapper.text()).toContain('Indexed camera')
+  expect(wrapper.text()).toContain('3,000')
+  expect(wrapper.text()).toContain('24.80000, 67.00000')
+  expect(wrapper.text()).toContain('Karachi')
+  expect(wrapper.text()).toContain('album edit failed')
+  const button = wrapper.findAll('button').find((button) => button.text() === 'Block this place')
+  expect(button).toBeDefined()
+  await button?.trigger('click')
+  expect(block).toHaveBeenCalledWith(BlockKind.BlockPlace, 9, 'Karachi')
+})
+
+it('ignores an older live metadata response after changing selection', async () => {
+  vi.useFakeTimers()
+  const changed = liveChanges()
+  wrapper = mount(DetailsPanel, { props: { sel: { day: 'results', id: 1 } } })
+  await flushPromises()
+  const pending = deferred<AssetDetail>()
+  vi.mocked(engine.asset).mockReturnValueOnce(pending.promise)
+  changed({ assets: true, thumbs: false, tags: false, people: false })
+  await vi.advanceTimersByTimeAsync(3000)
+  await wrapper.setProps({ sel: { day: 'results', id: 2 } })
+  await flushPromises()
+  pending.resolve(detail(1, 'Stale indexed camera'))
+  await flushPromises()
+  expect(wrapper.text()).toContain('Current')
+  expect(wrapper.text()).not.toContain('Stale indexed camera')
+})
+
+it('validates full Unicode names without truncation and rejects overlong tag and album drafts', async () => {
+  wrapper = mount(DetailsPanel, { props: { sel: { day: 'results', id: 1 } } })
+  await flushPromises()
+  const tag = wrapper.get<HTMLInputElement>('.add-tag')
+  const album = wrapper.get<HTMLInputElement>('.album-new input')
+  expect(tag.attributes('maxlength')).toBeUndefined()
+  expect(album.attributes('maxlength')).toBeUndefined()
+  const overlong = '😀'.repeat(MAX_NAME_LEN + 1)
+  await tag.setValue(overlong)
+  await album.setValue(overlong)
+  expect(tag.element.value).toBe(overlong)
+  expect(tag.attributes('aria-invalid')).toBe('true')
+  expect(album.attributes('aria-invalid')).toBe('true')
+  expect(wrapper.get<HTMLButtonElement>('.album-new button').element.disabled).toBe(true)
+  expect(wrapper.findAll('[role="alert"]')).toHaveLength(2)
+  await tag.trigger('keydown', { key: 'Enter' })
+  await wrapper.get('.album-new').trigger('submit')
+  expect(engine.tagAsset).not.toHaveBeenCalled()
+  expect(engine.createAlbum).not.toHaveBeenCalled()
+  const valid = '😀'.repeat(MAX_NAME_LEN)
+  await tag.setValue(` ${valid} `)
+  await album.setValue(` ${valid} `)
+  expect(tag.attributes('aria-invalid')).toBeUndefined()
+  expect(album.attributes('aria-invalid')).toBeUndefined()
+  await tag.trigger('keydown', { key: 'Enter' })
+  await wrapper.get('.album-new').trigger('submit')
+  await flushPromises()
+  expect(engine.tagAsset).toHaveBeenCalledWith(1, valid)
+  expect(engine.createAlbum).toHaveBeenCalledWith(valid, AlbumKind.AlbumManual, emptyRule(), [1])
+})
 
 it('keeps the newest details after selecting A, B, then A again', async () => {
   const old = deferred<AssetDetail>()

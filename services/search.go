@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"lumen/internal/core"
 	"lumen/internal/people"
@@ -36,18 +37,25 @@ func NewSearchService(st *store.Store, engine *search.Engine, faces bool) *Searc
 // the description can't be searched (the result says so): named people's
 // photos are still found.
 func (s *SearchService) Search(ctx context.Context, query string) (core.SearchResult, error) {
-	blocked, err := s.store.BlockedNamedPeople(ctx)
+	query = search.BoundQuery(query) // before the names are matched too
+	named, err := s.store.SearchNames(ctx, query)
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	if ids, _, _ := people.FindNames(query, blocked); len(ids) > 0 {
+	matches := people.MatchNames(query, named)
+	if slices.ContainsFunc(matches, func(match people.NameMatch) bool { return match.Target.Blocked }) {
 		return core.SearchResult{Items: []core.GridItem{}, People: []string{}, Complete: true, Blocked: true}, nil
 	}
-	named, err := s.store.NamedPeople(ctx)
-	if err != nil {
-		return core.SearchResult{}, err
+	personMatches := slices.DeleteFunc(matches, func(match people.NameMatch) bool { return match.Target.Kind != core.BlockPerson })
+	var who []int64
+	var names []string
+	for _, match := range personMatches {
+		if !slices.Contains(who, match.Target.ID) {
+			who = append(who, match.Target.ID)
+			names = append(names, query[match.Start:match.End])
+		}
 	}
-	who, names, text := people.FindNames(query, named)
+	text := people.RemainingQuery(query, personMatches)
 	var ids []int64
 	var moments map[int64]int64
 	var waitFor []core.Stage // stages whose photos can't be found yet
@@ -111,6 +119,16 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	return core.SearchResult{Items: items, People: names, Pending: pending, Complete: complete, NoAI: noAI}, nil
 }
 
+// VisibleAssets lets the UI prune current search results after a visibility
+// change, keeping their relevance order without running the search again.
+func (s *SearchService) VisibleAssets(ctx context.Context, ids []int64) ([]int64, error) {
+	visible, err := s.store.VisibleAssets(ctx, ids)
+	if visible == nil {
+		visible = []int64{}
+	}
+	return visible, err
+}
+
 // PrepareSearch readies the AI for a search the user is starting to type
 // (the search box got focus). It does nothing without the AI.
 func (s *SearchService) PrepareSearch(ctx context.Context) error {
@@ -135,7 +153,7 @@ func (s *SearchService) Things(ctx context.Context) ([]core.Tag, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.store.Things(ctx, float32(minScore))
+	return s.store.Things(ctx, minScore)
 }
 
 // CreateLabel adds a Thing for the AI to look for, and finds it across the
@@ -165,7 +183,7 @@ func (s *SearchService) AssetTags(ctx context.Context, assetID int64) ([]core.As
 	if err != nil {
 		return nil, err
 	}
-	return s.store.AssetTags(ctx, assetID, float32(minScore))
+	return s.store.AssetTags(ctx, assetID, minScore)
 }
 
 // TagAsset puts a tag on a photo by name, creating the tag if it's new.

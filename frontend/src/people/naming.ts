@@ -1,6 +1,7 @@
 import { engine, ErrorCode, errorCode } from '../bridge'
 import { confirm } from '../shared/confirm'
 import { t } from '../shared/i18n'
+import { trimName } from '../shared/names'
 
 /**
  * Names person id. If someone else already has that name, asks whether they
@@ -8,7 +9,7 @@ import { t } from '../shared/i18n'
  * now (the other person after a merge), or null if the user said no.
  */
 export async function namePerson(id: number, name: string): Promise<number | null> {
-  name = name.trim()
+  name = trimName(name)
   try {
     await engine.namePerson(id, name)
     return id

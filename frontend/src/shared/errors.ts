@@ -1,14 +1,23 @@
 import { shallowRef } from 'vue'
-import { ErrorCode, errorCode, MAX_NAME_LEN } from '../bridge'
+import { ErrorCode, errorCode, MAX_NAME_LEN, PIN_COOLDOWN_SECONDS, PIN_MAX_LEN, PIN_MIN_LEN } from '../bridge'
 import { t } from './i18n'
 import type { MessageKey } from './i18n'
 
 // Failures the engine names (ErrorCode) read in the UI's own words.
-const codeText: Record<Exclude<ErrorCode, typeof ErrorCode.InvalidAlbum>, MessageKey> = {
+const codeText: Record<ErrorCode, MessageKey> = {
   [ErrorCode.NotFound]: 'error.notFound',
   [ErrorCode.NoAI]: 'error.noAI',
   [ErrorCode.InvalidName]: 'error.invalidName',
   [ErrorCode.AlbumExists]: 'error.albumExists',
+  [ErrorCode.InvalidAlbum]: 'error.invalidAlbum',
+  [ErrorCode.AlbumMediaKind]: 'error.albumMediaKind',
+  [ErrorCode.AlbumSelection]: 'error.albumSelection',
+  [ErrorCode.AlbumDate]: 'error.albumDate',
+  [ErrorCode.AlbumDateOrder]: 'error.albumDateOrder',
+  [ErrorCode.AlbumSmartItems]: 'error.albumSmartItems',
+  [ErrorCode.AlbumKind]: 'error.albumKind',
+  [ErrorCode.AlbumReference]: 'error.albumReference',
+  [ErrorCode.AlbumManualOnly]: 'error.albumManualOnly',
   [ErrorCode.PersonExists]: 'error.personExists',
   [ErrorCode.BlockedName]: 'error.blockedName',
   [ErrorCode.TagExists]: 'error.tagExists',
@@ -16,17 +25,26 @@ const codeText: Record<Exclude<ErrorCode, typeof ErrorCode.InvalidAlbum>, Messag
   [ErrorCode.TagInAlbum]: 'error.tagInAlbum',
   [ErrorCode.AlreadyCovered]: 'error.alreadyCovered',
   [ErrorCode.FolderNotFound]: 'error.folderNotFound',
+  [ErrorCode.InvalidPIN]: 'error.invalidPIN',
+  [ErrorCode.PINExists]: 'error.pinExists',
+  [ErrorCode.PINRateLimited]: 'error.pinRateLimited',
+  [ErrorCode.BlocksLocked]: 'error.blocksLocked',
+  [ErrorCode.UndoExpired]: 'error.undoExpired',
+  [ErrorCode.InvalidBlock]: 'error.invalidBlock',
 }
 
 /** A user-facing message for a failed engine call or other thrown value. */
 export function errorText(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e)
   const code = errorCode(e)
-  if (code === ErrorCode.InvalidAlbum) {
-    // The engine says what is wrong with the rule after this prefix.
-    return t('error.invalidAlbum', { why: msg.replace(/^invalid album: /, '') })
-  }
-  return code ? t(codeText[code], { max: MAX_NAME_LEN }) : t('error.generic', { msg })
+  return code
+    ? t(codeText[code], {
+        max: MAX_NAME_LEN,
+        pinMin: PIN_MIN_LEN,
+        pinMax: PIN_MAX_LEN,
+        pinCooldown: PIN_COOLDOWN_SECONDS,
+      })
+    : t('error.generic', { msg })
 }
 
 /**

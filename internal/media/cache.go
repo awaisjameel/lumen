@@ -23,7 +23,7 @@ type Original struct {
 }
 
 // Cache is the on-disk thumbnail cache. Thumbnails can disappear (the user
-// clears the folder; later, the size cap evicts them), so readers call
+// clears the folder; the planned size cap will evict them), so readers call
 // Ensure, which rebuilds a missing pair from the original.
 type Cache struct {
 	Dir     string
@@ -94,20 +94,52 @@ func (c *Cache) FramePath(id, at int64) string {
 // tmpDir is where files are written before they are renamed into place.
 func (c *Cache) tmpDir() string { return filepath.Join(c.Dir, "tmp") }
 
-// Sweep removes what an earlier run left behind: temporary files a crash
-// cut short, and frames made by older versions. Call it once at startup.
-func (c *Cache) Sweep() error {
+// SweepTemp removes temporary files a crash cut short. Call it once at
+// startup, before anything writes to the cache: it removes the folder
+// writes go through.
+func (c *Cache) SweepTemp() error { return os.RemoveAll(c.tmpDir()) }
+
+// SweepFrames removes video frames made by older versions of the code.
+// Call it once at startup; it may run alongside everything else. A version
+// bump leaves one old folder per video, so it stops between them when ctx
+// ends: shutdown waits for it.
+func (c *Cache) SweepFrames(ctx context.Context) error {
 	var errs []error
-	if err := os.RemoveAll(c.tmpDir()); err != nil {
-		errs = append(errs, err)
+	entries, err := os.ReadDir(c.Dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
 	}
-	old, err := filepath.Glob(filepath.Join(c.Dir, "frame*"))
-	errs = append(errs, err)
-	for _, dir := range old {
-		if filepath.Base(dir) != framesDir {
-			errs = append(errs, os.RemoveAll(dir))
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if name := entry.Name(); strings.HasPrefix(name, "frame") && name != framesDir {
+			if err := removeTree(ctx, filepath.Join(c.Dir, name)); err != nil {
+				if ctx.Err() != nil {
+					return err
+				}
+				errs = append(errs, err)
+			}
 		}
 	}
+	return errors.Join(errs...)
+}
+
+// removeTree is os.RemoveAll of dir, one child at a time, stopping when ctx
+// ends; the rest is removed by the next sweep.
+func removeTree(ctx context.Context, dir string) error {
+	children, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return os.RemoveAll(dir) // not a folder, or unreadable: one attempt
+	}
+	var errs []error
+	for _, child := range children {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		errs = append(errs, os.RemoveAll(filepath.Join(dir, child.Name())))
+	}
+	errs = append(errs, os.RemoveAll(dir))
 	return errors.Join(errs...)
 }
 
@@ -176,7 +208,7 @@ func (c *Cache) writeAtomic(path string, data []byte) error {
 		werr = renameRetry(f.Name(), path)
 	}
 	if werr != nil {
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name()) // best effort: the write's failure is the one to report
 	}
 	return werr
 }
@@ -215,8 +247,8 @@ func (c *Cache) Ensure(ctx context.Context, id int64, size int, orig Original) e
 	return c.ensure(ctx, id, c.Path(id, size), orig)
 }
 
-// EnsureSprite rebuilds a video sprite if it was evicted independently of
-// its poster thumbnails.
+// EnsureSprite rebuilds a video sprite if it is missing while its poster
+// thumbnails are there.
 func (c *Cache) EnsureSprite(ctx context.Context, id int64, orig Original) error {
 	return c.ensure(ctx, id, c.SpritePath(id), orig)
 }

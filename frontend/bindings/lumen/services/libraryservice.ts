@@ -17,7 +17,8 @@ import * as core$0 from "../internal/core/models.js";
 /**
  * AddSources adds folders and starts scanning them, all or none: a folder
  * that doesn't exist fails the call before any is added. Folders already
- * inside the library are skipped.
+ * inside the library are skipped; if that leaves nothing to add, the call
+ * fails with store.ErrAlreadyCovered, so the UI can say so.
  */
 export function AddSources(paths: string[] | null): $CancellablePromise<core$0.Source[] | null> {
     return $Call.ByID(3692129822, paths);
@@ -182,8 +183,8 @@ export function SetAIOnBattery(on: boolean): $CancellablePromise<void> {
 /**
  * SetAlbumItem changes membership in a manual album.
  */
-export function SetAlbumItem(albumID: number, assetID: number, include: boolean): $CancellablePromise<void> {
-    return $Call.ByID(1841706489, albumID, assetID, include);
+export function SetAlbumItem(assetID: number, albumID: number, include: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1841706489, assetID, albumID, include);
 }
 
 /**

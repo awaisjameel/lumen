@@ -95,14 +95,11 @@ onBeforeUnmount(() => ro.disconnect())
 </script>
 
 <template>
+  <!-- For the pointer only: the grid itself scrolls with the keyboard. -->
   <div
     ref="track"
     class="scrubber"
-    role="scrollbar"
-    aria-orientation="vertical"
-    :aria-valuenow="Math.round((scrollTop / scrollRange) * 100)"
-    aria-valuemin="0"
-    aria-valuemax="100"
+    aria-hidden="true"
     @pointerdown="down"
     @pointermove="moveP"
     @pointerup="up"

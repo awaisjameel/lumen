@@ -3,20 +3,18 @@
 // place of its own to say so (see reportError).
 import { notice } from './errors'
 import { engine } from '../bridge'
-import { useLibrary } from '../library/store'
-import { blockUndo, clearBlockUndo } from './block'
+import { blockUndo, clearBlockUndo, showBlocksChanged } from './block'
 import { reportError } from './errors'
 import { t } from './i18n'
 import Icon from './Icon.vue'
 
-const lib = useLibrary()
 async function undo() {
   const item = blockUndo.value
   if (!item) return
   clearBlockUndo()
   try {
     await engine.undoBlock(item.id)
-    await lib.refreshVisibility()
+    await showBlocksChanged()
   } catch (e) {
     reportError(e)
   }

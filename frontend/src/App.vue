@@ -50,7 +50,9 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
         </RouterLink>
         <div class="grow" />
         <IndexStatus />
-        <RouterLink to="/settings" class="nav-item"><Icon name="settings" />{{ t('nav.settings') }}</RouterLink>
+        <RouterLink to="/settings" class="nav-item" :class="{ active: route.path.startsWith('/settings') }">
+          <Icon name="settings" />{{ t('nav.settings') }}
+        </RouterLink>
       </nav>
       <main class="content">
         <RouterView />

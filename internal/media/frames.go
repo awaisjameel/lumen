@@ -46,7 +46,10 @@ const (
 // full instead.
 func (d Decoders) Frames(ctx context.Context, path string, n, side int, fn func(Frame) error) error {
 	_, err := d.frames(ctx, path, n, side, fn)
-	return err
+	if err != nil {
+		return fmt.Errorf("sample video %s: %w", path, err)
+	}
+	return nil
 }
 
 // frames is Frames, also returning what ffprobe said about the video.
@@ -62,18 +65,23 @@ func (d Decoders) frames(ctx context.Context, path string, n, side int, fn func(
 	if v.Duration > 0 {
 		every = float64(v.Duration) / 1000 / float64(max(n, 1))
 	}
-	got, err := d.samplePass(ctx, path, v, side, every, true, fn)
-	if err == nil && got <= 1 && n > 1 && v.Duration > 0 {
-		_, err = d.samplePass(ctx, path, v, side, every, false, fn)
+	got, err := d.samplePass(ctx, path, v, side, every, true, false, fn)
+	if err == nil && v.Duration > 0 && (got == 0 || (got == 1 && n > 1)) {
+		_, err = d.samplePass(ctx, path, v, side, every, false, got == 1, fn)
 	}
 	return v, err
 }
 
+// VideoFramesVersion versions how Frames samples a video (SampleCount, the
+// passes below): both AI stages' versions end with it, so a change re-runs
+// them for videos.
+const VideoFramesVersion = "+video-frames-3"
+
 // samplePass runs ffmpeg once, selecting a frame every `every` seconds:
-// keyframes only, from the start, or every frame decoded, from the second
-// sample on (after a keyframe pass found just the first). It returns how
-// many frames it handed to fn.
-func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side int, every float64, keyframes bool,
+// keyframes only, or every frame decoded, from the start or, with
+// skipFirst (a keyframe pass found just the first), from the second sample
+// on. It returns how many frames it handed to fn.
+func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side int, every float64, keyframes, skipFirst bool,
 	fn func(Frame) error) (int, error) {
 	sel := fmt.Sprintf("isnan(prev_selected_t)+gte(t-prev_selected_t,%.3f)", every)
 	timeout := framesTimeout
@@ -81,7 +89,9 @@ func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side
 	if keyframes {
 		args = append(args, "-skip_frame", "nokey")
 	} else {
-		sel = fmt.Sprintf("gte(t,%.3f)*(%s)", v.start+every, sel) // t counts from the stream's start time
+		if skipFirst {
+			sel = fmt.Sprintf("gte(t,%.3f)*(%s)", every, sel)
+		}
 		timeout = fullPassTimeout
 	}
 	if math.IsInf(every, 1) {
@@ -110,7 +120,7 @@ func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side
 		return 0, fmt.Errorf("ffmpeg: %w", err)
 	}
 	log := readLog(stderr)
-	got, err := readFrames(stdout, log, v, fn)
+	got, err := readFrames(ctx, stdout, log, fn)
 	if err != nil {
 		cancel() // stop ffmpeg; its output is no longer read
 	}
@@ -124,23 +134,28 @@ func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side
 
 // readFrames reads the PPM frames ffmpeg writes, pairing each with its time
 // from the log, and hands them to fn.
-func readFrames(r io.Reader, log *ffmpegLog, v videoInfo, fn func(Frame) error) (int, error) {
+func readFrames(ctx context.Context, r io.Reader, log *ffmpegLog, fn func(Frame) error) (int, error) {
 	br := bufio.NewReaderSize(r, 1<<20)
 	for n := 0; ; n++ {
+		if err := ctx.Err(); err != nil {
+			return n, err
+		}
 		pix, w, h, err := readPPM(br)
+		if cerr := ctx.Err(); cerr != nil {
+			return n, cerr
+		}
 		if errors.Is(err, io.EOF) {
 			return n, nil
 		}
 		if err != nil {
 			return n, err
 		}
-		at := int64(-1)
-		if t, ok := log.time(n); ok {
-			at = max(0, int64(math.Round((t-v.start)*1000)))
+		t, err := log.time(ctx, n)
+		if err != nil {
+			return n, err
 		}
-		if at < 0 {
-			return n, errors.New("ffmpeg: frame without a time")
-		}
+		// FFmpeg offsets input timestamps to the playback start before filtering.
+		at := max(0, int64(math.Round(t*1000)))
 		if err := fn(Frame{At: at, Image: Image{Pix: pix, W: w, H: h}}); err != nil {
 			return n, err
 		}
@@ -154,6 +169,7 @@ type ffmpegLog struct {
 	ready    *sync.Cond
 	times    []float64
 	errs     []string
+	err      error
 	done     bool
 	finished chan struct{} // closed once the log is read to its end
 }
@@ -185,11 +201,14 @@ func readLog(r io.Reader) *ffmpegLog {
 			l.mu.Unlock()
 			l.ready.Broadcast()
 		}
-		_, _ = io.Copy(io.Discard, r) // after an overlong line: ffmpeg must never block on a full pipe
 		l.mu.Lock()
 		l.done = true
+		l.err = sc.Err()
 		l.mu.Unlock()
 		l.ready.Broadcast()
+		// Release timestamp waiters before draining: FFmpeg may be blocked
+		// writing the frame whose timestamp the scanner could not read.
+		_, _ = io.Copy(io.Discard, r)
 	}()
 	return l
 }
@@ -198,18 +217,36 @@ func isErrorLine(line string) bool {
 	return strings.Contains(line, "[error]") || strings.Contains(line, "[fatal]") || strings.Contains(line, "[panic]")
 }
 
-// time waits for the time of output frame n. ok is false if ffmpeg ended
-// without logging it.
-func (l *ffmpegLog) time(n int) (float64, bool) {
+// time waits for the time of output frame n, until cancellation or the log
+// ends without it.
+func (l *ffmpegLog) time(ctx context.Context, n int) (float64, error) {
+	notified := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(notified)
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		l.ready.Broadcast()
+	})
+	defer func() {
+		if !stop() {
+			<-notified
+		}
+	}()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for len(l.times) <= n && !l.done {
+	for len(l.times) <= n && !l.done && ctx.Err() == nil {
 		l.ready.Wait()
 	}
-	if n < len(l.times) {
-		return l.times[n], true
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
-	return 0, false
+	if n < len(l.times) {
+		return l.times[n], nil
+	}
+	if l.err != nil {
+		return 0, fmt.Errorf("read ffmpeg log: %w", l.err)
+	}
+	return 0, errors.New("ffmpeg: frame without a time")
 }
 
 // errors is what ffmpeg reported as errors, without its level tags.

@@ -44,11 +44,14 @@ IMAGE_SIZE = 224
 MAX_TOKENS = 64
 DIM = 768
 # The logit scale and bias live only in the original checkpoint, not the ONNX
-# towers; read them from its safetensors header with HTTP range requests.
+# towers; read them from its safetensors header with HTTP range requests. The
+# checkpoint is 1.5 GB, so rather than hash it, the two float32 values read
+# are pinned (little-endian bytes): anything else fails the preparation.
 CHECKPOINT = (
     "https://huggingface.co/google/siglip2-base-patch16-224/resolve/"
     "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2/model.safetensors"
 )
+LOGIT_BYTES = {"logit_scale": bytes.fromhex("b92e9740"), "logit_bias": bytes.fromhex("7e2c86c1")}
 VERSION = "siglip2-base-p16-224-fp16-1"  # bump when the prepared files change
 
 FACES_VERSION = "yunet-2023mar+sface-2021dec-1"  # bump when the prepared files change
@@ -212,9 +215,12 @@ def logit_params() -> tuple[float, float]:
     n = struct.unpack("<Q", fetch(0, 7))[0]
     header = json.loads(fetch(8, 8 + n - 1))
     vals = []
-    for key in ("logit_scale", "logit_bias"):
+    for key, want in LOGIT_BYTES.items():
         start, end = header[key]["data_offsets"]
-        vals.append(struct.unpack("<f", fetch(8 + n + start, 8 + n + end - 1))[0])
+        raw = fetch(8 + n + start, 8 + n + end - 1)
+        if raw != want:
+            raise SystemExit(f"{CHECKPOINT}: {key} is {raw.hex()}, pinned {want.hex()}")
+        vals.append(struct.unpack("<f", raw)[0])
     # logit_scale is stored as a log; the model multiplies by exp(logit_scale).
     return float(np.exp(vals[0])), vals[1]
 

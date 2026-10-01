@@ -74,12 +74,17 @@ type Indexer struct {
 	wakeThum  chan struct{}
 	wakeEmbed chan struct{}
 	wakeFaces chan struct{}
+	wakeVideo chan struct{}
+	wakeFS    chan struct{}
 
 	encoder *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
 	pixels  decoded                  // photos the thumbnail stage decoded for the faces stage
 
-	version map[core.Stage]string // what each running stage's results are made by
+	videoEmbedRetry stageBackoff // used only by the video coordinator
+	videoFaceRetry  stageBackoff
+
+	version map[core.Stage]store.StageVersion // what each running stage's results are made by
 
 	rescanMu sync.Mutex // one RescanAll at a time, so the watchers match the sources
 
@@ -93,10 +98,9 @@ type Indexer struct {
 	aiError     string
 	facesError  string
 	scanning    bool
-	discovered  int
 	pendingFS   map[string]bool // changed paths waiting for the debounce
 	fsSince     time.Time       // when the oldest of them arrived
-	fsTimer     *time.Timer
+	fsDue       time.Time       // the next flush's deadline (mu)
 	watchStop   context.CancelFunc
 
 	// Set by whoever changes things and cleared by reportLoop, which only then
@@ -105,9 +109,10 @@ type Indexer struct {
 	stale   atomic.Bool   // only the progress changed (scan counts, pause)
 	last    core.Progress
 
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	rootCtx context.Context // nil until Start
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+	watchers sync.WaitGroup  // watchLoops; Added under mu, only while rootCtx lives
+	rootCtx  context.Context // nil until Start
 }
 
 type scanRequest struct {
@@ -124,6 +129,8 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 		wakeThum:  make(chan struct{}, 1),
 		wakeEmbed: make(chan struct{}, 1),
 		wakeFaces: make(chan struct{}, 1),
+		wakeVideo: make(chan struct{}, 1),
+		wakeFS:    make(chan struct{}, 1),
 		resume:    make(chan struct{}),
 		pendingFS: map[string]bool{},
 	}
@@ -165,7 +172,9 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 					slog.Info("face models ready", "device", f.Device())
 				}
 				ix.setAIState(func() {
-					ix.facesError = ""
+					if loaded {
+						ix.facesError = ""
+					}
 					if err != nil {
 						ix.facesError = err.Error()
 					}
@@ -184,6 +193,10 @@ const (
 	changedTags
 	changedPeople
 )
+
+// LibraryChanged records a change made outside the indexer (a block), so the
+// UI hears of it with the indexer's own, at most once a second.
+func (ix *Indexer) LibraryChanged(c core.Changes) { ix.markChanged(c) }
 
 // markChanged records that the library changed, for reportLoop to tell the UI.
 func (ix *Indexer) markChanged(c core.Changes) {
@@ -214,16 +227,20 @@ func (ix *Indexer) setAIState(change func()) {
 // versions is the current version of every stage that runs, built once in
 // New: every job a stage finishes records it, and a finished job with
 // another version re-runs.
-func (ix *Indexer) versions() map[core.Stage]string {
-	v := map[core.Stage]string{
-		core.StageMetadata:  media.MetadataVersion + "+" + media.VideoMetadataVersion,
-		core.StageThumbnail: media.ThumbnailVersion + "+" + media.VideoThumbnailVersion,
+func (ix *Indexer) versions() map[core.Stage]store.StageVersion {
+	metadata := media.MetadataVersion + "+" + media.VideoMetadataVersion
+	thumbnail := media.ThumbnailVersion + "+" + media.VideoThumbnailVersion
+	v := map[core.Stage]store.StageVersion{
+		core.StageMetadata:  {Photo: metadata, Video: metadata},
+		core.StageThumbnail: {Photo: thumbnail, Video: thumbnail},
 	}
 	if ix.search != nil {
-		v[core.StageEmbedding] = ix.search.Model().Version + core.VideoFramesVersion
+		photo := ix.search.Model().Version
+		v[core.StageEmbedding] = store.StageVersion{Photo: photo, Video: photo + media.VideoFramesVersion, LegacyPhoto: photo + "+video-frames-1"}
 	}
 	if ix.people != nil {
-		v[core.StageFaces] = ix.people.Model().Version + "+analysis-" + ai.FaceAnalysisVersion + core.VideoFramesVersion
+		photo := ix.people.Model().Version + "+analysis-" + ai.FaceAnalysisVersion
+		v[core.StageFaces] = store.StageVersion{Photo: photo, Video: photo + media.VideoFramesVersion}
 	}
 	return v
 }
@@ -263,7 +280,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	})
 
 	ix.run(func() {
-		if n, err := ix.store.RequeueOutdated(ctx, ix.version); err != nil {
+		if n, err := ix.store.RequeueVersions(ctx, ix.version); err != nil {
 			slog.Error("requeue outdated jobs", "err", err)
 		} else if n > 0 {
 			slog.Info("re-running stages after an upgrade", "jobs", n)
@@ -275,21 +292,22 @@ func (ix *Indexer) Start(ctx context.Context) {
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.MetadataResult]{
 			name: core.StageMetadata, batch: metadataBatch, wake: ix.wakeMeta, next: []chan struct{}{ix.wakeThum},
-			changes: core.Changes{Assets: true},
-			process: eachItem(metadataWorkers, ix.doMetadata),
+			changes:   core.Changes{Assets: true},
+			unchanged: func(r store.MetadataResult) bool { return r.Unchanged },
+			process:   eachItem(metadataWorkers, ix.doMetadata),
 			save: func(ctx context.Context, rs []store.MetadataResult) error {
-				return ix.store.SaveMetadata(ctx, ix.version[core.StageMetadata], rs)
+				return ix.store.SaveMetadata(ctx, ix.version[core.StageMetadata].Photo, rs)
 			},
 		})
 	})
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.ThumbResult]{
-			name: core.StageThumbnail, batch: thumbnailBatch, wake: ix.wakeThum, next: []chan struct{}{ix.wakeEmbed, ix.wakeFaces},
+			name: core.StageThumbnail, batch: thumbnailBatch, wake: ix.wakeThum, next: []chan struct{}{ix.wakeEmbed, ix.wakeFaces, ix.wakeVideo},
 			changes:   core.Changes{Thumbs: true}, // the timeline's days and counts stay as they are
 			unchanged: func(r store.ThumbResult) bool { return r.Unchanged },
 			process:   ix.doThumbnails,
 			save: func(ctx context.Context, rs []store.ThumbResult) error {
-				return ix.store.SaveThumbnails(ctx, ix.version[core.StageThumbnail], rs)
+				return ix.store.SaveThumbnails(ctx, ix.version[core.StageThumbnail].Photo, rs)
 			},
 		})
 	})
@@ -317,13 +335,28 @@ func (ix *Indexer) Start(ctx context.Context) {
 		})
 		ix.run(func() { ix.people.Run(ctx, func() { ix.markChanged(core.Changes{People: true}) }) })
 	}
+	if ix.search != nil || ix.people != nil {
+		ix.run(func() {
+			name := core.StageEmbedding
+			if ix.search == nil {
+				name = core.StageFaces
+			}
+			runStage(ctx, ix, stage[videoResults]{
+				name: name, batch: 4, wake: ix.wakeVideo,
+				model: videoModels{ix.encoder, ix.faces},
+				fetch: ix.fetchVideos, process: ix.doVideos, save: ix.saveVideos,
+				changes: core.Changes{Tags: true, People: true},
+			})
+		})
+	}
 	ix.run(func() { ix.reportLoop(ctx) })
 	ix.run(func() { ix.powerLoop(ctx) })
+	ix.run(func() { ix.fsLoop(ctx, ix.flushFSChanges) })
 }
 
 // wakeStages nudges every stage to look for work.
 func (ix *Indexer) wakeStages() {
-	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed, ix.wakeFaces} {
+	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed, ix.wakeFaces, ix.wakeVideo} {
 		nudge(ch)
 	}
 }
@@ -334,12 +367,13 @@ func (ix *Indexer) Stop() {
 		return
 	}
 	ix.cancel()
-	ix.mu.Lock()
-	if ix.fsTimer != nil {
-		ix.fsTimer.Stop()
+	ix.mu.Lock() // after cancel: restartWatchers starts no more watchers
+	if ix.watchStop != nil {
+		ix.watchStop()
 	}
 	ix.mu.Unlock()
 	ix.wg.Wait()
+	ix.watchers.Wait()
 	if ix.encoder != nil {
 		ix.encoder.release()
 	}
@@ -423,6 +457,9 @@ func (ix *Indexer) held(stage core.Stage) bool {
 // any). It returns false if ctx ends.
 func (ix *Indexer) waitTurn(ctx context.Context, stage core.Stage, m releaser) bool {
 	for {
+		if ctx.Err() != nil {
+			return false
+		}
 		ix.mu.Lock()
 		held, resume := ix.held(stage), ix.resume
 		ix.mu.Unlock()
@@ -515,12 +552,6 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 	sc := &scanner.Scanner{
 		Store:       ix.store,
 		HashWorkers: hashWorkers,
-		OnProgress: func(seen int) {
-			ix.mu.Lock()
-			ix.discovered = seen
-			ix.mu.Unlock()
-			ix.stale.Store(true)
-		},
 		OnIngested: func(int) {
 			ix.markChanged(core.Changes{Assets: true}) // new assets, moves, revived files
 			nudge(ix.wakeMeta)
@@ -546,7 +577,7 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 		}
 
 		ix.mu.Lock()
-		ix.scanning, ix.discovered = true, 0
+		ix.scanning = true
 		ix.mu.Unlock()
 		ix.stale.Store(true)
 
@@ -606,15 +637,22 @@ func (ix *Indexer) skipDirs() []string { return []string{ix.paths.DataDir} }
 // restartWatchers watches every enabled source for changes.
 func (ix *Indexer) restartWatchers(srcs []core.Source) {
 	ix.mu.Lock()
+	defer ix.mu.Unlock()
 	if ix.watchStop != nil {
 		ix.watchStop()
 	}
+	if ix.rootCtx.Err() != nil {
+		return // stopping
+	}
 	ctx, cancel := context.WithCancel(ix.rootCtx)
 	ix.watchStop = cancel
-	ix.mu.Unlock()
 	for _, s := range srcs {
 		if s.Enabled {
-			go ix.watchLoop(ctx, s)
+			ix.watchers.Add(1)
+			go func() {
+				defer ix.watchers.Done()
+				ix.watchLoop(ctx, s)
+			}()
 		}
 	}
 }
@@ -661,17 +699,44 @@ func (ix *Indexer) onFSChange(path string) {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 	if ix.rootCtx.Err() != nil {
-		return // stopping; Stop cancels the timer
+		return // stopping
 	}
 	if len(ix.pendingFS) == 0 {
 		ix.fsSince = time.Now()
 	}
 	ix.pendingFS[path] = true
-	switch {
-	case ix.fsTimer == nil:
-		ix.fsTimer = time.AfterFunc(debounce, ix.flushFSChanges)
-	case time.Since(ix.fsSince) < debounceMax:
-		ix.fsTimer.Reset(debounce)
+	ix.fsDue = time.Now().Add(debounce)
+	if latest := ix.fsSince.Add(debounceMax); latest.Before(ix.fsDue) {
+		ix.fsDue = latest
+	}
+	nudge(ix.wakeFS)
+}
+
+// fsLoop owns the debounce timer so Stop also waits for a running flush.
+func (ix *Indexer) fsLoop(ctx context.Context, flush func()) {
+	timer := time.NewTimer(time.Hour)
+	defer timer.Stop()
+	timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ix.wakeFS:
+			ix.mu.Lock()
+			due := ix.fsDue
+			pending := len(ix.pendingFS) > 0
+			ix.mu.Unlock()
+			if pending {
+				timer.Reset(time.Until(due))
+			} else {
+				timer.Stop()
+			}
+		case <-timer.C:
+			if ctx.Err() != nil {
+				return
+			}
+			flush()
+		}
 	}
 }
 
@@ -703,8 +768,16 @@ func (ix *Indexer) flushFSChanges() {
 			dir = filepath.Dir(p)
 		}
 		for _, s := range srcs {
-			if !s.Enabled || !core.IsWithin(dir, s.Path) || scanner.Excluded(s.Path, p, ix.skipDirs()) {
-				continue // e.g. a hidden folder or the recycle bin, which scans leave out
+			if !s.Enabled || !core.IsWithin(dir, s.Path) {
+				continue
+			}
+			if at, byAttribute, excluded := scanner.Exclusion(s.Path, p, ix.skipDirs()); excluded {
+				if !byAttribute {
+					continue // e.g. the recycle bin, which scans always leave out
+				}
+				// Inside a folder hidden now: what the library has of it goes,
+				// by a scan of the folder around it.
+				dir = filepath.Dir(at)
 			}
 			if dirs[s.ID] == nil {
 				dirs[s.ID] = map[string]bool{}
@@ -745,6 +818,10 @@ func (ix *Indexer) flushFSChanges() {
 // big library, so it spends at most a fifth of the time doing it.
 func (ix *Indexer) reportLoop(ctx context.Context) {
 	wait := time.Second
+	visibility, err := ix.store.VisibilityRevision(ctx) // 0 on failure: at worst one extra reload
+	if err != nil && ctx.Err() == nil {
+		slog.Error("read visibility revision", "err", err)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -754,6 +831,18 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 		bits := ix.changes.Swap(0)
 		if stale := ix.stale.Swap(false); !stale && bits == 0 {
 			continue
+		}
+		if bits != 0 {
+			// New tags or faces can put photos under a block: then which
+			// assets are visible changed too, which every timeline shows.
+			if rev, err := ix.store.VisibilityRevision(ctx); err == nil {
+				if rev != visibility {
+					bits |= changedAssets
+				}
+				visibility = rev
+			} else if ctx.Err() == nil {
+				slog.Error("read visibility revision", "err", err)
+			}
 		}
 		start := time.Now()
 		p := ix.Progress(ctx)
@@ -775,7 +864,7 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 	ix.mu.Lock()
 	p := core.Progress{
-		Scanning: ix.scanning, Discovered: ix.discovered, Paused: ix.paused,
+		Scanning: ix.scanning, Paused: ix.paused,
 		OnBattery: (ix.search != nil || ix.people != nil) && ix.onBattery && !ix.aiOnBattery,
 		AI:        core.AI{Device: ix.aiDevice, Error: ix.aiError, FacesError: ix.facesError},
 	}

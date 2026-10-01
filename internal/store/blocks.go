@@ -17,6 +17,15 @@ var ErrInvalidBlock = errors.New("invalid block")
 // ErrBlockChangeLocked rejects unauthenticated changes to an existing rule.
 var ErrBlockChangeLocked = errors.New("changing an existing block requires PIN unlock")
 
+// labelBlocked is true when a block of kind (in either mode) targets id, an
+// SQL expression: the label is left out of lists, suggestions and details.
+func labelBlocked(kind core.BlockKind, id string) string {
+	return "EXISTS (SELECT 1 FROM blocks blk_label WHERE blk_label.kind = '" + string(kind) + "' AND blk_label.target_id = " + id + ")"
+}
+
+// placeBlocked is labelBlocked for places.
+func placeBlocked(id string) string { return labelBlocked(core.BlockPlace, id) }
+
 // Blocks lists the user's visibility rules. This is private UI data and is
 // deliberately not joined into the ordinary People/Things views.
 func (s *Store) Blocks(ctx context.Context) ([]core.Block, error) {
@@ -99,15 +108,19 @@ func (s *Store) SetBlockWithCreated(ctx context.Context, kind core.BlockKind, ta
 		if name == "" {
 			name = fmt.Sprintf("%s %d", kind, targetID)
 		}
+		var current core.BlockMode
 		if kind == core.BlockFolder {
-			err = tx.QueryRowContext(ctx, "SELECT id FROM blocks WHERE kind = 'folder' AND fold(path) = fold(?)", path).Scan(&id)
+			err = tx.QueryRowContext(ctx, "SELECT id, mode FROM blocks WHERE kind = 'folder' AND fold(path) = fold(?)", path).Scan(&id, &current)
 		} else {
-			err = tx.QueryRowContext(ctx, "SELECT id FROM blocks WHERE kind = ? AND target_id = ?", kind, targetID).Scan(&id)
+			err = tx.QueryRowContext(ctx, "SELECT id, mode FROM blocks WHERE kind = ? AND target_id = ?", kind, targetID).Scan(&id, &current)
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		if id != 0 {
+			if current == mode {
+				return nil // already so: nothing changes, so nothing needs the PIN
+			}
 			if !allowChange {
 				return ErrBlockChangeLocked
 			}
@@ -136,6 +149,6 @@ func (s *Store) RemoveBlock(ctx context.Context, id int64) error {
 // IsBlocked checks whether a named view target has been removed from browsing.
 func (s *Store) IsBlocked(ctx context.Context, kind core.BlockKind, targetID int64) (bool, error) {
 	var blocked bool
-	err := s.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM blocks WHERE kind = ? AND target_id = ?)", kind, targetID).Scan(&blocked)
+	err := s.r.QueryRowContext(ctx, "SELECT "+labelBlocked(kind, "?"), targetID).Scan(&blocked)
 	return blocked, err
 }

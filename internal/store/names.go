@@ -44,15 +44,36 @@ func named(ctx context.Context, q querier, table, name string, except int64) (in
 	return id, err
 }
 
-// foldName is fold(name), the column's core.Fold key. fold() is a call into
-// Go for every row, so ASCII names (a byte per character) and NULL use
-// SQLite's lower(), which is what core.Fold does to them.
-const foldName = "(CASE WHEN octet_length(name) != length(name) THEN fold(name) ELSE lower(name) END)"
+// foldName is the name column's core.Fold key (see foldKey).
+var foldName = foldKey("name")
 
 // nameMatch is the condition for a name column to contain the folded text
 // ?1, and nameFirst orders names starting with it first: suggestions as the
 // user types.
-const (
+var (
 	nameMatch = "instr(" + foldName + ", ?1) > 0"
 	nameFirst = "instr(" + foldName + ", ?1) = 1 DESC, length(name), name"
 )
+
+// SearchNames finds candidate names, including blocked labels, in one snapshot.
+func (s *Store) SearchNames(ctx context.Context, query string) ([]core.NamedTarget, error) {
+	var queries []string
+	for _, target := range []struct {
+		table string
+		kind  core.BlockKind
+	}{
+		{peopleNames, core.BlockPerson}, {tagNames, core.BlockTag}, {"places", core.BlockPlace}, {albumNames, core.BlockAlbum},
+	} {
+		name := target.table + ".name"
+		q := "SELECT id, name, '" + string(target.kind) + "', " + labelBlocked(target.kind, target.table+".id") +
+			" FROM " + target.table + " WHERE name != '' AND instr(?1, " + foldKey(name) + ") > 0"
+		if target.kind == core.BlockTag {
+			q += " AND is_sink = 0"
+		}
+		queries = append(queries, q)
+	}
+	return queryAll(ctx, s.r, func(r *sql.Rows) (target core.NamedTarget, err error) {
+		err = r.Scan(&target.ID, &target.Name, &target.Kind, &target.Blocked)
+		return target, err
+	}, strings.Join(queries, " UNION ALL "), core.Fold(query))
+}

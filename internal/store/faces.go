@@ -58,6 +58,11 @@ func (s *Store) WithFaces(ctx context.Context, ids []int64) (map[int64]bool, err
 // who is in it: each new face takes over the old face at the same spot, with
 // its person and the user's corrections.
 func (s *Store) SaveFaces(ctx context.Context, model, version string, rs []FaceResult) error {
+	return s.SaveFaceVersions(ctx, model, StageVersion{Photo: version, Video: version}, rs)
+}
+
+// SaveFaceVersions saves faces at their media-kind-specific stage versions.
+func (s *Store) SaveFaceVersions(ctx context.Context, model string, version StageVersion, rs []FaceResult) error {
 	if len(rs) == 0 {
 		return nil
 	}
@@ -85,7 +90,7 @@ func (s *Store) SaveFaces(ctx context.Context, model, version string, rs []FaceR
 			return err
 		}
 		defer del.Close()
-		job, err := prepareJobUpdate(ctx, tx)
+		job, err := prepareVersionedJobUpdate(ctx, tx, version)
 		if err != nil {
 			return err
 		}
@@ -121,7 +126,7 @@ func (s *Store) SaveFaces(ctx context.Context, model, version string, rs []FaceR
 					}
 				}
 			}
-			if err := execJob(ctx, job, r.AssetID, core.StageFaces, version, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
+			if err := execJob(ctx, job, r.AssetID, core.StageFaces, version.Photo, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}
@@ -192,17 +197,31 @@ type ClusterFace struct {
 
 // ClusterPerson is a person as clustering sees them.
 type ClusterPerson struct {
-	ID    int64
-	Named bool // the user named them: never merged into anyone automatically
+	ID int64
+	// Confirmed: the user named or blocked them, so they are never merged
+	// into anyone automatically (a block must not move to someone else).
+	Confirmed bool
 }
 
 // Rejection is the user saying a face is not a person.
 type Rejection struct{ Face, Person int64 }
 
 // ClusterData returns what clustering works from: the faces made by model in
-// visible photos, every person, and the user's rejections.
+// present photos that are neither hidden nor trashed, every person, and the
+// user's rejections, from one snapshot. Blocks do not stop recognition.
 func (s *Store) ClusterData(ctx context.Context, model string) ([]ClusterFace, []ClusterPerson, []Rejection, error) {
-	faces, err := queryAll(ctx, s.r, func(r *sql.Rows) (f ClusterFace, err error) {
+	var faces []ClusterFace
+	var people []ClusterPerson
+	var rejections []Rejection
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		faces, people, rejections, err = clusterData(ctx, tx, model)
+		return err
+	})
+	return faces, people, rejections, err
+}
+
+func clusterData(ctx context.Context, q querier, model string) ([]ClusterFace, []ClusterPerson, []Rejection, error) {
+	faces, err := queryAll(ctx, q, func(r *sql.Rows) (f ClusterFace, err error) {
 		var vec []byte
 		err = r.Scan(&f.ID, &f.AssetID, &f.Frame, &f.Person, &f.ByUser, &f.Sharpness, &f.Yaw, &vec)
 		f.Vec = bytesFloat32(vec)
@@ -213,14 +232,14 @@ func (s *Store) ClusterData(ctx context.Context, model string) ([]ClusterFace, [
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	people, err := queryAll(ctx, s.r, func(r *sql.Rows) (p ClusterPerson, err error) {
-		err = r.Scan(&p.ID, &p.Named)
+	people, err := queryAll(ctx, q, func(r *sql.Rows) (p ClusterPerson, err error) {
+		err = r.Scan(&p.ID, &p.Confirmed)
 		return p, err
-	}, "SELECT id, name IS NOT NULL FROM people ORDER BY id")
+	}, "SELECT id, name IS NOT NULL OR "+labelBlocked(core.BlockPerson, "people.id")+" FROM people ORDER BY id")
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	rejections, err := queryAll(ctx, s.r, func(r *sql.Rows) (x Rejection, err error) {
+	rejections, err := queryAll(ctx, q, func(r *sql.Rows) (x Rejection, err error) {
 		err = r.Scan(&x.Face, &x.Person)
 		return x, err
 	}, "SELECT face_id, person_id FROM face_rejections")
@@ -239,8 +258,8 @@ type Merge struct{ From, Into int64 }
 
 // ApplyClusters saves a clustering run in one transaction. The run worked
 // from a snapshot, so anything the user changed since wins: only faces still
-// unassigned are placed, and only unnamed people without user-placed faces
-// are merged away.
+// unassigned are placed, and only unnamed, unblocked people without
+// user-placed faces are merged away.
 func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		// Two faces in one photo (or one video frame) are never one person:
@@ -276,7 +295,8 @@ func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 		for _, m := range c.Merges {
 			var ok bool
 			err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM people WHERE id = ?1 AND name IS NULL
-					AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = ?1 AND assigned_by = 'user'))
+					AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = ?1 AND assigned_by = 'user')
+					AND NOT `+labelBlocked(core.BlockPerson, "?1")+`)
 				AND EXISTS (SELECT 1 FROM people WHERE id = ?2)
 				AND NOT EXISTS (SELECT 1 FROM face_rejections r JOIN faces f ON f.id = r.face_id
 					WHERE (f.person_id = ?1 AND r.person_id = ?2)
@@ -338,6 +358,6 @@ func dropEmptyPeople(ctx context.Context, tx *sql.Tx) error {
 		AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = people.id)
 		AND NOT EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND `+rulePerson+` = people.id)
 		AND NOT EXISTS (SELECT 1 FROM face_rejections WHERE person_id = people.id)
-		AND NOT EXISTS (SELECT 1 FROM blocks WHERE kind = 'person' AND target_id = people.id)`)
+		AND NOT `+labelBlocked(core.BlockPerson, "people.id"))
 	return err
 }

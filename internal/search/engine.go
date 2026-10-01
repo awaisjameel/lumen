@@ -24,19 +24,21 @@ import (
 // match, with an absolute floor so a query matching nothing returns nothing.
 const (
 	searchFloor    = 0.0005 // minimum probability for any result
-	searchRelative = 100    // keep results within this factor of the best one
+	searchRelative = 100    // keep results whose odds are within this factor of the best one's
 	searchLimit    = 1000   // most results a search returns
 	maxTagsPerItem = 12     // most AI tags stored per asset
 	kindShare      = 0.5    // the best kind applies when its softmax share is above this
 	textIdle       = 5 * time.Minute
-	textBatch      = 32  // prompts embedded per run of the text model
-	queryCache     = 64  // recent query embeddings kept
-	maxQueryRunes  = 500 // a longer query is cut (the model reads 64 tokens anyway)
+	textBatch      = 32 // prompts embedded per run of the text model
+	queryCache     = 64 // recent query embeddings kept
 	// unavailableTTL is how long the set of assets that must not take up
 	// result slots (hidden, trashed, gone) is reused. A stale set only
 	// costs slots: results are filtered by visibility again when shown.
 	unavailableTTL = 10 * time.Second
 )
+
+// MaxQueryRunes bounds queries before named matching and AI tokenization.
+const MaxQueryRunes = 500
 
 var (
 	// ErrNotLoaded means the engine could not load its index or Things;
@@ -55,8 +57,13 @@ type Engine struct {
 	video *videoIndex
 
 	started atomic.Bool
-	loaded  chan struct{} // closed once Start has loaded the index and labels
-	loadErr error
+	loaded  chan struct{} // closed once Start's first load of the index and labels ended
+	stopped chan struct{} // closed once Start's goroutine (loading and retrying) ended
+	loadMu  sync.Mutex
+	loadErr error // why the last load failed; nil once one succeeded
+	// loadMu guards loader startup, cancellation and shutdown as well as loadErr.
+	loadCancel context.CancelFunc
+	stopping   bool
 
 	textMu   sync.Mutex
 	text     *ai.TextEncoder
@@ -73,6 +80,13 @@ type Engine struct {
 
 	labelsMu sync.RWMutex
 	labels   []label
+	// labelsGen changes whenever labels do: a batch tagged under an older
+	// generation is tagged again before it is saved (see Commit).
+	labelsGen atomic.Uint64
+	// tagMu orders CreateLabel's re-scoring of the index with Commit, so
+	// every image is scored against a new Thing exactly once: by the
+	// re-scoring if it was in the index by then, else when it is committed.
+	tagMu sync.Mutex
 }
 
 type label struct {
@@ -104,41 +118,87 @@ func newLabel(t store.AutoTag, vecs [][]float32) label {
 
 // NewEngine prepares an engine for model. Call Start before use.
 func NewEngine(st *store.Store, m ai.Model) *Engine {
-	return &Engine{store: st, model: m, index: NewIndex(m.Dim), video: newVideoIndex(m.Dim), loaded: make(chan struct{}),
+	return &Engine{store: st, model: m, index: NewIndex(m.Dim), video: newVideoIndex(m.Dim),
+		loaded: make(chan struct{}), stopped: make(chan struct{}),
 		queries: map[string][]float32{}, shipped: shippedVectors(m)}
 }
 
 // Model is the SigLIP model the engine uses.
 func (e *Engine) Model() ai.Model { return e.model }
 
-// Start loads the index and the Things in the background. Cancel ctx before
-// Close to stop a load in progress.
+// A load that fails (the database was busy, the text model failed to load)
+// is tried again after loadRetry, doubling up to loadRetryMax, until one
+// succeeds or Start's ctx ends; meanwhile Wait reports the failure.
+const (
+	loadRetry    = 30 * time.Second
+	loadRetryMax = 10 * time.Minute
+)
+
+// Start loads the index and the Things in the background, once. Close or
+// cancellation of ctx stops loading and its retries.
 func (e *Engine) Start(ctx context.Context) {
+	e.loadMu.Lock()
+	if e.started.Load() || e.stopping {
+		e.loadMu.Unlock()
+		return
+	}
+	ctx, e.loadCancel = context.WithCancel(ctx)
 	e.started.Store(true)
+	e.loadMu.Unlock()
 	go func() {
-		defer close(e.loaded)
-		t := time.Now()
-		if e.loadErr = e.load(ctx); e.loadErr != nil {
-			if ctx.Err() == nil {
-				slog.Error("search engine failed to load", "err", e.loadErr)
+		defer close(e.stopped)
+		defer e.loadCancel()
+		first := true
+		for retry := loadRetry; ; retry = min(2*retry, loadRetryMax) {
+			t := time.Now()
+			err := e.load(ctx)
+			e.loadMu.Lock()
+			e.loadErr = err
+			e.loadMu.Unlock()
+			if first {
+				close(e.loaded)
+				first = false
 			}
-			return
+			if err == nil {
+				e.labelsMu.RLock()
+				things := len(e.labels)
+				e.labelsMu.RUnlock()
+				slog.Info("search ready", "images", e.index.Len(), "things", things, "took", time.Since(t).Round(time.Millisecond))
+				return
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			slog.Error("search engine failed to load", "err", err, "retry in", retry)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(retry):
+			}
 		}
-		e.labelsMu.RLock()
-		things := len(e.labels)
-		e.labelsMu.RUnlock()
-		slog.Info("search ready", "images", e.index.Len(), "things", things, "took", time.Since(t).Round(time.Millisecond))
 	}()
 }
 
-// Wait blocks until Start has finished loading. A failed load is
-// ErrNotLoaded, wrapping why.
+// Wait blocks until Start has finished its first load. A failed load (the
+// latest, while it is retried) is ErrNotLoaded, wrapping why.
 func (e *Engine) Wait(ctx context.Context) error {
 	done := func() error {
-		if e.loadErr != nil && !errors.Is(e.loadErr, context.Canceled) {
-			return fmt.Errorf("%w: %w", ErrNotLoaded, e.loadErr)
+		e.loadMu.Lock()
+		defer e.loadMu.Unlock()
+		if e.stopping {
+			return ErrClosed
 		}
-		return e.loadErr
+		err := e.loadErr
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return fmt.Errorf("%w: %w", ErrNotLoaded, err)
+		}
+		return err
+	}
+	e.loadMu.Lock()
+	stopping := e.stopping
+	e.loadMu.Unlock()
+	if stopping {
+		return ErrClosed
 	}
 	select {
 	case <-e.loaded:
@@ -156,11 +216,17 @@ func (e *Engine) Wait(ctx context.Context) error {
 	}
 }
 
-// Close waits for a load in progress to end, then frees the text model for
+// Close waits for Start's loading to end, then frees the text model for
 // good: searches after Close fail with ErrClosed.
 func (e *Engine) Close() {
+	e.loadMu.Lock()
+	e.stopping = true
+	if e.loadCancel != nil {
+		e.loadCancel()
+	}
+	e.loadMu.Unlock()
 	if e.started.Load() {
-		<-e.loaded
+		<-e.stopped
 	}
 	e.textMu.Lock()
 	defer e.textMu.Unlock()
@@ -176,8 +242,8 @@ func (e *Engine) load(ctx context.Context) error {
 	if err := e.store.Embeddings(ctx, e.model.Version, e.index.Put); err != nil {
 		return fmt.Errorf("load embeddings: %w", err)
 	}
-	if err := e.store.VideoEmbeddings(ctx, e.model.Version, func(id, at int64, q []int8, scale float32) {
-		e.video.add(id, at, q, scale)
+	if err := e.video.load(func(add func(asset, at int64, q []int8, scale float32)) error {
+		return e.store.VideoEmbeddings(ctx, e.model.Version, add)
 	}); err != nil {
 		return fmt.Errorf("load video embeddings: %w", err)
 	}
@@ -200,7 +266,7 @@ func (e *Engine) syncVocabulary(ctx context.Context) (bool, error) {
 	}
 	labels := make([]store.VocabLabel, len(Vocabulary))
 	for i, l := range Vocabulary {
-		labels[i] = store.VocabLabel{Name: l.Name, Prompts: l.Prompts, Exclusive: l.Exclusive, Hidden: l.Sink, Sink: l.Sink}
+		labels[i] = store.VocabLabel{Name: l.Name, Prompts: l.Prompts, Exclusive: l.Exclusive, Sink: l.Sink}
 	}
 	if err := e.store.SyncVocabulary(ctx, labels); err != nil {
 		return false, err
@@ -209,14 +275,18 @@ func (e *Engine) syncVocabulary(ctx context.Context) (bool, error) {
 }
 
 // loadLabels reads every AI-applied tag and embeds the prompts of any that
-// are new or changed. If the Things changed (vocabChanged, or new prompts),
-// the library is re-tagged.
+// are new or changed. If the built-in Things changed (vocabChanged, or one
+// of them was learned again), the library is re-tagged, since kinds are
+// judged against each other; a user's Thing learned again is only scored
+// across the library, as CreateLabel does.
 func (e *Engine) loadLabels(ctx context.Context, vocabChanged bool) error {
 	tags, err := e.store.AutoTags(ctx)
 	if err != nil {
 		return err
 	}
 	var stale []store.AutoTag
+	var relearned []label // stale user Things, to score across the library
+	retagAll := vocabChanged
 	labels := make([]label, 0, len(tags))
 	for _, t := range tags {
 		if t.Model != e.model.Version || len(t.Vecs) != len(t.Prompts)*e.model.Dim {
@@ -225,35 +295,50 @@ func (e *Engine) loadLabels(ctx context.Context, vocabChanged bool) error {
 		}
 		labels = append(labels, newLabel(t, split(t.Vecs, e.model.Dim)))
 	}
+	// Vectors learned are stored last, once the library is tagged with them:
+	// until then those Things stay stale, so a load cut short learns (and
+	// tags with) them again.
+	learned := make([]label, 0, len(stale))
 	if len(stale) > 0 {
 		slog.Info("learning things", "count", len(stale))
 		for _, t := range stale {
-			vecs, err := e.embedPrompts(ctx, t.ID, t.Prompts)
+			vecs, err := e.EncodeText(ctx, t.Prompts...)
 			if err != nil {
 				return fmt.Errorf("thing %q: %w", t.Name, err)
 			}
-			labels = append(labels, newLabel(t, vecs))
+			l := newLabel(t, vecs)
+			labels = append(labels, l)
+			learned = append(learned, l)
+			if t.Builtin || t.Exclusive {
+				retagAll = true
+			} else {
+				relearned = append(relearned, l)
+			}
 		}
 	}
 	e.labelsMu.Lock()
 	e.labels = labels
+	e.labelsGen.Add(1)
 	e.labelsMu.Unlock()
-	if (vocabChanged || len(stale) > 0) && e.index.Len() > 0 {
-		return e.retag(ctx) // re-tag every photo from its stored vector
+	if e.index.Len() > 0 {
+		if retagAll {
+			if err := e.retag(ctx); err != nil { // re-tag every photo from its stored vector
+				return err
+			}
+		} else {
+			for _, l := range relearned {
+				if err := e.rescore(ctx, l); err != nil {
+					return fmt.Errorf("score a relearned thing: %w", err)
+				}
+			}
+		}
+	}
+	for _, l := range learned {
+		if err := e.store.SetTagVectors(ctx, l.id, e.model.Version, slices.Concat(l.vecs...)); err != nil {
+			return err
+		}
 	}
 	return nil
-}
-
-// embedPrompts embeds a tag's prompts and stores them.
-func (e *Engine) embedPrompts(ctx context.Context, id int64, prompts []string) ([][]float32, error) {
-	vecs, err := e.EncodeText(ctx, prompts...)
-	if err != nil {
-		return nil, err
-	}
-	if err := e.store.SetTagVectors(ctx, id, e.model.Version, slices.Concat(vecs...)); err != nil {
-		return nil, err
-	}
-	return vecs, nil
 }
 
 // retag recomputes every photo's AI tags from the index. Needed when the
@@ -342,11 +427,58 @@ func topTags(tags []store.TagScore) []store.TagScore {
 	return tags[:min(len(tags), maxTagsPerItem)]
 }
 
-// Add puts a new image embedding into the index (after it is saved).
-func (e *Engine) Add(id int64, q []int8, scale float32) { e.index.Put(id, q, scale) }
+// LabelsGeneration identifies the current Things: pass it to Commit with
+// the batch tagged under them.
+func (e *Engine) LabelsGeneration() uint64 { return e.labelsGen.Load() }
 
-// AddVideo replaces the searchable moments of one video after they are saved.
-func (e *Engine) AddVideo(id int64, frames []store.FrameEmbedding) { e.video.replace(id, frames) }
+// Commit saves a batch of embeddings tagged (by Tags) under labels
+// generation gen, with save, then makes it searchable. A batch tagged
+// before the Things changed is tagged again first, so a Thing created
+// meanwhile misses none of it.
+func (e *Engine) Commit(gen uint64, rs []store.EmbedResult, save func([]store.EmbedResult) error) error {
+	e.tagMu.Lock()
+	defer e.tagMu.Unlock()
+	if e.labelsGen.Load() != gen {
+		for i := range rs {
+			e.retagResult(&rs[i])
+		}
+	}
+	if err := save(rs); err != nil {
+		return err
+	}
+	for _, r := range rs {
+		if r.Vec != nil {
+			e.index.Put(r.AssetID, r.Vec, r.Scale)
+			if r.Frames != nil {
+				e.video.replace(r.AssetID, r.Frames)
+			}
+		}
+	}
+	return nil
+}
+
+// retagResult tags a result again from its stored vectors, as retag does:
+// a video from its frames, a photo from its own.
+func (e *Engine) retagResult(r *store.EmbedResult) {
+	if r.Vec == nil {
+		return
+	}
+	v := make([]float32, e.model.Dim)
+	unquantize := func(q []int8, scale float32) []float32 {
+		for i, x := range q {
+			v[i] = float32(x) * scale
+		}
+		return v
+	}
+	if r.Frames == nil {
+		r.Tags = e.Tags(unquantize(r.Vec, r.Scale))
+		return
+	}
+	r.Tags = nil
+	for _, f := range r.Frames {
+		r.Tags = BestTags(r.Tags, e.Tags(unquantize(f.Vec, f.Scale)))
+	}
+}
 
 // Indexed is how many images are searchable.
 func (e *Engine) Indexed() int { return e.index.Len() }
@@ -420,15 +552,23 @@ func (e *Engine) CreateLabel(ctx context.Context, name string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	vecs, err := e.embedPrompts(ctx, id, prompts)
+	vecs, err := e.EncodeText(ctx, prompts...)
 	if err == nil {
 		// Photos the indexer embeds from now on are scored against the new
 		// Thing as they arrive; rescore covers those already indexed.
 		l := label{id: id, vecs: vecs}
+		e.tagMu.Lock()
 		e.labelsMu.Lock()
 		e.labels = append(e.labels, l)
+		e.labelsGen.Add(1)
 		e.labelsMu.Unlock()
 		err = e.rescore(ctx, l)
+		if err == nil {
+			// Until scoring commits, leave the Thing stale so a restart
+			// scores existing photos again after an interrupted creation.
+			err = e.store.SetTagVectors(ctx, id, e.model.Version, slices.Concat(vecs...))
+		}
+		e.tagMu.Unlock()
 	}
 	if err != nil {
 		// Don't leave a half-made Thing behind, even when ctx ended (the
@@ -466,6 +606,7 @@ func (e *Engine) forget(id int64) {
 	e.labelsMu.Lock()
 	defer e.labelsMu.Unlock()
 	e.labels = slices.DeleteFunc(e.labels, func(l label) bool { return l.id == id })
+	e.labelsGen.Add(1)
 }
 
 // Search returns the assets matching a natural-language query, best first.
@@ -521,13 +662,18 @@ func (e *Engine) Search(ctx context.Context, query string, allow func(id int64) 
 	return hits[:min(n, searchLimit)], complete, nil
 }
 
-// cleanQuery collapses a query's spaces and cuts it to maxQueryRunes: a
-// pasted page would take the tokenizer long, and the model reads its start.
+// cleanQuery collapses a query's spaces and bounds it (BoundQuery).
 func cleanQuery(query string) string {
-	query = strings.Join(strings.Fields(query), " ")
-	if n := 0; len(query) > maxQueryRunes {
+	return BoundQuery(strings.Join(strings.Fields(query), " "))
+}
+
+// BoundQuery cuts query to its first MaxQueryRunes runes: a pasted page
+// would take the tokenizer (and the name matching before it) long, and the
+// model reads only its start.
+func BoundQuery(query string) string {
+	if n := 0; len(query) > MaxQueryRunes {
 		for i := range query {
-			if n == maxQueryRunes {
+			if n == MaxQueryRunes {
 				return query[:i]
 			}
 			n++
@@ -592,6 +738,7 @@ func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, 
 		hi := min(lo+textBatch, len(todo))
 		vecs, err := e.text.Encode(todo[lo:hi])
 		if err != nil {
+			e.closeText() // a failed session is loaded afresh next time
 			return nil, err
 		}
 		for k, v := range vecs {

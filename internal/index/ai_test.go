@@ -2,6 +2,8 @@ package index
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -135,6 +137,255 @@ func TestBatteryHoldsOnlyTheAI(t *testing.T) {
 	ix.paused = true
 	if !ix.held(core.StageMetadata) {
 		t.Error("paused, yet metadata runs")
+	}
+}
+
+func TestVideoAIUsesOnePassAndRetriesOnlyTheFailedStage(t *testing.T) {
+	rt := testenv.Runtime(t)
+	if err := ai.Init(rt); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ai.LoadModel(filepath.Join(rt, "models", "siglip2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fm, err := ai.LoadFaceModel(filepath.Join(rt, "models", "faces"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, failFaces := range []bool{false, true} {
+		t.Run(map[bool]string{false: "both", true: "face-model-failure"}[failFaces], func(t *testing.T) {
+			ctx := t.Context()
+			paths := core.PathsIn(t.TempDir())
+			st, err := store.Open(paths.DBPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			if err := st.SetInt(ctx, core.SettingVocabulary, search.VocabularyVersion); err != nil {
+				t.Fatal(err)
+			}
+			src, err := st.AddSource(ctx, `C:\Videos`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.Ingest(ctx, []store.IngestItem{{SourceID: src.ID, Path: `C:\Videos\clip.mp4`, Size: 1, Hash: []byte("clip"), Kind: core.KindVideo, Ext: ".mp4", TakenAt: 100}}); err != nil {
+				t.Fatal(err)
+			}
+			jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 1)
+			if err != nil || len(jobs) != 1 {
+				t.Fatalf("metadata = %v, %v", jobs, err)
+			}
+			id := jobs[0].AssetID
+			if err := st.SaveMetadata(ctx, "m", []store.MetadataResult{{AssetID: id, Duration: 10000, Orientation: 1}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SaveThumbnails(ctx, "t", []store.ThumbResult{{AssetID: id}}); err != nil {
+				t.Fatal(err)
+			}
+			engine := search.NewEngine(st, m)
+			engine.Start(ctx)
+			defer engine.Close()
+			ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{Search: engine, People: people.NewEngine(st, fm)}, &fakeEvents{})
+			defer ix.encoder.release()
+			defer ix.faces.release()
+			openFaces := ix.faces.open
+			if failFaces {
+				ix.faces.open = func() (*ai.Faces, error) { return nil, errors.New("face model unavailable") }
+			}
+			passes := 0
+			sample := func(ctx context.Context, _ string, _, side int, consume func(media.Frame) error) error {
+				passes++
+				if side != faceSide {
+					t.Fatalf("sample side = %d", side)
+				}
+				for _, at := range []int64{0, 0, 5000} {
+					if err := consume(media.Frame{At: at, Image: media.Image{Pix: make([]byte, 320*180*3), W: 320, H: 180}}); err != nil {
+						return err
+					}
+				}
+				return ctx.Err()
+			}
+			jobs, err = ix.fetchVideos(ctx, 4)
+			if err != nil || len(jobs) != 1 {
+				t.Fatalf("video jobs = %v, %v", jobs, err)
+			}
+			if photos, err := ix.fetch(ctx, core.StageEmbedding, 4); err != nil || len(photos) != 0 {
+				t.Fatalf("video in photo queue = %v, %v", photos, err)
+			}
+			rs, err := ix.processVideos(ctx, jobs, sample)
+			if (err != nil) != failFaces || passes != 1 || len(rs) != 1 || len(rs[0].embeddings) != 1 || len(rs[0].embeddings[0].Frames) != 2 {
+				t.Fatalf("results = %+v, %v; passes = %d", rs, err, passes)
+			}
+			if err := ix.saveVideos(ctx, rs); err != nil {
+				t.Fatal(err)
+			}
+			if n, err := st.CountPending(ctx, core.StageEmbedding); err != nil || n != 0 {
+				t.Fatalf("embedding remains pending = %d, %v", n, err)
+			}
+			if failFaces {
+				ix.faces.open = openFaces
+				ix.videoFaceRetry.until = time.Time{}
+				jobs, err = ix.fetchVideos(ctx, 4)
+				if err != nil || len(jobs) != 1 {
+					t.Fatalf("face retry = %v, %v", jobs, err)
+				}
+				rs, err = ix.processVideos(ctx, jobs, sample)
+				if err != nil || len(rs) != 1 || len(rs[0].embeddings) != 0 || len(rs[0].faces) != 1 || passes != 2 {
+					t.Fatalf("retry = %+v, %v; passes = %d", rs, err, passes)
+				}
+				if err := ix.saveVideos(ctx, rs); err != nil {
+					t.Fatal(err)
+				}
+				if ix.videoFaceRetry.retry != 0 {
+					t.Error("successful retry did not clear face backoff")
+				}
+			}
+			if n, err := st.CountPending(ctx, core.StageFaces); err != nil || n != 0 {
+				t.Fatalf("faces remain pending = %d, %v", n, err)
+			}
+			if n, err := st.RequeueVersions(ctx, map[core.Stage]store.StageVersion{core.StageEmbedding: ix.version[core.StageEmbedding], core.StageFaces: ix.version[core.StageFaces]}); err != nil || n != 0 {
+				t.Fatalf("saved versions are outdated = %d, %v", n, err)
+			}
+		})
+	}
+}
+
+func TestVideoAIBackoffLetsTheHealthyStageDrain(t *testing.T) {
+	rt := testenv.Runtime(t)
+	if err := ai.Init(rt); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ai.LoadModel(filepath.Join(rt, "models", "siglip2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fm, err := ai.LoadFaceModel(filepath.Join(rt, "models", "faces"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, failFaces := range []bool{true, false} {
+		t.Run(map[bool]string{true: "faces-fail", false: "embeddings-fail"}[failFaces], func(t *testing.T) {
+			ctx := t.Context()
+			paths := core.PathsIn(t.TempDir())
+			st, err := store.Open(paths.DBPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			if err := st.SetInt(ctx, core.SettingVocabulary, search.VocabularyVersion); err != nil {
+				t.Fatal(err)
+			}
+			src, err := st.AddSource(ctx, `C:\Videos`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ingest []store.IngestItem
+			for i := range 9 {
+				name := fmt.Sprintf("clip-%d", i)
+				ingest = append(ingest, store.IngestItem{SourceID: src.ID, Path: `C:\Videos\` + name + ".mp4", Hash: []byte(name), Kind: core.KindVideo, Ext: ".mp4", TakenAt: int64(i + 100)})
+			}
+			if _, err := st.Ingest(ctx, ingest); err != nil {
+				t.Fatal(err)
+			}
+			jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 9)
+			if err != nil || len(jobs) != 9 {
+				t.Fatalf("metadata = %v, %v", jobs, err)
+			}
+			for _, j := range jobs {
+				if err := st.SaveMetadata(ctx, "m", []store.MetadataResult{{AssetID: j.AssetID, Duration: 10000, Orientation: 1}}); err != nil {
+					t.Fatal(err)
+				}
+				if err := st.SaveThumbnails(ctx, "t", []store.ThumbResult{{AssetID: j.AssetID}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			engine := search.NewEngine(st, m)
+			engine.Start(ctx)
+			defer engine.Close()
+			ix := New(st, paths, nil, Models{Search: engine, People: people.NewEngine(st, fm)}, &fakeEvents{})
+			defer ix.encoder.release()
+			defer ix.faces.release()
+			attempts := 0
+			if failFaces {
+				ix.faces.open = func() (*ai.Faces, error) {
+					attempts++
+					return nil, errors.New("face model unavailable")
+				}
+			} else {
+				ix.encoder.open = func() (*ai.ImageEncoder, error) {
+					attempts++
+					return nil, errors.New("image model unavailable")
+				}
+			}
+			passes := 0
+			sample := func(ctx context.Context, _ string, _, side int, consume func(media.Frame) error) error {
+				passes++
+				if side != faceSide {
+					t.Fatalf("sample side = %d", side)
+				}
+				if err := consume(media.Frame{Image: media.Image{Pix: make([]byte, 320*180*3), W: 320, H: 180}}); err != nil {
+					return err
+				}
+				return ctx.Err()
+			}
+			for round, want := range []int{4, 4, 1} {
+				batch, err := ix.fetchVideos(ctx, 4)
+				if err != nil || len(batch) != want {
+					t.Fatalf("round %d: jobs = %v, %v", round, batch, err)
+				}
+				rs, err := ix.processVideos(ctx, batch, sample)
+				if (err != nil) != (round == 0) || len(rs) != 1 {
+					t.Fatalf("round %d: results = %+v, %v", round, rs, err)
+				}
+				if err := ix.saveVideos(ctx, rs); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if attempts != 1 || passes != 9 {
+				t.Fatalf("model attempts = %d, sampling passes = %d; want 1, 9", attempts, passes)
+			}
+			healthy, failed := core.StageEmbedding, core.StageFaces
+			loaded := ix.encoder.loaded
+			if !failFaces {
+				healthy, failed = failed, healthy
+				loaded = ix.faces.loaded
+			}
+			if !loaded {
+				t.Error("healthy model was released")
+			}
+			if n, err := st.CountPending(ctx, healthy); err != nil || n != 0 {
+				t.Errorf("healthy queue = %d, %v", n, err)
+			}
+			if n, err := st.CountPending(ctx, failed); err != nil || n != 9 {
+				t.Errorf("failed queue = %d, %v", n, err)
+			}
+			if batch, err := ix.fetchVideos(ctx, 4); err != nil || len(batch) != 0 {
+				t.Fatalf("backoff queue = %v, %v", batch, err)
+			}
+			if rs, err := ix.processVideos(ctx, jobs, sample); err != nil || len(rs) != 0 || passes != 9 || attempts != 1 {
+				t.Fatalf("processing during backoff = %+v, %v; passes = %d, attempts = %d", rs, err, passes, attempts)
+			}
+		})
+	}
+}
+
+func TestStageBackoffUsesBoundedExponentialRetries(t *testing.T) {
+	var backoff stageBackoff
+	now := time.Now()
+	want := stageRetry
+	for range 10 {
+		if !backoff.ready(now) {
+			t.Fatal("stage is not ready after its retry deadline")
+		}
+		if delay := backoff.fail(now); delay != want {
+			t.Fatalf("retry delay = %v, want %v", delay, want)
+		}
+		if backoff.ready(now.Add(want - time.Nanosecond)) {
+			t.Fatal("stage became ready before its retry deadline")
+		}
+		now = now.Add(want)
+		want = min(2*want, stageRetryMax)
 	}
 }
 

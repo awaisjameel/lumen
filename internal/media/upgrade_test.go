@@ -104,6 +104,9 @@ func TestDecodesAsAtTellsWhichPhotosTheColourFixChanged(t *testing.T) {
 		{write(t, "a.heic", nil), UnmanagedThumbnailVersion, false}, // WIC converts it now
 		{filepath.Join(t.TempDir(), "gone.jpg"), UnmanagedThumbnailVersion, false},
 		{plain, "vips-8.17-1", false}, // a version it knows nothing about
+		{plain, HEIFProfilesVersion, true},
+		{p3, HEIFProfilesVersion, true},                       // a JPEG: only HEIC changed since
+		{write(t, "b.heic", nil), HEIFProfilesVersion, false}, // no header to read: unsure
 	} {
 		if got := DecodesAsAt(c.path, c.version); got != c.want {
 			t.Errorf("DecodesAsAt(%s, %s) = %v, want %v", filepath.Base(c.path), c.version, got, c.want)

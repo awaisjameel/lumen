@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"lumen/internal/core"
 )
 
 // Videos are read with the bundled FFmpeg: ffprobe for what a file holds,
@@ -25,9 +27,8 @@ const probeTimeout = 30 * time.Second
 
 // videoInfo is what ffprobe says about a video.
 type videoInfo struct {
-	Duration      int64   // ms; 0 if unknown
-	Width, Height int     // as displayed: rotation and pixel shape applied
-	start         float64 // the first timestamp, s: frame times count from here
+	Duration      int64 // ms; 0 if unknown
+	Width, Height int   // as displayed: rotation and pixel shape applied
 	Codec         string
 	Audio         string // "" = no sound
 	HDR           bool   // PQ or HLG: frames are tone-mapped to show right
@@ -53,9 +54,8 @@ type ffprobeOutput struct {
 		} `json:"side_data_list"`
 	} `json:"streams"`
 	Format struct {
-		Duration  string            `json:"duration"`
-		StartTime string            `json:"start_time"`
-		Tags      map[string]string `json:"tags"`
+		Duration string            `json:"duration"`
+		Tags     map[string]string `json:"tags"`
 	} `json:"format"`
 }
 
@@ -118,9 +118,6 @@ func parseProbe(p ffprobeOutput, now time.Time) (videoInfo, error) {
 		v.Width, v.Height = v.Height, v.Width
 	}
 
-	if t, err := strconv.ParseFloat(p.Format.StartTime, 64); err == nil && !math.IsInf(t, 0) && !math.IsNaN(t) {
-		v.start = t
-	}
 	v.Duration = seconds(p.Format.Duration)
 	if v.Duration == 0 {
 		v.Duration = seconds(s.Duration)
@@ -142,9 +139,9 @@ func parseProbe(p ffprobeOutput, now time.Time) (videoInfo, error) {
 // captureTime is when the video was recorded, as its local clock read. Apple
 // writes the local time with its offset; everyone else writes UTC, which is
 // read as this computer's local time (the best guess without a time zone).
-// Zero and far-future dates (unset clocks) are ignored.
+// Implausible dates (unset clocks, see core.PlausibleAt) are ignored.
 func captureTime(format, stream map[string]string, now time.Time) time.Time {
-	plausible := func(t time.Time) bool { return t.Year() > 1970 && t.Before(now.AddDate(0, 0, 2)) }
+	plausible := func(t time.Time) bool { return core.PlausibleAt(t, now) }
 	if t, err := time.Parse("2006-01-02T15:04:05-0700", format["com.apple.quicktime.creationdate"]); err == nil && plausible(t) {
 		return t
 	}

@@ -15,9 +15,9 @@ watch(question, async (q) => {
 </script>
 
 <template>
-  <dialog ref="dialog" class="confirm" @cancel.prevent="question?.answer(false)">
+  <dialog ref="dialog" class="dialog confirm" aria-labelledby="confirm-title" @cancel.prevent="question?.answer(false)">
     <template v-if="question">
-      <h2>{{ question.title }}</h2>
+      <h2 id="confirm-title">{{ question.title }}</h2>
       <p>{{ question.text }}</p>
       <div class="actions">
         <!-- Cancel is focused: Enter must not delete or merge by accident. -->
@@ -32,26 +32,9 @@ watch(question, async (q) => {
 .confirm {
   width: min(420px, calc(100vw - 32px));
   padding: 20px 22px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow);
-}
-.confirm::backdrop {
-  background: var(--backdrop);
-}
-h2 {
-  margin: 0 0 6px;
-  font: 600 17px var(--font-display);
 }
 p {
   margin: 0 0 18px;
   color: var(--text-2);
-}
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
 }
 </style>

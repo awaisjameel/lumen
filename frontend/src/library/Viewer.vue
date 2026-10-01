@@ -2,7 +2,7 @@
 // Full-window viewer. Shows the 1024px preview instantly, then swaps in the
 // original when the WebView can display it (JPEG, PNG, WebP, AVIF).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { engine, originalUrl, Playback, playUrl, THUMB_LARGE, thumbUrl, videoUrl } from '../bridge'
+import { engine, originalUrl, Playback, playUrl, THUMB_LARGE, thumbUrl, videosAvailable, videoUrl } from '../bridge'
 import type { AssetDetail } from '../bridge'
 import { orFallback } from '../shared/errors'
 import { dateTime, duration } from '../shared/format'
@@ -201,7 +201,7 @@ onBeforeUnmount(() => {
 
         <div v-if="lib.viewerItem" class="media" @dblclick="onMediaDoubleClick">
           <video
-            v-if="detail?.video && detail.id === lib.viewerItem.id"
+            v-if="detail?.video && detail.id === lib.viewerItem.id && videosAvailable()"
             ref="video"
             :key="videoSrc"
             :src="videoSrc"
@@ -212,7 +212,10 @@ onBeforeUnmount(() => {
             @timeupdate="videoTime"
             @error="videoError"
           />
-          <p v-if="videoFailed" class="video-error" role="alert">{{ t('viewer.videoFailed') }}</p>
+          <p v-if="detail?.video && !videosAvailable()" class="video-error" role="alert">
+            {{ t('viewer.videoUnavailable') }}
+          </p>
+          <p v-else-if="videoFailed" class="video-error" role="alert">{{ t('viewer.videoFailed') }}</p>
           <template v-else-if="!detail?.video">
             <img
               v-if="lib.viewerItem.t"
@@ -372,7 +375,8 @@ onBeforeUnmount(() => {
   opacity: 0;
   transition: opacity 0.15s;
 }
-.stage:hover .nav {
+.stage:hover .nav,
+.nav:focus-visible {
   opacity: 1;
 }
 .nav:hover {

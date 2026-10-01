@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"lumen/internal/core"
@@ -17,14 +18,30 @@ var (
 	// ErrAlbumExists means another album has that name (in any case). It
 	// comes wrapped with ErrInvalidAlbum.
 	ErrAlbumExists = errors.New("an album already has that name")
+	// ErrAlbumMediaKind rejects an unsupported photo/video filter.
+	ErrAlbumMediaKind = fmt.Errorf("%w: unknown media kind", ErrInvalidAlbum)
+	// ErrAlbumSelection rejects a negative Thing or person ID.
+	ErrAlbumSelection = fmt.Errorf("%w: invalid tag or person", ErrInvalidAlbum)
+	// ErrAlbumDate rejects an invalid calendar date.
+	ErrAlbumDate = fmt.Errorf("%w: date must be YYYY-MM-DD", ErrInvalidAlbum)
+	// ErrAlbumDateOrder rejects a reversed date range.
+	ErrAlbumDateOrder = fmt.Errorf("%w: start date follows end date", ErrInvalidAlbum)
+	// ErrAlbumSmartItems rejects explicit members in a smart album.
+	ErrAlbumSmartItems = fmt.Errorf("%w: smart albums choose their own items", ErrInvalidAlbum)
+	// ErrAlbumKind rejects an unsupported collection kind.
+	ErrAlbumKind = fmt.Errorf("%w: unknown album kind", ErrInvalidAlbum)
+	// ErrAlbumReference rejects a deleted Thing or person.
+	ErrAlbumReference = fmt.Errorf("%w: the selected Thing or person no longer exists", ErrInvalidAlbum)
+	// ErrAlbumManualOnly rejects member edits in a smart album.
+	ErrAlbumManualOnly = fmt.Errorf("%w: only manual albums accept items", ErrInvalidAlbum)
 )
 
 func validateAlbumRule(rule core.AlbumRule) error {
 	if rule.Kind != "" && rule.Kind != core.KindPhoto && rule.Kind != core.KindVideo {
-		return fmt.Errorf("%w: unknown media kind", ErrInvalidAlbum)
+		return ErrAlbumMediaKind
 	}
 	if rule.Tag < 0 || rule.Person < 0 {
-		return fmt.Errorf("%w: invalid tag or person", ErrInvalidAlbum)
+		return ErrAlbumSelection
 	}
 	for _, day := range []string{rule.From, rule.To} {
 		if day == "" {
@@ -32,11 +49,11 @@ func validateAlbumRule(rule core.AlbumRule) error {
 		}
 		parsed, err := time.Parse(time.DateOnly, day)
 		if err != nil || parsed.Format(time.DateOnly) != day {
-			return fmt.Errorf("%w: date must be YYYY-MM-DD", ErrInvalidAlbum)
+			return ErrAlbumDate
 		}
 	}
 	if rule.From != "" && rule.To != "" && rule.From > rule.To {
-		return fmt.Errorf("%w: start date follows end date", ErrInvalidAlbum)
+		return ErrAlbumDateOrder
 	}
 	return nil
 }
@@ -65,10 +82,10 @@ func (s *Store) CreateAlbum(ctx context.Context, name string, kind core.AlbumKin
 		rule = core.AlbumRule{}
 	case core.AlbumSmart:
 		if len(items) > 0 {
-			return 0, fmt.Errorf("%w: smart albums choose their own items", ErrInvalidAlbum)
+			return 0, ErrAlbumSmartItems
 		}
 	default:
-		return 0, fmt.Errorf("%w: unknown album kind", ErrInvalidAlbum)
+		return 0, ErrAlbumKind
 	}
 	if err := validateAlbumRule(rule); err != nil {
 		return 0, err
@@ -93,7 +110,7 @@ func (s *Store) CreateAlbum(ctx context.Context, name string, kind core.AlbumKin
 		}
 		for _, asset := range items {
 			if err == nil {
-				err = setAlbumItem(ctx, tx, id, asset, true)
+				err = setAlbumItem(ctx, tx, asset, id, true)
 			}
 		}
 		return err
@@ -148,7 +165,7 @@ func albumReferences(ctx context.Context, tx *sql.Tx, rule core.AlbumRule) error
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("%w: the selected Thing or person no longer exists", ErrInvalidAlbum)
+		return ErrAlbumReference
 	}
 	return nil
 }
@@ -160,7 +177,7 @@ func (s *Store) DeleteAlbum(ctx context.Context, id int64) error {
 
 func album(ctx context.Context, q querier, id int64) (core.Album, error) {
 	albums, err := queryAll(ctx, q, scanAlbum, `SELECT id, name, kind, COALESCE(rule_json, '{}') FROM albums WHERE id = ?
-		AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'album' AND b.target_id = albums.id)`, id)
+		AND NOT `+labelBlocked(core.BlockAlbum, "albums.id"), id)
 	if err != nil {
 		return core.Album{}, err
 	}
@@ -172,12 +189,12 @@ func album(ctx context.Context, q querier, id int64) (core.Album, error) {
 
 // Albums includes live counts and covers. A smart album reacts to new assets,
 // changed metadata, tags and people without maintaining a second membership.
-func (s *Store) Albums(ctx context.Context, minScore float32) ([]core.Album, error) {
+func (s *Store) Albums(ctx context.Context, minScore float64) ([]core.Album, error) {
 	// Counts and covers must describe the same snapshot while indexing continues.
 	var albums []core.Album
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
 		albums, err = queryAll(ctx, tx, scanAlbum, `SELECT id, name, kind, COALESCE(rule_json, '{}') FROM albums
-			WHERE NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'album' AND b.target_id = albums.id)
+			WHERE NOT `+labelBlocked(core.BlockAlbum, "albums.id")+`
 			ORDER BY name COLLATE NOCASE`)
 		if err != nil {
 			return err
@@ -185,16 +202,13 @@ func (s *Store) Albums(ctx context.Context, minScore float32) ([]core.Album, err
 		for i := range albums {
 			a := &albums[i]
 			where, args := albumFilter(*a).where(minScore)
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM assets WHERE `+where, args...).Scan(&a.Count); err != nil {
-				return err
-			}
-			if a.Count == 0 {
-				continue // no cover to find
-			}
-			// The newest member that has a thumbnail yet.
-			err := tx.QueryRowContext(ctx, `SELECT id, thumb_version FROM assets WHERE `+where+
-				` AND thumb_version > 0 ORDER BY taken_at DESC, id DESC LIMIT 1`, args...).Scan(&a.Cover, &a.CoverThumb)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			err := tx.QueryRowContext(ctx, `WITH cover AS (
+				SELECT id, thumb_version FROM assets WHERE `+where+`
+				AND thumb_version > 0 ORDER BY taken_at DESC, id DESC LIMIT 1)
+				SELECT count(*), COALESCE((SELECT id FROM cover), 0),
+					COALESCE((SELECT thumb_version FROM cover), 0)
+				FROM assets WHERE `+where, slices.Concat(args, args)...).Scan(&a.Count, &a.Cover, &a.CoverThumb)
+			if err != nil {
 				return err
 			}
 		}
@@ -230,15 +244,16 @@ func albumFilter(a core.Album) assetFilter {
 func (s *Store) AssetAlbums(ctx context.Context, assetID int64) ([]int64, error) {
 	return queryAll(ctx, s.r, scanID, `SELECT i.album_id FROM album_items i WHERE i.asset_id = ?
 		AND EXISTS (SELECT 1 FROM assets WHERE id = i.asset_id AND `+visible+`)
-		AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'album' AND b.target_id = i.album_id)`, assetID)
+		AND NOT `+labelBlocked(core.BlockAlbum, "i.album_id"), assetID)
 }
 
-// SetAlbumItem adds or removes an asset from a manual album.
-func (s *Store) SetAlbumItem(ctx context.Context, albumID, assetID int64, include bool) error {
-	return s.tx(ctx, func(tx *sql.Tx) error { return setAlbumItem(ctx, tx, albumID, assetID, include) })
+// SetAlbumItem adds or removes an asset from a manual album. Like tagging
+// (TagAsset), it takes the asset first.
+func (s *Store) SetAlbumItem(ctx context.Context, assetID, albumID int64, include bool) error {
+	return s.tx(ctx, func(tx *sql.Tx) error { return setAlbumItem(ctx, tx, assetID, albumID, include) })
 }
 
-func setAlbumItem(ctx context.Context, tx *sql.Tx, albumID, assetID int64, include bool) error {
+func setAlbumItem(ctx context.Context, tx *sql.Tx, assetID, albumID int64, include bool) error {
 	var kind core.AlbumKind
 	err := tx.QueryRowContext(ctx, `SELECT kind FROM albums WHERE id = ?
 		AND EXISTS (SELECT 1 FROM assets WHERE id = ? AND `+present+`)`, albumID, assetID).Scan(&kind)
@@ -249,7 +264,7 @@ func setAlbumItem(ctx context.Context, tx *sql.Tx, albumID, assetID int64, inclu
 		return err
 	}
 	if kind != core.AlbumManual {
-		return fmt.Errorf("%w: only manual albums accept items", ErrInvalidAlbum)
+		return ErrAlbumManualOnly
 	}
 	if include {
 		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO album_items (album_id, asset_id, added_at) VALUES (?, ?, ?)`,

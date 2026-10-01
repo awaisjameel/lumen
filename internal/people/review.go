@@ -16,9 +16,19 @@ func OddOnesFirst(faces []core.Face, vecs [][]float32) []core.Face {
 		return faces
 	}
 	// Faces made by an earlier face model (during an upgrade) can have
-	// vectors of another length: they don't count towards the mean, and
-	// score as unlike it.
-	mean := make([]float32, len(vecs[0]))
+	// vectors of another length: the length most faces have sets the mean,
+	// and the others don't count towards it and score as unlike it.
+	lengths := map[int]int{}
+	for _, v := range vecs {
+		lengths[len(v)]++
+	}
+	dim := 0
+	for n, count := range lengths {
+		if count > lengths[dim] || (count == lengths[dim] && n > dim) {
+			dim = n
+		}
+	}
+	mean := make([]float32, dim)
 	for _, v := range vecs {
 		if len(v) == len(mean) {
 			add(mean, v)

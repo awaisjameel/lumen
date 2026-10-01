@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"math"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,51 @@ import (
 	"lumen/internal/media"
 	"lumen/internal/testenv"
 )
+
+func TestDetectorDropsNonFiniteOutputsBeforeDecodingFaces(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output int
+		value  float32
+	}{
+		{"infinite class", 0, float32(math.Inf(1))},
+		{"infinite objectness", 3, float32(math.Inf(1))},
+		{"NaN class", 0, float32(math.NaN())},
+		{"NaN objectness", 3, float32(math.NaN())},
+		{"infinite box", 6, float32(math.Inf(1))},
+		{"NaN box", 6, float32(math.NaN())},
+		{"infinite landmark", 9, float32(math.Inf(1))},
+		{"NaN landmark", 9, float32(math.NaN())},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outs := detectorOutputs()
+			outs[tc.output][0] = tc.value
+			got, err := detectFaces(outs, 32, 32, 32, 0.8)
+			if err != nil || len(got) != 0 {
+				t.Fatalf("invalid output produced faces: %+v, %v", got, err)
+			}
+		})
+	}
+	got, err := detectFaces(detectorOutputs(), 32, 32, 32, 0.8)
+	if err != nil || len(got) != 1 || got[0].Score != 1 {
+		t.Fatalf("valid output = %+v, %v, want one face", got, err)
+	}
+	if _, err := detectFaces(nil, 32, 32, 32, 0.8); err == nil {
+		t.Fatal("missing detector outputs were accepted")
+	}
+}
+
+func detectorOutputs() [][]float32 {
+	outs := make([][]float32, 4*len(yunetStrides))
+	for k, stride := range yunetStrides {
+		n := (32 / stride) * (32 / stride)
+		outs[k], outs[3+k] = make([]float32, n), make([]float32, n)
+		outs[6+k], outs[9+k] = make([]float32, 4*n), make([]float32, 10*n)
+	}
+	outs[0][0], outs[3][0] = 1, 1
+	outs[6][0], outs[6][1] = 2, 2
+	return outs
+}
 
 // Five dots placed by a known rotation, scale and shift of the template must
 // land back on the template's points after alignment.
@@ -114,7 +160,7 @@ func TestFacesOnRealPhotos(t *testing.T) {
 		if len(big) == 0 {
 			continue
 		}
-		vecs, err := f.Embed(im.Pix, im.W, im.H, big)
+		vecs, err := f.Embed(t.Context(), im.Pix, im.W, im.H, big)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -131,7 +177,7 @@ func TestFacesOnRealPhotos(t *testing.T) {
 				scaled[i].Landmarks[j] = [2]float64{fc.Landmarks[j][0] * k, fc.Landmarks[j][1] * k}
 			}
 		}
-		again, err := f.Embed(small.Pix, small.W, small.H, scaled)
+		again, err := f.Embed(t.Context(), small.Pix, small.W, small.H, scaled)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,11 +260,11 @@ func TestFacesOnTheGPUMatchTheCPU(t *testing.T) {
 		if len(pc) == 0 {
 			continue
 		}
-		vc, err := onCPU.Embed(im.Pix, im.W, im.H, pc)
+		vc, err := onCPU.Embed(t.Context(), im.Pix, im.W, im.H, pc)
 		if err != nil {
 			t.Fatal(err)
 		}
-		vg, err := onGPU.Embed(im.Pix, im.W, im.H, pg)
+		vg, err := onGPU.Embed(t.Context(), im.Pix, im.W, im.H, pg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -290,5 +336,30 @@ func BenchmarkAlign(b *testing.B) {
 	lm := [5][2]float64{{900, 600}, {1150, 600}, {1025, 750}, {930, 900}, {1120, 900}}
 	for b.Loop() {
 		Align(pix, w, h, lm, 112)
+	}
+}
+
+// A group photo runs several recognition batches; a cancelled context stops
+// before the next one instead of finishing the photo.
+func TestEmbedStopsWhenCancelled(t *testing.T) {
+	rt := testenv.Runtime(t)
+	if err := Init(rt); err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadFaceModel(filepath.Join(rt, "models", "faces"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := OpenFaces(m, CPU, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	const w, h = 64, 64
+	face := Face{X: 8, Y: 8, W: 48, H: 48, Landmarks: [5][2]float64{{24, 28}, {40, 28}, {32, 36}, {26, 46}, {38, 46}}}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := f.Embed(ctx, make([]byte, w*h*3), w, h, []Face{face}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Embed: %v", err)
 	}
 }

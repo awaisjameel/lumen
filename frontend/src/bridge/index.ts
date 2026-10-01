@@ -2,7 +2,8 @@
 // functions, never the generated bindings directly (ESLint enforces it), so
 // engine communication can be understood (and mocked) from this file alone.
 
-import { Events } from '@wailsio/runtime'
+import { CancelError, Events } from '@wailsio/runtime'
+import type { CancellablePromise } from '@wailsio/runtime'
 import { LibraryService, MediaService, PeopleService, SearchService } from '../../bindings/lumen/services'
 import {
   AlbumKind,
@@ -104,6 +105,12 @@ export const EVENT_GAP_DEFAULT = 12 // core.EventGapDefault
 export const EVENT_GAP_MIN = 1 // core.EventGapMin
 export const EVENT_GAP_MAX = 72 // core.EventGapMax
 export const MAX_NAME_LEN = 80 // core.MaxNameLen: people, Things and albums
+export const PIN_MIN_LEN = 6 // core.PINMinLen
+export const BLOCK_UNLOCK_IDLE_MINUTES = 10 // services.blockUnlockIdle
+export const PIN_MAX_LEN = 12 // core.PINMaxLen
+export const PIN_COOLDOWN_SECONDS = 30 // services.pinCooldown: the wait after too many wrong PINs
+/** The pattern attribute of a PIN field: PIN_MIN_LEN to PIN_MAX_LEN digits. */
+export const PIN_PATTERN = `[0-9]{${PIN_MIN_LEN},${PIN_MAX_LEN}}`
 export type ThumbSize = typeof THUMB_SMALL | typeof THUMB_LARGE
 
 /**
@@ -116,6 +123,14 @@ export const ErrorCode = {
   InvalidName: 'invalid_name',
   AlbumExists: 'album_exists',
   InvalidAlbum: 'invalid_album',
+  AlbumMediaKind: 'album_media_kind',
+  AlbumSelection: 'album_selection',
+  AlbumDate: 'album_date',
+  AlbumDateOrder: 'album_date_order',
+  AlbumSmartItems: 'album_smart_items',
+  AlbumKind: 'album_kind',
+  AlbumReference: 'album_reference',
+  AlbumManualOnly: 'album_manual_only',
   PersonExists: 'person_exists',
   BlockedName: 'blocked_name',
   TagExists: 'tag_exists',
@@ -123,17 +138,39 @@ export const ErrorCode = {
   TagInAlbum: 'tag_in_album',
   AlreadyCovered: 'already_covered',
   FolderNotFound: 'folder_not_found',
+  InvalidPIN: 'invalid_pin',
+  PINExists: 'pin_exists',
+  PINRateLimited: 'pin_rate_limited',
+  BlocksLocked: 'blocks_locked',
+  UndoExpired: 'undo_expired',
+  InvalidBlock: 'invalid_block',
 } as const
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 
-const errorCodes = new Set<string>(Object.values(ErrorCode))
+const errorCodes: ReadonlySet<unknown> = new Set<ErrorCode>(Object.values(ErrorCode))
+
+function isErrorCode(code: unknown): code is ErrorCode {
+  return errorCodes.has(code)
+}
 
 /** The code of a failed engine call (see ErrorCode), if it has one. */
 export function errorCode(e: unknown): ErrorCode | undefined {
   const cause: unknown = e instanceof Error ? e.cause : undefined
   if (typeof cause !== 'object' || cause === null || !('code' in cause)) return undefined
-  const code = cause.code
-  return typeof code === 'string' && errorCodes.has(code) ? (code as ErrorCode) : undefined
+  return isErrorCode(cause.code) ? cause.code : undefined
+}
+
+/**
+ * Whether an engine call failed because its signal aborted it: the caller
+ * no longer wanted the answer, so there is nothing to report.
+ */
+export function isCancelled(e: unknown): boolean {
+  return e instanceof CancelError
+}
+
+/** call, cancelled in the engine too (its context ends) if signal aborts. */
+function cancellable<T>(call: CancellablePromise<T>, signal: AbortSignal | undefined): Promise<T> {
+  return signal ? call.cancelOn(signal) : call
 }
 
 let blockSession = Promise.resolve()
@@ -153,9 +190,15 @@ export const engine = {
   removeSource: (id: number): Promise<void> => LibraryService.RemoveSource(id),
   rescan: (): Promise<void> => LibraryService.Rescan(),
 
-  timeline: async (view: View): Promise<DayBucket[]> => (await LibraryService.Timeline(view)) ?? [],
-  days: async (from: string, to: string, view: View): Promise<DayItems[]> =>
-    ((await LibraryService.Days(from, to, view)) ?? []).map((d) => ({ ...d, items: d.items ?? [] })),
+  // The reads a scroll or a new search supersedes take a signal that cancels
+  // them in the engine too (see isCancelled).
+  timeline: async (view: View, signal?: AbortSignal): Promise<DayBucket[]> =>
+    (await cancellable(LibraryService.Timeline(view), signal)) ?? [],
+  days: async (from: string, to: string, view: View, signal?: AbortSignal): Promise<DayItems[]> =>
+    ((await cancellable(LibraryService.Days(from, to, view), signal)) ?? []).map((d) => ({
+      ...d,
+      items: d.items ?? [],
+    })),
   focus: (from: string, to: string): Promise<void> => LibraryService.Focus(from, to),
 
   asset: async (id: number): Promise<AssetDetail> => {
@@ -180,8 +223,8 @@ export const engine = {
   updateAlbum: (id: number, name: string, rule: AlbumRule): Promise<void> => LibraryService.UpdateAlbum(id, name, rule),
   deleteAlbum: (id: number): Promise<void> => LibraryService.DeleteAlbum(id),
   assetAlbums: async (id: number): Promise<number[]> => (await LibraryService.AssetAlbums(id)) ?? [],
-  setAlbumItem: (album: number, asset: number, include: boolean): Promise<void> =>
-    LibraryService.SetAlbumItem(album, asset, include),
+  setAlbumItem: (assetID: number, albumID: number, include: boolean): Promise<void> =>
+    LibraryService.SetAlbumItem(assetID, albumID, include),
   /** Opens Explorer on one of an asset's files: path, or "" for the first one there. */
   showInFolder: (id: number, path = ''): Promise<void> => LibraryService.ShowInFolder(id, path),
 
@@ -203,10 +246,12 @@ export const engine = {
   removeBlock: (id: number): Promise<void> => LibraryService.RemoveBlock(id),
   undoBlock: (id: number): Promise<void> => LibraryService.UndoBlock(id),
 
-  search: async (query: string): Promise<SearchResults> => {
-    const r = await SearchService.Search(query)
+  search: async (query: string, signal?: AbortSignal): Promise<SearchResults> => {
+    const r = await cancellable(SearchService.Search(query), signal)
     return { ...r, items: r.items ?? [], people: r.people ?? [] }
   },
+  visibleAssets: async (ids: number[], signal?: AbortSignal): Promise<number[]> =>
+    (await cancellable(SearchService.VisibleAssets(ids), signal)) ?? [],
   suggestTags: async (text: string): Promise<Tag[]> => (await SearchService.SuggestTags(text)) ?? [],
   prepareSearch: (): Promise<void> => SearchService.PrepareSearch(),
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],
@@ -276,6 +321,11 @@ let videoBase = ''
 /** Learns where videos stream from. Call once at startup. */
 export async function startMedia(): Promise<void> {
   videoBase = await MediaService.VideoBase()
+}
+
+/** Whether videos can play: false if the engine could not start its video server. */
+export function videosAvailable(): boolean {
+  return videoBase !== ''
 }
 
 /** A video file the WebView plays as it is. */

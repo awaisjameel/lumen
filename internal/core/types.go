@@ -30,9 +30,6 @@ const (
 // Stages lists every stage in pipeline order. A new asset gets a job for each.
 var Stages = []Stage{StageMetadata, StageThumbnail, StageEmbedding, StageFaces}
 
-// VideoFramesVersion tracks the sampling pipeline shared by both AI stages.
-const VideoFramesVersion = "+video-frames-1"
-
 // AI reports whether a stage runs the AI models: heavy work that waits for
 // mains power unless the user allows it on battery.
 func (s Stage) AI() bool { return s == StageEmbedding || s == StageFaces }
@@ -57,6 +54,13 @@ const (
 // MaxNameLen is the longest name (in characters) a person, Thing or album
 // may have. frontend/src/bridge mirrors it.
 const MaxNameLen = 80
+
+// The Blocked screen's PIN is PINMinLen to PINMaxLen digits.
+// frontend/src/bridge mirrors them.
+const (
+	PINMinLen = 6
+	PINMaxLen = 12
+)
 
 // Settings keys.
 const (
@@ -308,7 +312,6 @@ type Tag struct {
 	ID         int64   `json:"id"`
 	Name       string  `json:"name"`
 	Kind       TagKind `json:"kind"`
-	Hidden     bool    `json:"hidden"`
 	Count      int     `json:"count"`
 	Cover      int64   `json:"cover"`      // asset id; 0 = none
 	CoverThumb int     `json:"coverThumb"` // its thumbnail version
@@ -323,6 +326,14 @@ type AssetTag struct {
 	Score  float32   `json:"score"` // AI probability; 0 for user tags
 }
 
+// NamedTarget is a named entity considered when resolving a search query.
+type NamedTarget struct {
+	ID      int64
+	Name    string
+	Kind    BlockKind
+	Blocked bool
+}
+
 // SearchResult is the answer to a natural-language search, best match first.
 type SearchResult struct {
 	Items    []GridItem `json:"items"`
@@ -330,7 +341,7 @@ type SearchResult struct {
 	Pending  int        `json:"pending"`  // photos not yet understood, so not searchable yet
 	Complete bool       `json:"complete"` // false: more matched than are shown
 	NoAI     bool       `json:"noAI"`     // the description could not be searched: the AI isn't available (see AI.Error)
-	Blocked  bool       `json:"blocked"`  // a blocked person's name occurred in the query
+	Blocked  bool       `json:"blocked"`  // a blocked named entity occurred in the query
 }
 
 // Face is one face in a photo or video: where it is, and who it is.
@@ -354,11 +365,10 @@ type Face struct {
 // Person is someone who appears in the photos: a group of faces the AI
 // found, or the user made, named or not.
 type Person struct {
-	ID     int64  `json:"id"`
-	Name   string `json:"name"` // "" until the user names them
-	Hidden bool   `json:"hidden"`
-	Count  int    `json:"count"` // visible photos they appear in
-	Cover  Face   `json:"cover"` // the face to show; ID 0 = none
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`  // "" until the user names them
+	Count int    `json:"count"` // visible photos they appear in
+	Cover Face   `json:"cover"` // the face to show; ID 0 = none
 }
 
 // DayBucket is how many visible assets were taken on one calendar day.
@@ -444,36 +454,27 @@ var (
 
 // Progress is the payload of the index:progress event.
 type Progress struct {
-	Scanning   bool `json:"scanning"`
-	Discovered int  `json:"discovered"` // files found in this scan so far
-	Total      int  `json:"total"`      // assets in the library
-	Metadata   int  `json:"metadata"`   // assets still waiting for metadata
-	Thumbnail  int  `json:"thumbnail"`  // assets still waiting for thumbnails
-	Embedding  int  `json:"embedding"`  // assets still waiting for the AI
-	Faces      int  `json:"faces"`      // assets still waiting for face recognition
-	Errors     int  `json:"errors"`
-	Skipped    int  `json:"skipped"`
-	Paused     bool `json:"paused"`
-	OnBattery  bool `json:"onBattery"` // AI work is waiting for mains power
-	AI         AI   `json:"ai"`
+	Scanning  bool `json:"scanning"`
+	Total     int  `json:"total"`     // assets in the library
+	Metadata  int  `json:"metadata"`  // assets still waiting for metadata
+	Thumbnail int  `json:"thumbnail"` // assets still waiting for thumbnails
+	Embedding int  `json:"embedding"` // assets still waiting for the AI
+	Faces     int  `json:"faces"`     // assets still waiting for face recognition
+	Errors    int  `json:"errors"`
+	Skipped   int  `json:"skipped"`
+	Paused    bool `json:"paused"`
+	OnBattery bool `json:"onBattery"` // AI work is waiting for mains power
+	AI        AI   `json:"ai"`
 }
 
 // Changes says what changed in the library: the payload of library:changed,
 // so each view reloads only for what it shows. While the AI works through a
 // big library, tags and people change for hours after the timeline settles.
 type Changes struct {
-	Assets bool `json:"assets"` // assets came, went, or their dates or sizes changed
+	Assets bool `json:"assets"` // assets came, went, were blocked or unblocked, or their dates or sizes changed
 	Thumbs bool `json:"thumbs"` // only thumbnails (and the perceptual hashes made with them) changed
 	Tags   bool `json:"tags"`   // the AI tagged assets
 	People bool `json:"people"` // faces were found or grouped into people
-}
-
-// Any reports whether anything changed.
-func (c Changes) Any() bool { return c.Assets || c.Thumbs || c.Tags || c.People }
-
-// Merge adds the changes in d.
-func (c Changes) Merge(d Changes) Changes {
-	return Changes{Assets: c.Assets || d.Assets, Thumbs: c.Thumbs || d.Thumbs, Tags: c.Tags || d.Tags, People: c.People || d.People}
 }
 
 // AI is the state of the on-device models.
@@ -514,10 +515,14 @@ var (
 		".webm": true, ".3gp": true, ".wmv": true, ".mts": true, ".m2ts": true,
 	}
 	// Photo formats WebView2 renders natively, so the viewer can show the
-	// original. (Videos: see PlaybackOf.)
-	webNativeExts = map[string]bool{
-		".jpg": true, ".jpeg": true, ".jpe": true, ".png": true, ".gif": true,
-		".webp": true, ".bmp": true, ".avif": true,
+	// original (videos: see PlaybackOf), with the MIME type they are sent as.
+	webNativeTypes = map[string]string{
+		".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".jpe": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
+		".webp": "image/webp", ".bmp": "image/bmp", ".avif": "image/avif",
+	}
+	// Videos the WebView may play as they are, with their MIME types.
+	videoTypes = map[string]string{
+		".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
 	}
 )
 
@@ -534,20 +539,17 @@ func KindOf(path string) Kind {
 }
 
 // WebNative reports whether the WebView can display a photo of this extension.
-func WebNative(ext string) bool { return webNativeExts[strings.ToLower(ext)] }
+func WebNative(ext string) bool { _, ok := webNativeTypes[strings.ToLower(ext)]; return ok }
 
-// contentTypes are the MIME types of the files the WebView is sent as they
-// are: photos it displays and videos it plays.
-var contentTypes = map[string]string{
-	".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".jpe": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
-	".webp": "image/webp", ".bmp": "image/bmp", ".avif": "image/avif",
-	".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
-}
-
-// ContentType is the MIME type to send a file of this extension as (from
-// Lumen's own table: Windows' registry, which Go would ask, varies by PC).
+// ContentType is the MIME type to send a file of this extension as, when
+// the WebView is sent it as it is: a photo it displays or a video it plays
+// (from Lumen's own tables: Windows' registry, which Go would ask, varies by PC).
 func ContentType(ext string) string {
-	if t, ok := contentTypes[strings.ToLower(ext)]; ok {
+	ext = strings.ToLower(ext)
+	if t, ok := webNativeTypes[ext]; ok {
+		return t
+	}
+	if t, ok := videoTypes[ext]; ok {
 		return t
 	}
 	return "application/octet-stream"

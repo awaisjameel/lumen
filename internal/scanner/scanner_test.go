@@ -2,6 +2,10 @@ package scanner
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,6 +27,63 @@ func TestUnreadablePathsAreNotDeletionCandidates(t *testing.T) {
 	}
 }
 
+func TestFingerprintStopsReadingAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	pix := bytes.NewReader([]byte("unchanged"))
+	if _, err := io.ReadAll(hashReader{ctx: ctx, r: pix}); !errors.Is(err, context.Canceled) || pix.Len() != 9 {
+		t.Fatalf("cancelled hash read: %v, %d bytes remain", err, pix.Len())
+	}
+	if _, err := Fingerprint(ctx, filepath.Join(t.TempDir(), "missing.jpg"), 9); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled fingerprint opened its file: %v", err)
+	}
+}
+
+func TestCancelledScanKeepsUnvisitedFiles(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	root := t.TempDir()
+	for i := range 600 {
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("%04d.jpg", i)), []byte("same bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	src, err := st.AddSource(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := Scanner{Store: st, HashWorkers: 2}
+	if res, err := s.Scan(t.Context(), src, "", Options{}); err != nil || res.Seen != 600 {
+		t.Fatalf("initial scan: %+v, %v", res, err)
+	}
+	for i := range 600 {
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("%04d.jpg", i)), []byte("changed bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	s.OnProgress = func(int) { cancel() }
+	if _, err := s.Scan(ctx, src, "", Options{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("interrupted scan: %v", err)
+	}
+	known, err := st.KnownFiles(t.Context(), src.ID, "")
+	if err != nil || len(known) != 600 {
+		t.Fatalf("files after interrupted scan: %d, %v", len(known), err)
+	}
+	s.OnProgress = nil
+	if res, err := s.Scan(t.Context(), src, "", Options{}); err != nil || res.Seen != 600 {
+		t.Fatalf("scan after cancellation: %+v, %v", res, err)
+	}
+}
+
 func TestFingerprintIdentifiesContent(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string, data []byte) string {
@@ -37,7 +98,7 @@ func TestFingerprintIdentifiesContent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		h, err := Fingerprint(p, fi.Size())
+		h, err := Fingerprint(t.Context(), p, fi.Size())
 		if err != nil {
 			t.Fatal(err)
 		}

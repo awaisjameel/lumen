@@ -1,9 +1,11 @@
 <script setup lang="ts">
 // Duplicates: exact file copies and similar-looking photos, for review only.
 // Lumen never deletes or moves files; each copy can be shown in Explorer.
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { DuplicateKind, engine, THUMB_LARGE, thumbUrl } from '../bridge'
-import type { DuplicateItem } from '../bridge'
+import type { DuplicateGroup, DuplicateItem } from '../bridge'
 import SearchBox from '../search/SearchBox.vue'
 import EmptyState from '../shared/EmptyState.vue'
 import { errorText } from '../shared/errors'
@@ -16,52 +18,98 @@ import { useDuplicates } from './store'
 const duplicates = useDuplicates()
 const busy = ref(false)
 const error = ref('')
-const preview = ref<DuplicateItem | null>(null)
+const preview = shallowRef<DuplicateItem | null>(null)
 const previewDialog = ref<HTMLDialogElement | null>(null)
 
-const exact = computed(() => duplicates.groups.filter((g) => g.kind === DuplicateKind.DuplicateExact))
-const similar = computed(() => duplicates.groups.filter((g) => g.kind === DuplicateKind.DuplicateSimilar))
+const exact = computed(() => duplicates.list.filter((g) => g.kind === DuplicateKind.DuplicateExact))
+const similar = computed(() => duplicates.list.filter((g) => g.kind === DuplicateKind.DuplicateSimilar))
 
-// Groups are rendered a page at a time as the list is scrolled (a large
-// library has thousands, and all of them at once took seconds to build and
-// to leave). Exact copies come first, then similar photos.
-const PAGE = 40
-const shown = ref(PAGE)
-const exactShown = computed(() => exact.value.slice(0, shown.value))
-const similarShown = computed(() => similar.value.slice(0, Math.max(0, shown.value - exact.value.length)))
-const more = computed(() => shown.value < duplicates.groups.length)
-const sentinel = ref<HTMLElement | null>(null)
-const observer =
-  typeof IntersectionObserver === 'undefined'
-    ? null
-    : new IntersectionObserver(
-        (entries) => {
-          if (!entries.some((e) => e.isIntersecting)) return
-          shown.value += PAGE
-          // Still in view after the page was added (a tall window): observing
-          // afresh reports it again.
-          void nextTick(() => {
-            if (!sentinel.value) return
-            observer?.unobserve(sentinel.value)
-            observer?.observe(sentinel.value)
-          })
-        },
-        { rootMargin: '800px' },
-      )
-if (!observer) shown.value = Infinity
-watch(sentinel, (el, old) => {
-  if (old) observer?.unobserve(old)
-  if (el) observer?.observe(el)
+interface Row {
+  key: string
+  kind: DuplicateGroup['kind']
+  group: DuplicateGroup | null
+}
+const scroller = ref<HTMLElement | null>(null)
+const intro = ref<HTMLElement | null>(null)
+const list = ref<HTMLElement | null>(null)
+const scrollMargin = ref(0)
+let resizeObserver: ResizeObserver | undefined
+function updateMargin() {
+  if (!list.value || !scroller.value) return
+  scrollMargin.value =
+    list.value.getBoundingClientRect().top - scroller.value.getBoundingClientRect().top + scroller.value.scrollTop
+}
+const rows = computed<Row[]>(() => {
+  const result: Row[] = []
+  for (const [kind, groups] of [
+    [DuplicateKind.DuplicateExact, exact.value],
+    [DuplicateKind.DuplicateSimilar, similar.value],
+  ] as const) {
+    if (!groups.length) continue
+    result.push({ key: `${kind}-heading`, kind, group: null })
+    for (const group of groups) result.push({ key: `${kind}-${group.items[0]?.id}`, kind, group })
+  }
+  return result
 })
-onUnmounted(() => observer?.disconnect())
+const virtualizer = useVirtualizer(
+  computed(() => ({
+    count: rows.value.length,
+    getScrollElement: () => scroller.value,
+    getItemKey: (index: number) => rows.value[index]?.key ?? index,
+    estimateSize: (index: number) => (rows.value[index]?.group ? 250 : 88),
+    overscan: 3,
+    scrollMargin: scrollMargin.value,
+  })),
+)
+const visible = computed(() =>
+  virtualizer.value.getVirtualItems().flatMap((item) => {
+    const row = rows.value[item.index]
+    return row ? [{ item, row }] : []
+  }),
+)
+watch(rows, (current, previous) => {
+  if (current.length !== previous.length || current.some((row, i) => row.key !== previous[i]?.key))
+    virtualizer.value.measure()
+})
+watch(
+  () => duplicates.list,
+  (groups) => {
+    const id = preview.value?.id
+    if (id === undefined) return
+    let current: DuplicateItem | undefined
+    for (const group of groups) {
+      current = group.items.find((item) => item.id === id)
+      if (current) break
+    }
+    if (!current) previewDialog.value?.close()
+    preview.value = current ?? null
+  },
+)
+function measureRow(element: Element | ComponentPublicInstance | null) {
+  virtualizer.value.measureElement(element instanceof Element ? element : null)
+}
+watch(
+  [intro, busy, error, () => duplicates.error],
+  async () => {
+    await nextTick()
+    updateMargin()
+  },
+  { flush: 'post' },
+)
+onMounted(() => {
+  resizeObserver = new ResizeObserver(updateMargin)
+  if (intro.value) resizeObserver.observe(intro.value)
+  if (scroller.value) resizeObserver.observe(scroller.value)
+  updateMargin()
+})
+onBeforeUnmount(() => resizeObserver?.disconnect())
 
 async function refresh() {
   busy.value = true
-  error.value = ''
   try {
     await duplicates.load()
-  } catch (e) {
-    error.value = errorText(e)
+  } catch {
+    // duplicates.error says why
   } finally {
     busy.value = false
   }
@@ -100,86 +148,100 @@ async function openPreview(item: DuplicateItem) {
         <Icon name="refresh" />
       </button>
     </header>
-    <div class="page-body">
-      <p class="muted">{{ t('duplicates.intro') }}</p>
-      <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-      <p v-if="busy" class="muted" role="status">{{ t('duplicates.loading') }}</p>
-
-      <section v-if="exactShown.length" aria-labelledby="exact-title">
-        <h2 id="exact-title">{{ t('duplicates.exact') }}</h2>
-        <p class="muted">{{ t('duplicates.exactHint') }}</p>
-        <div v-for="group in exactShown" :key="`exact-${group.items[0]?.id}`" class="group">
-          <div v-for="item in group.items" :key="item.id" class="item">
-            <button
-              class="preview-button"
-              :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
-              @click="openPreview(item)"
-            >
-              <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
-              <span v-else class="ph" />
-            </button>
-            <div class="item-info">
+    <div ref="scroller" class="page-body">
+      <div ref="intro">
+        <p class="muted">{{ t('duplicates.intro') }}</p>
+        <p v-if="error || duplicates.error" class="page-error" role="alert">{{ error || duplicates.error }}</p>
+        <p v-if="busy" class="muted" role="status">{{ t('duplicates.loading') }}</p>
+      </div>
+      <div ref="list" class="virtual-list" :style="{ height: `${virtualizer.getTotalSize()}px` }" role="list">
+        <div
+          v-for="{ item: virtual, row } in visible"
+          :key="row.key"
+          :ref="measureRow"
+          :data-index="virtual.index"
+          class="virtual-row"
+          :style="{ transform: `translateY(${virtual.start - scrollMargin}px)` }"
+          :role="row.group ? 'listitem' : undefined"
+        >
+          <template v-if="!row.group">
+            <h2>{{ t(row.kind === DuplicateKind.DuplicateExact ? 'duplicates.exact' : 'duplicates.similar') }}</h2>
+            <p class="muted">
+              {{ t(row.kind === DuplicateKind.DuplicateExact ? 'duplicates.exactHint' : 'duplicates.similarHint') }}
+            </p>
+          </template>
+          <div v-else-if="row.kind === DuplicateKind.DuplicateExact" class="group">
+            <div v-for="item in row.group.items" :key="item.id" class="item">
+              <button
+                class="preview-button"
+                :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
+                @click="openPreview(item)"
+              >
+                <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
+                <span v-else class="ph" />
+              </button>
+              <div class="item-info">
+                <span class="muted">{{
+                  t('duplicates.copies', {
+                    n: item.paths.length,
+                    size: bytes(item.size),
+                  })
+                }}</span>
+                <ul>
+                  <li v-for="path in item.paths" :key="path" :title="path">
+                    <span>{{ path }}</span>
+                    <button
+                      class="btn btn-subtle"
+                      :aria-label="t('duplicates.showFile', { name: path })"
+                      @click="showPath(item, path)"
+                    >
+                      {{ t('common.showInFolder') }}
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div v-else class="group similar">
+            <div v-for="item in row.group.items" :key="item.id" class="similar-item">
+              <button
+                class="preview-button"
+                :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
+                @click="openPreview(item)"
+              >
+                <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
+                <span v-else class="ph" />
+              </button>
+              <strong :title="item.paths[0]">{{ filename(item.paths[0] ?? '') }}</strong>
               <span class="muted">{{
-                t('duplicates.copies', {
-                  n: item.paths.length,
-                  size: bytes(item.size),
-                })
+                t('duplicates.photoSize', { w: item.width, h: item.height, size: bytes(item.size) })
               }}</span>
-              <ul>
-                <li v-for="path in item.paths" :key="path" :title="path">
-                  <span>{{ path }}</span>
-                  <button
-                    class="btn btn-subtle"
-                    :aria-label="t('duplicates.showFile', { name: path })"
-                    @click="showPath(item, path)"
-                  >
-                    {{ t('common.showInFolder') }}
-                  </button>
-                </li>
-              </ul>
+              <button
+                v-if="item.paths[0]"
+                class="btn btn-subtle"
+                :aria-label="t('duplicates.showFile', { name: item.paths[0] })"
+                @click="showPath(item, item.paths[0])"
+              >
+                {{ t('common.showInFolder') }}
+              </button>
             </div>
           </div>
         </div>
-      </section>
-
-      <section v-if="similarShown.length" aria-labelledby="similar-title">
-        <h2 id="similar-title">{{ t('duplicates.similar') }}</h2>
-        <p class="muted">{{ t('duplicates.similarHint') }}</p>
-        <div v-for="group in similarShown" :key="`similar-${group.items[0]?.id}`" class="group similar">
-          <div v-for="item in group.items" :key="item.id" class="similar-item">
-            <button
-              class="preview-button"
-              :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
-              @click="openPreview(item)"
-            >
-              <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
-              <span v-else class="ph" />
-            </button>
-            <strong :title="item.paths[0]">{{ filename(item.paths[0] ?? '') }}</strong>
-            <span class="muted">{{
-              t('duplicates.photoSize', { w: item.width, h: item.height, size: bytes(item.size) })
-            }}</span>
-            <button
-              v-if="item.paths[0]"
-              class="btn btn-subtle"
-              :aria-label="t('duplicates.showFile', { name: item.paths[0] })"
-              @click="showPath(item, item.paths[0])"
-            >
-              {{ t('common.showInFolder') }}
-            </button>
-          </div>
-        </div>
-      </section>
-      <div v-if="more" ref="sentinel" class="more" aria-hidden="true" />
+      </div>
 
       <EmptyState
-        v-if="duplicates.loaded && !duplicates.groups.length"
+        v-if="duplicates.loaded && !duplicates.list.length"
         icon="copy"
         :title="t('duplicates.empty')"
         :text="t('duplicates.emptyHint')"
       />
     </div>
-    <dialog ref="previewDialog" class="preview-dialog" @close="preview = null">
+    <dialog
+      ref="previewDialog"
+      class="dialog preview-dialog"
+      :aria-label="preview ? filename(preview.paths[0] ?? '') : undefined"
+      @close="preview = null"
+    >
       <template v-if="preview">
         <button class="icon-btn close" :aria-label="t('common.close')" @click="previewDialog?.close()">
           <Icon name="close" />
@@ -204,8 +266,16 @@ h2 {
   margin: 12px 0;
 }
 
-.more {
-  height: 1px;
+.virtual-list {
+  position: relative;
+}
+
+.virtual-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: flow-root;
 }
 
 .item {
@@ -227,6 +297,7 @@ h2 {
   background: transparent;
   cursor: zoom-in;
 }
+
 /* No thumbnail made yet. */
 .preview-button .ph {
   display: block;
@@ -290,14 +361,7 @@ li .btn {
   max-width: min(90vw, 1100px);
   max-height: 90vh;
   padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
   background: var(--surface-2);
-  color: var(--text);
-}
-
-.preview-dialog::backdrop {
-  background: var(--backdrop);
 }
 
 .preview-dialog > img {

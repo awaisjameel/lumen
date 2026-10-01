@@ -84,3 +84,11 @@ export function Things(): $CancellablePromise<core$0.Tag[] | null> {
 export function UntagAsset(assetID: number, tagID: number): $CancellablePromise<void> {
     return $Call.ByID(2710358875, assetID, tagID);
 }
+
+/**
+ * VisibleAssets lets the UI prune current search results after a visibility
+ * change, keeping their relevance order without running the search again.
+ */
+export function VisibleAssets(ids: number[] | null): $CancellablePromise<number[] | null> {
+    return $Call.ByID(3842970683, ids);
+}

@@ -18,7 +18,6 @@ import (
 	"github.com/zeebo/xxh3"
 
 	"lumen/internal/core"
-	"lumen/internal/media"
 	"lumen/internal/store"
 )
 
@@ -70,7 +69,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 	if !ok {
 		return Result{}, err
 	}
-	known, extra, err := s.Store.KnownFiles(ctx, src.ID, under)
+	known, err := s.Store.KnownFiles(ctx, src.ID, under)
 	if err != nil {
 		return Result{}, fmt.Errorf("load known files: %w", err)
 	}
@@ -87,12 +86,15 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 	for range max(1, s.HashWorkers) {
 		hw.Go(func() {
 			for f := range toHash {
-				sum, err := Fingerprint(f.path, f.size)
+				sum, err := Fingerprint(ctx, f.path, f.size)
 				if err != nil {
+					if ctx.Err() != nil {
+						return
+					}
 					slog.Warn("fingerprint failed", "path", f.path, "err", err)
 					continue
 				}
-				takenAt, from := media.GuessDate(filepath.Base(f.path), f.mtime)
+				takenAt, from := core.GuessDate(filepath.Base(f.path), f.mtime)
 				select {
 				case hashed <- store.IngestItem{
 					SourceID: src.ID, Path: f.path, Size: f.size, MTime: f.mtime.UnixNano(),
@@ -105,6 +107,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 		})
 	}
 	go func() { hw.Wait(); close(hashed) }()
+	defer hw.Wait()
 
 	// Collector: commit in batches, or every half second so the grid fills in live.
 	ingestErr := make(chan error, 1)
@@ -113,10 +116,10 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 		tick := time.NewTicker(500 * time.Millisecond)
 		defer tick.Stop()
 		fail := func(err error) {
-			ingestErr <- err
 			cancel()
 			for range hashed { // drain so hash workers can exit
 			}
+			ingestErr <- err
 		}
 		flush := func() error {
 			if len(batch) == 0 {
@@ -225,8 +228,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 	}
 
 	// Whatever is left in known was not found on disk.
-	gone := make([]int64, 0, len(known)+len(extra))
-	gone = append(gone, extra...)
+	gone := make([]int64, 0, len(known))
 	for _, st := range known {
 		gone = append(gone, st.ID)
 	}
@@ -279,22 +281,30 @@ func withinAny(path string, dirs []string) bool {
 // folder between them (or path itself) is hidden, a system folder, or in
 // skip. The indexer checks folder changes with it before scanning them.
 func Excluded(root, path string, skip []string) bool {
+	_, _, excluded := Exclusion(root, path, skip)
+	return excluded
+}
+
+// Exclusion is Excluded, also saying which folder (or file) inside root is
+// left out, and whether that is for its hidden or system attribute (which the
+// user can change in Explorer) rather than its name or place.
+func Exclusion(root, path string, skip []string) (at string, byAttribute, excluded bool) {
 	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return false
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false, false
 	}
 	cur := root
 	for name := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		cur = filepath.Join(cur, name)
 		if skipName(name) || withinAny(cur, skip) {
-			return true
+			return cur, false, true
 		}
 		// A deleted path has no attributes left; its name rules still apply.
 		if info, err := os.Lstat(cur); err == nil && isHiddenOrSystem(info) {
-			return true
+			return cur, true, true
 		}
 	}
-	return false
+	return "", false, false
 }
 
 // walkable returns the folder to walk for root. A source's root that is a
@@ -324,29 +334,49 @@ const (
 	sampleWindow  = 4 << 20
 )
 
-// Fingerprint returns the 16-byte content hash that identifies an asset.
-func Fingerprint(path string, size int64) ([]byte, error) {
-	f, err := openShared(path)
+// Fingerprint returns the 16-byte content hash that identifies an asset,
+// stopping between reads when ctx ends.
+func Fingerprint(ctx context.Context, path string, size int64) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	f, err := core.OpenShared(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 	h := xxh3.New128()
 	if size <= fullHashLimit {
-		if _, err := io.Copy(h, f); err != nil {
-			return nil, err
+		if _, err := io.Copy(h, hashReader{ctx: ctx, r: f}); err != nil {
+			return nil, fmt.Errorf("fingerprint %s: %w", path, err)
 		}
 	} else {
 		fmt.Fprintf(h, "lumen-sampled:%d:", size)
 		buf := make([]byte, sampleWindow)
 		for _, off := range []int64{0, size/2 - sampleWindow/2, size - sampleWindow} {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			n, err := f.ReadAt(buf, off)
 			if err != nil && !errors.Is(err, io.EOF) {
-				return nil, err
+				return nil, fmt.Errorf("fingerprint %s at %d: %w", path, off, err)
 			}
 			_, _ = h.Write(buf[:n]) // hashing into memory never fails
 		}
 	}
 	sum := h.Sum128().Bytes()
 	return sum[:], nil
+}
+
+// hashReader stops a full-file hash between reads when the scan is cancelled.
+type hashReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r hashReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(p)
 }

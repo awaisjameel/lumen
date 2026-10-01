@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The top of a person's page: their face, their name (click to change it),
 // how many photos, and what can be done about them.
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { BlockKind, engine, MAX_NAME_LEN } from '../bridge'
 import type { Person } from '../bridge'
@@ -10,6 +10,8 @@ import { block } from '../shared/block'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
+import { useRename } from '../shared/rename'
+import { nameTooLong, trimName } from '../shared/names'
 import FaceThumb from './FaceThumb.vue'
 import { namePerson } from './naming'
 import { usePeople } from './store'
@@ -19,10 +21,11 @@ const router = useRouter()
 const people = usePeople()
 
 const person = ref<Person | null>(null)
-const editing = ref(false)
-const draft = ref('')
-const input = ref<HTMLInputElement | null>(null)
+const rename = useRename<true>() // one editor: the name
+const { editing, draft } = rename
 const error = ref('')
+const actionError = ref('') // a rename's; the list's own reloads don't clear it
+const busy = ref(false)
 let revision = 0
 let loadRequest = 0
 onBeforeUnmount(() => {
@@ -47,27 +50,27 @@ watch(
   () => {
     revision++
     person.value = null
-    editing.value = false
+    void rename.close(false)
     error.value = ''
+    actionError.value = ''
     void load()
   },
   { immediate: true },
 )
 useLiveReload(load, (c) => c.people || c.assets || c.thumbs)
 
-async function edit() {
-  draft.value = person.value?.name ?? ''
-  editing.value = true
-  await nextTick()
-  input.value?.select()
+function edit() {
+  if (!busy.value) void rename.open(true, person.value?.name ?? '')
 }
 
-async function save() {
-  if (!editing.value) return
-  editing.value = false
-  const name = draft.value.trim()
+/** Saves the name typed; with refocus (Enter), focus returns to the name. */
+async function save(refocus: boolean) {
+  if (!editing.value || nameTooLong(draft.value) || busy.value) return
+  void rename.close(refocus) // leaving the field (blur) leaves focus where it went
+  const name = trimName(draft.value)
   if (name === (person.value?.name ?? '')) return
-  error.value = ''
+  actionError.value = ''
+  busy.value = true
   const requested = revision
   const id = props.id
   try {
@@ -77,22 +80,20 @@ async function save() {
     if (shown !== null && shown !== props.id) await router.replace({ name: 'person', params: { id: shown } })
     else await load()
   } catch (e) {
-    if (requested === revision) error.value = errorText(e)
+    if (requested === revision) actionError.value = errorText(e)
+  } finally {
+    busy.value = false
   }
 }
 
-async function toggleHidden() {
+async function blockPerson() {
   if (!person.value) return
   const requested = revision
-  try {
-    const saved = await block(BlockKind.BlockPerson, props.id, person.value.name || t('person.unnamed'))
-    if (saved && requested === revision) {
-      void people.load().catch(logError)
-      await router.push({ name: 'people' })
-    }
-  } catch (e) {
-    if (requested === revision) error.value = errorText(e)
-  }
+  if (
+    (await block(BlockKind.BlockPerson, props.id, person.value.name || t('person.unnamed'))) &&
+    requested === revision
+  )
+    await router.push({ name: 'people' }) // their page shows nothing now
 }
 </script>
 
@@ -102,21 +103,33 @@ async function toggleHidden() {
     <div class="text">
       <input
         v-if="editing"
-        ref="input"
+        :ref="rename.fieldRef"
         v-model="draft"
-        class="name-input"
+        class="name-input field"
         :aria-label="t('person.name')"
         :placeholder="t('person.namePlaceholder')"
-        :maxlength="MAX_NAME_LEN"
-        @keydown.enter="save"
-        @keydown.esc.stop="editing = false"
-        @blur="save"
+        :aria-invalid="nameTooLong(draft) || undefined"
+        @keydown.enter="save(true)"
+        @keydown.esc.stop="rename.close()"
+        @blur="save(false)"
       />
-      <button v-else class="name" :title="t('person.rename')" @click="edit">
-        <span class="name-text">{{ person.name || t('person.addName') }}</span>
-        <Icon name="pencil" :size="14" />
-      </button>
-      <span class="count">{{ error || t('status.items', { n: person.count }) }}</span>
+      <h1 v-else class="heading">
+        <button
+          :ref="rename.triggerRef(true)"
+          class="name"
+          :aria-disabled="busy || undefined"
+          :title="t('person.rename')"
+          @click="edit"
+        >
+          <span class="name-text">{{ person.name || t('person.addName') }}</span>
+          <Icon name="pencil" :size="14" />
+        </button>
+      </h1>
+      <span v-if="editing && nameTooLong(draft)" class="count error" role="alert">{{
+        t('error.invalidName', { max: MAX_NAME_LEN })
+      }}</span>
+      <span v-else-if="actionError || error" class="count error" role="alert">{{ actionError || error }}</span>
+      <span v-else class="count">{{ t('status.items', { n: person.count }) }}</span>
     </div>
     <RouterLink :to="{ name: 'personFaces', params: { id } }" class="btn" :title="t('person.review')">
       <Icon name="user" :size="16" /><span class="label">{{ t('person.review') }}</span>
@@ -125,7 +138,7 @@ async function toggleHidden() {
       class="icon-btn"
       :title="t('blocked.block')"
       :aria-label="t('blocked.confirmTitle', { name: person.name || t('person.unnamed') })"
-      @click="toggleHidden"
+      @click="blockPerson"
     >
       <Icon name="eye-off" :size="18" />
     </button>
@@ -145,6 +158,11 @@ async function toggleHidden() {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+.heading {
+  margin: 0;
+  min-width: 0;
+  font: inherit;
 }
 .name {
   display: flex;
@@ -176,17 +194,17 @@ async function toggleHidden() {
 .name-input {
   width: 240px;
   height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-s);
-  background: var(--surface);
+  border-color: var(--accent);
   font: 600 16px var(--font-display);
-  outline: none;
 }
 .count {
   color: var(--text-3);
   font-size: 12px;
   white-space: nowrap;
+}
+.count.error {
+  color: var(--danger);
+  white-space: normal;
 }
 .btn {
   flex-shrink: 0;

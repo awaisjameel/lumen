@@ -76,15 +76,15 @@ func (s *Store) AddSource(ctx context.Context, path string) (core.Source, error)
 // the folder comes back, names, favourites and albums are still there.
 func (s *Store) RemoveSource(ctx context.Context, id int64) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM files WHERE source_id = ?", id); err != nil {
+		// Only the assets of the files removed can have lost their last file.
+		rows, err := tx.QueryContext(ctx, "DELETE FROM files WHERE source_id = ? RETURNING asset_id", id)
+		assets, err := collect(rows, err, scanID)
+		if err != nil {
 			return err
 		}
 		if err := affected(tx.ExecContext(ctx, "DELETE FROM sources WHERE id = ?", id)); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE assets SET missing_since = ?
-			WHERE missing_since IS NULL AND NOT EXISTS (SELECT 1 FROM files f WHERE f.asset_id = assets.id)`,
-			time.Now().Unix())
-		return err
+		return markOrphans(ctx, tx, assets, time.Now().Unix())
 	})
 }

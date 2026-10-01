@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlbumKind, BlockKind, engine, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
 import type { Album, AlbumRule } from '../bridge'
@@ -9,6 +9,7 @@ import { block } from '../shared/block'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
+import { nameTooLong, trimName } from '../shared/names'
 import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
 import SearchBox from '../search/SearchBox.vue'
@@ -23,6 +24,7 @@ const name = ref('')
 const kind = ref(AlbumKind.AlbumManual)
 const rule = ref<AlbumRule>(emptyRule())
 const editing = ref<number | null>(null)
+const nameField = ref<HTMLInputElement | null>(null)
 const busy = ref(false)
 const error = ref('')
 const active = ref(true)
@@ -42,16 +44,28 @@ function reset() {
   rule.value = emptyRule()
 }
 
-function edit(album: Album) {
+watch(
+  () => albums.list,
+  (list) => {
+    if (editing.value !== null && !list.some((album) => album.id === editing.value)) reset()
+  },
+)
+
+/** Loads an album into the form at the top of the page, and goes there. */
+async function edit(album: Album) {
   if (busy.value) return
   editing.value = album.id
   name.value = album.name
   kind.value = album.kind
   rule.value = { ...album.rule }
+  await nextTick()
+  nameField.value?.scrollIntoView({ block: 'nearest' })
+  nameField.value?.focus()
+  nameField.value?.select()
 }
 
 async function save() {
-  if (!name.value.trim() || busy.value) return
+  if (!trimName(name.value) || nameTooLong(name.value) || busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -89,7 +103,7 @@ async function remove(album: Album) {
 }
 
 async function blockAlbum(album: Album) {
-  if (await block(BlockKind.BlockAlbum, album.id, album.name)) await albums.load()
+  if ((await block(BlockKind.BlockAlbum, album.id, album.name)) && editing.value === album.id) reset()
 }
 </script>
 
@@ -111,11 +125,12 @@ async function blockAlbum(album: Album) {
         </div>
         <div class="form-row">
           <input
+            ref="nameField"
             v-model="name"
             class="field"
             :aria-label="t('albums.name')"
             :placeholder="t('albums.name')"
-            :maxlength="MAX_NAME_LEN"
+            :aria-invalid="nameTooLong(name) || undefined"
             required
           />
           <select v-if="editing === null" v-model="kind" :aria-label="t('albums.type')">
@@ -152,7 +167,10 @@ async function blockAlbum(album: Album) {
           </label>
           <label class="check"><input v-model="rule.favourites" type="checkbox" />{{ t('albums.favourites') }}</label>
         </div>
-        <button class="btn btn-primary" :disabled="busy || !name.trim()">
+        <p v-if="nameTooLong(name)" class="page-error" role="alert">
+          {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
+        </p>
+        <button class="btn btn-primary" :disabled="busy || !trimName(name) || nameTooLong(name)">
           {{ editing === null ? t('albums.create') : t('albums.save') }}
         </button>
       </form>
@@ -162,7 +180,7 @@ async function blockAlbum(album: Album) {
         <div v-for="album in albums.list" :key="album.id" class="card">
           <RouterLink :to="{ name: 'album', params: { id: album.id } }" class="card-cover" :aria-label="album.name">
             <img
-              v-if="album.cover"
+              v-if="album.cover && album.coverThumb"
               :src="thumbUrl(album.cover, album.coverThumb)"
               alt=""
               loading="lazy"
@@ -216,9 +234,6 @@ async function blockAlbum(album: Album) {
 </template>
 
 <style scoped>
-.intro {
-  margin: 0 0 16px;
-}
 .editor {
   display: flex;
   flex-direction: column;

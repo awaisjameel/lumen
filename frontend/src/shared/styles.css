@@ -37,7 +37,6 @@
   --viewer-text: #ececef;
   --viewer-text-2: #b4b4bc;
   --viewer-control: rgb(255 255 255 / 0.1);
-  --viewer-control-hover: rgb(255 255 255 / 0.2);
   --backdrop: rgb(0 0 0 / 0.45);
 }
 
@@ -175,9 +174,6 @@ select {
   position: relative;
   min-width: 0;
 }
-.card.hidden {
-  opacity: 0.5;
-}
 .card-cover {
   display: grid;
   place-items: center;
@@ -228,6 +224,39 @@ select {
 .card:hover .card-act,
 .card-act:focus-visible {
   opacity: 1;
+}
+
+/* A page's opening explanation, above its content. */
+.intro {
+  margin: 0 0 16px;
+}
+
+/* Place and event cards (GroupCard): wide, a cover beside the text. */
+.group-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 12px;
+}
+
+/* Modal dialogs (native <dialog>: focus is trapped, Escape cancels) */
+.dialog {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.dialog::backdrop {
+  background: var(--backdrop);
+}
+.dialog h2 {
+  margin: 0 0 8px;
+  font: 600 17px var(--font-display);
+}
+.dialog .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* Pages: a fixed top bar over a scrolling body */

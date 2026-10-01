@@ -7,10 +7,70 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"lumen/internal/core"
 )
+
+func TestDamagedPINEncodingReturnsTheInvalidPINSentinel(t *testing.T) {
+	for _, key := range []string{"block_pin_salt", "block_pin_hash"} {
+		t.Run(key, func(t *testing.T) {
+			st, ctx := openTest(t), t.Context()
+			for _, setting := range []string{"block_pin_salt", "block_pin_hash"} {
+				check(t, errOf(st.w.ExecContext(ctx, "INSERT INTO settings(key, value) VALUES (?, ?)", setting, strings.Repeat("00", 32))))
+			}
+			for _, damaged := range []string{"not-hex", "0"} {
+				check(t, errOf(st.w.ExecContext(ctx, "UPDATE settings SET value = ? WHERE key = ?", damaged, key)))
+				valid, err := st.VerifyBlockPIN(ctx, "123456")
+				if valid || !errors.Is(err, ErrInvalidPIN) {
+					t.Fatalf("damaged %s = %q: valid %v, error %v; want invalid PIN", key, damaged, valid, err)
+				}
+			}
+		})
+	}
+}
+
+func TestVocabularyUpdatesPreserveBlockedThingsAndTheirMatches(t *testing.T) {
+	for _, mode := range []core.BlockMode{core.BlockLabel, core.BlockPhotos} {
+		t.Run(string(mode), func(t *testing.T) {
+			st, ctx := openTest(t), t.Context()
+			src, err := st.AddSource(ctx, `C:\Photos`)
+			check(t, err)
+			check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\private.jpg`, "private")})))
+			check(t, st.SyncVocabulary(ctx, []VocabLabel{{Name: "Private", Prompts: []string{"private"}}}))
+			tag, _, err := st.TagByName(ctx, "Private")
+			check(t, err)
+			check(t, st.SetTagScores(ctx, tag, []AssetScore{{AssetID: 1, Score: 1}}))
+			block, err := st.SetBlock(ctx, core.BlockTag, tag, "", mode)
+			check(t, err)
+			before, err := st.CountVisible(ctx)
+			check(t, err)
+			labels := []VocabLabel{{Name: "Public", Prompts: []string{"public"}}}
+			check(t, st.SyncVocabulary(ctx, labels))
+			blocks, err := st.Blocks(ctx)
+			check(t, err)
+			if len(blocks) != 1 || blocks[0].ID != block || blocks[0].TargetID != tag || blocks[0].Mode != mode {
+				t.Fatalf("vocabulary update lost the user's block: %+v", blocks)
+			}
+			after, err := st.CountVisible(ctx)
+			check(t, err)
+			if after != before {
+				t.Fatalf("vocabulary update changed blocked visibility: %d -> %d", before, after)
+			}
+			auto, err := st.AutoTags(ctx)
+			check(t, err)
+			if len(auto) != 2 || auto[0].ID != tag || len(auto[0].Prompts) != 1 || auto[0].Prompts[0] != "private" {
+				t.Fatalf("blocked Thing no longer matches future photos: %+v", auto)
+			}
+			check(t, st.RemoveBlock(ctx, block))
+			check(t, st.SyncVocabulary(ctx, labels))
+			if _, _, err := st.TagByName(ctx, "Private"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("unblocked obsolete Thing was not retired: %v", err)
+			}
+		})
+	}
+}
 
 func TestPersonBlockModesAndOverlappingAssetBlock(t *testing.T) {
 	st, ctx, a, b, _ := peopleFixture(t)
