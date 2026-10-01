@@ -34,7 +34,7 @@ func TestFingerprintStopsReadingAfterCancellation(t *testing.T) {
 	if _, err := io.ReadAll(hashReader{ctx: ctx, r: pix}); !errors.Is(err, context.Canceled) || pix.Len() != 9 {
 		t.Fatalf("cancelled hash read: %v, %d bytes remain", err, pix.Len())
 	}
-	if _, err := fingerprint(ctx, filepath.Join(t.TempDir(), "missing.jpg"), 9); !errors.Is(err, context.Canceled) {
+	if _, err := Fingerprint(ctx, filepath.Join(t.TempDir(), "missing.jpg"), 9); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled fingerprint opened its file: %v", err)
 	}
 }
@@ -98,7 +98,7 @@ func TestFingerprintIdentifiesContent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		h, err := Fingerprint(p, fi.Size())
+		h, err := Fingerprint(t.Context(), p, fi.Size())
 		if err != nil {
 			t.Fatal(err)
 		}

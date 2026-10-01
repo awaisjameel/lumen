@@ -21,8 +21,8 @@ type model[T any] struct {
 	report func(v T, loaded bool, err error)
 
 	once   sync.Once
-	use    chan struct{} // Serialises batches and release; initialised by once.
-	mu     sync.Mutex    // Guards the loaded value and its last use.
+	use    chan struct{} // one batch or release at a time; made by once
+	mu     sync.Mutex    // guards v, loaded and used
 	v      T
 	loaded bool
 	used   time.Time
@@ -84,7 +84,7 @@ func (m *model[T]) get() (T, error) {
 // releaseIdle frees the model if it has had no work for a while. Stages
 // call it whenever their queue is empty.
 func (m *model[T]) releaseIdle() {
-	_ = m.lock(context.Background()) // Cleanup waits for an in-flight batch.
+	_ = m.lock(context.Background()) // waits for a batch in flight; never fails
 	defer func() { <-m.use }()
 	m.mu.Lock()
 	idle := time.Since(m.used) >= m.idle
@@ -97,7 +97,7 @@ func (m *model[T]) releaseIdle() {
 // release frees the model now: its stage is idle, held (paused, on
 // battery) or stopping, or the model failed and is loaded afresh next time.
 func (m *model[T]) release() {
-	_ = m.lock(context.Background()) // Cleanup waits for an in-flight batch.
+	_ = m.lock(context.Background()) // waits for a batch in flight; never fails
 	defer func() { <-m.use }()
 	m.releaseLocked()
 }

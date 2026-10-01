@@ -38,7 +38,7 @@ type Streamer struct {
 	ln      net.Listener
 	secret  string
 	cancel  context.CancelFunc
-	mu      sync.Mutex // Guards closing and admission to active before Close waits.
+	mu      sync.Mutex // guards closing, and adding to active before Close waits
 	closing bool
 	active  sync.WaitGroup
 }
@@ -91,7 +91,7 @@ func (s *Streamer) Close() error {
 	if lerr := s.ln.Close(); lerr != nil && !errors.Is(lerr, net.ErrClosed) {
 		err = errors.Join(err, lerr)
 	}
-	s.active.Wait() // Request cancellation must finish probes and conversions before the store closes.
+	s.active.Wait() // cancelled requests end their probes and conversions before the store closes
 	return err
 }
 

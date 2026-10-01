@@ -738,7 +738,7 @@ func (e *Engine) EncodeText(ctx context.Context, texts ...string) ([][]float32, 
 		hi := min(lo+textBatch, len(todo))
 		vecs, err := e.text.Encode(todo[lo:hi])
 		if err != nil {
-			e.closeText() // A failed session must be loaded afresh on the next attempt.
+			e.closeText() // a failed session is loaded afresh next time
 			return nil, err
 		}
 		for k, v := range vecs {

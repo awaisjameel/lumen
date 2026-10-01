@@ -208,7 +208,7 @@ func (c *Cache) writeAtomic(path string, data []byte) error {
 		werr = renameRetry(f.Name(), path)
 	}
 	if werr != nil {
-		_ = os.Remove(f.Name()) // Best-effort cleanup; preserve the write failure.
+		_ = os.Remove(f.Name()) // best effort: the write's failure is the one to report
 	}
 	return werr
 }

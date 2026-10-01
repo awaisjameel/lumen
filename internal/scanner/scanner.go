@@ -86,7 +86,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 	for range max(1, s.HashWorkers) {
 		hw.Go(func() {
 			for f := range toHash {
-				sum, err := fingerprint(ctx, f.path, f.size)
+				sum, err := Fingerprint(ctx, f.path, f.size)
 				if err != nil {
 					if ctx.Err() != nil {
 						return
@@ -335,12 +335,9 @@ const (
 	sampleWindow  = 4 << 20
 )
 
-// Fingerprint returns the 16-byte content hash that identifies an asset.
-func Fingerprint(path string, size int64) ([]byte, error) {
-	return fingerprint(context.Background(), path, size)
-}
-
-func fingerprint(ctx context.Context, path string, size int64) ([]byte, error) {
+// Fingerprint returns the 16-byte content hash that identifies an asset,
+// stopping between reads when ctx ends.
+func Fingerprint(ctx context.Context, path string, size int64) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

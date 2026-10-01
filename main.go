@@ -219,7 +219,7 @@ type background struct {
 	cache   backgroundCache
 	stream  *services.Streamer // nil if it couldn't listen
 	cancel  context.CancelFunc
-	workers sync.WaitGroup // Shutdown waits for the server and cache cleanup.
+	workers sync.WaitGroup // the video server and cache cleanup, which shutdown waits for
 }
 
 // backgroundCache is the startup cleanup, separated so shutdown can be tested
@@ -329,7 +329,7 @@ func setupLogging(paths core.Paths) {
 // old (replacing the one before) and starts a new one, while running too: a
 // long session that logs a warning per failed request can't fill the disk.
 type rotatingLog struct {
-	mu        sync.Mutex // Guards the file and its tracked size during writes and rotation.
+	mu        sync.Mutex // guards f and size, through writes and rotation
 	name, old string
 	max, size int64
 	f         *os.File

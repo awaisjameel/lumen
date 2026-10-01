@@ -100,7 +100,7 @@ type Indexer struct {
 	scanning    bool
 	pendingFS   map[string]bool // changed paths waiting for the debounce
 	fsSince     time.Time       // when the oldest of them arrived
-	fsDue       time.Time       // Next flush deadline, protected by mu.
+	fsDue       time.Time       // the next flush's deadline (mu)
 	watchStop   context.CancelFunc
 
 	// Set by whoever changes things and cleared by reportLoop, which only then
@@ -367,7 +367,7 @@ func (ix *Indexer) Stop() {
 		return
 	}
 	ix.cancel()
-	ix.mu.Lock() // Barrier: restartWatchers starts no more watchers after cancellation.
+	ix.mu.Lock() // after cancel: restartWatchers starts no more watchers
 	if ix.watchStop != nil {
 		ix.watchStop()
 	}
