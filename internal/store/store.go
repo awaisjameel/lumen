@@ -324,6 +324,11 @@ var tagApplies = tagAppliesTo("x", "?")
 var tagConfidenceSQL = "COALESCE((SELECT CAST(value AS REAL) FROM settings WHERE key = '" + core.SettingTagConfidence + "'), " +
 	strconv.FormatFloat(core.TagConfidenceDefault, 'g', -1, 64) + ")"
 
+// foldPath is files.path's fold key, the expression of the unique index
+// files_path_fold (migration 0018): queries must use it exactly for SQLite
+// to use that index.
+var foldPath = foldKey("path")
+
 // foldKey is the SQL for core.Fold(expr). fold() is a call into Go for every
 // row, so ASCII text (a byte per character) and NULL use SQLite's lower(),
 // which is what core.Fold does to them.

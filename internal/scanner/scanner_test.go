@@ -74,7 +74,7 @@ func TestCancelledScanKeepsUnvisitedFiles(t *testing.T) {
 	if _, err := s.Scan(ctx, src, "", Options{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("interrupted scan: %v", err)
 	}
-	known, _, err := st.KnownFiles(t.Context(), src.ID, "")
+	known, err := st.KnownFiles(t.Context(), src.ID, "")
 	if err != nil || len(known) != 600 {
 		t.Fatalf("files after interrupted scan: %d, %v", len(known), err)
 	}

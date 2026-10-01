@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -268,16 +269,90 @@ func TestKnownFilesFoldsCaseLikeWindows(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
 	src, err := st.AddSource(ctx, `C:\Photos`)
 	check(t, err)
-	// The folder was renamed from ÉTÉ to été: both spellings were recorded.
+	// The folder was renamed from ÉTÉ to été: one file, under its new spelling.
 	check(t, errOf(st.Ingest(ctx, []IngestItem{
 		item(src.ID, `C:\Photos\ÉTÉ\a.jpg`, "a"),
 		item(src.ID, `C:\Photos\été\a.jpg`, "a"),
 		item(src.ID, `C:\Photos\misc\b.jpg`, "b"),
 	})))
-	known, extra, err := st.KnownFiles(ctx, src.ID, `C:\Photos\été`)
+	known, err := st.KnownFiles(ctx, src.ID, `C:\Photos\ÉTÉ`)
 	check(t, err)
-	if _, ok := known[core.Fold(`C:\Photos\ÉTÉ\a.jpg`)]; !ok || len(known) != 1 || len(extra) != 1 {
-		t.Fatalf("KnownFiles(été) = %v, extra %v; want the file once and its other spelling as extra", known, extra)
+	if _, ok := known[core.Fold(`C:\Photos\été\a.jpg`)]; !ok || len(known) != 1 {
+		t.Fatalf("KnownFiles(ÉTÉ) = %v; want the file once", known)
+	}
+	var path string
+	check(t, st.r.QueryRowContext(ctx, `SELECT path FROM files WHERE path LIKE '%a.jpg'`).Scan(&path))
+	if path != `C:\Photos\été\a.jpg` {
+		t.Fatalf("stored spelling %q, want the newest", path)
+	}
+}
+
+// A file renamed in letters NOCASE doesn't fold, with new content, stays one
+// file: its row moves to the new content and the old asset is left missing.
+// Before files_path_fold it got a second row, and the next scan dropped the
+// newer one, so the file switched between the two assets on every scan.
+func TestFileRenamedInOtherLettersWithNewContentStaysOneFile(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\Été.jpg`, "old")})))
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\été.jpg`, "new")})))
+	known, err := st.KnownFiles(ctx, src.ID, "")
+	check(t, err)
+	if len(known) != 1 {
+		t.Fatalf("KnownFiles = %v; want one file", known)
+	}
+	var files, missing, present int
+	check(t, st.r.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM files),
+		(SELECT count(*) FROM assets WHERE missing_since IS NOT NULL),
+		(SELECT count(*) FROM assets WHERE missing_since IS NULL)`).Scan(&files, &missing, &present))
+	if files != 1 || missing != 1 || present != 1 {
+		t.Fatalf("files %d, missing assets %d, present assets %d; want 1, 1, 1", files, missing, present)
+	}
+}
+
+// Migration 0018 keeps the newest row of each file named in several cases,
+// leaves the displaced asset missing, and makes the fold key unique.
+func TestUpgradeKeepsOneRowPerFileInAnyCase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "library.db")
+	st, err := Open(path)
+	check(t, err)
+	ctx := t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\Été.jpg`, "old"), item(src.ID, `C:\Photos\b.jpg`, "b")})))
+	// A schema 17 library could hold a second spelling with other content.
+	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX files_path_fold")))
+	check(t, errOf(st.w.ExecContext(ctx, "INSERT INTO assets (content_hash, kind, ext, taken_at, date_from, added_at) VALUES (x'6e6577', 'photo', '.jpg', 0, 'file', 0)")))
+	check(t, errOf(st.w.ExecContext(ctx, `INSERT INTO files (asset_id, source_id, path, size, mtime) VALUES (last_insert_rowid(), ?, 'C:\Photos\été.jpg', 1, 1)`, src.ID)))
+	check(t, errOf(st.w.ExecContext(ctx, "PRAGMA user_version = 17")))
+	check(t, st.Close())
+
+	st, err = Open(path)
+	check(t, err)
+	defer st.Close()
+	rows, err := st.r.QueryContext(ctx, "SELECT f.path, a.missing_since IS NOT NULL FROM files f JOIN assets a ON a.id = f.asset_id ORDER BY f.path")
+	check(t, err)
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var p string
+		var missing bool
+		check(t, rows.Scan(&p, &missing))
+		got = append(got, fmt.Sprintf("%s missing=%v", p, missing))
+	}
+	check(t, rows.Err())
+	if want := []string{`C:\Photos\b.jpg missing=false`, `C:\Photos\été.jpg missing=false`}; !slices.Equal(got, want) {
+		t.Fatalf("files after upgrade: %v, want %v", got, want)
+	}
+	var displacedMissing int
+	check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM assets WHERE content_hash = ? AND missing_since IS NOT NULL", []byte("old")).Scan(&displacedMissing))
+	if displacedMissing != 1 {
+		t.Fatal("the displaced asset is not marked missing")
+	}
+	if _, err := st.w.ExecContext(ctx, `INSERT INTO files (asset_id, source_id, path, size, mtime)
+		SELECT asset_id, source_id, 'C:\Photos\ÉTÉ.JPG', 1, 1 FROM files LIMIT 1`); err == nil {
+		t.Fatal("a second spelling of one file was accepted after the upgrade")
 	}
 }
 

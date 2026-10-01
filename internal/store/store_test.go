@@ -168,7 +168,7 @@ func TestAddSourceNeverOverlaps(t *testing.T) {
 	if len(srcs) != 1 || srcs[0].ID != parent.ID {
 		t.Fatalf("sources = %+v, want only the parent", srcs)
 	}
-	if files, _, _ := st.KnownFiles(ctx, parent.ID, ""); len(files) != 1 {
+	if files, _ := st.KnownFiles(ctx, parent.ID, ""); len(files) != 1 {
 		t.Fatalf("parent has %d files, want 1", len(files))
 	}
 }
@@ -190,7 +190,7 @@ func TestIngestJoinsDuplicatesAndKeepsMovedAssets(t *testing.T) {
 	}
 
 	// b.jpg is deleted: its asset leaves the grid but is kept.
-	files, _, _ := st.KnownFiles(ctx, src.ID, "")
+	files, _ := st.KnownFiles(ctx, src.ID, "")
 	if err := st.RemoveFiles(ctx, []int64{files[`c:\photos\b.jpg`].ID}); err != nil {
 		t.Fatal(err)
 	}

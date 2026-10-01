@@ -69,7 +69,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 	if !ok {
 		return Result{}, err
 	}
-	known, extra, err := s.Store.KnownFiles(ctx, src.ID, under)
+	known, err := s.Store.KnownFiles(ctx, src.ID, under)
 	if err != nil {
 		return Result{}, fmt.Errorf("load known files: %w", err)
 	}
@@ -228,8 +228,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 	}
 
 	// Whatever is left in known was not found on disk.
-	gone := make([]int64, 0, len(known)+len(extra))
-	gone = append(gone, extra...)
+	gone := make([]int64, 0, len(known))
 	for _, st := range known {
 		gone = append(gone, st.ID)
 	}

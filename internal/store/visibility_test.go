@@ -121,7 +121,7 @@ func TestVisibilityRevisionFollowsOnlyVisibility(t *testing.T) {
 	moved("an unblocked tag", func() error { return st.TagAsset(ctx, a, other) }, false)
 	moved("the blocked tag", func() error { return st.TagAsset(ctx, b, blocked) }, true)
 	moved("removing its last file", func() error {
-		known, _, err := st.KnownFiles(ctx, src.ID, "")
+		known, err := st.KnownFiles(ctx, src.ID, "")
 		if err != nil {
 			return err
 		}

@@ -21,10 +21,9 @@ type FileStat struct {
 }
 
 // KnownFiles returns the files recorded for a source, keyed by core.Fold of
-// their path. If under is not empty, only files inside that folder are
-// returned. Rows that name the same file in another case (left by a folder
-// renamed to another case) are returned as extra: one row per file is kept.
-func (s *Store) KnownFiles(ctx context.Context, sourceID int64, under string) (known map[string]FileStat, extra []int64, err error) {
+// their path (one row per file in any case: files_path_fold). If under is not
+// empty, only files inside that folder are returned.
+func (s *Store) KnownFiles(ctx context.Context, sourceID int64, under string) (known map[string]FileStat, err error) {
 	q := "SELECT id, path, size, mtime FROM files WHERE source_id = ?"
 	args := []any{sourceID}
 	var prefix string
@@ -34,16 +33,16 @@ func (s *Store) KnownFiles(ctx context.Context, sourceID int64, under string) (k
 		// A range scan instead of LIKE: every path inside dir sorts between
 		// dir+`\` and dir+`]` (']' is the character after '\'). NOCASE folds
 		// only A-Z, so a folder named in other letters is filtered in Go.
-		// +source_id keeps SQLite on the path range: with ORDER BY id it would
-		// read every file of the source through files_source instead.
+		// +source_id keeps SQLite on the path range rather than reading every
+		// file of the source through files_source.
 		if isASCII(dir) {
 			q = "SELECT id, path, size, mtime FROM files WHERE +source_id = ? AND path >= ? AND path < ?"
 			args = append(args, dir+`\`, dir+`]`)
 		}
 	}
-	rows, err := s.r.QueryContext(ctx, q+" ORDER BY id", args...)
+	rows, err := s.r.QueryContext(ctx, q, args...)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer rows.Close()
 	known = make(map[string]FileStat)
@@ -51,19 +50,13 @@ func (s *Store) KnownFiles(ctx context.Context, sourceID int64, under string) (k
 		var st FileStat
 		var path string
 		if err := rows.Scan(&st.ID, &path, &st.Size, &st.MTime); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		key := core.Fold(path)
-		if !strings.HasPrefix(key, prefix) {
-			continue
+		if key := core.Fold(path); strings.HasPrefix(key, prefix) {
+			known[key] = st
 		}
-		if _, dup := known[key]; dup {
-			extra = append(extra, st.ID)
-			continue
-		}
-		known[key] = st
 	}
-	return known, extra, rows.Err()
+	return known, rows.Err()
 }
 
 func isASCII(s string) bool {
@@ -145,19 +138,24 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 			return err
 		}
 		defer insJob.Close()
-		oldAsset, err := tx.PrepareContext(ctx, "SELECT asset_id FROM files WHERE path = ?")
+		// A file is the same file in any case, as Windows treats "ÉTÉ" and
+		// "été" as one name: rows are found by their folded path (the
+		// files_path_fold index), and an update also stores the new spelling.
+		oldFile, err := tx.PrepareContext(ctx, "SELECT id, asset_id FROM files WHERE "+foldPath+" = "+foldKey("?1"))
 		if err != nil {
 			return err
 		}
-		defer oldAsset.Close()
-		// Paths compare case-insensitively; a conflict also stores the new spelling.
-		upsertFile, err := tx.PrepareContext(ctx, `INSERT INTO files (asset_id, source_id, path, size, mtime) VALUES (?, ?, ?, ?, ?)
-			ON CONFLICT (path) DO UPDATE SET asset_id = excluded.asset_id, source_id = excluded.source_id,
-				path = excluded.path, size = excluded.size, mtime = excluded.mtime`)
+		defer oldFile.Close()
+		updFile, err := tx.PrepareContext(ctx, "UPDATE files SET asset_id = ?, source_id = ?, path = ?, size = ?, mtime = ? WHERE id = ?")
 		if err != nil {
 			return err
 		}
-		defer upsertFile.Close()
+		defer updFile.Close()
+		insFile, err := tx.PrepareContext(ctx, "INSERT INTO files (asset_id, source_id, path, size, mtime) VALUES (?, ?, ?, ?, ?)")
+		if err != nil {
+			return err
+		}
+		defer insFile.Close()
 
 		var orphanCandidates []int64
 		for _, it := range items {
@@ -199,14 +197,20 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 				return err
 			}
 
-			var prev int64
-			switch err := oldAsset.QueryRowContext(ctx, it.Path).Scan(&prev); {
-			case err == nil && prev != assetID:
-				orphanCandidates = append(orphanCandidates, prev) // the file's content changed
-			case err != nil && !errors.Is(err, sql.ErrNoRows):
-				return err
-			}
-			if _, err := upsertFile.ExecContext(ctx, assetID, it.SourceID, it.Path, it.Size, it.MTime); err != nil {
+			var fileID, prev int64
+			switch err := oldFile.QueryRowContext(ctx, it.Path).Scan(&fileID, &prev); {
+			case err == nil:
+				if prev != assetID {
+					orphanCandidates = append(orphanCandidates, prev) // the file's content changed
+				}
+				if _, err := updFile.ExecContext(ctx, assetID, it.SourceID, it.Path, it.Size, it.MTime, fileID); err != nil {
+					return err
+				}
+			case errors.Is(err, sql.ErrNoRows):
+				if _, err := insFile.ExecContext(ctx, assetID, it.SourceID, it.Path, it.Size, it.MTime); err != nil {
+					return err
+				}
+			default:
 				return err
 			}
 		}

@@ -141,7 +141,7 @@ func TestRemovedAssetsDoNotSuppressVisibleSearchResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, _, err := e.store.KnownFiles(ctx, sources[0].ID, "")
+	files, err := e.store.KnownFiles(ctx, sources[0].ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
