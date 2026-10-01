@@ -454,18 +454,17 @@ var (
 
 // Progress is the payload of the index:progress event.
 type Progress struct {
-	Scanning   bool `json:"scanning"`
-	Discovered int  `json:"discovered"` // files found in this scan so far
-	Total      int  `json:"total"`      // assets in the library
-	Metadata   int  `json:"metadata"`   // assets still waiting for metadata
-	Thumbnail  int  `json:"thumbnail"`  // assets still waiting for thumbnails
-	Embedding  int  `json:"embedding"`  // assets still waiting for the AI
-	Faces      int  `json:"faces"`      // assets still waiting for face recognition
-	Errors     int  `json:"errors"`
-	Skipped    int  `json:"skipped"`
-	Paused     bool `json:"paused"`
-	OnBattery  bool `json:"onBattery"` // AI work is waiting for mains power
-	AI         AI   `json:"ai"`
+	Scanning  bool `json:"scanning"`
+	Total     int  `json:"total"`     // assets in the library
+	Metadata  int  `json:"metadata"`  // assets still waiting for metadata
+	Thumbnail int  `json:"thumbnail"` // assets still waiting for thumbnails
+	Embedding int  `json:"embedding"` // assets still waiting for the AI
+	Faces     int  `json:"faces"`     // assets still waiting for face recognition
+	Errors    int  `json:"errors"`
+	Skipped   int  `json:"skipped"`
+	Paused    bool `json:"paused"`
+	OnBattery bool `json:"onBattery"` // AI work is waiting for mains power
+	AI        AI   `json:"ai"`
 }
 
 // Changes says what changed in the library: the payload of library:changed,

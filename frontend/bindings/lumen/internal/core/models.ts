@@ -511,11 +511,6 @@ export interface Progress {
     "scanning": boolean;
 
     /**
-     * files found in this scan so far
-     */
-    "discovered": number;
-
-    /**
      * assets in the library
      */
     "total": number;

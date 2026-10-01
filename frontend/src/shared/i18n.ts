@@ -196,7 +196,7 @@ const en = {
   'welcome.privacy':
     'Everything stays on this computer. Nothing is uploaded, and your files are never moved or changed.',
 
-  'status.scanning': 'Looking for photos… {n} found',
+  'status.scanning': 'Looking for photos…',
   'status.preparing': 'Preparing your library… {left} left',
   'status.upToDate': 'Up to date',
   'status.preparingPhase': 'Preparing your library',

@@ -98,7 +98,6 @@ type Indexer struct {
 	aiError     string
 	facesError  string
 	scanning    bool
-	discovered  int
 	pendingFS   map[string]bool // changed paths waiting for the debounce
 	fsSince     time.Time       // when the oldest of them arrived
 	fsDue       time.Time       // Next flush deadline, protected by mu.
@@ -553,12 +552,6 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 	sc := &scanner.Scanner{
 		Store:       ix.store,
 		HashWorkers: hashWorkers,
-		OnProgress: func(seen int) {
-			ix.mu.Lock()
-			ix.discovered = seen
-			ix.mu.Unlock()
-			ix.stale.Store(true)
-		},
 		OnIngested: func(int) {
 			ix.markChanged(core.Changes{Assets: true}) // new assets, moves, revived files
 			nudge(ix.wakeMeta)
@@ -584,7 +577,7 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 		}
 
 		ix.mu.Lock()
-		ix.scanning, ix.discovered = true, 0
+		ix.scanning = true
 		ix.mu.Unlock()
 		ix.stale.Store(true)
 
@@ -871,7 +864,7 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 	ix.mu.Lock()
 	p := core.Progress{
-		Scanning: ix.scanning, Discovered: ix.discovered, Paused: ix.paused,
+		Scanning: ix.scanning, Paused: ix.paused,
 		OnBattery: (ix.search != nil || ix.people != nil) && ix.onBattery && !ix.aiOnBattery,
 		AI:        core.AI{Device: ix.aiDevice, Error: ix.aiError, FacesError: ix.facesError},
 	}
