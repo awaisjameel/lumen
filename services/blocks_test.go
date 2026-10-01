@@ -132,6 +132,8 @@ func TestBlockPINRateLimit(t *testing.T) {
 	}
 	defer st.Close()
 	s := NewLibraryService(st, nil)
+	now := time.Now()
+	s.now = func() time.Time { return now }
 	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
 		t.Fatal(err)
 	}
@@ -143,19 +145,21 @@ func TestBlockPINRateLimit(t *testing.T) {
 	if err := s.UnlockBlocks(ctx, "123456"); !errors.Is(err, ErrPINRateLimited) {
 		t.Fatalf("PIN during cooldown: %v", err)
 	}
-	s.blocked.Lock()
-	s.blocked.retryAt = time.Now().Add(-time.Second)
-	s.blocked.Unlock()
+	now = now.Add(pinCooldown)
 	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
 		t.Fatalf("PIN after cooldown: %v", err)
 	}
 	if _, err := s.Blocks(ctx); err != nil {
 		t.Fatalf("list after unlock: %v", err)
 	}
+	for range 2 {
+		now = now.Add(blockUnlockIdle - time.Second)
+		if _, err := s.Blocks(ctx); err != nil {
+			t.Fatalf("list use did not refresh the idle timeout: %v", err)
+		}
+	}
 	// Left unused (the window reloaded before the screen could relock it).
-	s.blocked.Lock()
-	s.blocked.usedAt = time.Now().Add(-blockUnlockIdle - time.Second)
-	s.blocked.Unlock()
+	now = now.Add(blockUnlockIdle + time.Second)
 	if _, err := s.Blocks(ctx); !errors.Is(err, ErrBlockLocked) {
 		t.Fatalf("list after the idle timeout: %v", err)
 	}
@@ -165,5 +169,76 @@ func TestBlockPINRateLimit(t *testing.T) {
 	s.LockBlocks()
 	if _, err := s.Blocks(ctx); !errors.Is(err, ErrBlockLocked) {
 		t.Fatalf("list after relock: %v", err)
+	}
+}
+
+func TestConcurrentPINGuessesShareOneCooldown(t *testing.T) {
+	ctx := t.Context()
+	st, err := store.Open(filepath.Join(t.TempDir(), "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := NewLibraryService(st, nil)
+	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	const guesses = pinAttempts + 3
+	results := make(chan error, guesses)
+	for range guesses {
+		go func() { results <- s.UnlockBlocks(ctx, "wrong") }()
+	}
+	invalid, limited := 0, 0
+	for range guesses {
+		switch err := <-results; {
+		case errors.Is(err, store.ErrInvalidPIN):
+			invalid++
+		case errors.Is(err, ErrPINRateLimited):
+			limited++
+		default:
+			t.Errorf("unexpected PIN failure: %v", err)
+		}
+	}
+	if invalid != pinAttempts || limited != guesses-pinAttempts {
+		t.Fatalf("concurrent guesses: %d invalid, %d limited", invalid, limited)
+	}
+}
+
+func TestUndoExpiresAndOnlyRemovesTheLatestNewBlock(t *testing.T) {
+	ctx := t.Context()
+	st, err := store.Open(filepath.Join(t.TempDir(), "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := NewLibraryService(st, nil)
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	var changes []core.BlockChange
+	for _, name := range []string{"First", "Second"} {
+		id, err := st.CreateTag(ctx, name, core.TagManual, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		change, err := s.SetBlock(ctx, core.BlockTag, id, "", core.BlockLabel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		changes = append(changes, change)
+	}
+	if err := s.UndoBlock(ctx, changes[0].ID); !errors.Is(err, ErrBlockUndoExpired) {
+		t.Fatalf("undo earlier block: %v", err)
+	}
+	now = now.Add(blockUndoWindow + time.Nanosecond)
+	if err := s.UndoBlock(ctx, changes[1].ID); !errors.Is(err, ErrBlockUndoExpired) {
+		t.Fatalf("undo expired block: %v", err)
+	}
+	if blocks, err := st.Blocks(ctx); err != nil || len(blocks) != 2 {
+		t.Fatalf("expired undo changed blocks: %+v, %v", blocks, err)
 	}
 }

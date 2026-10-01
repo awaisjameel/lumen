@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lumen/internal/core"
+	"lumen/internal/search"
 	"lumen/internal/store"
 )
 
@@ -82,6 +83,16 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		if !regexp.MustCompile(`'` + regexp.QuoteMeta(event) + `' satisfies keyof Events.CustomEvents`).MatchString(bridge) {
 			t.Errorf("the bridge does not listen for %q", event)
 		}
+	}
+}
+
+func TestClosedSearchHasALocalisedFailureCode(t *testing.T) {
+	var failure Failure
+	if err := json.Unmarshal(MarshalError(fmt.Errorf("search: %w", search.ErrClosed)), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Code != CodeNoAI {
+		t.Fatalf("closed search code = %q, want %q", failure.Code, CodeNoAI)
 	}
 }
 

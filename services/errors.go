@@ -55,6 +55,7 @@ var errorCodes = []struct {
 	{store.ErrNotFound, CodeNotFound},
 	{ErrNoAI, CodeNoAI},
 	{search.ErrNotLoaded, CodeNoAI},
+	{search.ErrClosed, CodeNoAI},
 	{store.ErrInvalidName, CodeInvalidName},
 	{store.ErrAlbumExists, CodeAlbumExists},
 	{store.ErrAlbumMediaKind, CodeAlbumMediaKind},

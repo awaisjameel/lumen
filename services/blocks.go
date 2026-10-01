@@ -34,11 +34,12 @@ const (
 // unlockedNow reports whether the list is unlocked, and counts this as a use.
 // Call with s.blocked held.
 func (s *LibraryService) unlockedNow() bool {
-	if s.blocked.unlocked && time.Since(s.blocked.usedAt) > blockUnlockIdle {
+	now := s.now()
+	if s.blocked.unlocked && now.Sub(s.blocked.usedAt) > blockUnlockIdle {
 		s.blocked.unlocked = false
 	}
 	if s.blocked.unlocked {
-		s.blocked.usedAt = time.Now()
+		s.blocked.usedAt = now
 	}
 	return s.blocked.unlocked
 }
@@ -58,7 +59,7 @@ func (s *LibraryService) CreateBlockPIN(ctx context.Context, pin string) error {
 func (s *LibraryService) UnlockBlocks(ctx context.Context, pin string) error {
 	s.blocked.Lock()
 	defer s.blocked.Unlock()
-	if time.Now().Before(s.blocked.retryAt) {
+	if s.now().Before(s.blocked.retryAt) {
 		return ErrPINRateLimited
 	}
 	ok, err := s.store.VerifyBlockPIN(ctx, pin)
@@ -68,12 +69,12 @@ func (s *LibraryService) UnlockBlocks(ctx context.Context, pin string) error {
 	if !ok {
 		s.blocked.failures++
 		if s.blocked.failures >= pinAttempts {
-			s.blocked.retryAt = time.Now().Add(pinCooldown)
+			s.blocked.retryAt = s.now().Add(pinCooldown)
 			s.blocked.failures = 0
 		}
 		return store.ErrInvalidPIN
 	}
-	s.blocked.unlocked, s.blocked.usedAt = true, time.Now()
+	s.blocked.unlocked, s.blocked.usedAt = true, s.now()
 	s.blocked.failures = 0
 	return nil
 }
@@ -112,7 +113,7 @@ func (s *LibraryService) SetBlock(ctx context.Context, kind core.BlockKind, targ
 	}
 	if err == nil {
 		if created {
-			s.blocked.lastID, s.blocked.lastAt = id, time.Now()
+			s.blocked.lastID, s.blocked.lastAt = id, s.now()
 		} else if id == s.blocked.lastID {
 			s.blocked.lastID = 0
 		}
@@ -125,7 +126,7 @@ func (s *LibraryService) SetBlock(ctx context.Context, kind core.BlockKind, targ
 func (s *LibraryService) UndoBlock(ctx context.Context, id int64) error {
 	s.blocked.Lock()
 	defer s.blocked.Unlock()
-	if id == 0 || id != s.blocked.lastID || time.Since(s.blocked.lastAt) > blockUndoWindow {
+	if id == 0 || id != s.blocked.lastID || s.now().Sub(s.blocked.lastAt) > blockUndoWindow {
 		return ErrBlockUndoExpired
 	}
 	if err := s.store.RemoveBlock(ctx, id); err != nil {

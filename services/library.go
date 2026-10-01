@@ -57,7 +57,8 @@ func (e *Emitter) LibraryChanged(c core.Changes) {
 type LibraryService struct {
 	store   *store.Store
 	ix      *index.Indexer
-	blocked struct {
+	now     func() time.Time // Set before use; tests advance time without sleeping.
+	blocked struct {         // The mutex guards PIN access, rate limiting and Undo state.
 		sync.Mutex
 		unlocked bool
 		usedAt   time.Time // the unlocked list's last use (see blockUnlockIdle)
@@ -70,7 +71,7 @@ type LibraryService struct {
 
 // NewLibraryService returns the library service.
 func NewLibraryService(st *store.Store, ix *index.Indexer) *LibraryService {
-	return &LibraryService{store: st, ix: ix}
+	return &LibraryService{store: st, ix: ix, now: time.Now}
 }
 
 // Sources lists the folders in the library.
