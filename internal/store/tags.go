@@ -44,6 +44,8 @@ type AutoTag struct {
 // changed ones are updated (their embeddings dropped, so they are redone and
 // the library re-tagged), and built-ins no longer listed are removed, unless
 // the user tagged photos with them, in which case they become the user's own.
+// Blocked built-ins keep their prompts and matches until unblocked: retiring
+// one must never remove the user's block or reveal its photos.
 func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := time.Now().Unix()
@@ -74,7 +76,7 @@ func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 		if err != nil {
 			return err
 		}
-		stale := `kind = 'builtin' AND name NOT IN (SELECT value FROM json_each(?))`
+		stale := `kind = 'builtin' AND name NOT IN (SELECT value FROM json_each(?)) AND NOT ` + labelBlocked(core.BlockTag, "tags.id")
 		if _, err := tx.ExecContext(ctx, `DELETE FROM asset_tags WHERE source = 'ai' AND tag_id IN (SELECT id FROM tags WHERE `+stale+`)`, list); err != nil {
 			return err
 		}
