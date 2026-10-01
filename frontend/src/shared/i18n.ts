@@ -348,6 +348,16 @@ const en = {
   'error.blocksLocked': 'Enter your PIN on the Blocked screen first.',
   'error.undoExpired': 'It’s too late to undo that block. Unblock it on the Blocked screen instead.',
   'error.invalidBlock': 'That can’t be blocked.',
+
+  // Things and Events: rename and pin.
+
+  // Trash.
+
+  // Thumbnail cache.
+
+  // Text in photos (OCR).
+
+  // Forgotten PIN.
 } as const satisfies Record<string, Message>
 
 export type MessageKey = keyof typeof en
