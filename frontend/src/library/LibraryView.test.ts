@@ -26,6 +26,7 @@ const event = (id: number, name: string): Event => ({
   cover: 0,
   coverThumb: 0,
   placeId: 0,
+  pinned: false,
 })
 
 beforeEach(() => {

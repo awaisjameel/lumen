@@ -18,6 +18,7 @@ const en = {
   'nav.events': 'Events',
   'nav.albums': 'Albums',
   'nav.duplicates': 'Duplicates',
+  'nav.trash': 'Trash',
   'nav.settings': 'Settings',
 
   'blocked.title': 'Blocked',

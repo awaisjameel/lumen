@@ -28,6 +28,7 @@ import type {
   Changes,
   DayBucket,
   DayItems as RawDayItems,
+  DiskDeletion as RawDiskDeletion,
   DuplicateGroup as RawDuplicateGroup,
   DuplicateItem as RawDuplicateItem,
   Event,
@@ -91,6 +92,8 @@ export type SearchResults = NonNullLists<SearchResult, 'items' | 'people'>
 export type DuplicateItem = NonNullLists<RawDuplicateItem, 'paths'>
 /** Exact copies or similar photos to review. */
 export type DuplicateGroup = Omit<RawDuplicateGroup, 'items'> & { items: DuplicateItem[] }
+/** What moving files to the Recycle Bin did; kept files were left as they were. */
+export type DiskDeletion = NonNullLists<RawDiskDeletion, 'kept'>
 
 // Constants of the engine's that are not part of the generated bindings.
 // services/contract_test.go checks each against its Go original.
@@ -109,6 +112,9 @@ export const PIN_MIN_LEN = 6 // core.PINMinLen
 export const BLOCK_UNLOCK_IDLE_MINUTES = 10 // services.blockUnlockIdle
 export const PIN_MAX_LEN = 12 // core.PINMaxLen
 export const PIN_COOLDOWN_SECONDS = 30 // services.pinCooldown: the wait after too many wrong PINs
+export const THUMB_CACHE_DEFAULT_MB = 2048 // core.ThumbCacheDefaultMB
+export const THUMB_CACHE_MIN_MB = 256 // core.ThumbCacheMinMB
+export const THUMB_CACHE_MAX_MB = 102400 // core.ThumbCacheMaxMB
 /** The pattern attribute of a PIN field: PIN_MIN_LEN to PIN_MAX_LEN digits. */
 export const PIN_PATTERN = `[0-9]{${PIN_MIN_LEN},${PIN_MAX_LEN}}`
 export type ThumbSize = typeof THUMB_SMALL | typeof THUMB_LARGE
@@ -215,6 +221,7 @@ export const engine = {
   events: async (): Promise<Event[]> => (await LibraryService.Events()) ?? [],
   event: (id: number): Promise<Event> => LibraryService.Event(id),
   setEventName: (id: number, name: string): Promise<void> => LibraryService.SetEventName(id, name),
+  setEventPinned: (id: number, pinned: boolean): Promise<void> => LibraryService.SetEventPinned(id, pinned),
   setFavourite: (id: number, fav: boolean): Promise<void> => LibraryService.SetFavourite(id, fav),
   albums: async (): Promise<Album[]> => (await LibraryService.Albums()) ?? [],
   /** Creates a manual album holding items, or a smart album (no items). */
@@ -235,9 +242,28 @@ export const engine = {
   setAIOnBattery: (on: boolean): Promise<void> => LibraryService.SetAIOnBattery(on),
   setTagConfidence: (v: number): Promise<void> => LibraryService.SetTagConfidence(v),
   setEventGapHours: (hours: number): Promise<void> => LibraryService.SetEventGapHours(hours),
+  setThumbCacheMB: (mb: number): Promise<void> => LibraryService.SetThumbCacheMB(mb),
+  thumbCacheBytes: (): Promise<number> => MediaService.ThumbCacheBytes(),
+  setOCR: (on: boolean): Promise<void> => LibraryService.SetOCR(on),
+
+  trashAssets: (ids: number[]): Promise<void> => LibraryService.TrashAssets(ids),
+  restoreAssets: (ids: number[]): Promise<void> => LibraryService.RestoreAssets(ids),
+  restoreAllTrash: (): Promise<void> => LibraryService.RestoreAllTrash(),
+  trashCount: (): Promise<number> => LibraryService.TrashCount(),
+  /** Moves trashed assets' files to the Windows Recycle Bin. */
+  deleteFromDisk: async (ids: number[]): Promise<DiskDeletion> => {
+    const r = await LibraryService.DeleteFromDisk(ids)
+    return { ...r, kept: r.kept ?? [] }
+  },
+  deleteAllTrashFromDisk: async (): Promise<DiskDeletion> => {
+    const r = await LibraryService.DeleteAllTrashFromDisk()
+    return { ...r, kept: r.kept ?? [] }
+  },
 
   blockPINConfigured: (): Promise<boolean> => LibraryService.BlockPINConfigured(),
   createBlockPIN: (pin: string): Promise<void> => LibraryService.CreateBlockPIN(pin),
+  /** Replaces a forgotten PIN once the user signs in to Windows; the list stays locked. */
+  resetBlockPIN: (pin: string): Promise<void> => LibraryService.ResetBlockPIN(pin),
   unlockBlocks: (pin: string): Promise<void> => queueBlockSession(() => LibraryService.UnlockBlocks(pin)),
   lockBlocks: (): Promise<void> => queueBlockSession(() => LibraryService.LockBlocks()),
   blocks: async (): Promise<Block[]> => (await LibraryService.Blocks()) ?? [],
@@ -257,6 +283,8 @@ export const engine = {
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],
   createLabel: (name: string): Promise<number> => SearchService.CreateLabel(name),
   deleteTag: (id: number): Promise<void> => SearchService.DeleteTag(id),
+  renameThing: (id: number, name: string): Promise<void> => SearchService.RenameThing(id, name),
+  setThingPinned: (id: number, pinned: boolean): Promise<void> => SearchService.SetThingPinned(id, pinned),
   assetTags: async (id: number): Promise<AssetTag[]> => (await SearchService.AssetTags(id)) ?? [],
   tagAsset: (id: number, name: string): Promise<void> => SearchService.TagAsset(id, name),
   untagAsset: (id: number, tagID: number): Promise<void> => SearchService.UntagAsset(id, tagID),

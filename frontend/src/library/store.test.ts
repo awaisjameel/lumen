@@ -51,6 +51,7 @@ const progress: Progress = {
   thumbnail: 0,
   embedding: 0,
   faces: 0,
+  ocr: 0,
   errors: 0,
   skipped: 0,
   paused: false,
@@ -72,9 +73,14 @@ beforeEach(() => {
   vi.mocked(engine.search).mockReset()
   vi.mocked(engine.visibleAssets).mockReset()
   vi.mocked(engine.sources).mockReset().mockResolvedValue([])
-  vi.mocked(engine.settings)
-    .mockReset()
-    .mockResolvedValue({ videos: false, aiOnBattery: false, tagConfidence: 0.02, eventGapHours: 12 })
+  vi.mocked(engine.settings).mockReset().mockResolvedValue({
+    videos: false,
+    aiOnBattery: false,
+    tagConfidence: 0.02,
+    eventGapHours: 12,
+    thumbCacheMB: 2048,
+    ocr: false,
+  })
   vi.mocked(engine.progress).mockReset().mockResolvedValue(progress)
   vi.mocked(startMedia).mockReset().mockResolvedValue(undefined)
   vi.mocked(onProgress).mockReset().mockReturnValue(vi.fn())

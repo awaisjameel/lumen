@@ -89,6 +89,22 @@ export function DeleteAlbum(id: number): $CancellablePromise<void> {
 }
 
 /**
+ * DeleteAllTrashFromDisk moves the files of everything in the Trash to the
+ * Windows Recycle Bin.
+ */
+export function DeleteAllTrashFromDisk(): $CancellablePromise<core$0.DiskDeletion> {
+    return $Call.ByID(55127656);
+}
+
+/**
+ * DeleteFromDisk moves the files of trashed assets to the Windows Recycle
+ * Bin. Assets that are not in the Trash are refused.
+ */
+export function DeleteFromDisk(ids: number[] | null): $CancellablePromise<core$0.DiskDeletion> {
+    return $Call.ByID(1507331539, ids);
+}
+
+/**
  * DuplicateGroups returns exact file copies and likely similar photos for review.
  */
 export function DuplicateGroups(): $CancellablePromise<core$0.DuplicateGroup[] | null> {
@@ -173,6 +189,29 @@ export function Rescan(): $CancellablePromise<void> {
 }
 
 /**
+ * ResetBlockPIN replaces a forgotten PIN after the user signs in to Windows
+ * (Windows Hello, or the PC's password). Blocks are kept, and the list
+ * stays locked until the new PIN unlocks it.
+ */
+export function ResetBlockPIN(pin: string): $CancellablePromise<void> {
+    return $Call.ByID(2236387432, pin);
+}
+
+/**
+ * RestoreAllTrash takes everything out of the Trash.
+ */
+export function RestoreAllTrash(): $CancellablePromise<void> {
+    return $Call.ByID(2784798122);
+}
+
+/**
+ * RestoreAssets takes assets out of the Trash.
+ */
+export function RestoreAssets(ids: number[] | null): $CancellablePromise<void> {
+    return $Call.ByID(1245830972, ids);
+}
+
+/**
  * SetAIOnBattery lets the AI keep working on battery power (it waits for
  * mains power by default).
  */
@@ -209,10 +248,27 @@ export function SetEventName(id: number, name: string): $CancellablePromise<void
 }
 
 /**
+ * SetEventPinned pins or unpins the event holding asset id: pinned events
+ * sort first, and the pin follows the event as it regroups.
+ */
+export function SetEventPinned(id: number, pinned: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2954515139, id, pinned);
+}
+
+/**
  * SetFavourite marks or unmarks a favourite.
  */
 export function SetFavourite(id: number, fav: boolean): $CancellablePromise<void> {
     return $Call.ByID(2033754606, id, fav);
+}
+
+/**
+ * SetOCR turns reading the text in screenshots and documents on or off.
+ * Turning it on queues the photos it applies to; turning it off stops the
+ * work, and text already read stays searchable.
+ */
+export function SetOCR(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2726961037, on);
 }
 
 /**
@@ -228,6 +284,15 @@ export function SetPaused(paused: boolean): $CancellablePromise<void> {
  */
 export function SetTagConfidence(v: number): $CancellablePromise<void> {
     return $Call.ByID(1275176765, v);
+}
+
+/**
+ * SetThumbCacheMB sets the thumbnail cache's size cap. The least recently
+ * viewed thumbnails are dropped in the background to fit, and made again
+ * when next shown.
+ */
+export function SetThumbCacheMB(mb: number): $CancellablePromise<void> {
+    return $Call.ByID(2577875554, mb);
 }
 
 /**
@@ -272,6 +337,21 @@ export function SuggestedFolders(): $CancellablePromise<string[] | null> {
  */
 export function Timeline(view: core$0.View): $CancellablePromise<core$0.DayBucket[] | null> {
     return $Call.ByID(636808110, view);
+}
+
+/**
+ * TrashAssets moves assets to Lumen's Trash: they leave every view, and
+ * their files are untouched.
+ */
+export function TrashAssets(ids: number[] | null): $CancellablePromise<void> {
+    return $Call.ByID(2663586304, ids);
+}
+
+/**
+ * TrashCount is how many assets the Trash holds.
+ */
+export function TrashCount(): $CancellablePromise<number> {
+    return $Call.ByID(305184172);
 }
 
 /**

@@ -263,6 +263,23 @@ export enum Device {
 };
 
 /**
+ * DiskDeletion is what moving files to the Windows Recycle Bin did. A file
+ * the shell would not recycle (on a network share, or a drive without a
+ * Recycle Bin) is left exactly as it was: Lumen never deletes permanently.
+ */
+export interface DiskDeletion {
+    /**
+     * files now in the Recycle Bin
+     */
+    "recycled": number;
+
+    /**
+     * files left in place because they could not be recycled
+     */
+    "kept": string[] | null;
+}
+
+/**
  * DuplicateGroup holds exact file copies or photos that look similar.
  * Similarity is a suggestion for review, never a deletion decision.
  */
@@ -329,6 +346,11 @@ export interface Event {
     "cover": number;
     "coverThumb": number;
     "placeId": number;
+
+    /**
+     * the user pinned it: it sorts first
+     */
+    "pinned": boolean;
 }
 
 /**
@@ -394,6 +416,12 @@ export enum Filter {
     FilterAll = "",
     FilterFavourites = "favourites",
     FilterVideos = "videos",
+
+    /**
+     * FilterTrash is the app-level Trash: trashed assets that are still on
+     * disk, blocked ones included (the plan shows them in Trash like any other).
+     */
+    FilterTrash = "trash",
 };
 
 /**
@@ -534,6 +562,11 @@ export interface Progress {
      * assets still waiting for face recognition
      */
     "faces": number;
+
+    /**
+     * photos still waiting for their text to be read
+     */
+    "ocr": number;
     "errors": number;
     "skipped": number;
     "paused": boolean;
@@ -589,6 +622,12 @@ export interface Settings {
      */
     "tagConfidence": number;
     "eventGapHours": number;
+
+    /**
+     * ThumbCacheMinMB..ThumbCacheMaxMB
+     */
+    "thumbCacheMB": number;
+    "ocr": boolean;
 }
 
 /**
@@ -618,6 +657,16 @@ export interface Tag {
      * its thumbnail version
      */
     "coverThumb": number;
+
+    /**
+     * the user pinned it: it sorts first
+     */
+    "pinned": boolean;
+
+    /**
+     * a renamed built-in's own name; "" otherwise
+     */
+    "original": string;
 }
 
 /**

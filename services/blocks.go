@@ -79,6 +79,13 @@ func (s *LibraryService) UnlockBlocks(ctx context.Context, pin string) error {
 	return nil
 }
 
+// ResetBlockPIN replaces a forgotten PIN after the user signs in to Windows
+// (Windows Hello, or the PC's password). Blocks are kept, and the list
+// stays locked until the new PIN unlocks it.
+func (s *LibraryService) ResetBlockPIN(ctx context.Context, pin string) error {
+	return unbuilt(ctx, pin) // Phase 5 unit U5
+}
+
 // LockBlocks closes access to the private list as the user leaves the screen.
 func (s *LibraryService) LockBlocks() {
 	s.blocked.Lock()

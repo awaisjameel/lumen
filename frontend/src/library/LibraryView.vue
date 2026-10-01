@@ -65,6 +65,7 @@ const titles: Record<Filter, MessageKey> = {
   [Filter.FilterAll]: 'nav.library',
   [Filter.FilterFavourites]: 'nav.favourites',
   [Filter.FilterVideos]: 'nav.videos',
+  [Filter.FilterTrash]: 'nav.trash',
 }
 
 const tagId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.tag ?? 0) : 0))

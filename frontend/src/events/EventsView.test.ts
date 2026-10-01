@@ -21,6 +21,7 @@ const trip: Event = {
   cover: 0,
   coverThumb: 0,
   placeId: 0,
+  pinned: false,
 }
 let wrapper: ReturnType<typeof mount> | undefined
 

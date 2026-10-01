@@ -25,6 +25,10 @@ const (
 	StageThumbnail Stage = "thumbnail" // also produces the perceptual hash
 	StageEmbedding Stage = "embedding" // SigLIP image embedding, plus AI tags
 	StageFaces     Stage = "faces"     // face detection and identity vectors
+	// StageOCR reads the text in screenshots and documents. It is an
+	// optional add-on, off by default, so it is not in Stages: only the
+	// photos it applies to get a job, and only while it is on.
+	StageOCR Stage = "ocr"
 )
 
 // Stages lists every stage in pipeline order. A new asset gets a job for each.
@@ -32,7 +36,7 @@ var Stages = []Stage{StageMetadata, StageThumbnail, StageEmbedding, StageFaces}
 
 // AI reports whether a stage runs the AI models: heavy work that waits for
 // mains power unless the user allows it on battery.
-func (s Stage) AI() bool { return s == StageEmbedding || s == StageFaces }
+func (s Stage) AI() bool { return s == StageEmbedding || s == StageFaces || s == StageOCR }
 
 // JobStatus is the state of one stage for one asset.
 type JobStatus string
@@ -69,6 +73,8 @@ const (
 	SettingTagConfidence = "tag_confidence"     // float: minimum AI probability for a tag to apply
 	SettingVocabulary    = "vocabulary_version" // int: built-in Things last synced
 	SettingEventGapHours = "event_gap_hours"    // split events after this many quiet hours
+	SettingThumbCacheMB  = "thumb_cache_mb"     // int: the thumbnail cache's size cap, in MB
+	SettingOCR           = "ocr_enabled"        // bool: read text in screenshots and documents (off by default)
 )
 
 // Settings are the user-facing preferences.
@@ -77,7 +83,17 @@ type Settings struct {
 	AIOnBattery   bool    `json:"aiOnBattery"`
 	TagConfidence float64 `json:"tagConfidence"` // TagConfidenceMin..Max
 	EventGapHours int     `json:"eventGapHours"`
+	ThumbCacheMB  int     `json:"thumbCacheMB"` // ThumbCacheMinMB..ThumbCacheMaxMB
+	OCR           bool    `json:"ocr"`
 }
+
+// The thumbnail cache's size cap, in MB: the default, and the range the
+// setting may take. frontend/src/bridge mirrors them.
+const (
+	ThumbCacheDefaultMB = 2048
+	ThumbCacheMinMB     = 256
+	ThumbCacheMaxMB     = 102400
+)
 
 const (
 	// EventGapDefault is the number of quiet hours that starts a new event.
@@ -168,6 +184,14 @@ type BlockChange struct {
 	Created bool  `json:"created"`
 }
 
+// DiskDeletion is what moving files to the Windows Recycle Bin did. A file
+// the shell would not recycle (on a network share, or a drive without a
+// Recycle Bin) is left exactly as it was: Lumen never deletes permanently.
+type DiskDeletion struct {
+	Recycled int      `json:"recycled"` // files now in the Recycle Bin
+	Kept     []string `json:"kept"`     // files left in place because they could not be recycled
+}
+
 // GridItem is the minimum the grid needs to lay out and draw one cell.
 // Field names are short on purpose: a big library sends many of these.
 type GridItem struct {
@@ -189,6 +213,9 @@ const (
 	FilterAll        Filter = ""
 	FilterFavourites Filter = "favourites"
 	FilterVideos     Filter = "videos"
+	// FilterTrash is the app-level Trash: trashed assets that are still on
+	// disk, blocked ones included (the plan shows them in Trash like any other).
+	FilterTrash Filter = "trash"
 )
 
 // View is what the timeline grid shows: a filter, optionally narrowed to
@@ -212,7 +239,8 @@ type Event struct {
 	Cover      int64  `json:"cover"`
 	CoverThumb int    `json:"coverThumb"`
 	PlaceID    int64  `json:"placeId"`
-	FirstID    int64  `json:"-"` // boundary among equal timestamps; engine only
+	Pinned     bool   `json:"pinned"` // the user pinned it: it sorts first
+	FirstID    int64  `json:"-"`      // boundary among equal timestamps; engine only
 	LastID     int64  `json:"-"`
 }
 
@@ -315,6 +343,8 @@ type Tag struct {
 	Count      int     `json:"count"`
 	Cover      int64   `json:"cover"`      // asset id; 0 = none
 	CoverThumb int     `json:"coverThumb"` // its thumbnail version
+	Pinned     bool    `json:"pinned"`     // the user pinned it: it sorts first
+	Original   string  `json:"original"`   // a renamed built-in's own name; "" otherwise
 }
 
 // AssetTag is a tag on one asset.
@@ -460,6 +490,7 @@ type Progress struct {
 	Thumbnail int  `json:"thumbnail"` // assets still waiting for thumbnails
 	Embedding int  `json:"embedding"` // assets still waiting for the AI
 	Faces     int  `json:"faces"`     // assets still waiting for face recognition
+	OCR       int  `json:"ocr"`       // photos still waiting for their text to be read
 	Errors    int  `json:"errors"`
 	Skipped   int  `json:"skipped"`
 	Paused    bool `json:"paused"`

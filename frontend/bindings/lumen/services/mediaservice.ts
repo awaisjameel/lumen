@@ -20,6 +20,13 @@
 import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
 /**
+ * ThumbCacheBytes is the thumbnail cache's current size on disk.
+ */
+export function ThumbCacheBytes(): $CancellablePromise<number> {
+    return $Call.ByID(2647063451);
+}
+
+/**
  * VideoBase is where videos stream from: the Streamer's address, which the
  * bridge puts before /video/{id} and /play/{id}. "" when videos can't play.
  */

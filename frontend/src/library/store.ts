@@ -3,6 +3,7 @@ import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import {
   engine,
   EVENT_GAP_DEFAULT,
+  THUMB_CACHE_DEFAULT_MB,
   Filter,
   isCancelled,
   onLibraryChanged,
@@ -74,6 +75,8 @@ export const useLibrary = defineStore('library', () => {
     aiOnBattery: false,
     tagConfidence: TAG_CONFIDENCE_DEFAULT,
     eventGapHours: EVENT_GAP_DEFAULT,
+    thumbCacheMB: THUMB_CACHE_DEFAULT_MB,
+    ocr: false,
   })
   const settingsError = ref('')
   let eventGapSave: LatestSave<number> | null = null

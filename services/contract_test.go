@@ -53,6 +53,9 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"PIN_MAX_LEN":               core.PINMaxLen,
 		"PIN_COOLDOWN_SECONDS":      float64(pinCooldown / time.Second),
 		"BLOCK_UNLOCK_IDLE_MINUTES": float64(blockUnlockIdle / time.Minute),
+		"THUMB_CACHE_DEFAULT_MB":    core.ThumbCacheDefaultMB,
+		"THUMB_CACHE_MIN_MB":        core.ThumbCacheMinMB,
+		"THUMB_CACHE_MAX_MB":        core.ThumbCacheMaxMB,
 	} {
 		if got := constant(name); got != want {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)

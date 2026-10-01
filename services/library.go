@@ -336,7 +336,19 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 		return core.Settings{}, err
 	}
 	gap, err := s.store.EventGapHours(ctx)
-	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf, EventGapHours: gap}, err
+	if err != nil {
+		return core.Settings{}, err
+	}
+	cacheMB, err := s.store.Int(ctx, core.SettingThumbCacheMB, core.ThumbCacheDefaultMB)
+	if err != nil {
+		return core.Settings{}, err
+	}
+	if cacheMB < core.ThumbCacheMinMB || cacheMB > core.ThumbCacheMaxMB {
+		cacheMB = core.ThumbCacheDefaultMB
+	}
+	ocr, err := s.store.Bool(ctx, core.SettingOCR, false)
+	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf, EventGapHours: gap,
+		ThumbCacheMB: cacheMB, OCR: ocr}, err
 }
 
 // SetEventGapHours sets the quiet period that splits detected events.

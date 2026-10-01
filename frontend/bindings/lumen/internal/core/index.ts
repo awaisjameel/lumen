@@ -26,6 +26,7 @@ export type {
     Changes,
     DayBucket,
     DayItems,
+    DiskDeletion,
     DuplicateGroup,
     DuplicateItem,
     Event,
