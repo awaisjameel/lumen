@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { engine, onLibraryChanged } from '../bridge'
+import { engine, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event } from '../bridge'
 import EventsView from './EventsView.vue'
@@ -74,4 +74,26 @@ it('keeps a rename failure on screen while the list reloads around it', async ()
   await flushPromises()
   expect(engine.events).toHaveBeenCalledTimes(2)
   expect(w.get('[role="alert"]').text()).toContain('disk full')
+})
+
+it('validates emoji names by code point and still allows resetting an overlong draft', async () => {
+  const w = await mounted()
+  await w.get('button.icon-btn').trigger('click')
+  await flushPromises()
+  expect(w.get('form.rename input').attributes('maxlength')).toBeUndefined()
+  await w.get('form.rename input').setValue('😀'.repeat(MAX_NAME_LEN + 1))
+  await w.get('form.rename').trigger('submit')
+  await flushPromises()
+  expect(w.get('[role="alert"]').text()).toContain('80')
+  expect(engine.setEventName).not.toHaveBeenCalled()
+  await w.get('form.rename input').setValue('😀'.repeat(MAX_NAME_LEN))
+  await w.get('form.rename').trigger('submit')
+  await flushPromises()
+  expect(engine.setEventName).toHaveBeenCalledWith(trip.id, '😀'.repeat(MAX_NAME_LEN))
+  await w.get('button.icon-btn').trigger('click')
+  await flushPromises()
+  await w.get('form.rename input').setValue('😀'.repeat(MAX_NAME_LEN + 1))
+  await w.findAll('form.rename button')[2]?.trigger('click')
+  await flushPromises()
+  expect(engine.setEventName).toHaveBeenLastCalledWith(trip.id, '')
 })

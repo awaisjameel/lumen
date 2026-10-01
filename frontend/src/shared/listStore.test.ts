@@ -2,7 +2,54 @@ import { expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
-import { defineListStore, useList } from './listStore'
+import { defineCollectionStore, defineListStore, useList } from './listStore'
+
+it('supersedes an initial collection read when visibility changes', async () => {
+  setActivePinia(createPinia())
+  let finish!: (value: string[]) => void
+  const fetch = vi
+    .fn<() => Promise<string[]>>()
+    .mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+    .mockResolvedValueOnce(['Visible'])
+  const store = defineCollectionStore('private', fetch)()
+  const initial = store.load()
+  expect(store.loaded).toBe(false)
+  expect(store.loading).toBe(true)
+  const changed = store.invalidate()
+  finish(['Private'])
+  await Promise.all([initial, changed])
+  expect(store.list).toEqual(['Visible'])
+  expect(store.loaded).toBe(true)
+  expect(store.loading).toBe(false)
+  expect(fetch).toHaveBeenCalledTimes(2)
+})
+
+it('drops cached names and their id index while reloading after invalidation', async () => {
+  setActivePinia(createPinia())
+  let fail!: (reason: Error) => void
+  const fetch = vi
+    .fn<() => Promise<{ id: number; name: string }[]>>()
+    .mockResolvedValueOnce([{ id: 1, name: 'Private' }])
+    .mockReturnValueOnce(new Promise((_resolve, reject) => (fail = reject)))
+  const store = defineListStore('cached', fetch)()
+  await store.load()
+  const changed = store.invalidate()
+  expect(store.list).toEqual([])
+  expect(store.byId.size).toBe(0)
+  expect(store.loaded).toBe(false)
+  const rejected = expect(changed).rejects.toThrow('reload failed')
+  fail(new Error('reload failed'))
+  await rejected
+  expect(store.list).toEqual([])
+  expect(store.loading).toBe(false)
+})
+
+it('does not read an unopened collection on invalidation', async () => {
+  setActivePinia(createPinia())
+  const fetch = vi.fn<() => Promise<string[]>>()
+  await defineCollectionStore('unopened', fetch)().invalidate()
+  expect(fetch).not.toHaveBeenCalled()
+})
 
 it('reloads after an edit during a pending list request', async () => {
   setActivePinia(createPinia())

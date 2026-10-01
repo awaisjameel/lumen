@@ -30,11 +30,9 @@ func DefaultPaths() (Paths, error) {
 		return Paths{}, err
 	}
 	if dir == "" {
-		base, err := os.UserCacheDir() // %LOCALAPPDATA% on Windows
-		if err != nil {
-			return Paths{}, fmt.Errorf("locate app data folder: %w", err)
+		if dir, err = DefaultDataDir(); err != nil {
+			return Paths{}, err
 		}
-		dir = filepath.Join(base, "Lumen")
 	}
 	p := PathsIn(dir)
 	if p.Runtime, err = absEnv("LUMEN_RUNTIME_DIR"); err != nil {
@@ -48,6 +46,16 @@ func DefaultPaths() (Paths, error) {
 		p.Runtime = filepath.Dir(exe)
 	}
 	return p, nil
+}
+
+// DefaultDataDir is the user's own library: Lumen in the per-user app-data
+// folder (%LOCALAPPDATA% on Windows), where LUMEN_DATA_DIR is not set.
+func DefaultDataDir() (string, error) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("locate app data folder: %w", err)
+	}
+	return filepath.Join(base, "Lumen"), nil
 }
 
 // absEnv is the environment variable name as an absolute path, "" if unset.

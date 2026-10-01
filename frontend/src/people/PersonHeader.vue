@@ -11,6 +11,7 @@ import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
 import { useRename } from '../shared/rename'
+import { nameTooLong } from '../shared/names'
 import FaceThumb from './FaceThumb.vue'
 import { namePerson } from './naming'
 import { usePeople } from './store'
@@ -23,6 +24,7 @@ const person = ref<Person | null>(null)
 const rename = useRename<true>() // one editor: the name
 const { editing, draft } = rename
 const error = ref('')
+const actionError = ref('') // a rename's; the list's own reloads don't clear it
 let revision = 0
 let loadRequest = 0
 onBeforeUnmount(() => {
@@ -49,6 +51,7 @@ watch(
     person.value = null
     void rename.close(false)
     error.value = ''
+    actionError.value = ''
     void load()
   },
   { immediate: true },
@@ -61,11 +64,11 @@ function edit() {
 
 /** Saves the name typed; with refocus (Enter), focus returns to the name. */
 async function save(refocus: boolean) {
-  if (!editing.value) return
+  if (!editing.value || nameTooLong(draft.value)) return
   void rename.close(refocus) // leaving the field (blur) leaves focus where it went
   const name = draft.value.trim()
   if (name === (person.value?.name ?? '')) return
-  error.value = ''
+  actionError.value = ''
   const requested = revision
   const id = props.id
   try {
@@ -75,7 +78,7 @@ async function save(refocus: boolean) {
     if (shown !== null && shown !== props.id) await router.replace({ name: 'person', params: { id: shown } })
     else await load()
   } catch (e) {
-    if (requested === revision) error.value = errorText(e)
+    if (requested === revision) actionError.value = errorText(e)
   }
 }
 
@@ -101,7 +104,7 @@ async function blockPerson() {
         class="name-input field"
         :aria-label="t('person.name')"
         :placeholder="t('person.namePlaceholder')"
-        :maxlength="MAX_NAME_LEN"
+        :aria-invalid="nameTooLong(draft) || undefined"
         @keydown.enter="save(true)"
         @keydown.esc.stop="rename.close()"
         @blur="save(false)"
@@ -112,7 +115,10 @@ async function blockPerson() {
           <Icon name="pencil" :size="14" />
         </button>
       </h1>
-      <span v-if="error" class="count error" role="alert">{{ error }}</span>
+      <span v-if="editing && nameTooLong(draft)" class="count error" role="alert">{{
+        t('error.invalidName', { max: MAX_NAME_LEN })
+      }}</span>
+      <span v-else-if="actionError || error" class="count error" role="alert">{{ actionError || error }}</span>
       <span v-else class="count">{{ t('status.items', { n: person.count }) }}</span>
     </div>
     <RouterLink :to="{ name: 'personFaces', params: { id } }" class="btn" :title="t('person.review')">

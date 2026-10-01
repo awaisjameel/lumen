@@ -2,10 +2,12 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io/fs"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"lumen/internal/core"
 )
@@ -100,6 +102,130 @@ func TestIngestJoinsDuplicatesAndKeepsMovedAssets(t *testing.T) {
 	pending, failed, skipped, err := st.JobCounts(ctx)
 	if err != nil || pending[core.StageMetadata] != 2 || pending[core.StageThumbnail] != 2 || failed != 0 || skipped != 0 {
 		t.Fatalf("job counts = %v, %d, %d (%v)", pending, failed, skipped, err)
+	}
+}
+
+func TestMarkOrphansHandlesDuplicateCandidatesAndRemainingCopies(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	other, err := st.AddSource(ctx, `D:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{
+		item(src.ID, `C:\Photos\gone.jpg`, "gone"),
+		item(src.ID, `C:\Photos\copy.jpg`, "gone"),
+		item(src.ID, `C:\Photos\kept.jpg`, "kept"),
+		item(other.ID, `D:\Photos\kept.jpg`, "kept"),
+	})))
+	var gone, kept int64
+	check(t, st.r.QueryRowContext(ctx, "SELECT id FROM assets WHERE content_hash = ?", []byte("gone")).Scan(&gone))
+	check(t, st.r.QueryRowContext(ctx, "SELECT id FROM assets WHERE content_hash = ?", []byte("kept")).Scan(&kept))
+	check(t, st.RemoveSource(ctx, src.ID))
+	var missing sql.NullInt64
+	check(t, st.r.QueryRowContext(ctx, "SELECT missing_since FROM assets WHERE id = ?", gone).Scan(&missing))
+	if !missing.Valid {
+		t.Fatal("asset whose two files were removed is still present")
+	}
+	check(t, st.tx(ctx, func(tx *sql.Tx) error {
+		return markOrphans(ctx, tx, []int64{gone, gone, kept, kept}, missing.Int64+1)
+	}))
+	var again sql.NullInt64
+	check(t, st.r.QueryRowContext(ctx, "SELECT missing_since FROM assets WHERE id = ?", gone).Scan(&again))
+	if again != missing {
+		t.Fatalf("duplicate candidates changed an existing missing time: %v, want %v", again, missing)
+	}
+	check(t, st.r.QueryRowContext(ctx, "SELECT missing_since FROM assets WHERE id = ?", kept).Scan(&again))
+	if again.Valid {
+		t.Fatal("asset with a copy in another source was marked missing")
+	}
+}
+
+func TestMetadataWithoutCaptureDateRestoresRejectedEXIFGuess(t *testing.T) {
+	fileTime := time.Date(2024, time.April, 5, 12, 30, 0, 0, time.Local)
+	fileAt := core.WallClock(fileTime)
+	nameAt := time.Date(2020, time.January, 2, 3, 4, 5, 0, time.UTC).Unix()
+	for _, tc := range []struct {
+		name     string
+		paths    []string
+		oldFrom  core.DateSource
+		oldAt    int64
+		modified int64
+		wantFrom core.DateSource
+		wantAt   int64
+	}{
+		{"filename", []string{"IMG_20200102_030405.jpg"}, core.DateFromEXIF, 0, fileAt - 86400, core.DateFromFilename, nameAt},
+		{"file time", []string{"photo.jpg"}, core.DateFromEXIF, 0, 0, core.DateFromFile, fileAt},
+		{"QuickTime epoch", []string{"photo.jpg"}, core.DateFromEXIF, time.Date(1904, time.January, 1, 0, 0, 0, 0, time.UTC).Unix(), 0, core.DateFromFile, fileAt},
+		{"saved earlier", []string{"photo.jpg"}, core.DateFromEXIF, 0, fileAt - 86400, core.DateFromFile, fileAt - 86400},
+		{"saved later", []string{"photo.jpg"}, core.DateFromEXIF, 0, fileAt + 86400, core.DateFromFile, fileAt},
+		{"filename on another copy", []string{"photo.jpg", "IMG_20200102_030405.jpg"}, core.DateFromEXIF, 0, fileAt - 86400, core.DateFromFilename, nameAt},
+		{"older file copy", []string{"photo.jpg", "copy.jpg"}, core.DateFromEXIF, 0, 0, core.DateFromFile, fileAt - 86400},
+		{"keep filename", []string{"photo.jpg"}, core.DateFromFilename, nameAt, nameAt - 86400, core.DateFromFilename, nameAt},
+		{"keep file guess", []string{"photo.jpg"}, core.DateFromFile, fileAt - 86400, 0, core.DateFromFile, fileAt - 86400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, ctx := openTest(t), t.Context()
+			src, err := st.AddSource(ctx, `C:\Photos`)
+			check(t, err)
+			for i, path := range tc.paths {
+				in := item(src.ID, filepath.Join(src.Path, path), "same")
+				in.MTime = fileTime.Add(-time.Duration(i) * 24 * time.Hour).UnixNano()
+				check(t, errOf(st.Ingest(ctx, []IngestItem{in})))
+			}
+			jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 1)
+			check(t, err)
+			id := jobs[0].AssetID
+			check(t, errOf(st.w.ExecContext(ctx, "UPDATE assets SET taken_at = ?, date_from = ? WHERE id = ?", tc.oldAt, tc.oldFrom, id)))
+			check(t, st.SaveMetadata(ctx, "new", []MetadataResult{{AssetID: id, Modified: tc.modified}}))
+			var gotAt int64
+			var gotFrom core.DateSource
+			check(t, st.r.QueryRowContext(ctx, "SELECT taken_at, date_from FROM assets WHERE id = ?", id).Scan(&gotAt, &gotFrom))
+			if gotAt != tc.wantAt || gotFrom != tc.wantFrom {
+				t.Fatalf("date = %d from %s, want %d from %s", gotAt, gotFrom, tc.wantAt, tc.wantFrom)
+			}
+			var wrong int
+			check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM asset_jobs WHERE asset_id = ? AND taken_at != ?", id, tc.wantAt).Scan(&wrong))
+			if wrong != 0 {
+				t.Fatalf("%d jobs kept the rejected capture time", wrong)
+			}
+		})
+	}
+}
+
+func TestUnchangedMetadataOnlyRecordsTheVersion(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a")})))
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 1)
+	check(t, err)
+	id := jobs[0].AssetID
+	lat, lon := 48.8584, 2.2945
+	check(t, st.SaveMetadata(ctx, "old", []MetadataResult{{AssetID: id, TakenAt: 1000, Width: 4000, Height: 3000,
+		Orientation: 6, Camera: "Canon", Lat: &lat, Lon: &lon}}))
+	_, err = st.RequeueOutdated(ctx, map[core.Stage]string{core.StageMetadata: "new"})
+	check(t, err)
+	jobs, err = st.PendingJobs(ctx, core.StageMetadata, nil, 1)
+	check(t, err)
+	if len(jobs) != 1 || jobs[0].Prior != "old" || jobs[0].Width != 4000 || jobs[0].Height != 3000 {
+		t.Fatalf("requeued job = %+v", jobs)
+	}
+	// An unchanged result carries nothing else: none of it may be written.
+	check(t, st.SaveMetadata(ctx, "new", []MetadataResult{{AssetID: id, Unchanged: true}}))
+	var takenAt int64
+	var width, orientation int
+	var camera string
+	var placed bool
+	check(t, st.r.QueryRowContext(ctx, "SELECT taken_at, width, orientation, camera, place_id IS NOT NULL FROM assets WHERE id = ?",
+		id).Scan(&takenAt, &width, &orientation, &camera, &placed))
+	if takenAt != 1000 || width != 4000 || orientation != 6 || camera != "Canon" || !placed {
+		t.Fatalf("asset = taken %d, width %d, orientation %d, camera %q, placed %v", takenAt, width, orientation, camera, placed)
+	}
+	var version, status string
+	check(t, st.r.QueryRowContext(ctx, "SELECT model_version, status FROM asset_jobs WHERE asset_id = ? AND stage = ?",
+		id, core.StageMetadata).Scan(&version, &status))
+	if version != "new" || status != string(core.JobDone) {
+		t.Fatalf("metadata job = %s at %q", status, version)
 	}
 }
 

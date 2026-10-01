@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { nextTick, watch } from 'vue'
 import { engine, Filter } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { DayBucket, DayItems, SearchResults } from '../bridge'
@@ -7,7 +8,7 @@ import { affects, scopeKey, useLibrary } from './store'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
-  engine: { timeline: vi.fn(), days: vi.fn(), search: vi.fn() },
+  engine: { timeline: vi.fn(), days: vi.fn(), search: vi.fn(), visibleAssets: vi.fn() },
 }))
 
 function deferred<T>() {
@@ -36,9 +37,143 @@ beforeEach(() => {
   vi.mocked(engine.timeline).mockReset().mockResolvedValue(buckets)
   vi.mocked(engine.days).mockReset()
   vi.mocked(engine.search).mockReset()
+  vi.mocked(engine.visibleAssets).mockReset()
 })
 
 describe('library requests', () => {
+  it('prunes hidden search hits without changing order or rerunning the search', async () => {
+    const lib = shownLibrary()
+    vi.mocked(engine.search).mockResolvedValueOnce({
+      items: [3, 1, 2].map((id) => ({ id, w: 100, h: 100, t: 1 })),
+      people: ['Ali'],
+      pending: 5,
+      complete: false,
+      noAI: false,
+      blocked: false,
+    })
+    await lib.setScope({ kind: 'search', query: 'Ali' })
+    lib.selected = { day: 'results', id: 1 }
+    lib.viewer = { day: 'results', id: 1 }
+    vi.mocked(engine.visibleAssets).mockResolvedValueOnce([2, 3])
+    await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+    expect(lib.days.get('results')?.map((item) => item.id)).toEqual([3, 2])
+    expect(lib.total).toBe(2)
+    expect(lib.buckets).toEqual([{ day: 'results', count: 2 }])
+    expect(lib.searchInfo).toEqual({ people: ['Ali'], pending: 5, complete: false, noAI: false, blocked: false })
+    expect(lib.selected).toBeNull()
+    expect(lib.viewer).toBeNull()
+    expect(engine.search).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores a superseded visibility prune even if its response arrives last', async () => {
+    const lib = shownLibrary()
+    vi.mocked(engine.search).mockResolvedValueOnce({
+      items: [1, 2, 3].map((id) => ({ id, w: 100, h: 100, t: 1 })),
+      people: [],
+      pending: 0,
+      complete: true,
+      noAI: false,
+      blocked: false,
+    })
+    await lib.setScope({ kind: 'search', query: 'beach' })
+    const old = deferred<number[]>()
+    vi.mocked(engine.visibleAssets).mockReturnValueOnce(old.promise).mockResolvedValueOnce([2, 3])
+    const first = lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+    const signal = vi.mocked(engine.visibleAssets).mock.calls[0]?.[1]
+    await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+    expect(signal?.aborted).toBe(true)
+    old.resolve([1])
+    await first
+    expect(lib.days.get('results')?.map((item) => item.id)).toEqual([2, 3])
+  })
+
+  it('clears the search bucket when no current hits remain visible', async () => {
+    const lib = shownLibrary()
+    vi.mocked(engine.search).mockResolvedValueOnce({
+      items: result(1)[0]?.items ?? [],
+      people: [],
+      pending: 0,
+      complete: true,
+      noAI: false,
+      blocked: false,
+    })
+    await lib.setScope({ kind: 'search', query: 'beach' })
+    vi.mocked(engine.visibleAssets).mockResolvedValueOnce([])
+    await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+    expect(lib.days.size).toBe(0)
+    expect(lib.buckets).toEqual([])
+    expect(lib.total).toBe(0)
+  })
+
+  it('marks a detached search stale without reading visibility until shown again', async () => {
+    const lib = shownLibrary()
+    vi.mocked(engine.search).mockResolvedValue({
+      items: [],
+      people: [],
+      pending: 0,
+      complete: true,
+      noAI: false,
+      blocked: false,
+    })
+    await lib.setScope({ kind: 'search', query: 'beach' })
+    lib.detach()
+    await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+    expect(engine.visibleAssets).not.toHaveBeenCalled()
+    lib.attach()
+    await lib.setScope({ kind: 'search', query: 'beach' })
+    expect(engine.search).toHaveBeenCalledTimes(2)
+  })
+
+  it('prunes a pre-change search response that was still loading', async () => {
+    const lib = shownLibrary()
+    const pending = deferred<SearchResults>()
+    vi.mocked(engine.search).mockReturnValueOnce(pending.promise)
+    vi.mocked(engine.visibleAssets).mockResolvedValue([])
+    const loading = lib.setScope({ kind: 'search', query: 'beach' })
+    await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+    pending.resolve({
+      items: result(1)[0]?.items ?? [],
+      people: [],
+      pending: 0,
+      complete: true,
+      noAI: false,
+      blocked: false,
+    })
+    await loading
+    expect(lib.days.size).toBe(0)
+    expect(lib.total).toBe(0)
+    expect(engine.search).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads a day again when a thumbs-only refresh cancels its pending read', async () => {
+    const { CancelError } = await vi.importActual<{ CancelError: new (message: string) => Error }>('@wailsio/runtime')
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    let calls = 0
+    vi.mocked(engine.days).mockImplementation(
+      (_from, _to, _view, signal) =>
+        new Promise((resolve, reject) => {
+          calls++
+          if (calls === 1) signal?.addEventListener('abort', () => reject(new CancelError('stale')))
+          else resolve(result(calls))
+        }),
+    )
+    const stop = watch(
+      () => lib.days,
+      () => void lib.ensureDays([day]),
+      { flush: 'post' },
+    )
+    try {
+      void lib.ensureDays([day])
+      await nextTick()
+      await lib.refresh({ assets: false, thumbs: true, tags: false, people: false })
+      for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(calls).toBeGreaterThan(1)
+      expect(lib.days.get(day)?.[0]?.id).toBeGreaterThan(1)
+    } finally {
+      stop()
+    }
+  })
   it('cancels a superseded timeline read in the engine, without reporting it', async () => {
     // What the runtime rejects a cancelled call with (the bridge alone imports the runtime).
     const { CancelError } = await vi.importActual<{ CancelError: new (message: string) => Error }>('@wailsio/runtime')
@@ -255,10 +390,12 @@ describe('library requests', () => {
     await lib.setScope(all)
     vi.mocked(engine.days).mockResolvedValue(result(1))
     await lib.ensureDays([day])
+    // The grid asks for what it shows whenever days changes (LibraryView's
+    // watcher, a getter: it hears of a new Map, not of triggerRef).
+    watch([() => lib.days], () => void lib.ensureDays([day]), { flush: 'post' })
     await lib.refresh({ assets: false, thumbs: true, tags: false, people: false })
+    for (let i = 0; i < 5; i++) await nextTick()
     expect(engine.timeline).toHaveBeenCalledTimes(1)
-    expect(lib.needsDays([day])).toBe(true)
-    await lib.ensureDays([day])
     expect(engine.days).toHaveBeenCalledTimes(2)
   })
 

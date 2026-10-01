@@ -25,9 +25,9 @@ import (
 // a fix); the indexer then re-runs just that stage.
 // Photos and videos have their own, as different code serves them.
 const (
-	MetadataVersion       = "imagemeta-1.1+goexif+vips-3" // capture dates only (not modify dates); header sizes
+	MetadataVersion       = "imagemeta-1.1+goexif+vips-4" // unset epoch capture dates are ignored
 	ThumbnailVersion      = "vips-8.18-3"                 // colour profiles converted to sRGB, also in HEIC FFmpeg decodes
-	VideoMetadataVersion  = "ffprobe-9.0-1"
+	VideoMetadataVersion  = "ffprobe-9.0-2"
 	VideoThumbnailVersion = "ffmpeg-9.0+vips-8.18-1"
 )
 

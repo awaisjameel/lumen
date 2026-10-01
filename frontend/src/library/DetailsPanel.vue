@@ -9,6 +9,7 @@ import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
+import { nameTooLong } from '../shared/names'
 import FaceThumb from '../people/FaceThumb.vue'
 import PersonPicker from '../people/PersonPicker.vue'
 import { useLibrary } from './store'
@@ -24,6 +25,8 @@ const tags = ref<AssetTag[]>([])
 const faces = ref<Face[]>([])
 const newTag = ref('')
 const error = ref('')
+const detailError = ref('')
+const shownError = computed(() => error.value || detailError.value)
 const albumIDs = ref<number[]>([])
 const newAlbum = ref('')
 const creatingAlbum = ref(false)
@@ -46,25 +49,34 @@ onBeforeUnmount(() => {
 // ask again, nor clear what an edit said went wrong).
 watch(
   [() => props.sel?.id, () => lib.itemAt(props.sel)?.f],
-  async ([id], old) => {
-    const request = ++detailRequest
+  ([id], old) => {
     if (id !== old[0]) {
       error.value = ''
       detail.value = null
       placeName.value = ''
     }
-    if (!id) return
-    try {
-      const d = await engine.asset(id)
-      if (request !== detailRequest) return
-      detail.value = d
-      const place = d.placeId ? await orFallback(engine.place(d.placeId), null) : null
-      if (request === detailRequest) placeName.value = place?.name ?? ''
-    } catch (e) {
-      if (request === detailRequest) error.value = errorText(e)
-    }
+    void loadDetails(id)
   },
   { immediate: true },
+)
+
+async function loadDetails(id: number | undefined) {
+  const request = ++detailRequest
+  detailError.value = ''
+  if (!id) return
+  try {
+    const d = await engine.asset(id)
+    if (request !== detailRequest) return
+    detail.value = d
+    const place = d.placeId ? await orFallback(engine.place(d.placeId), null) : null
+    if (request === detailRequest) placeName.value = place?.name ?? ''
+  } catch (e) {
+    if (request === detailRequest) detailError.value = errorText(e)
+  }
+}
+useLiveReload(
+  () => loadDetails(props.sel?.id),
+  (c) => c.assets,
 )
 
 // Tags and faces: load with the photo, and again as the library changes
@@ -123,7 +135,7 @@ function toggleAlbum(albumID: number, e: Event) {
 async function createAlbumForItem() {
   const name = newAlbum.value.trim()
   const assetID = detail.value?.id
-  if (!name || !assetID || creatingAlbum.value) return
+  if (!name || nameTooLong(newAlbum.value) || !assetID || creatingAlbum.value) return
   const revision = selectionRevision
   creatingAlbum.value = true
   error.value = ''
@@ -190,7 +202,7 @@ async function edit(fn: () => Promise<unknown>, reload: () => Promise<void>): Pr
 async function addTag() {
   const name = newTag.value.trim()
   const id = detail.value?.id
-  if (!name || !id) return
+  if (!name || nameTooLong(newTag.value) || !id) return
   const requested = selectionRevision
   // What was typed stays until the tag is on, so a failure loses nothing.
   if (
@@ -292,7 +304,7 @@ function showInFolder(id: number) {
       </button>
     </header>
 
-    <p v-if="!detail && error" class="error pad" role="alert">{{ error }}</p>
+    <p v-if="!detail && shownError" class="error pad" role="alert">{{ shownError }}</p>
     <p v-else-if="!detail" class="muted pad">{{ props.sel ? t('details.loading') : t('details.none') }}</p>
 
     <div v-else class="pad body">
@@ -371,9 +383,12 @@ function showInFolder(id: number) {
           class="field add-tag"
           :placeholder="t('details.addTag')"
           :aria-label="t('details.addTag')"
-          :maxlength="MAX_NAME_LEN"
+          :aria-invalid="nameTooLong(newTag) || undefined"
           @keydown.enter="addTag"
         />
+        <p v-if="nameTooLong(newTag)" class="error small" role="alert">
+          {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
+        </p>
       </section>
 
       <section>
@@ -388,17 +403,20 @@ function showInFolder(id: number) {
             class="field"
             :placeholder="t('albums.createForItem')"
             :aria-label="t('albums.createForItem')"
-            :maxlength="MAX_NAME_LEN"
+            :aria-invalid="nameTooLong(newAlbum) || undefined"
           />
           <button
             class="icon-btn"
             :title="t('albums.createForItem')"
             :aria-label="t('albums.createForItem')"
-            :disabled="creatingAlbum || !newAlbum.trim()"
+            :disabled="creatingAlbum || !newAlbum.trim() || nameTooLong(newAlbum)"
           >
             <Icon name="plus" :size="16" />
           </button>
         </form>
+        <p v-if="nameTooLong(newAlbum)" class="error small" role="alert">
+          {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
+        </p>
       </section>
 
       <section v-if="faces.length">
@@ -456,7 +474,7 @@ function showInFolder(id: number) {
           {{ t('common.showInFolder') }}
         </button>
       </div>
-      <p v-if="error" class="error small" role="alert">{{ error }}</p>
+      <p v-if="shownError" class="error small" role="alert">{{ shownError }}</p>
     </div>
   </aside>
 </template>

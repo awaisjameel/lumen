@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"testing"
+	"time"
 
 	"lumen/internal/core"
 	"lumen/internal/store"
@@ -36,19 +37,20 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		return v
 	}
 	for name, want := range map[string]float64{
-		"THUMB_SMALL":            core.ThumbSmall,
-		"THUMB_LARGE":            core.ThumbLarge,
-		"SPRITE_COLS":            core.SpriteCols,
-		"SPRITE_ROWS":            core.SpriteRows,
-		"TAG_CONFIDENCE_DEFAULT": core.TagConfidenceDefault,
-		"TAG_CONFIDENCE_MIN":     core.TagConfidenceMin,
-		"TAG_CONFIDENCE_MAX":     core.TagConfidenceMax,
-		"EVENT_GAP_DEFAULT":      core.EventGapDefault,
-		"EVENT_GAP_MIN":          core.EventGapMin,
-		"EVENT_GAP_MAX":          core.EventGapMax,
-		"MAX_NAME_LEN":           core.MaxNameLen,
-		"PIN_MIN_LEN":            core.PINMinLen,
-		"PIN_MAX_LEN":            core.PINMaxLen,
+		"THUMB_SMALL":               core.ThumbSmall,
+		"THUMB_LARGE":               core.ThumbLarge,
+		"SPRITE_COLS":               core.SpriteCols,
+		"SPRITE_ROWS":               core.SpriteRows,
+		"TAG_CONFIDENCE_DEFAULT":    core.TagConfidenceDefault,
+		"TAG_CONFIDENCE_MIN":        core.TagConfidenceMin,
+		"TAG_CONFIDENCE_MAX":        core.TagConfidenceMax,
+		"EVENT_GAP_DEFAULT":         core.EventGapDefault,
+		"EVENT_GAP_MIN":             core.EventGapMin,
+		"EVENT_GAP_MAX":             core.EventGapMax,
+		"MAX_NAME_LEN":              core.MaxNameLen,
+		"PIN_MIN_LEN":               core.PINMinLen,
+		"PIN_MAX_LEN":               core.PINMaxLen,
+		"BLOCK_UNLOCK_IDLE_MINUTES": float64(blockUnlockIdle / time.Minute),
 	} {
 		if got := constant(name); got != want {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)

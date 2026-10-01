@@ -18,7 +18,6 @@ import (
 	"github.com/zeebo/xxh3"
 
 	"lumen/internal/core"
-	"lumen/internal/media"
 	"lumen/internal/store"
 )
 
@@ -92,7 +91,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 					slog.Warn("fingerprint failed", "path", f.path, "err", err)
 					continue
 				}
-				takenAt, from := media.GuessDate(filepath.Base(f.path), f.mtime)
+				takenAt, from := core.GuessDate(filepath.Base(f.path), f.mtime)
 				select {
 				case hashed <- store.IngestItem{
 					SourceID: src.ID, Path: f.path, Size: f.size, MTime: f.mtime.UnixNano(),

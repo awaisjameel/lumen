@@ -14,6 +14,20 @@ import (
 // exist (or no longer does), or an asset is not visible.
 var ErrNotFound = errors.New("not found")
 
+// VisibleAssets returns the visible subset of ids, keeping their order and
+// repeated IDs so callers can prune results without changing their ranking.
+func (s *Store) VisibleAssets(ctx context.Context, ids []int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return []int64{}, nil
+	}
+	list, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	return queryAll(ctx, s.r, scanID, `SELECT assets.id FROM json_each(?) AS requested
+		JOIN assets ON assets.id = requested.value WHERE `+visible+` ORDER BY requested.key`, string(list))
+}
+
 // UnavailableAssets identifies stored vectors that must not compete for search
 // results. Keep their embeddings so restored sources become searchable again.
 func (s *Store) UnavailableAssets(ctx context.Context) (map[int64]bool, error) {

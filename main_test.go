@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -44,11 +47,68 @@ func TestLogRotatesWhileRunning(t *testing.T) {
 	}
 }
 
+func TestLogTruncatesWhenRotationFails(t *testing.T) {
+	for _, startup := range []bool{true, false} {
+		t.Run(fmt.Sprint("startup=", startup), func(t *testing.T) {
+			dir := t.TempDir()
+			name, old := filepath.Join(dir, "lumen.log"), filepath.Join(dir, "lumen.old.log")
+			// A non-empty directory makes renaming fail on every platform.
+			if err := os.Mkdir(old, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(old, "held"), []byte("old"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			const limit = 1024
+			if startup {
+				if err := os.WriteFile(name, bytes.Repeat([]byte("x"), limit+1), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			log, err := openLog(name, old, limit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = log.f.Close() })
+			line := bytes.Repeat([]byte("y"), 800)
+			if !startup {
+				if _, err := log.Write(bytes.Repeat([]byte("x"), 800)); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := log.Write(line); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for range 3 {
+				data, err := os.ReadFile(name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if bytes.Contains(data, []byte("xxx")) || bytes.Count(data, []byte("level=WARN")) != 1 ||
+					!bytes.Contains(data, []byte("truncated active log")) {
+					t.Fatalf("failed rotation did not truncate and warn once: %q", data)
+				}
+				if int64(len(data)) != log.size || len(data) > limit+len(line) {
+					t.Fatalf("log grew after failed rotation: %d bytes, tracked %d", len(data), log.size)
+				}
+				if _, err := log.Write(line); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 // A scratch library (LUMEN_DATA_DIR) runs beside the user's Lumen: one
 // single-instance ID per library, the same whatever the path's case.
 func TestInstanceIDPerLibrary(t *testing.T) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultDir := filepath.Join(base, "Lumen")
 	t.Setenv("LUMEN_DATA_DIR", "")
-	if got := instanceID(core.PathsIn(`C:\Users\a\AppData\Local\Lumen`)); got != "io.lumen.app" {
+	if got := instanceID(core.PathsIn(defaultDir)); got != "io.lumen.app" {
 		t.Errorf("default library: %q", got)
 	}
 	t.Setenv("LUMEN_DATA_DIR", `D:\scratch`)
@@ -60,8 +120,26 @@ func TestInstanceIDPerLibrary(t *testing.T) {
 		t.Errorf("scratch WebView data in %q", got)
 	}
 	t.Setenv("LUMEN_DATA_DIR", "")
-	if got := webviewDataPath(core.PathsIn(`C:\Users\a\AppData\Local\Lumen`)); got != "" {
+	if got := webviewDataPath(core.PathsIn(defaultDir)); got != "" {
 		t.Errorf("the user's WebView data moved to %q", got)
+	}
+	sep := string(filepath.Separator)
+	variants := []string{defaultDir, defaultDir + sep + ".." + sep + "Lumen" + sep}
+	if runtime.GOOS == "windows" {
+		variants = append(variants, strings.ToUpper(defaultDir))
+	}
+	for _, dir := range variants {
+		t.Setenv("LUMEN_DATA_DIR", dir)
+		paths, err := core.DefaultPaths()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := instanceID(paths); got != "io.lumen.app" {
+			t.Errorf("explicit default library %q: %q", dir, got)
+		}
+		if got := webviewDataPath(paths); got != "" {
+			t.Errorf("explicit default library %q moved WebView data to %q", dir, got)
+		}
 	}
 }
 

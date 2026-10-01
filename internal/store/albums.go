@@ -110,7 +110,7 @@ func (s *Store) CreateAlbum(ctx context.Context, name string, kind core.AlbumKin
 		}
 		for _, asset := range items {
 			if err == nil {
-				err = setAlbumItem(ctx, tx, id, asset, true)
+				err = setAlbumItem(ctx, tx, asset, id, true)
 			}
 		}
 		return err
@@ -247,12 +247,13 @@ func (s *Store) AssetAlbums(ctx context.Context, assetID int64) ([]int64, error)
 		AND NOT `+labelBlocked(core.BlockAlbum, "i.album_id"), assetID)
 }
 
-// SetAlbumItem adds or removes an asset from a manual album.
-func (s *Store) SetAlbumItem(ctx context.Context, albumID, assetID int64, include bool) error {
-	return s.tx(ctx, func(tx *sql.Tx) error { return setAlbumItem(ctx, tx, albumID, assetID, include) })
+// SetAlbumItem adds or removes an asset from a manual album. Like tagging
+// (TagAsset), it takes the asset first.
+func (s *Store) SetAlbumItem(ctx context.Context, assetID, albumID int64, include bool) error {
+	return s.tx(ctx, func(tx *sql.Tx) error { return setAlbumItem(ctx, tx, assetID, albumID, include) })
 }
 
-func setAlbumItem(ctx context.Context, tx *sql.Tx, albumID, assetID int64, include bool) error {
+func setAlbumItem(ctx context.Context, tx *sql.Tx, assetID, albumID int64, include bool) error {
 	var kind core.AlbumKind
 	err := tx.QueryRowContext(ctx, `SELECT kind FROM albums WHERE id = ?
 		AND EXISTS (SELECT 1 FROM assets WHERE id = ? AND `+present+`)`, albumID, assetID).Scan(&kind)

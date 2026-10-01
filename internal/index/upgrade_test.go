@@ -213,3 +213,162 @@ func TestVideoQueuesMergeInCaptureOrder(t *testing.T) {
 		t.Fatalf("focused video jobs = %v, %v", got, err)
 	}
 }
+
+func TestMetadataStandingUsesTheKindVersionAndRejectsEpochs(t *testing.T) {
+	oldPhoto := "imagemeta-1.1+goexif+vips-3"
+	oldVideo := "ffprobe-9.0-1"
+	ordinary := core.WallClock(time.Date(1965, time.June, 3, 12, 0, 0, 0, time.UTC))
+	unix := core.WallClock(time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC))
+	quicktime := core.WallClock(time.Date(1904, time.January, 1, 0, 0, 0, 0, time.UTC))
+	for _, c := range []struct {
+		name  string
+		kind  core.Kind
+		prior string
+		taken int64
+		want  bool
+	}{
+		{"ordinary photo", core.KindPhoto, oldPhoto + "+" + oldVideo, ordinary, true},
+		{"Unix epoch", core.KindPhoto, oldPhoto + "+" + oldVideo, unix, false},
+		{"QuickTime epoch", core.KindPhoto, oldPhoto + "+" + oldVideo, quicktime, false},
+		{"beside epoch", core.KindPhoto, oldPhoto + "+" + oldVideo, unix + 1, true},
+		{"video tag change", core.KindVideo, oldPhoto + "+" + oldVideo, ordinary, false},
+		{"photo part changes only", core.KindVideo, oldPhoto + "+" + media.VideoMetadataVersion, ordinary, true},
+		{"video part changes only", core.KindPhoto, media.MetadataVersion + "+" + oldVideo, ordinary, true},
+		{"older photo fix", core.KindPhoto, "imagemeta-1.1+goexif+vips-2+" + oldVideo, ordinary, false},
+		{"unknown", core.KindPhoto, "unknown", ordinary, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := metadataStand(store.JobItem{Kind: c.kind, Prior: c.prior, TakenAt: c.taken}); got != c.want {
+				t.Errorf("metadata stands = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestUpgradeRequeuesVideoMetadata(t *testing.T) {
+	ctx := t.Context()
+	paths := core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	src, err := st.AddSource(ctx, `C:\Videos`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Ingest(ctx, []store.IngestItem{{SourceID: src.ID, Path: `C:\Videos\1965.mov`, Hash: []byte("1965"), Kind: core.KindVideo, Ext: ".mov", TakenAt: core.WallClock(time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC))}}); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 1)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("metadata = %v, %v", jobs, err)
+	}
+	old := "imagemeta-1.1+goexif+vips-3+ffprobe-9.0-1"
+	if err := st.SaveMetadata(ctx, old, []store.MetadataResult{{AssetID: jobs[0].AssetID}}); err != nil {
+		t.Fatal(err)
+	}
+	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	if n, err := st.RequeueVersions(ctx, map[core.Stage]store.StageVersion{core.StageMetadata: ix.version[core.StageMetadata]}); err != nil || n != 1 {
+		t.Fatalf("requeued metadata = %d, %v", n, err)
+	}
+	jobs, err = st.PendingJobs(ctx, core.StageMetadata, nil, 1)
+	if err != nil || len(jobs) != 1 || jobs[0].Prior != old || metadataStand(jobs[0]) {
+		t.Fatalf("video metadata must run in full: %v, %v", jobs, err)
+	}
+}
+
+func TestAnalysisTwoFacesStandOnlyForUnchangedLargePhotos(t *testing.T) {
+	ctx := t.Context()
+	paths := core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	dir := t.TempDir()
+	src, err := st.AddSource(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ai.FaceModel{Version: "sface-test", DetectSize: 640}
+	ix := New(st, paths, nil, Models{People: people.NewEngine(st, m)}, &fakeEvents{})
+	if ix.version[core.StageFaces].LegacyPhoto != "" {
+		t.Fatal("face upgrades must check pixels before adopting old output")
+	}
+	for _, c := range []struct {
+		name   string
+		width  int
+		height int
+		suffix string
+		want   bool
+	}{
+		{"large", 1000, 800, "", true},
+		{"large legacy", 800, 1000, "+video-frames-1", true},
+		{"small", 400, 300, "", false},
+		{"small legacy", 300, 400, "+video-frames-1", false},
+		{"blocked", 1000, 800, "", true}, // judged by the job's own size, which a block doesn't hide
+	} {
+		path := filepath.Join(dir, c.name+".jpg")
+		writeJPEG(t, path, c.width, c.height, color.RGBA{R: 10})
+		if _, err := st.Ingest(ctx, []store.IngestItem{{SourceID: src.ID, Path: path, Hash: []byte(c.name), Kind: core.KindPhoto, Ext: ".jpg", TakenAt: 100}}); err != nil {
+			t.Fatal(err)
+		}
+		jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 1)
+		if err != nil || len(jobs) != 1 {
+			t.Fatalf("metadata = %v, %v", jobs, err)
+		}
+		id := jobs[0].AssetID
+		if err := st.SaveMetadata(ctx, "m", []store.MetadataResult{{AssetID: id, Width: c.width, Height: c.height, Orientation: 1}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SaveThumbnails(ctx, "t", []store.ThumbResult{{AssetID: id}}); err != nil {
+			t.Fatal(err)
+		}
+		if c.name == "blocked" {
+			if _, err := st.SetBlock(ctx, core.BlockAsset, id, "", core.BlockPhotos); err != nil {
+				t.Fatal(err)
+			}
+		}
+		prior := m.Version + "+analysis-2" + c.suffix
+		if err := st.SaveFaces(ctx, m.Version, prior, []store.FaceResult{{AssetID: id, Faces: []store.DetectedFace{{X: 0.1, Y: 0.1, W: 0.3, H: 0.3, Score: 0.9, Vec: []float32{1, 0}}}}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.RequeueVersions(ctx, map[core.Stage]store.StageVersion{core.StageFaces: ix.version[core.StageFaces]}); err != nil {
+			t.Fatal(err)
+		}
+		items, err := st.PendingJobsOf(ctx, core.StageFaces, []int64{id})
+		if err != nil || len(items) != 1 || items[0].Prior != prior {
+			t.Fatalf("face job = %v, %v", items, err)
+		}
+		standing, err := ix.facesStanding(ctx, items)
+		if err != nil || standing[id] != c.want {
+			t.Errorf("%s: standing = %v, want %v (%v)", c.name, standing[id], c.want, err)
+		}
+	}
+}
+
+func TestFacePixelsStandingRejectsChangedHEIC(t *testing.T) {
+	decodes := func(path, version string) bool {
+		if version != media.HEIFProfilesVersion {
+			t.Fatalf("decode version = %s", version)
+		}
+		return path != "p3.heic"
+	}
+	for _, c := range []struct {
+		path   string
+		width  int
+		height int
+		want   bool
+	}{
+		{"p3.heic", 2000, 1500, false},
+		{"srgb.heic", 2000, 1500, true},
+		{"plain.jpg", 640, 480, true},
+		{"plain.jpg", 639, 480, false},
+		{"plain.jpg", 0, 1000, false},
+	} {
+		if got := facePixelsStand(c.path, c.width, c.height, 640, decodes); got != c.want {
+			t.Errorf("%s %dx%d: stands = %v, want %v", c.path, c.width, c.height, got, c.want)
+		}
+	}
+}

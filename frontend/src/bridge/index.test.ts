@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { CancellablePromise } from '@wailsio/runtime'
-import { LibraryService } from '../../bindings/lumen/services'
+import { LibraryService, SearchService } from '../../bindings/lumen/services'
 import { engine, ErrorCode } from './index'
 import { errorText } from '../shared/errors'
 
@@ -12,8 +12,18 @@ vi.mock('../../bindings/lumen/services', () => ({
   },
   MediaService: {},
   PeopleService: {},
-  SearchService: {},
+  SearchService: { VisibleAssets: vi.fn() },
 }))
+
+it('normalizes an empty visible subset and passes cancellation to the engine', async () => {
+  const controller = new AbortController()
+  const call = CancellablePromise.resolve<number[] | null>(null)
+  const cancelled = vi.spyOn(call, 'cancelOn')
+  vi.mocked(SearchService.VisibleAssets).mockReturnValueOnce(call)
+  expect(await engine.visibleAssets([1, 2], controller.signal)).toEqual([])
+  expect(SearchService.VisibleAssets).toHaveBeenCalledWith([1, 2])
+  expect(cancelled).toHaveBeenCalledWith(controller.signal)
+})
 
 it('uses asset-first album membership arguments end to end', async () => {
   await engine.setAlbumItem(17, 43, true)

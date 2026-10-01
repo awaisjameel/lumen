@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
+	"time"
 
 	"lumen/internal/ai"
 	"lumen/internal/core"
@@ -40,6 +42,26 @@ type videoResults struct {
 	faces      []store.FaceResult
 }
 
+func (ix *Indexer) videoStageReady(stage core.Stage) bool {
+	if stage == core.StageEmbedding {
+		return ix.search != nil && ix.videoEmbedRetry.ready(time.Now())
+	}
+	return ix.people != nil && ix.videoFaceRetry.ready(time.Now())
+}
+
+func finishVideoStage(ctx context.Context, stage core.Stage, backoff *stageBackoff, model releaser, attempted bool, err error) {
+	if !attempted || ctx.Err() != nil {
+		return
+	}
+	if err == nil {
+		*backoff = stageBackoff{}
+		return
+	}
+	delay := backoff.fail(time.Now())
+	slog.Error("video stage can't run", "stage", stage, "err", err, "retry in", delay)
+	model.release()
+}
+
 func (ix *Indexer) fetchVideos(ctx context.Context, n int) ([]store.JobItem, error) {
 	ix.mu.Lock()
 	focus := ix.focus
@@ -47,7 +69,7 @@ func (ix *Indexer) fetchVideos(ctx context.Context, n int) ([]store.JobItem, err
 	fetch := func(within *store.TimeRange) ([]store.JobItem, error) {
 		var items []store.JobItem
 		for _, stage := range []core.Stage{core.StageEmbedding, core.StageFaces} {
-			if (stage == core.StageEmbedding && ix.search == nil) || (stage == core.StageFaces && ix.people == nil) {
+			if !ix.videoStageReady(stage) {
 				continue
 			}
 			jobs, err := ix.store.PendingJobsKind(ctx, stage, core.KindVideo, within, n)
@@ -75,7 +97,14 @@ func (ix *Indexer) fetchVideos(ctx context.Context, n int) ([]store.JobItem, err
 }
 
 func (ix *Indexer) doVideos(ctx context.Context, items []store.JobItem) ([]videoResults, error) {
-	return ix.processVideos(ctx, items, ix.cache.Decoder.Frames)
+	rs, err := ix.processVideos(ctx, items, ix.cache.Decoder.Frames)
+	var serr storeError
+	if errors.As(err, &serr) {
+		return nil, err
+	}
+	// Model failures have their own backoff, so the shared worker can keep
+	// draining the healthy stage without releasing its model.
+	return rs, nil
 }
 
 type frameSampler func(context.Context, string, int, int, func(media.Frame) error) error
@@ -85,17 +114,30 @@ func (ix *Indexer) processVideos(ctx context.Context, items []store.JobItem, sam
 	for i, j := range items {
 		ids[i] = j.AssetID
 	}
-	embed, err := ix.store.Unfinished(ctx, core.StageEmbedding, ids)
-	if err != nil {
-		return nil, storeError{err}
+	var embed, face map[int64]bool
+	if ix.videoStageReady(core.StageEmbedding) {
+		var err error
+		embed, err = ix.store.Unfinished(ctx, core.StageEmbedding, ids)
+		if err != nil {
+			return nil, storeError{err}
+		}
 	}
-	face, err := ix.store.Unfinished(ctx, core.StageFaces, ids)
-	if err != nil {
-		return nil, storeError{err}
+	if ix.videoStageReady(core.StageFaces) {
+		var err error
+		face, err = ix.store.Unfinished(ctx, core.StageFaces, ids)
+		if err != nil {
+			return nil, storeError{err}
+		}
 	}
 	var enc *ai.ImageEncoder
 	var faces *ai.Faces
 	var embedErr, faceErr error
+	// Registered before acquire's defers, so failed models are released
+	// only after this batch has stopped using them.
+	defer func() {
+		finishVideoStage(ctx, core.StageEmbedding, &ix.videoEmbedRetry, ix.encoder, len(embed) > 0, embedErr)
+		finishVideoStage(ctx, core.StageFaces, &ix.videoFaceRetry, ix.faces, len(face) > 0, faceErr)
+	}()
 	if ix.search != nil && len(embed) > 0 {
 		embedErr = ix.search.Wait(ctx)
 		if embedErr == nil {

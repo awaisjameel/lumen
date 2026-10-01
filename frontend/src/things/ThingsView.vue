@@ -13,6 +13,7 @@ import { t } from '../shared/i18n'
 import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
+import { nameTooLong } from '../shared/names'
 import { useLibrary } from '../library/store'
 import SearchBox from '../search/SearchBox.vue'
 import { useThings } from './store'
@@ -39,7 +40,7 @@ useLiveReload(things.load, (c) => c.tags || c.assets || c.thumbs) // counts grow
 
 async function create() {
   const n = name.value.trim()
-  if (!n || busy.value) return
+  if (!n || nameTooLong(name.value) || busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -93,12 +94,15 @@ async function remove(tag: Tag) {
           :placeholder="t('things.new')"
           :aria-label="t('things.new')"
           :disabled="busy || !!aiError"
-          :maxlength="MAX_NAME_LEN"
+          :aria-invalid="nameTooLong(name) || undefined"
         />
-        <button class="btn btn-primary" :disabled="busy || !name.trim() || !!aiError">
+        <button class="btn btn-primary" :disabled="busy || !name.trim() || nameTooLong(name) || !!aiError">
           {{ busy ? t('things.finding') : t('things.find') }}
         </button>
       </form>
+      <p v-if="nameTooLong(name)" class="page-error" role="alert">
+        {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
+      </p>
       <p v-if="error || things.error || aiError" class="page-error" role="alert">
         {{ error || things.error || t('settings.aiError', { error: aiError }) }}
       </p>

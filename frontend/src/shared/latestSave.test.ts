@@ -58,3 +58,36 @@ it('reports a failure after saving without rolling the saved value back', async 
   expect(failed).toHaveBeenCalledOnce()
   expect(rollback).not.toHaveBeenCalled()
 })
+
+it('supersedes a failing save as soon as a debounced input arrives', async () => {
+  const { save, calls } = deferredSaves()
+  const rollback = vi.fn()
+  const failed = vi.fn()
+  const set = latestSave(save, 0.02, { rollback, failed })
+  const first = set(0.1)
+  set.touch()
+  calls[0]?.reject(new Error('older save failed'))
+  await first
+  expect(rollback).not.toHaveBeenCalled()
+  expect(failed).not.toHaveBeenCalled()
+  const newest = set(0.2)
+  calls[1]?.resolve()
+  await newest
+  expect(save).toHaveBeenLastCalledWith(0.2)
+})
+
+it('does not treat an older queued value as the newest debounced input', async () => {
+  const { save, calls } = deferredSaves()
+  const rollback = vi.fn()
+  const failed = vi.fn()
+  const set = latestSave(save, 0, { rollback, failed })
+  const done = set(1)
+  void set(2)
+  set.touch()
+  calls[0]?.resolve()
+  await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2))
+  calls[1]?.reject(new Error('queued save failed'))
+  await done
+  expect(rollback).not.toHaveBeenCalled()
+  expect(failed).not.toHaveBeenCalled()
+})

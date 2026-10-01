@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -138,8 +139,8 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 		defer insAsset.Close()
 		// Jobs start with the asset's capture time (see migration 0007), and
 		// waiting if an earlier stage has to run first.
-		insJob, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO asset_jobs (asset_id, stage, status, updated_at, taken_at)
-			VALUES (?, ?, ?, ?, ?)`)
+		insJob, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO asset_jobs (asset_id, stage, status, updated_at, taken_at, kind)
+			VALUES (?, ?, ?, ?, ?, ?)`)
 		if err != nil {
 			return err
 		}
@@ -189,7 +190,7 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 					if len(waitsFor[st]) > 0 {
 						status = core.JobWaiting
 					}
-					if _, err := insJob.ExecContext(ctx, assetID, st, status, now, it.TakenAt); err != nil {
+					if _, err := insJob.ExecContext(ctx, assetID, st, status, now, it.TakenAt, it.Kind); err != nil {
 						return err
 					}
 				}
@@ -253,16 +254,12 @@ func markOrphans(ctx context.Context, tx *sql.Tx, assetIDs []int64, now int64) e
 	if len(assetIDs) == 0 {
 		return nil
 	}
-	st, err := tx.PrepareContext(ctx, `UPDATE assets SET missing_since = ?
-		WHERE id = ? AND missing_since IS NULL AND NOT EXISTS (SELECT 1 FROM files WHERE asset_id = ?)`)
+	list, err := json.Marshal(assetIDs)
 	if err != nil {
 		return err
 	}
-	defer st.Close()
-	for _, id := range assetIDs {
-		if _, err := st.ExecContext(ctx, now, id, id); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err = tx.ExecContext(ctx, `UPDATE assets SET missing_since = ?
+		WHERE id IN (SELECT value FROM json_each(?)) AND missing_since IS NULL
+		AND NOT EXISTS (SELECT 1 FROM files WHERE asset_id = assets.id)`, now, string(list))
+	return err
 }

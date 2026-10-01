@@ -8,6 +8,12 @@ export interface LatestSaveHandlers<T> {
   failed: (e: unknown) => void
 }
 
+export interface LatestSave<T> {
+  (value: T): Promise<void>
+  /** Supersede older saves as soon as an input arrives, before its debounce. */
+  touch: () => void
+}
+
 /**
  * Saves a setting that can change faster than the engine saves it (a number
  * typed in, a slider): one save at a time, then the newest value asked for
@@ -20,19 +26,17 @@ export function latestSave<T>(
   save: (value: T) => Promise<unknown>,
   initial: NoInfer<T>,
   handlers: LatestSaveHandlers<T>,
-): (value: T) => Promise<void> {
+): LatestSave<T> {
   let lastSaved = initial
-  let queued: { value: T } | null = null
+  let queued: { value: T; revision: number } | null = null
   let revision = 0
   let running: Promise<void> | null = null
-  return (value) => {
-    queued = { value }
-    revision++
+  const set = (value: T): Promise<void> => {
+    queued = { value, revision: ++revision }
     running ??= (async () => {
       try {
         while (queued) {
-          const { value: next } = queued
-          const requested = revision
+          const { value: next, revision: requested } = queued
           queued = null
           try {
             await save(next)
@@ -48,7 +52,7 @@ export function latestSave<T>(
             try {
               await handlers.saved?.(next)
             } catch (e) {
-              handlers.failed(e) // it was saved: nothing to roll back
+              if (requested === revision) handlers.failed(e) // it was saved: nothing to roll back
             }
           }
         }
@@ -58,4 +62,9 @@ export function latestSave<T>(
     })()
     return running
   }
+  return Object.assign(set, {
+    touch: () => {
+      revision++
+    },
+  })
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlbumKind, BlockKind, engine, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
 import type { Album, AlbumRule } from '../bridge'
@@ -9,6 +9,7 @@ import { block } from '../shared/block'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
+import { nameTooLong } from '../shared/names'
 import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
 import SearchBox from '../search/SearchBox.vue'
@@ -43,6 +44,13 @@ function reset() {
   rule.value = emptyRule()
 }
 
+watch(
+  () => albums.list,
+  (list) => {
+    if (editing.value !== null && !list.some((album) => album.id === editing.value)) reset()
+  },
+)
+
 /** Loads an album into the form at the top of the page, and goes there. */
 async function edit(album: Album) {
   if (busy.value) return
@@ -57,7 +65,7 @@ async function edit(album: Album) {
 }
 
 async function save() {
-  if (!name.value.trim() || busy.value) return
+  if (!name.value.trim() || nameTooLong(name.value) || busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -94,8 +102,8 @@ async function remove(album: Album) {
   }
 }
 
-function blockAlbum(album: Album) {
-  void block(BlockKind.BlockAlbum, album.id, album.name)
+async function blockAlbum(album: Album) {
+  if ((await block(BlockKind.BlockAlbum, album.id, album.name)) && editing.value === album.id) reset()
 }
 </script>
 
@@ -122,7 +130,7 @@ function blockAlbum(album: Album) {
             class="field"
             :aria-label="t('albums.name')"
             :placeholder="t('albums.name')"
-            :maxlength="MAX_NAME_LEN"
+            :aria-invalid="nameTooLong(name) || undefined"
             required
           />
           <select v-if="editing === null" v-model="kind" :aria-label="t('albums.type')">
@@ -159,7 +167,10 @@ function blockAlbum(album: Album) {
           </label>
           <label class="check"><input v-model="rule.favourites" type="checkbox" />{{ t('albums.favourites') }}</label>
         </div>
-        <button class="btn btn-primary" :disabled="busy || !name.trim()">
+        <p v-if="nameTooLong(name)" class="page-error" role="alert">
+          {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
+        </p>
+        <button class="btn btn-primary" :disabled="busy || !name.trim() || nameTooLong(name)">
           {{ editing === null ? t('albums.create') : t('albums.save') }}
         </button>
       </form>

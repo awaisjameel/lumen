@@ -63,6 +63,9 @@ var DefaultParams = Params{Threshold: 0.42, MinFaces: 3, MinSharpness: 15, MaxYa
 // run (see Linker); without them they are worked out from scratch. If ctx
 // ends first, its error is returned (a big library takes seconds).
 func Cluster(ctx context.Context, in Input, p Params) (store.ClusterChanges, error) {
+	if err := ctx.Err(); err != nil {
+		return store.ClusterChanges{}, err
+	}
 	if in.Links == nil {
 		links, err := NewLinker(p).Update(ctx, in.Faces)
 		if err != nil {
@@ -71,7 +74,9 @@ func Cluster(ctx context.Context, in Input, p Params) (store.ClusterChanges, err
 		in.Links = links
 	}
 	c := newClustering(in.Faces, in.People, in.Rejections)
-	c.link(ctx, in.Links, p)
+	if err := c.link(ctx, in.Links, p); err != nil {
+		return store.ClusterChanges{}, err
+	}
 	if err := ctx.Err(); err != nil {
 		return store.ClusterChanges{}, err
 	}
@@ -157,7 +162,10 @@ func newClustering(faces []store.ClusterFace, people []store.ClusterPerson, reje
 
 // link connects every unplaced face to its most similar faces (links) and
 // people, and people to each other.
-func (c *clustering) link(ctx context.Context, links map[int64][]int64, p Params) {
+func (c *clustering) link(ctx context.Context, links map[int64][]int64, p Params) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	connect := func(i, j int) {
 		if i != j {
 			c.groups[i].links[j] = struct{}{}
@@ -200,12 +208,16 @@ func (c *clustering) link(ctx context.Context, links map[int64][]int64, p Params
 		}
 	}
 	for a, i := range placed {
+		if a%16 == 0 && ctx.Err() != nil {
+			return ctx.Err()
+		}
 		for _, j := range placed[a+1:] {
 			if ai.Dot(means[i], means[j]) >= p.Threshold {
 				connect(i, j)
 			}
 		}
 	}
+	return ctx.Err()
 }
 
 // merge joins the most similar linked groups while they reach threshold.

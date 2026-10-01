@@ -280,7 +280,7 @@ func (s *LibraryService) AssetAlbums(ctx context.Context, id int64) ([]int64, er
 
 // SetAlbumItem changes membership in a manual album.
 func (s *LibraryService) SetAlbumItem(ctx context.Context, assetID, albumID int64, include bool) error {
-	return s.store.SetAlbumItem(ctx, albumID, assetID, include)
+	return s.store.SetAlbumItem(ctx, assetID, albumID, include)
 }
 
 // ShowInFolder opens Explorer with one of the asset's files selected: path,

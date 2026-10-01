@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -131,11 +132,32 @@ func run() error {
 // library, so a scratch one (LUMEN_DATA_DIR, as UI tests run) opens beside
 // the user's instead of focusing it.
 func instanceID(paths core.Paths) string {
-	if os.Getenv("LUMEN_DATA_DIR") == "" {
+	if defaultLibrary(paths) {
 		return "io.lumen.app"
 	}
-	sum := sha256.Sum256([]byte(core.Fold(filepath.Clean(paths.DataDir))))
+	sum := sha256.Sum256([]byte(dataPathKey(paths.DataDir)))
 	return "io.lumen.app." + hex.EncodeToString(sum[:8])
+}
+
+// defaultLibrary reports whether paths is the user's own library, even when
+// LUMEN_DATA_DIR names it: one library is one instance, whichever way it was
+// reached.
+func defaultLibrary(paths core.Paths) bool {
+	dir, err := core.DefaultDataDir()
+	return err == nil && dataPathKey(paths.DataDir) == dataPathKey(dir)
+}
+
+// dataPathKey is dir as two paths to one folder compare: absolute, clean
+// and, on Windows, case-folded.
+func dataPathKey(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	dir = filepath.Clean(dir)
+	if runtime.GOOS == "windows" {
+		dir = core.Fold(dir)
+	}
+	return dir
 }
 
 // webviewDataPath is where the WebView keeps its own data (storage, cache):
@@ -144,7 +166,7 @@ func instanceID(paths core.Paths) string {
 // cached images with it, and WebView2 lets both run at once (it refuses a
 // second instance of one folder started with other options).
 func webviewDataPath(paths core.Paths) string {
-	if os.Getenv("LUMEN_DATA_DIR") == "" {
+	if defaultLibrary(paths) {
 		return ""
 	}
 	return filepath.Join(paths.DataDir, "webview")
@@ -298,7 +320,10 @@ type rotatingLog struct {
 func openLog(name, old string, maxSize int64) (*rotatingLog, error) {
 	l := &rotatingLog{name: name, old: old, max: maxSize}
 	if fi, err := os.Stat(name); err == nil && fi.Size() > maxSize {
-		_ = os.Rename(name, old) // a fresh log either way; losing the old one is fine
+		if err := l.rotate(); err != nil {
+			return nil, err
+		}
+		return l, nil
 	}
 	if err := l.open(); err != nil {
 		return nil, err
@@ -320,13 +345,36 @@ func (l *rotatingLog) open() error {
 	return nil
 }
 
+func (l *rotatingLog) rotate() error {
+	renameErr := os.Rename(l.name, l.old)
+	if renameErr != nil {
+		// An old log held open on Windows must not let the active one grow
+		// forever. Discard it when keeping a backup is impossible.
+		if err := os.Truncate(l.name, 0); err != nil {
+			return err
+		}
+	}
+	if err := l.open(); err != nil {
+		return err
+	}
+	if renameErr != nil {
+		// Write directly because slog may be writing through this same lock.
+		n, err := fmt.Fprintf(l.f, "level=WARN msg=%q err=%q\n", "log rotation failed; truncated active log", renameErr)
+		l.size += int64(n)
+		if err != nil {
+			_ = l.f.Close()
+			return err
+		}
+	}
+	return nil
+}
+
 func (l *rotatingLog) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.size+int64(len(p)) > l.max && l.size > 0 {
 		_ = l.f.Close()
-		_ = os.Rename(l.name, l.old)
-		if err := l.open(); err != nil {
+		if err := l.rotate(); err != nil {
 			return 0, err
 		}
 	}

@@ -37,6 +37,7 @@ func NewSearchService(st *store.Store, engine *search.Engine, faces bool) *Searc
 // the description can't be searched (the result says so): named people's
 // photos are still found.
 func (s *SearchService) Search(ctx context.Context, query string) (core.SearchResult, error) {
+	query = search.BoundQuery(query) // before the names are matched too
 	named, err := s.store.SearchNames(ctx, query)
 	if err != nil {
 		return core.SearchResult{}, err
@@ -116,6 +117,16 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 		names = []string{}
 	}
 	return core.SearchResult{Items: items, People: names, Pending: pending, Complete: complete, NoAI: noAI}, nil
+}
+
+// VisibleAssets lets the UI prune current search results after a visibility
+// change, keeping their relevance order without running the search again.
+func (s *SearchService) VisibleAssets(ctx context.Context, ids []int64) ([]int64, error) {
+	visible, err := s.store.VisibleAssets(ctx, ids)
+	if visible == nil {
+		visible = []int64{}
+	}
+	return visible, err
 }
 
 // PrepareSearch readies the AI for a search the user is starting to type

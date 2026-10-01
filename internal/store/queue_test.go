@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,15 +36,131 @@ func TestPendingJobsReadsTheQueueInIndexOrder(t *testing.T) {
 	}
 }
 
+func TestPendingJobsKindSkipsTheOtherKindsBacklog(t *testing.T) {
+	for _, kind := range []core.Kind{core.KindPhoto, core.KindVideo} {
+		t.Run(string(kind), func(t *testing.T) {
+			st, ctx := openTest(t), t.Context()
+			src, err := st.AddSource(ctx, `C:\Media`)
+			check(t, err)
+			other := core.KindPhoto
+			if kind == core.KindPhoto {
+				other = core.KindVideo
+			}
+			items := make([]IngestItem, 10_000)
+			for i := range items {
+				items[i] = item(src.ID, fmt.Sprintf(`C:\Media\%d.jpg`, i), fmt.Sprint(i))
+				items[i].Kind = other
+				items[i].TakenAt += int64(i)
+			}
+			check(t, errOf(st.Ingest(ctx, items)))
+			check(t, errOf(st.w.ExecContext(ctx, "UPDATE asset_jobs SET status = 'done' WHERE stage IN ('metadata', 'thumbnail')")))
+			check(t, errOf(st.w.ExecContext(ctx, "UPDATE asset_jobs SET status = 'pending' WHERE stage = 'embedding'")))
+			jobs, err := st.PendingJobsKind(ctx, core.StageEmbedding, kind, nil, 10)
+			check(t, err)
+			if len(jobs) != 0 {
+				t.Fatalf("empty kind returned jobs: %+v", jobs)
+			}
+			for _, within := range []*TimeRange{nil, {From: 1_699_999_999, To: 1_700_000_001}} {
+				q, args := pendingJobsKindQuery(core.StageEmbedding, kind, within, 10)
+				plan, err := queryAll(ctx, st.r, func(r *sql.Rows) (d string, err error) {
+					var id, parent, unused int
+					err = r.Scan(&id, &parent, &unused, &d)
+					return d, err
+				}, "EXPLAIN QUERY PLAN "+q, args...)
+				check(t, err)
+				all := strings.Join(plan, "\n")
+				if !strings.Contains(all, "asset_jobs_pending_kind (stage=? AND kind=?") || strings.Contains(all, "TEMP B-TREE") {
+					t.Fatalf("kind query does not bound the queue by kind in date order:\n%s", all)
+				}
+				t.Log(all)
+			}
+			a, b := item(src.ID, `C:\Media\a.jpg`, "a"), item(src.ID, `C:\Media\b.jpg`, "b")
+			a.Kind, b.Kind = kind, kind
+			check(t, errOf(st.Ingest(ctx, []IngestItem{a, b})))
+			jobs, err = st.PendingJobsKind(ctx, core.StageMetadata, kind, nil, 10)
+			check(t, err)
+			if len(jobs) != 2 || jobs[0].Path != b.Path || jobs[1].Path != a.Path {
+				t.Fatalf("kind query changed capture-time tie ordering: %+v", jobs)
+			}
+			for _, within := range []*TimeRange{nil, {From: a.TakenAt, To: a.TakenAt + 1}} {
+				got, err := st.PendingJobsKind(ctx, core.StageMetadata, kind, within, 1)
+				check(t, err)
+				if len(got) != 1 || got[0] != jobs[0] {
+					t.Fatalf("kind query with range %v and limit 1 = %+v, want %+v", within, got, jobs[:1])
+				}
+			}
+			check(t, st.SaveMetadata(ctx, "m", []MetadataResult{{AssetID: jobs[0].AssetID}, {AssetID: jobs[1].AssetID}}))
+			check(t, st.SaveThumbnails(ctx, "t", []ThumbResult{{AssetID: jobs[0].AssetID}, {AssetID: jobs[1].AssetID}}))
+			got, err := st.PendingJobsKind(ctx, core.StageEmbedding, kind, nil, 10)
+			check(t, err)
+			if len(got) != 2 || got[0] != jobs[0] || got[1] != jobs[1] {
+				t.Fatalf("runnable embedding jobs changed: %+v, want %+v", got, jobs)
+			}
+			var empty int
+			check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM asset_jobs WHERE kind = ''").Scan(&empty))
+			if empty != 0 {
+				t.Fatalf("%d ingested jobs have no kind", empty)
+			}
+		})
+	}
+}
+
+func TestPendingJobsOfLooksUpCandidatesByKey(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	q, args := runnableQuery("json_each(?) ids CROSS JOIN asset_jobs j ON j.asset_id = ids.value", []any{"[1,2]"}, core.StageFaces)
+	plan, err := queryAll(ctx, st.r, func(r *sql.Rows) (d string, err error) {
+		var id, parent, unused int
+		err = r.Scan(&id, &parent, &unused, &d)
+		return d, err
+	}, "EXPLAIN QUERY PLAN "+q+" ORDER BY j.taken_at DESC, j.asset_id DESC", args...)
+	check(t, err)
+	all := strings.Join(plan, "\n")
+	if !strings.Contains(all, "SEARCH j USING PRIMARY KEY (asset_id=? AND stage=?)") {
+		t.Fatalf("PendingJobsOf does not look up candidates by key:\n%s", all)
+	}
+	t.Log(all)
+}
+
+func TestUpgradeBackfillsJobKinds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "library.db")
+	st, err := Open(path)
+	check(t, err)
+	ctx := t.Context()
+	src, err := st.AddSource(ctx, `C:\Media`)
+	check(t, err)
+	photo, video := item(src.ID, `C:\Media\a.jpg`, "a"), item(src.ID, `C:\Media\b.mp4`, "b")
+	video.Kind = core.KindVideo
+	check(t, errOf(st.Ingest(ctx, []IngestItem{photo, video})))
+	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX asset_jobs_pending_kind")))
+	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE asset_jobs DROP COLUMN kind")))
+	check(t, errOf(st.w.ExecContext(ctx, "PRAGMA user_version = 16")))
+	check(t, st.Close())
+	st, err = Open(path)
+	check(t, err)
+	defer st.Close()
+	var wrong int
+	check(t, st.r.QueryRowContext(ctx, `SELECT count(*) FROM asset_jobs j JOIN assets a ON a.id = j.asset_id
+		WHERE j.kind != a.kind OR j.kind = ''`).Scan(&wrong))
+	if wrong != 0 {
+		t.Fatalf("%d upgraded jobs have the wrong kind", wrong)
+	}
+	jobs, err := st.PendingJobsKind(ctx, core.StageMetadata, core.KindVideo, nil, 10)
+	check(t, err)
+	if len(jobs) != 1 || jobs[0].Path != video.Path {
+		t.Fatalf("upgraded video jobs: %+v", jobs)
+	}
+}
+
 func TestKindVersionsAdoptPhotosAndRetryOldVideos(t *testing.T) {
 	st, ctx := openTest(t), t.Context()
 	src, err := st.AddSource(ctx, `C:\Photos`)
 	check(t, err)
+	video := item(src.ID, `C:\Photos\video.mp4`, "video")
+	video.Kind = core.KindVideo
 	check(t, errOf(st.Ingest(ctx, []IngestItem{
 		item(src.ID, `C:\Photos\photo.jpg`, "photo"),
-		item(src.ID, `C:\Photos\video.mp4`, "video"),
+		video,
 	})))
-	check(t, errOf(st.w.ExecContext(ctx, "UPDATE assets SET kind = 'video' WHERE content_hash = ?", []byte("video"))))
 	check(t, errOf(st.w.ExecContext(ctx, `UPDATE asset_jobs SET status = 'done', model_version = 'model+video-frames-1'
 		WHERE stage = 'embedding'`)))
 	check(t, errOf(st.w.ExecContext(ctx, `UPDATE asset_jobs SET status = 'skipped', attempts = 3
@@ -229,6 +346,8 @@ func TestUpgradeMovesBlockedJobsToWaiting(t *testing.T) {
 	a, b := jobs[0].AssetID, jobs[1].AssetID
 	check(t, st.SaveMetadata(ctx, "m", []MetadataResult{{AssetID: b, Orientation: 1}}))
 	check(t, errOf(st.w.ExecContext(ctx, "UPDATE asset_jobs SET status = 'pending' WHERE status = 'waiting'")))
+	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX asset_jobs_pending_kind")))
+	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE asset_jobs DROP COLUMN kind")))          // added by v17
 	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE asset_jobs DROP COLUMN prior_version"))) // added by v9
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX assets_by_place")))                       // added by v10
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE places")))

@@ -106,6 +106,7 @@ export const EVENT_GAP_MIN = 1 // core.EventGapMin
 export const EVENT_GAP_MAX = 72 // core.EventGapMax
 export const MAX_NAME_LEN = 80 // core.MaxNameLen: people, Things and albums
 export const PIN_MIN_LEN = 6 // core.PINMinLen
+export const BLOCK_UNLOCK_IDLE_MINUTES = 10 // services.blockUnlockIdle
 export const PIN_MAX_LEN = 12 // core.PINMaxLen
 /** The pattern attribute of a PIN field: PIN_MIN_LEN to PIN_MAX_LEN digits. */
 export const PIN_PATTERN = `[0-9]{${PIN_MIN_LEN},${PIN_MAX_LEN}}`
@@ -248,6 +249,8 @@ export const engine = {
     const r = await cancellable(SearchService.Search(query), signal)
     return { ...r, items: r.items ?? [], people: r.people ?? [] }
   },
+  visibleAssets: async (ids: number[], signal?: AbortSignal): Promise<number[]> =>
+    (await cancellable(SearchService.VisibleAssets(ids), signal)) ?? [],
   suggestTags: async (text: string): Promise<Tag[]> => (await SearchService.SuggestTags(text)) ?? [],
   prepareSearch: (): Promise<void> => SearchService.PrepareSearch(),
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],

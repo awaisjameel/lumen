@@ -2,6 +2,7 @@ package people
 
 import (
 	"context"
+	"errors"
 	"math"
 	"math/rand/v2"
 	"reflect"
@@ -12,6 +13,49 @@ import (
 )
 
 const dim = 128
+
+func TestClusterWithCachedLinksHonoursCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	in := Input{Faces: []store.ClusterFace{{ID: 1, Vec: []float32{1}}, {ID: 2, Person: 1, Vec: []float32{1}}}, Links: map[int64][]int64{1: {2}}}
+	got, err := Cluster(ctx, in, DefaultParams)
+	if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(got, store.ClusterChanges{}) {
+		t.Fatalf("cancelled clustering = %+v, %v", got, err)
+	}
+}
+
+type cancelOnCheck struct {
+	context.Context
+	cancel context.CancelFunc
+	checks int
+}
+
+func (c *cancelOnCheck) Err() error {
+	c.checks++
+	if c.checks == 3 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+func TestLinkExistingPeopleStopsDuringCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	checked := &cancelOnCheck{Context: ctx, cancel: cancel}
+	var faces []store.ClusterFace
+	for i := range 64 {
+		id := int64(i + 1)
+		faces = append(faces, store.ClusterFace{ID: id, AssetID: id, Person: id, Vec: []float32{1}})
+	}
+	c := newClustering(faces, nil, nil)
+	if err := c.link(checked, map[int64][]int64{}, DefaultParams); !errors.Is(err, context.Canceled) {
+		t.Fatalf("link cancellation = %v", err)
+	}
+	// Cancellation at the next periodic check must leave later pairs alone.
+	if _, linked := c.groups[16].links[17]; linked {
+		t.Error("existing people kept linking after cancellation")
+	}
+}
 
 // world makes identity vectors: each person has a random direction, and
 // each face of them is that direction plus noise (same person ~0.7 cosine,

@@ -14,9 +14,13 @@ import (
 // found in pixels decoded as it did.
 const UnmanagedThumbnailVersion = "vips-8.18-1"
 
-// heifProfilesVersion is the last ThumbnailVersion before HEIC decoded by
+// HEIFProfilesVersion is the last ThumbnailVersion before HEIC decoded by
 // FFmpeg (on PCs without the HEVC extension) had its profile converted too.
-const heifProfilesVersion = "vips-8.18-2"
+const HEIFProfilesVersion = "vips-8.18-2"
+
+// EpochDatesMetadataVersion is the last photo MetadataVersion that took an
+// unset clock's epoch (1970 or 1904) for a capture date.
+const EpochDatesMetadataVersion = "imagemeta-1.1+goexif+vips-3"
 
 // DecodesAsAt reports whether Thumbnail and Decode make the same pixels of
 // a photo now as they did at an earlier ThumbnailVersion, so what was made
@@ -27,7 +31,7 @@ func DecodesAsAt(path, version string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	heif := ext == ".heic" || ext == ".heif"
 	switch version {
-	case heifProfilesVersion:
+	case HEIFProfilesVersion:
 		// Only HEIC changed since, and only in a profile other than sRGB
 		// (which WIC converted then too, where it decoded the file).
 		if !heif {

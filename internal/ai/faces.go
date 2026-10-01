@@ -253,7 +253,7 @@ func (f *Faces) Detect(pix []byte, w, h int, minScore float32) ([]Face, error) {
 // FaceAnalysisVersion is the version of what Lumen computes around the face
 // models (alignment, sharpness, yaw). A change re-runs the faces stage, as a
 // new model does.
-const FaceAnalysisVersion = "2"
+const FaceAnalysisVersion = "3"
 
 // embedBatch is the most faces SFace embeds in one run.
 const embedBatch = 32

@@ -7,6 +7,7 @@ import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
 import { useList } from '../shared/listStore'
 import { useRename } from '../shared/rename'
+import { nameTooLong } from '../shared/names'
 import EmptyState from '../shared/EmptyState.vue'
 import GroupCard from '../shared/GroupCard.vue'
 import Icon from '../shared/Icon.vue'
@@ -24,7 +25,7 @@ function edit(event: Event) {
 }
 
 async function save(id: number, value: string) {
-  if (busy.value) return
+  if (busy.value || nameTooLong(value)) return
   busy.value = true
   actionError.value = ''
   try {
@@ -72,10 +73,13 @@ async function save(id: number, value: string) {
               v-model="draft"
               class="field"
               :aria-label="t('events.name')"
-              :maxlength="MAX_NAME_LEN"
+              :aria-invalid="nameTooLong(draft) || undefined"
               required
             />
-            <button class="btn" type="submit" :disabled="busy">{{ t('events.save') }}</button>
+            <p v-if="nameTooLong(draft)" class="page-error" role="alert">
+              {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
+            </p>
+            <button class="btn" type="submit" :disabled="busy || nameTooLong(draft)">{{ t('events.save') }}</button>
             <button class="btn btn-subtle" type="button" :disabled="busy" @click="rename.close()">
               {{ t('common.cancel') }}
             </button>

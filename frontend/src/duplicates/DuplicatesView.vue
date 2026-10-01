@@ -67,7 +67,19 @@ const visible = computed(() =>
     return row ? [{ item, row }] : []
   }),
 )
-watch(rows, () => virtualizer.value.measure())
+watch(rows, (current, previous) => {
+  if (current.length !== previous.length || current.some((row, i) => row.key !== previous[i]?.key))
+    virtualizer.value.measure()
+})
+watch(
+  () => duplicates.list,
+  (groups) => {
+    if (preview.value && !groups.some((group) => group.items.some((item) => item.id === preview.value?.id))) {
+      previewDialog.value?.close()
+      preview.value = null
+    }
+  },
+)
 function measureRow(element: Element | ComponentPublicInstance | null) {
   virtualizer.value.measureElement(element instanceof Element ? element : null)
 }

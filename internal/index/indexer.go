@@ -80,6 +80,9 @@ type Indexer struct {
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
 	pixels  decoded                  // photos the thumbnail stage decoded for the faces stage
 
+	videoEmbedRetry stageBackoff // used only by the video coordinator
+	videoFaceRetry  stageBackoff
+
 	version map[core.Stage]store.StageVersion // what each running stage's results are made by
 
 	rescanMu sync.Mutex // one RescanAll at a time, so the watchers match the sources
@@ -236,7 +239,7 @@ func (ix *Indexer) versions() map[core.Stage]store.StageVersion {
 	}
 	if ix.people != nil {
 		photo := ix.people.Model().Version + "+analysis-" + ai.FaceAnalysisVersion
-		v[core.StageFaces] = store.StageVersion{Photo: photo, Video: photo + media.VideoFramesVersion, LegacyPhoto: photo + "+video-frames-1"}
+		v[core.StageFaces] = store.StageVersion{Photo: photo, Video: photo + media.VideoFramesVersion}
 	}
 	return v
 }
@@ -288,8 +291,9 @@ func (ix *Indexer) Start(ctx context.Context) {
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.MetadataResult]{
 			name: core.StageMetadata, batch: metadataBatch, wake: ix.wakeMeta, next: []chan struct{}{ix.wakeThum},
-			changes: core.Changes{Assets: true},
-			process: eachItem(metadataWorkers, ix.doMetadata),
+			changes:   core.Changes{Assets: true},
+			unchanged: func(r store.MetadataResult) bool { return r.Unchanged },
+			process:   eachItem(metadataWorkers, ix.doMetadata),
 			save: func(ctx context.Context, rs []store.MetadataResult) error {
 				return ix.store.SaveMetadata(ctx, ix.version[core.StageMetadata].Photo, rs)
 			},

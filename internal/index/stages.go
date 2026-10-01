@@ -73,13 +73,31 @@ const (
 	idlePoll      = 30 * time.Second
 )
 
+// stageBackoff keeps a failed stage out of the queue until its next retry.
+// Photo workers wait for it; the video coordinator can run the other stage.
+type stageBackoff struct {
+	retry time.Duration
+	until time.Time
+}
+
+func (b *stageBackoff) ready(now time.Time) bool { return !now.Before(b.until) }
+
+func (b *stageBackoff) fail(now time.Time) time.Duration {
+	if b.retry == 0 {
+		b.retry = stageRetry
+	}
+	delay := b.retry
+	b.until = now.Add(delay)
+	b.retry = min(2*delay, stageRetryMax)
+	return delay
+}
+
 // runStage drains one stage's job queue: fetch a batch (what the user is
 // looking at first, then newest first), process it, save the results in one
 // transaction, repeat. With nothing to do it sleeps until woken. Batches are
 // small so the UI sees results stream in and focus changes apply fast.
 func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
-	retry := stageRetry
-	failing := false
+	var backoff stageBackoff
 	for {
 		if !ix.waitTurn(ctx, s.name, s.model) {
 			return
@@ -123,23 +141,22 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 			if len(results) > 0 && saveResults(ctx, s, results) {
 				ix.markChanged(s.changes)
 			}
-			slog.Error("stage can't run", "stage", s.name, "err", err, "retry in", retry)
+			delay := backoff.fail(time.Now())
+			slog.Error("stage can't run", "stage", s.name, "err", err, "retry in", delay)
 			if s.model != nil {
 				s.model.release() // a model that failed is loaded afresh next time
 			}
 			if s.fail != nil {
 				s.fail(err.Error())
 			}
-			failing = true
-			sleep(ctx, retry)
-			retry = min(2*retry, stageRetryMax)
+			sleep(ctx, delay)
 			continue
 		}
 		if !saveResults(ctx, s, results) {
 			continue // fetched and processed again
 		}
-		if failing {
-			failing, retry = false, stageRetry
+		if backoff.retry != 0 {
+			backoff = stageBackoff{}
 			if s.fail != nil {
 				s.fail("")
 			}
@@ -225,6 +242,10 @@ func (ix *Indexer) pendingJobs(ctx context.Context, stage core.Stage, within *st
 func (ix *Indexer) doMetadata(ctx context.Context, j store.JobItem) (r store.MetadataResult) {
 	r.AssetID = j.AssetID
 	defer recoverInto(&r.Err, j.Path)
+	if j.Prior != "" && metadataStand(j) {
+		r.Unchanged = true
+		return r
+	}
 	m, err := ix.cache.Decoder.Metadata(ctx, j.Path, j.Kind)
 	if errors.Is(err, media.ErrUnsupported) {
 		r.Skipped = true

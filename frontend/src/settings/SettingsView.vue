@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, toRef } from 'vue'
 import {
   BlockKind,
   Device,
@@ -16,13 +16,12 @@ import { block } from '../shared/block'
 import { confirm } from '../shared/confirm'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
-import { latestSave } from '../shared/latestSave'
 import Icon from '../shared/Icon.vue'
 import { theme } from '../shared/theme'
 import type { Theme } from '../shared/theme'
 
 const lib = useLibrary()
-const error = ref('')
+const error = toRef(lib, 'settingsError')
 
 /** Run an engine call, showing any failure. It reports whether it worked. */
 async function run(fn: () => Promise<unknown>): Promise<boolean> {
@@ -79,12 +78,6 @@ async function setAIOnBattery(on: boolean) {
 
 // A number typed in and the slider change faster than they save: each saves
 // its newest value, and a failure of the newest puts back the last saved.
-const failed = (e: unknown) => (error.value = errorText(e))
-const saveEventGap = latestSave(engine.setEventGapHours, lib.settings.eventGapHours, {
-  saved: () => lib.refresh(),
-  rollback: (hours) => (lib.settings.eventGapHours = hours),
-  failed,
-})
 function setEventGap(e: Event) {
   if (!(e.target instanceof HTMLInputElement)) return
   const parsed = e.target.valueAsNumber
@@ -93,9 +86,7 @@ function setEventGap(e: Event) {
     Math.max(EVENT_GAP_MIN, Number.isFinite(parsed) ? Math.round(parsed) : EVENT_GAP_DEFAULT),
   )
   e.target.value = String(value)
-  lib.settings.eventGapHours = value
-  error.value = ''
-  return saveEventGap(value)
+  return lib.saveEventGap(value)
 }
 
 const themes: Theme[] = ['system', 'light', 'dark']
@@ -127,11 +118,6 @@ const span = Math.log(TAG_CONFIDENCE_MAX / TAG_CONFIDENCE_MIN)
 const confidencePos = computed(() =>
   Math.round((100 * Math.log(lib.settings.tagConfidence / TAG_CONFIDENCE_MIN)) / span),
 )
-const saveTagConfidence = latestSave(engine.setTagConfidence, lib.settings.tagConfidence, {
-  saved: () => lib.refresh(),
-  rollback: (v) => (lib.settings.tagConfidence = v),
-  failed,
-})
 let saveTimer = 0
 let pendingConfidence: number | null = null
 function saveConfidence() {
@@ -140,11 +126,11 @@ function saveConfidence() {
   const value = pendingConfidence
   pendingConfidence = null
   error.value = ''
-  void saveTagConfidence(value)
+  void lib.saveTagConfidence(value)
 }
 function onConfidence(e: Event) {
   if (!(e.target instanceof HTMLInputElement)) return
-  lib.settings.tagConfidence = TAG_CONFIDENCE_MIN * Math.exp((span * Number(e.target.value)) / 100)
+  lib.intendTagConfidence(TAG_CONFIDENCE_MIN * Math.exp((span * Number(e.target.value)) / 100))
   pendingConfidence = lib.settings.tagConfidence
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(saveConfidence, 250)

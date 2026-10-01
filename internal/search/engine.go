@@ -29,14 +29,16 @@ const (
 	maxTagsPerItem = 12     // most AI tags stored per asset
 	kindShare      = 0.5    // the best kind applies when its softmax share is above this
 	textIdle       = 5 * time.Minute
-	textBatch      = 32  // prompts embedded per run of the text model
-	queryCache     = 64  // recent query embeddings kept
-	maxQueryRunes  = 500 // a longer query is cut (the model reads 64 tokens anyway)
+	textBatch      = 32 // prompts embedded per run of the text model
+	queryCache     = 64 // recent query embeddings kept
 	// unavailableTTL is how long the set of assets that must not take up
 	// result slots (hidden, trashed, gone) is reused. A stale set only
 	// costs slots: results are filtered by visibility again when shown.
 	unavailableTTL = 10 * time.Second
 )
+
+// MaxQueryRunes bounds queries before named matching and AI tokenization.
+const MaxQueryRunes = 500
 
 var (
 	// ErrNotLoaded means the engine could not load its index or Things;
@@ -313,18 +315,6 @@ func (e *Engine) loadLabels(ctx context.Context, vocabChanged bool) error {
 	return nil
 }
 
-// embedPrompts embeds a tag's prompts and stores them.
-func (e *Engine) embedPrompts(ctx context.Context, id int64, prompts []string) ([][]float32, error) {
-	vecs, err := e.EncodeText(ctx, prompts...)
-	if err != nil {
-		return nil, err
-	}
-	if err := e.store.SetTagVectors(ctx, id, e.model.Version, slices.Concat(vecs...)); err != nil {
-		return nil, err
-	}
-	return vecs, nil
-}
-
 // retag recomputes every photo's AI tags from the index. Needed when the
 // built-in Things change, since kinds are judged against each other.
 func (e *Engine) retag(ctx context.Context) error {
@@ -536,7 +526,7 @@ func (e *Engine) CreateLabel(ctx context.Context, name string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	vecs, err := e.embedPrompts(ctx, id, prompts)
+	vecs, err := e.EncodeText(ctx, prompts...)
 	if err == nil {
 		// Photos the indexer embeds from now on are scored against the new
 		// Thing as they arrive; rescore covers those already indexed.
@@ -547,6 +537,11 @@ func (e *Engine) CreateLabel(ctx context.Context, name string) (int64, error) {
 		e.labelsGen.Add(1)
 		e.labelsMu.Unlock()
 		err = e.rescore(ctx, l)
+		if err == nil {
+			// Until scoring commits, leave the Thing stale so a restart
+			// scores existing photos again after an interrupted creation.
+			err = e.store.SetTagVectors(ctx, id, e.model.Version, slices.Concat(vecs...))
+		}
 		e.tagMu.Unlock()
 	}
 	if err != nil {
@@ -641,13 +636,18 @@ func (e *Engine) Search(ctx context.Context, query string, allow func(id int64) 
 	return hits[:min(n, searchLimit)], complete, nil
 }
 
-// cleanQuery collapses a query's spaces and cuts it to maxQueryRunes: a
-// pasted page would take the tokenizer long, and the model reads its start.
+// cleanQuery collapses a query's spaces and bounds it (BoundQuery).
 func cleanQuery(query string) string {
-	query = strings.Join(strings.Fields(query), " ")
-	if n := 0; len(query) > maxQueryRunes {
+	return BoundQuery(strings.Join(strings.Fields(query), " "))
+}
+
+// BoundQuery cuts query to its first MaxQueryRunes runes: a pasted page
+// would take the tokenizer (and the name matching before it) long, and the
+// model reads only its start.
+func BoundQuery(query string) string {
+	if n := 0; len(query) > MaxQueryRunes {
 		for i := range query {
-			if n == maxQueryRunes {
+			if n == MaxQueryRunes {
 				return query[:i]
 			}
 			n++

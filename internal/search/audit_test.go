@@ -167,3 +167,79 @@ func TestCommitRetagsABatchTaggedUnderOlderThings(t *testing.T) {
 		t.Fatalf("committed batch not searchable: %d", e.index.Len())
 	}
 }
+
+// Prompt vectors must stay stale until scoring commits, so a restart finds
+// photos indexed before an interrupted Thing creation.
+func TestInterruptedCreateLabelRecoversOnRestart(t *testing.T) {
+	ctx := t.Context()
+	db := filepath.Join(t.TempDir(), "library.db")
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Ingest(ctx, []store.IngestItem{{SourceID: src.ID, Path: `C:\Photos\a.jpg`,
+		Hash: []byte("a"), Kind: core.KindPhoto, TakenAt: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	days, err := st.DayItems(ctx, "1970-01-01", "1970-01-01", core.View{}, 0)
+	if err != nil || len(days) != 1 || len(days[0].Items) != 1 {
+		t.Fatalf("fixture: %+v, %v", days, err)
+	}
+	photo := days[0].Items[0].ID
+	model := ai.Model{Dim: 2, Version: "test", LogitScale: 20, LogitBias: -10}
+	if err := st.SaveEmbeddings(ctx, model.Version, "test", []store.EmbedResult{
+		{AssetID: photo, Vec: []int8{100, 0}, Scale: 0.01},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEngine(st, model)
+	close(e.loaded)
+	e.queries["beach"], e.queries["a photo of beach"] = []float32{1, 0}, []float32{1, 0}
+	// Stop at the first index access during scoring, bypassing error cleanup
+	// as a terminated process would. The restarted engine has a normal index.
+	e.index = nil
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("creation did not stop before scoring committed")
+			}
+		}()
+		_, _ = e.CreateLabel(ctx, "beach")
+	}()
+	tags, err := st.AutoTags(ctx)
+	if err != nil || len(tags) != 1 {
+		t.Fatalf("interrupted Thing: %+v, %v", tags, err)
+	}
+	tag := tags[0].ID
+	if tags[0].Model != "" || len(tags[0].Vecs) != 0 {
+		t.Error("interrupted Thing's vectors were marked current before scoring committed")
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := NewEngine(st, model)
+	restarted.queries["beach"], restarted.queries["a photo of beach"] = []float32{1, 0}, []float32{1, 0}
+	if err := st.Embeddings(ctx, model.Version, restarted.index.Put); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.loadLabels(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.AssetTags(ctx, photo, core.TagConfidenceDefault)
+	if err != nil || len(got) != 1 || got[0].ID != tag {
+		t.Fatalf("existing photo missed after restart: %+v, %v", got, err)
+	}
+	tags, err = st.AutoTags(ctx)
+	if err != nil || len(tags) != 1 || tags[0].Model != model.Version || len(tags[0].Vecs) != 4 {
+		t.Fatalf("completed Thing's vectors: %+v, %v", tags, err)
+	}
+}

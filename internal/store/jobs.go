@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -23,6 +24,8 @@ type JobItem struct {
 	Orientation int
 	Duration    int64
 	TakenAt     int64
+	Width       int // as stored (0 if not known yet): upgrade rules judge by size
+	Height      int
 	// Prior is the version that made the output this job would replace,
 	// when an upgrade put the finished job back in the queue: the stage may
 	// keep that output where it would come out the same. "" otherwise.
@@ -104,26 +107,25 @@ const primaryFile = "(SELECT min(id) FROM files WHERE asset_id = a.id)"
 // batch cost a third of a second at 300,000 photos.
 func (s *Store) PendingJobs(ctx context.Context, stage core.Stage, within *TimeRange, limit int) ([]JobItem, error) {
 	q, args := pendingJobsQuery(stage, within, limit)
-	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
-		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior, &j.TakenAt)
-		return j, err
-	}, q, args...)
+	return queryAll(ctx, s.r, scanJob, q, args...)
 }
 
 // PendingJobsKind selects runnable jobs of one media kind in queue order.
 func (s *Store) PendingJobsKind(ctx context.Context, stage core.Stage, kind core.Kind, within *TimeRange, limit int) ([]JobItem, error) {
-	q, args := runnableQuery("asset_jobs j INDEXED BY asset_jobs_pending", nil, stage)
-	q += " AND a.kind = ?"
+	q, args := pendingJobsKindQuery(stage, kind, within, limit)
+	return queryAll(ctx, s.r, scanJob, q, args...)
+}
+
+func pendingJobsKindQuery(stage core.Stage, kind core.Kind, within *TimeRange, limit int) (q string, args []any) {
+	q, args = runnableQuery("asset_jobs j INDEXED BY asset_jobs_pending_kind", nil, stage)
+	q += " AND j.kind = ?"
 	args = append(args, kind)
 	if within != nil {
 		q += " AND j.taken_at >= ? AND j.taken_at < ?"
 		args = append(args, within.From, within.To)
 	}
 	q += " ORDER BY j.taken_at DESC, j.asset_id DESC LIMIT ?"
-	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
-		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior, &j.TakenAt)
-		return j, err
-	}, q, append(args, limit)...)
+	return q, append(args, limit)
 }
 
 func pendingJobsQuery(stage core.Stage, within *TimeRange, limit int) (q string, args []any) {
@@ -136,10 +138,17 @@ func pendingJobsQuery(stage core.Stage, within *TimeRange, limit int) (q string,
 	return q, append(args, limit)
 }
 
+// scanJob reads a JobItem as runnableQuery selects it.
+func scanJob(r *sql.Rows) (j JobItem, err error) {
+	err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior, &j.TakenAt, &j.Width, &j.Height)
+	return j, err
+}
+
 // runnableQuery selects the jobs of stage a worker can run, as JobItems,
 // from the tables in from (which name the jobs j), with args for from.
 func runnableQuery(from string, fromArgs []any, stage core.Stage) (q string, args []any) {
-	q = `SELECT a.id, f.path, a.kind, a.ext, a.orientation, COALESCE(a.duration_ms, 0), COALESCE(j.prior_version, ''), j.taken_at
+	q = `SELECT a.id, f.path, a.kind, a.ext, a.orientation, COALESCE(a.duration_ms, 0), COALESCE(j.prior_version, ''), j.taken_at,
+			COALESCE(a.width, 0), COALESCE(a.height, 0)
 		FROM ` + from + `
 		JOIN assets a ON a.id = j.asset_id
 		JOIN files f ON f.id = ` + primaryFile + `
@@ -167,10 +176,7 @@ func (s *Store) PendingJobsOf(ctx context.Context, stage core.Stage, ids []int64
 	}
 	// CROSS JOIN: look each one up by key, rather than walk the stage's queue.
 	q, args := runnableQuery("json_each(?) ids CROSS JOIN asset_jobs j ON j.asset_id = ids.value", []any{string(list)}, stage)
-	return queryAll(ctx, s.r, func(r *sql.Rows) (j JobItem, err error) {
-		err = r.Scan(&j.AssetID, &j.Path, &j.Kind, &j.Ext, &j.Orientation, &j.Duration, &j.Prior, &j.TakenAt)
-		return j, err
-	}, q+" ORDER BY j.taken_at DESC, j.asset_id DESC", args...)
+	return queryAll(ctx, s.r, scanJob, q+" ORDER BY j.taken_at DESC, j.asset_id DESC", args...)
 }
 
 // Unfinished returns which of ids still have stage to do (pending or waiting).
@@ -222,7 +228,7 @@ func (s *Store) RetryFailed(ctx context.Context, sourceID int64) (n int64, err e
 // MetadataResult is the outcome of the metadata stage for one asset.
 type MetadataResult struct {
 	AssetID     int64
-	TakenAt     int64 // 0 keeps the scanner's guess
+	TakenAt     int64 // 0 uses the scanner's guess, restoring it if EXIF no longer supplies a date
 	Modified    int64 // when the file says it was last saved: replaces an older-looking guess from the file's time; 0 = unknown
 	Width       int
 	Height      int
@@ -234,6 +240,9 @@ type MetadataResult struct {
 	AudioCodec  string
 	Err         string
 	Skipped     bool
+	// Unchanged: the metadata read at the job's prior version stands (see
+	// index.metadataStand); only the new version is recorded.
+	Unchanged bool
 }
 
 // ThumbResult is the outcome of the thumbnail stage for one asset.
@@ -307,7 +316,7 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 	}
 	cities := make([]places.City, len(rs))
 	for i, r := range rs {
-		if r.Err == "" && !r.Skipped && r.Lat != nil && r.Lon != nil {
+		if r.Err == "" && !r.Skipped && !r.Unchanged && r.Lat != nil && r.Lon != nil {
 			var err error
 			cities[i], _, err = places.Lookup(*r.Lat, *r.Lon)
 			if err != nil {
@@ -317,13 +326,20 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := time.Now().Unix()
+		guesses, err := metadataDateGuesses(ctx, tx, rs)
+		if err != nil {
+			return err
+		}
 		// Without a capture date, the time the file says it was saved beats
 		// the file system's when it is older (copies are newer), but never a
 		// date in the file's name.
 		upd, err := tx.PrepareContext(ctx, `UPDATE assets SET
 				taken_at = CASE WHEN ?1 != 0 THEN ?1
+					WHEN date_from = 'exif' AND ?15 != '' THEN
+						CASE WHEN ?12 != 0 AND ?15 = 'file' AND ?12 < ?14 THEN ?12 ELSE ?14 END
 					WHEN ?12 != 0 AND date_from = 'file' AND ?12 < taken_at THEN ?12 ELSE taken_at END,
-				date_from = CASE WHEN ?1 != 0 THEN 'exif' ELSE date_from END,
+				date_from = CASE WHEN ?1 != 0 THEN 'exif'
+					WHEN date_from = 'exif' AND ?15 != '' THEN ?15 ELSE date_from END,
 				width = NULLIF(?2, 0), height = NULLIF(?3, 0), orientation = ?4,
 				camera = NULLIF(?5, ''), lat = ?6, lon = ?7, place_id = ?13, place_checked = 1,
 				duration_ms = NULLIF(?8, 0), video_codec = NULLIF(?9, ''), audio_codec = NULLIF(?10, '')
@@ -350,7 +366,7 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 		}
 		defer job.Close()
 		for i, r := range rs {
-			if r.Err == "" && !r.Skipped {
+			if r.Err == "" && !r.Skipped && !r.Unchanged {
 				if err := savePlace(ctx, tx, cities[i]); err != nil {
 					return err
 				}
@@ -366,7 +382,8 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 					return err
 				}
 				if _, err := upd.ExecContext(ctx, r.TakenAt, r.Width, r.Height, max(r.Orientation, 1),
-					r.Camera, r.Lat, r.Lon, r.Duration, r.VideoCodec, r.AudioCodec, r.AssetID, r.Modified, placeID); err != nil {
+					r.Camera, r.Lat, r.Lon, r.Duration, r.VideoCodec, r.AudioCodec, r.AssetID, r.Modified, placeID,
+					guesses[r.AssetID].takenAt, guesses[r.AssetID].from); err != nil {
 					return err
 				}
 			}
@@ -376,6 +393,49 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 		}
 		return nil
 	})
+}
+
+type dateGuess struct {
+	takenAt int64
+	from    core.DateSource
+}
+
+// metadataDateGuesses restores the scanner's best guess across remaining copies
+// when a metadata re-run rejects the date that EXIF previously supplied.
+func metadataDateGuesses(ctx context.Context, tx *sql.Tx, rs []MetadataResult) (map[int64]dateGuess, error) {
+	guesses := make(map[int64]dateGuess)
+	var ids []int64
+	for _, r := range rs {
+		if r.TakenAt == 0 && r.Err == "" && !r.Skipped && !r.Unchanged {
+			ids = append(ids, r.AssetID)
+		}
+	}
+	if len(ids) == 0 {
+		return guesses, nil
+	}
+	list, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT a.id, f.path, f.mtime
+		FROM json_each(?) ids CROSS JOIN assets a ON a.id = ids.value
+		JOIN files f ON f.asset_id = a.id WHERE a.date_from = 'exif' ORDER BY f.id`, string(list))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, mtime int64
+		var path string
+		if err := rows.Scan(&id, &path, &mtime); err != nil {
+			return nil, err
+		}
+		at, from := core.GuessDate(filepath.Base(path), time.Unix(0, mtime))
+		if old, ok := guesses[id]; !ok || (old.from == core.DateFromFile && (from == core.DateFromFilename || at < old.takenAt)) {
+			guesses[id] = dateGuess{takenAt: at, from: from}
+		}
+	}
+	return guesses, rows.Err()
 }
 
 // SaveThumbnails records a batch of finished thumbnails and closes their

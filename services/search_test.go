@@ -1,12 +1,19 @@
 package services
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"lumen/internal/core"
+	"lumen/internal/search"
 	"lumen/internal/store"
 )
 
@@ -57,6 +64,22 @@ func TestSearchWithoutAI(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewSearchService(st, nil, true)
+	for _, name := range []string{"Ali", "Ali Khan"} {
+		query := strings.Repeat(name+" ", 8000)
+		prefix := string([]rune(query)[:search.MaxQueryRunes])
+		want, err := s.Search(ctx, prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		got, err := s.Search(ctx, query)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("long repeated name %q: %+v, %v; want %+v", name, got, err, want)
+		}
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Errorf("long repeated name %q took %s", name, elapsed)
+		}
+	}
 	for _, c := range []struct {
 		query string
 		ids   []int64
@@ -121,6 +144,14 @@ func TestSearchWithoutAI(t *testing.T) {
 	if r, err := s.Search(ctx, "Ali Khan and Ali Khan"); err != nil || r.Blocked || len(r.Items) != 1 {
 		t.Errorf("repeated longer name = %+v, %v", r, err)
 	}
+	prefix := strings.Repeat("🌊", search.MaxQueryRunes)
+	want, err := s.Search(ctx, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Search(ctx, prefix+" Family Trip"); err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("blocked name after Unicode query limit = %+v, %v; want %+v", got, err, want)
+	}
 	if _, err := s.CreateLabel(ctx, "Eiffel Tower"); !errors.Is(err, ErrNoAI) {
 		t.Errorf("CreateLabel without AI: %v, want ErrNoAI", err)
 	}
@@ -129,6 +160,68 @@ func TestSearchWithoutAI(t *testing.T) {
 	}
 	if code := MarshalError(errors.New("disk full")); code != nil {
 		t.Errorf("MarshalError(other) = %s, want Wails' default", code)
+	}
+}
+
+func TestVisibleAssetsPrunesResultsInOrder(t *testing.T) {
+	ctx := t.Context()
+	db := filepath.Join(t.TempDir(), "library.db")
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"a", "b", "blocked", "hidden"} {
+		if _, err := st.Ingest(ctx, []store.IngestItem{{SourceID: src.ID, Path: `C:\Photos\` + name + ".jpg",
+			Hash: []byte(name), Kind: core.KindPhoto, TakenAt: int64(i + 1)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	days, err := st.DayItems(ctx, "1970-01-01", "1970-01-01", core.View{}, 0)
+	if err != nil || len(days) != 1 || len(days[0].Items) != 4 {
+		t.Fatalf("fixture: %+v, %v", days, err)
+	}
+	items := days[0].Items
+	a, b, blocked, hidden := items[3].ID, items[2].ID, items[1].ID, items[0].ID
+	if _, err := st.SetBlock(ctx, core.BlockAsset, blocked, "", core.BlockPhotos); err != nil {
+		t.Fatal(err)
+	}
+	w, err := sql.Open("sqlite3", db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if _, err := w.ExecContext(ctx, "UPDATE assets SET hidden = 1 WHERE id = ?", hidden); err != nil {
+		t.Fatal(err)
+	}
+	s := NewSearchService(st, nil, false)
+	for _, read := range []struct {
+		name string
+		fn   func(context.Context, []int64) ([]int64, error)
+	}{{"store", st.VisibleAssets}, {"service", s.VisibleAssets}} {
+		t.Run(read.name, func(t *testing.T) {
+			for _, c := range []struct {
+				ids, want []int64
+			}{
+				{[]int64{b, blocked, a, hidden, b, 999}, []int64{b, a, b}},
+				{[]int64{hidden, blocked, 999}, []int64{}},
+				{nil, []int64{}},
+			} {
+				got, err := read.fn(ctx, c.ids)
+				if err != nil || got == nil || !slices.Equal(got, c.want) {
+					t.Errorf("visible IDs %v = %v, %v; want %v", c.ids, got, err, c.want)
+				}
+			}
+		})
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if got, err := s.VisibleAssets(cancelled, []int64{a}); got == nil || !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled visibility read = %v, %v", got, err)
 	}
 }
 

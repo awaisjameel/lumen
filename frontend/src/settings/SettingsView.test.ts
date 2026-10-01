@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { engine } from '../bridge'
@@ -15,7 +15,118 @@ vi.mock('../bridge', async (importOriginal) => ({
   },
 }))
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(engine.setTagConfidence).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setEventGapHours).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setVideos).mockReset().mockResolvedValue(undefined)
+})
+afterEach(() => vi.useRealTimers())
+
+it('keeps a newer slider input when the previous save fails before its debounce fires', async () => {
+  vi.useFakeTimers()
+  setActivePinia(createPinia())
+  const lib = useLibrary()
+  let fail!: (reason: Error) => void
+  vi.mocked(engine.setTagConfidence)
+    .mockReturnValueOnce(new Promise((_resolve, reject) => (fail = reject)))
+    .mockResolvedValueOnce()
+  const wrapper = mount(SettingsView)
+  try {
+    await wrapper.get('#confidence').setValue('70')
+    await vi.advanceTimersByTimeAsync(250)
+    await wrapper.get('#confidence').setValue('90')
+    const newest = lib.settings.tagConfidence
+    fail(new Error('older confidence failed'))
+    await flushPromises()
+    expect(lib.settings.tagConfidence).toBe(newest)
+    expect(wrapper.get<HTMLInputElement>('#confidence').element.value).toBe('90')
+    expect(wrapper.text()).not.toContain('older confidence failed')
+    await vi.advanceTimersByTimeAsync(250)
+    await flushPromises()
+    expect(engine.setTagConfidence).toHaveBeenLastCalledWith(newest)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('uses one gap save queue across settings remounts', async () => {
+  setActivePinia(createPinia())
+  const lib = useLibrary()
+  let finish!: () => void
+  let persisted = 12
+  const writes: number[] = []
+  vi.mocked(engine.setEventGapHours).mockImplementation((hours) => {
+    writes.push(hours)
+    if (writes.length === 1)
+      return new Promise((resolve) => {
+        finish = () => {
+          persisted = hours
+          resolve()
+        }
+      })
+    persisted = hours
+    return Promise.resolve()
+  })
+  const first = mount(SettingsView)
+  await first.get('.event-gap input').setValue('24')
+  await first.get('.event-gap input').setValue('36')
+  first.unmount()
+  const next = mount(SettingsView)
+  try {
+    await next.get('.event-gap input').setValue('48')
+    expect(writes).toEqual([24])
+    finish()
+    await flushPromises()
+    expect(writes).toEqual([24, 48])
+    expect(persisted).toBe(48)
+    expect(lib.settings.eventGapHours).toBe(48)
+    expect(next.get<HTMLInputElement>('.event-gap input').element.value).toBe('48')
+  } finally {
+    next.unmount()
+  }
+})
+
+it('uses one confidence save queue across settings remounts', async () => {
+  vi.useFakeTimers()
+  setActivePinia(createPinia())
+  const lib = useLibrary()
+  let finish!: () => void
+  let persisted = lib.settings.tagConfidence
+  const writes: number[] = []
+  vi.mocked(engine.setTagConfidence).mockImplementation((value) => {
+    writes.push(value)
+    if (writes.length === 1)
+      return new Promise((resolve) => {
+        finish = () => {
+          persisted = value
+          resolve()
+        }
+      })
+    persisted = value
+    return Promise.resolve()
+  })
+  const first = mount(SettingsView)
+  await first.get('#confidence').setValue('50')
+  await vi.advanceTimersByTimeAsync(250)
+  await first.get('#confidence').setValue('60')
+  first.unmount()
+  const next = mount(SettingsView)
+  try {
+    await next.get('#confidence').setValue('80')
+    const newest = lib.settings.tagConfidence
+    await vi.advanceTimersByTimeAsync(250)
+    expect(writes).toHaveLength(1)
+    finish()
+    await flushPromises()
+    expect(writes).toHaveLength(2)
+    expect(writes[1]).toBe(newest)
+    expect(persisted).toBe(newest)
+    expect(next.get<HTMLInputElement>('#confidence').element.value).toBe('80')
+  } finally {
+    next.unmount()
+  }
+})
 
 it('persists the final slider value when leaving settings before the debounce', async () => {
   setActivePinia(createPinia())

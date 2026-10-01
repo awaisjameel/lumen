@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref, shallowRef, triggerRef } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import {
   engine,
   EVENT_GAP_DEFAULT,
@@ -13,6 +13,8 @@ import {
 import type { Changes, DayBucket, GridItem, Progress, Settings, Source, View } from '../bridge'
 import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
+import { latestSave } from '../shared/latestSave'
+import type { LatestSave } from '../shared/latestSave'
 
 const ZOOM_KEY = 'lumen.zoom'
 export const ZOOM_MIN = 96
@@ -78,6 +80,40 @@ export const useLibrary = defineStore('library', () => {
     tagConfidence: TAG_CONFIDENCE_DEFAULT,
     eventGapHours: EVENT_GAP_DEFAULT,
   })
+  const settingsError = ref('')
+  let eventGapSave: LatestSave<number> | null = null
+  let confidenceSave: LatestSave<number> | null = null
+  const settingFailed = (e: unknown) => (settingsError.value = errorText(e))
+
+  function saveEventGap(hours: number) {
+    eventGapSave ??= latestSave(engine.setEventGapHours, settings.value.eventGapHours, {
+      saved: () => refresh(),
+      rollback: (value) => (settings.value.eventGapHours = value),
+      failed: settingFailed,
+    })
+    settings.value.eventGapHours = hours
+    settingsError.value = ''
+    return eventGapSave(hours)
+  }
+
+  function confidenceQueue() {
+    confidenceSave ??= latestSave(engine.setTagConfidence, settings.value.tagConfidence, {
+      saved: () => refresh(),
+      rollback: (value) => (settings.value.tagConfidence = value),
+      failed: settingFailed,
+    })
+    return confidenceSave
+  }
+
+  function intendTagConfidence(value: number) {
+    confidenceQueue().touch()
+    settings.value.tagConfidence = value
+    settingsError.value = ''
+  }
+
+  function saveTagConfidence(value: number) {
+    return confidenceQueue()(value)
+  }
   const progress = shallowRef<Progress | null>(null) // replaced whole by each event
 
   const scope = ref<Scope>({ kind: 'timeline', view: { filter: Filter.FilterAll } })
@@ -86,8 +122,18 @@ export const useLibrary = defineStore('library', () => {
   const loadError = ref('')
   const searchInfo = ref<SearchInfo | null>(null)
 
-  // day -> items. A shallowRef plus triggerRef keeps big maps cheap.
+  // day -> items. A shallowRef keeps big maps cheap; notifyDays tells
+  // everything shown from it that it changed.
   const days = shallowRef(new Map<string, GridItem[]>())
+  /**
+   * Tells the views days changed (or its items did, in place). A new Map, not
+   * triggerRef: a watcher of () => days skips its callback when the value is
+   * the same object, and the grid's (LibraryView) is how stale days are asked
+   * for again.
+   */
+  function notifyDays() {
+    days.value = new Map(days.value)
+  }
   const fresh = new Set<string>() // days loaded since the last change
   const inflight = new Map<string, Promise<void>>() // day -> the load under way
   let generation = 0 // changes even when returning to a previously visited scope
@@ -97,6 +143,9 @@ export const useLibrary = defineStore('library', () => {
   // loads again, the days' when they go stale (dayRevision).
   let loadAbort = new AbortController()
   let daysAbort = new AbortController()
+  let visibilityAbort = new AbortController()
+  let visibilityRequest = 0
+  let visibilityRevision = 0
   let shown = 0 // grids showing the scope (see attach)
   let stale = false // the library changed while no grid showed it
 
@@ -144,6 +193,9 @@ export const useLibrary = defineStore('library', () => {
     const s = scope.value
     const current = generation
     const request = ++loadRequest
+    const visibility = visibilityRevision
+    visibilityAbort.abort()
+    visibilityRequest++
     loadAbort.abort()
     loadAbort = new AbortController()
     const { signal } = loadAbort
@@ -163,6 +215,8 @@ export const useLibrary = defineStore('library', () => {
         buckets.value = r.items.length ? [{ day: RESULTS, count: r.items.length }] : []
         days.value = new Map(r.items.length ? [[RESULTS, r.items]] : [])
         fresh.add(RESULTS)
+        if (visibility !== visibilityRevision) await pruneSearch()
+        if (current !== generation || request !== loadRequest) return
       } else {
         const b = await engine.timeline(s.view, signal)
         if (current !== generation || request !== loadRequest) return
@@ -187,17 +241,54 @@ export const useLibrary = defineStore('library', () => {
     daysAbort = new AbortController()
   }
 
+  async function pruneSearch() {
+    const current = generation
+    const load = loadRequest
+    const request = ++visibilityRequest
+    visibilityAbort.abort()
+    visibilityAbort = new AbortController()
+    const items = days.value.get(RESULTS) ?? []
+    try {
+      const visible = new Set(
+        await engine.visibleAssets(
+          items.map((item) => item.id),
+          visibilityAbort.signal,
+        ),
+      )
+      if (current !== generation || load !== loadRequest || request !== visibilityRequest) return
+      const kept = items.filter((item) => visible.has(item.id))
+      buckets.value = kept.length ? [{ day: RESULTS, count: kept.length }] : []
+      days.value = new Map(kept.length ? [[RESULTS, kept]] : [])
+      if (selected.value && !itemAt(selected.value)) selected.value = null
+      if (viewer.value && !itemAt(viewer.value)) viewer.value = null
+      stale = false
+    } catch (e) {
+      if (current !== generation || request !== visibilityRequest || isCancelled(e)) return
+      throw e
+    }
+  }
+
   /**
    * Reload after the engine reports changes (all, if c is not given): counts,
-   * then visible days on demand. Search results stay as they are
-   * (reshuffling them while someone looks would be jarring); searching again
-   * picks up new photos.
+   * then visible days on demand. Search results only lose hidden hits;
+   * searching again picks up new photos without reshuffling a live search.
    */
   let refreshing: Promise<void> | null = null
   let refreshRevision = 0
   async function refresh(c?: Changes) {
     const s = scope.value
-    if (s.kind === 'search' || (c && !affects(s.view, c) && !c.thumbs)) return
+    if (s.kind === 'search') {
+      if (c && !c.assets) return
+      visibilityRevision++
+      if (!shown) {
+        visibilityAbort.abort()
+        visibilityRequest++
+        stale = true
+        return
+      }
+      return pruneSearch()
+    }
+    if (c && !affects(s.view, c) && !c.thumbs) return
     if (!shown) {
       stale = true // loaded when a grid shows it again
       return
@@ -207,7 +298,7 @@ export const useLibrary = defineStore('library', () => {
     if (c && !affects(s.view, c)) {
       // Only thumbnails changed: the days and counts stand, and the view
       // asks again for the days it shows.
-      triggerRef(days)
+      notifyDays()
       return
     }
     refreshRevision++
@@ -217,7 +308,7 @@ export const useLibrary = defineStore('library', () => {
         for (;;) {
           const revision = refreshRevision
           await load()
-          triggerRef(days) // the view re-requests what it shows
+          notifyDays() // the view re-requests what it shows
           if (revision === refreshRevision || isSearch.value) break
         }
       } finally {
@@ -259,8 +350,12 @@ export const useLibrary = defineStore('library', () => {
     const missing = want.filter((d) => !fresh.has(d) && !inflight.has(d)).sort()
     const [from, to] = [missing[0], missing.at(-1)]
     if (from !== undefined && to !== undefined) {
+      const current = generation
+      const revision = dayRevision
       const request: Promise<void> = loadDays(s.view, missing, from, to).finally(() => {
         for (const d of missing) if (inflight.get(d) === request) inflight.delete(d)
+        // Released before the grid hears of it, so it asks for these days again.
+        if (current === generation && revision !== dayRevision) notifyDays()
       })
       missing.forEach((d) => inflight.set(d, request))
       waiting.push(request)
@@ -293,8 +388,6 @@ export const useLibrary = defineStore('library', () => {
       if (viewer.value && missing.includes(viewer.value.day) && !itemAt(viewer.value)) viewer.value = null
     } catch (e) {
       if (!isCancelled(e)) logError(e)
-    } finally {
-      if (current === generation && revision !== dayRevision) triggerRef(days) // ask again for what is shown
     }
   }
 
@@ -372,7 +465,7 @@ export const useLibrary = defineStore('library', () => {
       const item = itemAt(p) // the day may have been reloaded meanwhile
       if (item) {
         item.f = value
-        triggerRef(days)
+        notifyDays()
       }
     }
     set(fav)
@@ -420,6 +513,10 @@ export const useLibrary = defineStore('library', () => {
     ready,
     sources,
     settings,
+    settingsError,
+    saveEventGap,
+    intendTagConfidence,
+    saveTagConfidence,
     progress,
     scope,
     buckets,
