@@ -7,7 +7,7 @@ import { engine, MAX_NAME_LEN } from '../bridge'
 import type { Person } from '../bridge'
 import { useSuggestions } from '../shared/suggest'
 import { t } from '../shared/i18n'
-import { nameTooLong } from '../shared/names'
+import { nameTooLong, trimName } from '../shared/names'
 import FaceThumb from './FaceThumb.vue'
 
 const props = defineProps<{ placeholder: string; exclude?: number }>()
@@ -23,7 +23,7 @@ const options = computed(() => found.value.filter((p) => p.id !== props.exclude)
 watch(text, () => (active.value = -1))
 
 function pick(name: string) {
-  name = name.trim()
+  name = trimName(name)
   if (!name || nameTooLong(name)) return
   emit('pick', name)
   text.value = ''

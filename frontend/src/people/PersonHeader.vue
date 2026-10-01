@@ -11,7 +11,7 @@ import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
 import { useRename } from '../shared/rename'
-import { nameTooLong } from '../shared/names'
+import { nameTooLong, trimName } from '../shared/names'
 import FaceThumb from './FaceThumb.vue'
 import { namePerson } from './naming'
 import { usePeople } from './store'
@@ -67,7 +67,7 @@ function edit() {
 async function save(refocus: boolean) {
   if (!editing.value || nameTooLong(draft.value) || busy.value) return
   void rename.close(refocus) // leaving the field (blur) leaves focus where it went
-  const name = draft.value.trim()
+  const name = trimName(draft.value)
   if (name === (person.value?.name ?? '')) return
   actionError.value = ''
   busy.value = true

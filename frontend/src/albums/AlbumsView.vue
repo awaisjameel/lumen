@@ -9,7 +9,7 @@ import { block } from '../shared/block'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
-import { nameTooLong } from '../shared/names'
+import { nameTooLong, trimName } from '../shared/names'
 import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
 import SearchBox from '../search/SearchBox.vue'
@@ -65,7 +65,7 @@ async function edit(album: Album) {
 }
 
 async function save() {
-  if (!name.value.trim() || nameTooLong(name.value) || busy.value) return
+  if (!trimName(name.value) || nameTooLong(name.value) || busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -170,7 +170,7 @@ async function blockAlbum(album: Album) {
         <p v-if="nameTooLong(name)" class="page-error" role="alert">
           {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
         </p>
-        <button class="btn btn-primary" :disabled="busy || !name.trim() || nameTooLong(name)">
+        <button class="btn btn-primary" :disabled="busy || !trimName(name) || nameTooLong(name)">
           {{ editing === null ? t('albums.create') : t('albums.save') }}
         </button>
       </form>

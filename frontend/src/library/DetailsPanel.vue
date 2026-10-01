@@ -9,7 +9,7 @@ import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
-import { nameTooLong } from '../shared/names'
+import { nameTooLong, trimName } from '../shared/names'
 import FaceThumb from '../people/FaceThumb.vue'
 import PersonPicker from '../people/PersonPicker.vue'
 import { useLibrary } from './store'
@@ -133,7 +133,7 @@ function toggleAlbum(albumID: number, e: Event) {
 }
 
 async function createAlbumForItem() {
-  const name = newAlbum.value.trim()
+  const name = trimName(newAlbum.value)
   const assetID = detail.value?.id
   if (!name || nameTooLong(newAlbum.value) || !assetID || creatingAlbum.value) return
   const revision = selectionRevision
@@ -200,7 +200,7 @@ async function edit(fn: () => Promise<unknown>, reload: () => Promise<void>): Pr
 }
 
 async function addTag() {
-  const name = newTag.value.trim()
+  const name = trimName(newTag.value)
   const id = detail.value?.id
   if (!name || nameTooLong(newTag.value) || !id) return
   const requested = selectionRevision
@@ -409,7 +409,7 @@ function showInFolder(id: number) {
             class="icon-btn"
             :title="t('albums.createForItem')"
             :aria-label="t('albums.createForItem')"
-            :disabled="creatingAlbum || !newAlbum.trim() || nameTooLong(newAlbum)"
+            :disabled="creatingAlbum || !trimName(newAlbum) || nameTooLong(newAlbum)"
           >
             <Icon name="plus" :size="16" />
           </button>

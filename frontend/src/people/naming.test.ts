@@ -52,3 +52,9 @@ it('propagates a blocked name without offering a merge', async () => {
   expect(engine.personByName).not.toHaveBeenCalled()
   expect(engine.mergePeople).not.toHaveBeenCalled()
 })
+
+it('sends the name Go saves: a byte-order mark stays, next-line whitespace goes', async () => {
+  vi.mocked(engine.namePerson).mockResolvedValue(undefined)
+  await expect(namePerson(1, '\u0085\uFEFFAli ')).resolves.toBe(1)
+  expect(engine.namePerson).toHaveBeenCalledWith(1, '\uFEFFAli')
+})

@@ -13,7 +13,7 @@ import { t } from '../shared/i18n'
 import EmptyState from '../shared/EmptyState.vue'
 import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
-import { nameTooLong } from '../shared/names'
+import { nameTooLong, trimName } from '../shared/names'
 import { useLibrary } from '../library/store'
 import SearchBox from '../search/SearchBox.vue'
 import { useThings } from './store'
@@ -39,7 +39,7 @@ onMounted(() => void things.load().catch(logError))
 useLiveReload(things.load, (c) => c.tags || c.assets || c.thumbs) // counts grow while the AI works
 
 async function create() {
-  const n = name.value.trim()
+  const n = trimName(name.value)
   if (!n || nameTooLong(name.value) || busy.value) return
   busy.value = true
   error.value = ''
@@ -96,7 +96,7 @@ async function remove(tag: Tag) {
           :disabled="busy || !!aiError"
           :aria-invalid="nameTooLong(name) || undefined"
         />
-        <button class="btn btn-primary" :disabled="busy || !name.trim() || nameTooLong(name) || !!aiError">
+        <button class="btn btn-primary" :disabled="busy || !trimName(name) || nameTooLong(name) || !!aiError">
           {{ busy ? t('things.finding') : t('things.find') }}
         </button>
       </form>

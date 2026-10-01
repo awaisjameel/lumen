@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { MAX_NAME_LEN } from '../bridge'
-import { nameLength, nameTooLong } from './names'
+import { nameLength, nameTooLong, trimName } from './names'
 
 it('counts astral characters once and ignores surrounding whitespace', () => {
   expect(nameLength(' \t😀Ali😀\n ')).toBe(5)
@@ -13,4 +13,10 @@ it('trims the whitespace Go trims, including next-line but excluding the byte-or
   expect(nameLength('\u0085 Ali \u0085')).toBe(3)
   expect(nameLength('\uFEFFAli\uFEFF')).toBe(5)
   expect(nameLength(' \r\n\t ')).toBe(0)
+})
+
+it('trims names as Go does, unlike String.prototype.trim', () => {
+  expect(trimName('\u0085 Ali \u0085')).toBe('Ali')
+  expect(trimName('\uFEFFAli ')).toBe('\uFEFFAli')
+  expect('\uFEFFAli '.trim()).toBe('Ali') // why trimName exists
 })
