@@ -214,11 +214,26 @@ func startAI(paths core.Paths, st *store.Store) index.Models {
 // engine) and the video server once the app is running, and stops them
 // cleanly before the database closes.
 type background struct {
-	ix     *index.Indexer
-	search *search.Engine // nil without AI
-	cache  *media.Cache
-	stream *services.Streamer // nil if it couldn't listen
-	cancel context.CancelFunc
+	ix      backgroundIndexer
+	search  *search.Engine // nil without AI
+	cache   backgroundCache
+	stream  *services.Streamer // nil if it couldn't listen
+	cancel  context.CancelFunc
+	workers sync.WaitGroup // Shutdown waits for the server and cache cleanup.
+}
+
+// backgroundCache is the startup cleanup, separated so shutdown can be tested
+// with a sweep that is still running.
+type backgroundCache interface {
+	SweepTemp() error
+	SweepFrames() error
+}
+
+// backgroundIndexer is the lifecycle the application owns; tests can check
+// shutdown without starting the indexing pipeline.
+type backgroundIndexer interface {
+	Start(context.Context)
+	Stop()
 }
 
 // ServiceStartup starts the background work (Wails calls it once the app runs).
@@ -236,13 +251,13 @@ func (b *background) ServiceStartup(ctx context.Context, _ application.ServiceOp
 	}
 	b.ix.Start(ctx)
 	if b.stream != nil {
-		go b.stream.Run()
+		b.workers.Go(b.stream.Run)
 	}
-	go func() {
+	b.workers.Go(func() {
 		if err := b.cache.SweepFrames(); err != nil {
 			slog.Warn("tidy thumbnail cache", "err", err)
 		}
-	}()
+	})
 	return nil
 }
 
@@ -252,8 +267,11 @@ func (b *background) ServiceStartup(ctx context.Context, _ application.ServiceOp
 func (b *background) ServiceShutdown() error {
 	b.cancel()
 	if b.stream != nil {
-		_ = b.stream.Close() // ends every stream and conversion; nothing else to do if it fails
+		if err := b.stream.Close(); err != nil {
+			slog.Warn("stop video server", "err", err)
+		}
 	}
+	b.workers.Wait()
 	b.ix.Stop()
 	if b.search != nil {
 		b.search.Close() // after the indexer: it no longer adds embeddings
@@ -311,7 +329,7 @@ func setupLogging(paths core.Paths) {
 // old (replacing the one before) and starts a new one, while running too: a
 // long session that logs a warning per failed request can't fill the disk.
 type rotatingLog struct {
-	mu        sync.Mutex
+	mu        sync.Mutex // Guards the file and its tracked size during writes and rotation.
 	name, old string
 	max, size int64
 	f         *os.File
