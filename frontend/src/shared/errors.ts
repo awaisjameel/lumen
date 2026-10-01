@@ -1,5 +1,5 @@
 import { shallowRef } from 'vue'
-import { ErrorCode, errorCode, MAX_NAME_LEN, PIN_MAX_LEN, PIN_MIN_LEN } from '../bridge'
+import { ErrorCode, errorCode, MAX_NAME_LEN, PIN_COOLDOWN_SECONDS, PIN_MAX_LEN, PIN_MIN_LEN } from '../bridge'
 import { t } from './i18n'
 import type { MessageKey } from './i18n'
 
@@ -38,7 +38,12 @@ export function errorText(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e)
   const code = errorCode(e)
   return code
-    ? t(codeText[code], { max: MAX_NAME_LEN, pinMin: PIN_MIN_LEN, pinMax: PIN_MAX_LEN })
+    ? t(codeText[code], {
+        max: MAX_NAME_LEN,
+        pinMin: PIN_MIN_LEN,
+        pinMax: PIN_MAX_LEN,
+        pinCooldown: PIN_COOLDOWN_SECONDS,
+      })
     : t('error.generic', { msg })
 }
 

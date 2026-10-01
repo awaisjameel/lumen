@@ -108,6 +108,7 @@ export const MAX_NAME_LEN = 80 // core.MaxNameLen: people, Things and albums
 export const PIN_MIN_LEN = 6 // core.PINMinLen
 export const BLOCK_UNLOCK_IDLE_MINUTES = 10 // services.blockUnlockIdle
 export const PIN_MAX_LEN = 12 // core.PINMaxLen
+export const PIN_COOLDOWN_SECONDS = 30 // services.pinCooldown: the wait after too many wrong PINs
 /** The pattern attribute of a PIN field: PIN_MIN_LEN to PIN_MAX_LEN digits. */
 export const PIN_PATTERN = `[0-9]{${PIN_MIN_LEN},${PIN_MAX_LEN}}`
 export type ThumbSize = typeof THUMB_SMALL | typeof THUMB_LARGE

@@ -14,3 +14,8 @@ it('checks placeholders at compile time', () => {
   t('blocked.saved', { nam: 'Lahore' })
   expect(t('nav.people')).toBe('People') // a message without placeholders takes none
 })
+
+it('formats PIN guidance from the mirrored engine bounds and cooldown', () => {
+  expect(t('blocked.createPINHint', { pinMin: 4, pinMax: 9 })).toContain('4–9 digit PIN')
+  expect(t('error.pinRateLimited', { pinCooldown: 45 })).toContain('45 seconds')
+})

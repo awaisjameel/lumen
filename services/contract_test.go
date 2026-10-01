@@ -51,6 +51,7 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"MAX_NAME_LEN":              core.MaxNameLen,
 		"PIN_MIN_LEN":               core.PINMinLen,
 		"PIN_MAX_LEN":               core.PINMaxLen,
+		"PIN_COOLDOWN_SECONDS":      float64(pinCooldown / time.Second),
 		"BLOCK_UNLOCK_IDLE_MINUTES": float64(blockUnlockIdle / time.Minute),
 	} {
 		if got := constant(name); got != want {

@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { BLOCK_UNLOCK_IDLE_MINUTES, BlockKind, BlockMode, engine, errorCode, ErrorCode } from '../bridge'
+import {
+  BLOCK_UNLOCK_IDLE_MINUTES,
+  BlockKind,
+  BlockMode,
+  engine,
+  errorCode,
+  ErrorCode,
+  PIN_MAX_LEN,
+  PIN_MIN_LEN,
+} from '../bridge'
 import type { Block } from '../bridge'
 import { showBlocksChanged } from '../shared/block'
 import { confirm } from '../shared/confirm'
@@ -172,7 +181,8 @@ function kindName(kind: BlockKind): string {
       <RouterLink to="/settings" class="btn btn-subtle">{{ t('blocked.back') }}</RouterLink>
       <p v-if="error" class="page-error" role="alert">{{ error }}</p>
       <form v-if="!unlocked" ref="unlockForm" class="unlock" @submit.prevent="unlock">
-        <p>{{ t(configured ? 'blocked.enterPINHint' : 'blocked.createPINHint') }}</p>
+        <p v-if="configured">{{ t('blocked.enterPINHint') }}</p>
+        <p v-else>{{ t('blocked.createPINHint', { pinMin: PIN_MIN_LEN, pinMax: PIN_MAX_LEN }) }}</p>
         <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" :creating="!configured" />
         <button class="btn btn-primary" :disabled="busy">{{ t('blocked.unlock') }}</button>
       </form>

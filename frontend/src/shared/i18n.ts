@@ -32,7 +32,7 @@ const en = {
   'blocked.labelPhotos': 'Label and photos',
   'blocked.photosOnly': 'This hides the photo or folder and its media.',
   'blocked.createPINHint':
-    'Create a 6–12 digit PIN to protect the Blocked screen. Keep it safe: PIN reset is not available yet.',
+    'Create a {pinMin}–{pinMax} digit PIN to protect the Blocked screen. Keep it safe: PIN reset is not available yet.',
   'blocked.enterPINHint': 'Enter your PIN to open the Blocked screen.',
   'blocked.newPIN': 'New PIN',
   'blocked.confirmPIN': 'Confirm PIN',
@@ -343,7 +343,7 @@ const en = {
   'error.folderNotFound': 'That folder can’t be found.',
   'error.invalidPIN': 'That PIN isn’t right. A PIN is {pinMin} to {pinMax} digits.',
   'error.pinExists': 'A PIN has already been set. Enter it to continue.',
-  'error.pinRateLimited': 'Too many incorrect PINs. Try again in 30 seconds.',
+  'error.pinRateLimited': 'Too many incorrect PINs. Try again in {pinCooldown} seconds.',
   'error.blocksLocked': 'Enter your PIN on the Blocked screen first.',
   'error.undoExpired': 'It’s too late to undo that block. Unblock it on the Blocked screen instead.',
   'error.invalidBlock': 'That can’t be blocked.',

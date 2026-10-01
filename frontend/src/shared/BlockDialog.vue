@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import { BlockMode, engine } from '../bridge'
+import { BlockMode, engine, PIN_MAX_LEN, PIN_MIN_LEN } from '../bridge'
 import { blockRequest, showBlocksChanged, showBlockUndo } from './block'
 import type { BlockRequest } from './block'
 import { errorText, reportError } from './errors'
@@ -89,7 +89,7 @@ async function save() {
       </fieldset>
       <p v-else>{{ t(blockRequest.photosAllowed ? 'blocked.photosOnly' : 'blocked.labelOnly') }}</p>
       <template v-if="!configured">
-        <p>{{ t('blocked.createPINHint') }}</p>
+        <p>{{ t('blocked.createPINHint', { pinMin: PIN_MIN_LEN, pinMax: PIN_MAX_LEN }) }}</p>
         <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" creating />
       </template>
       <p v-if="error" class="page-error" role="alert">{{ error }}</p>
