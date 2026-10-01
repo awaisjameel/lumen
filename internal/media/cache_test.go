@@ -100,3 +100,40 @@ func TestCancelledRebuildDoesNotStartDecoder(t *testing.T) {
 		t.Fatalf("retry decoder calls = %d", d.calls)
 	}
 }
+
+func TestFrameSweepKeepsCurrentWritesInLiteralCacheDirectory(t *testing.T) {
+	c := NewCache(filepath.Join(t.TempDir(), "cache[local]"), Decoders{})
+	old := filepath.Join(c.Dir, "frame-old", "0.jpg")
+	if err := os.MkdirAll(filepath.Dir(old), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(old, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("current")
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 16 {
+			if err := c.Write(7, Thumbs{Small: data, Large: data}); err != nil {
+				t.Error(err)
+			}
+			if err := c.lockedWrite(7, func() error { return c.writeAtomic(c.FramePath(7, 0), data) }); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	for range 16 {
+		if err := c.SweepFrames(); err != nil {
+			t.Error(err)
+		}
+	}
+	wg.Wait()
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("old frame remains: %v", err)
+	}
+	for _, path := range []string{c.Path(7, core.ThumbSmall), c.Path(7, core.ThumbLarge), c.FramePath(7, 0)} {
+		if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, data) {
+			t.Errorf("current cache file %s: %q, %v", path, got, err)
+		}
+	}
+}

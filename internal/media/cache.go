@@ -103,11 +103,16 @@ func (c *Cache) SweepTemp() error { return os.RemoveAll(c.tmpDir()) }
 // Call it once at startup; it may run alongside everything else.
 func (c *Cache) SweepFrames() error {
 	var errs []error
-	old, err := filepath.Glob(filepath.Join(c.Dir, "frame*"))
-	errs = append(errs, err)
-	for _, dir := range old {
-		if filepath.Base(dir) != framesDir {
-			errs = append(errs, os.RemoveAll(dir))
+	entries, err := os.ReadDir(c.Dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if name := entry.Name(); strings.HasPrefix(name, "frame") && name != framesDir {
+			errs = append(errs, os.RemoveAll(filepath.Join(c.Dir, name)))
 		}
 	}
 	return errors.Join(errs...)
@@ -178,7 +183,7 @@ func (c *Cache) writeAtomic(path string, data []byte) error {
 		werr = renameRetry(f.Name(), path)
 	}
 	if werr != nil {
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name()) // Best-effort cleanup; preserve the write failure.
 	}
 	return werr
 }
