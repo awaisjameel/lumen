@@ -93,11 +93,11 @@ func (s *Store) VerifyBlockPIN(ctx context.Context, pin string) (bool, error) {
 	}
 	salt, err := hex.DecodeString(saltHex)
 	if err != nil {
-		return false, err
+		return false, ErrInvalidPIN
 	}
 	want, err := hex.DecodeString(hashHex)
 	if err != nil {
-		return false, err
+		return false, ErrInvalidPIN
 	}
 	if len(salt) != 32 || len(want) != 32 {
 		return false, ErrInvalidPIN
