@@ -97,3 +97,26 @@ it('validates emoji names by code point and still allows resetting an overlong d
   await flushPromises()
   expect(engine.setEventName).toHaveBeenLastCalledWith(trip.id, '')
 })
+
+it('discards a rename draft when its event disappears and later returns', async () => {
+  let changed: ((c: Changes) => void) | undefined
+  vi.mocked(onLibraryChanged).mockImplementation((cb) => {
+    changed = cb
+    return () => undefined
+  })
+  const w = await mounted()
+  await w.get('button.icon-btn').trigger('click')
+  await w.get('form.rename input').setValue('Unsaved name')
+  vi.mocked(engine.events).mockResolvedValue([])
+  changed?.({ assets: true, thumbs: false, tags: false, people: false })
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(w.find('form.rename').exists()).toBe(false)
+  vi.mocked(engine.events).mockResolvedValue([trip])
+  changed?.({ assets: true, thumbs: false, tags: false, people: false })
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(w.find('form.rename').exists()).toBe(false)
+  await w.get('button.icon-btn').trigger('click')
+  expect(w.get<HTMLInputElement>('form.rename input').element.value).toBe(trip.name)
+})

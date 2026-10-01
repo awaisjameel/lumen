@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { engine, MAX_NAME_LEN } from '../bridge'
 import type { Event } from '../bridge'
 import { errorText } from '../shared/errors'
@@ -19,6 +19,10 @@ const { editing, draft } = rename
 const busy = ref(false)
 const actionError = ref('') // a rename's; the list's own reloads don't clear it
 useLiveReload(load, (c) => c.assets || c.thumbs)
+
+watch(list, (events) => {
+  if (editing.value !== null && !events.some((event) => event.id === editing.value)) void rename.close(false)
+})
 
 function edit(event: Event) {
   if (!busy.value) void rename.open(event.id, event.name)
