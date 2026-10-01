@@ -23,12 +23,12 @@ import (
 // versions (see Indexer.versions): a video's stand if its part is the same,
 // a photo's if its part is, or if it decodes as it did then.
 func thumbnailsStand(j store.JobItem) bool {
-	photo, ok := strings.CutSuffix(j.Prior, "+"+media.VideoThumbnailVersion)
+	photo, video, ok := strings.Cut(j.Prior, "+ffmpeg-")
 	if !ok {
 		return false
 	}
 	if j.Kind == core.KindVideo {
-		return true
+		return "ffmpeg-"+video == media.VideoThumbnailVersion
 	}
 	return photo == media.ThumbnailVersion || media.DecodesAsAt(j.Path, photo)
 }

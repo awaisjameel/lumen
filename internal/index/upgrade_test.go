@@ -245,6 +245,30 @@ func TestMetadataStandingUsesTheKindVersionAndRejectsEpochs(t *testing.T) {
 	}
 }
 
+func TestThumbnailStandingUsesOnlyTheKindVersion(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		kind  core.Kind
+		prior string
+		want  bool
+	}{
+		{"current photo", core.KindPhoto, media.ThumbnailVersion + "+" + media.VideoThumbnailVersion, true},
+		{"video change only", core.KindPhoto, media.ThumbnailVersion + "+ffmpeg-old+vips-old", true},
+		{"unchanged photo pixels beside old video", core.KindPhoto, media.HEIFProfilesVersion + "+ffmpeg-old+vips-old", true},
+		{"unknown photo change", core.KindPhoto, "vips-unknown+" + media.VideoThumbnailVersion, false},
+		{"photo change only", core.KindVideo, "vips-old+" + media.VideoThumbnailVersion, true},
+		{"video change", core.KindVideo, media.ThumbnailVersion + "+ffmpeg-old+vips-old", false},
+		{"unknown", core.KindPhoto, "unknown", false},
+		{"no prior output", core.KindPhoto, "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := thumbnailsStand(store.JobItem{Kind: c.kind, Prior: c.prior, Path: "plain.jpg"}); got != c.want {
+				t.Errorf("thumbnails stand = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 func TestUpgradeRequeuesVideoMetadata(t *testing.T) {
 	ctx := t.Context()
 	paths := core.PathsIn(t.TempDir())
