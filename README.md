@@ -84,7 +84,7 @@ Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), what
 | Python   | Ruff             | Ruff                                                                                                      | `ruff.toml`                                                                        |
 | Shell    |                  | ShellCheck                                                                                                |                                                                                    |
 
-The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm install`). npm enforces a seven-day release-age window through `min-release-age=7` in `frontend/.npmrc`; engine checks reject unsupported Node/npm versions. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line.
+The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm install`). npm enforces a seven-day release-age window through `min-release-age=7` in `frontend/.npmrc`; engine checks reject unsupported Node/npm versions. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line. How code is written (errors, context, SQLite, logging, the Go-to-TypeScript contract, Pinia and Vue, tests) is set out in [AUDIT_CONVENTIONS.md](AUDIT_CONVENTIONS.md).
 
 Editors do the same on save: `.editorconfig` sets line endings and indentation, and `.vscode/settings.json` runs these formatters and linters from the pinned copies (install the recommended extensions).
 
@@ -105,7 +105,7 @@ Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates
 `task package` (the Wails template's NSIS installer) is not usable yet: the installer does not carry `deps/runtime`. The installer is Phase 6. The template's Docker and server tasks are left out of `Taskfile.yml`: Lumen needs cgo with the Windows libvips.
 
 Before moving between implementation phases, also regenerate the bindings with
-`wails3 generate bindings -ts -i`, check `git diff -- frontend/bindings`, and run
+`wails3 generate bindings -f '-tags production' -clean=true -ts -i` (as the build does), check `git diff -- frontend/bindings`, and run
 `wails3 build`. The frontend must finish building before Go embeds `frontend/dist`;
 do not run independent frontend and Go production builds concurrently. Browser
 component tests use jsdom; actual codec playback still needs a WebView smoke test
