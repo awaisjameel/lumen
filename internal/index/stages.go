@@ -361,7 +361,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 	if err := ix.search.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("search engine: %w", err)
 	}
-	enc, done, err := ix.encoder.acquire()
+	enc, done, err := ix.encoder.acquire(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +405,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 			continue
 		}
 		r := &results[i]
-		if err := b.add(in, func(v []float32) {
+		if err := b.add(ctx, in, func(v []float32) {
 			if v == nil {
 				r.Err = errNoVector
 				return
@@ -416,7 +416,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 			return nil, err
 		}
 	}
-	if err := b.flush(); err != nil {
+	if err := b.flush(ctx); err != nil {
 		return nil, err
 	}
 	ix.setAIState(func() { ix.aiDevice = enc.Device() }) // it may have moved to the CPU
@@ -427,17 +427,26 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 // usable vector of.
 const errNoVector = "the image model gave no usable result"
 
+// imageEncoder is the model input contract, also implemented by batch test fakes.
+type imageEncoder interface {
+	BatchSize() int
+	Encode([][]byte) ([][]float32, error)
+}
+
 // modelBatch gathers image model inputs from any number of files and runs
 // the model whenever a full batch is waiting, handing each vector to the
 // input's owner. At most one batch of inputs is held at a time.
 type modelBatch struct {
-	enc    *ai.ImageEncoder
+	enc    imageEncoder
 	inputs [][]byte
 	owners []func(vec []float32) // vec is nil where the model made no usable one
 	err    error                 // the model failed: the stage can't run
 }
 
-func (b *modelBatch) add(px []byte, owner func(vec []float32)) error {
+func (b *modelBatch) add(ctx context.Context, px []byte, owner func(vec []float32)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if b.err != nil {
 		return b.err
 	}
@@ -445,17 +454,20 @@ func (b *modelBatch) add(px []byte, owner func(vec []float32)) error {
 	if len(b.inputs) < b.enc.BatchSize() {
 		return nil
 	}
-	return b.flush()
+	return b.flush(ctx)
 }
 
-func (b *modelBatch) flush() error {
+func (b *modelBatch) flush(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if b.err != nil || len(b.inputs) == 0 {
 		return b.err
 	}
 	vecs, err := b.enc.Encode(b.inputs)
 	if err != nil {
-		b.err = err
-		return err
+		b.err = fmt.Errorf("embed image batch: %w", err)
+		return b.err
 	}
 	for k, owner := range b.owners {
 		owner(vecs[k])
@@ -543,7 +555,7 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 	if len(run) == 0 {
 		return results, nil // without loading the models
 	}
-	faces, done, err := ix.faces.acquire()
+	faces, done, err := ix.faces.acquire(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -570,7 +582,7 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 			im, err = ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
 		}
 		if err == nil {
-			err = modelErr(findFaces(faces, im, 0, r))
+			err = modelErr(findFaces(ctx, faces, im, 0, r))
 		}
 		var merr modelError
 		switch {
@@ -591,15 +603,21 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 	return results, nil
 }
 
-func findFaces(faces *ai.Faces, im media.Image, at int64, r *store.FaceResult) error {
+func findFaces(ctx context.Context, faces *ai.Faces, im media.Image, at int64, r *store.FaceResult) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	found, err := faces.Detect(im.Pix, im.W, im.H, faceMinScore)
 	if err != nil {
+		return fmt.Errorf("detect faces: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	found = slices.DeleteFunc(found, func(f ai.Face) bool { return min(f.W, f.H) < faceMinSide })
 	ids, err := faces.Embed(im.Pix, im.W, im.H, found)
 	if err != nil {
-		return err
+		return fmt.Errorf("embed faces: %w", err)
 	}
 	w, h := float64(im.W), float64(im.H)
 	for k, f := range found {

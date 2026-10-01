@@ -1,6 +1,8 @@
 package index
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -18,25 +20,45 @@ type model[T any] struct {
 	// unload (loaded false), so the progress can show the AI's state.
 	report func(v T, loaded bool, err error)
 
-	use    sync.Mutex
-	mu     sync.Mutex
+	once   sync.Once
+	use    chan struct{} // Serialises batches and release; initialised by once.
+	mu     sync.Mutex    // Guards the loaded value and its last use.
 	v      T
 	loaded bool
 	used   time.Time
 }
 
-func (m *model[T]) acquire() (value T, release func(), err error) {
-	m.use.Lock()
+func (m *model[T]) lock(ctx context.Context) error {
+	m.once.Do(func() { m.use = make(chan struct{}, 1) })
+	select {
+	case m.use <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-m.use
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *model[T]) acquire(ctx context.Context) (value T, release func(), err error) {
+	if err := m.lock(ctx); err != nil {
+		return value, func() {}, err
+	}
 	value, err = m.get()
+	if err == nil {
+		err = ctx.Err()
+	}
 	if err != nil {
-		m.use.Unlock()
+		<-m.use
 		return value, func() {}, err
 	}
 	return value, func() {
 		m.mu.Lock()
 		m.used = time.Now()
 		m.mu.Unlock()
-		m.use.Unlock()
+		<-m.use
 	}, nil
 }
 
@@ -52,7 +74,7 @@ func (m *model[T]) get() (T, error) {
 	v, err := m.open()
 	m.report(v, err == nil, err)
 	if err != nil {
-		return v, err
+		return v, fmt.Errorf("load %s: %w", m.name, err)
 	}
 	slog.Info("model loaded", "model", m.name, "took", time.Since(t).Round(time.Millisecond))
 	m.v, m.loaded = v, true
@@ -62,8 +84,8 @@ func (m *model[T]) get() (T, error) {
 // releaseIdle frees the model if it has had no work for a while. Stages
 // call it whenever their queue is empty.
 func (m *model[T]) releaseIdle() {
-	m.use.Lock()
-	defer m.use.Unlock()
+	_ = m.lock(context.Background()) // Cleanup waits for an in-flight batch.
+	defer func() { <-m.use }()
 	m.mu.Lock()
 	idle := time.Since(m.used) >= m.idle
 	m.mu.Unlock()
@@ -75,8 +97,8 @@ func (m *model[T]) releaseIdle() {
 // release frees the model now: its stage is idle, held (paused, on
 // battery) or stopping, or the model failed and is loaded afresh next time.
 func (m *model[T]) release() {
-	m.use.Lock()
-	defer m.use.Unlock()
+	_ = m.lock(context.Background()) // Cleanup waits for an in-flight batch.
+	defer func() { <-m.use }()
 	m.releaseLocked()
 }
 
