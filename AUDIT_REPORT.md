@@ -5,8 +5,8 @@
 **Source of truth:** "Local AI Photo Gallery — End-to-End Plan.md", read together with the README's "Deviations from the plan", which records decisions already accepted.
 
 **Outcome:**
-- 33 commits on top of `ef0013a`: one adds `AUDIT_CONVENTIONS.md`, and the rest are fixes, tests and cleanups.
-- 91 files changed, 3,081 lines added and 320 removed.
+- 37 commits on top of `ef0013a`, up to `153b406`: one adds `AUDIT_CONVENTIONS.md`, two record the 1 October decisions, and the rest are fixes, tests and cleanups.
+- 96 files changed, 3,464 lines added and 365 removed.
 - No next-phase work was started.
 
 ## How the pass ran
@@ -162,30 +162,28 @@ Every finding below was checked in the code before it was fixed, and each fix ha
 | No dead code, debug output or TODOs | Satisfied (see the dead code item above). |
 | Go: boundaries, interfaces, global state | Satisfied, with stated exceptions. The new interfaces sit with their consumers and exist for test fakes. Two package-level states remain, and both are justified: `ai`'s GPU lock, which takes turns between models and is process-wide by nature and the lazily loaded place index (immutable once loaded). |
 | Go: errors, context, goroutines, races | Satisfied. All goroutines started on the branch are tracked. The one limit: a native ONNX call can't be interrupted mid-run (see section 4). |
-| SQLite | Satisfied. Migrations are versioned and transactional. Foreign keys, WAL and `busy_timeout` are set explicitly. There is one writer connection and a read pool. Unit A checked 42 queue query plans. One gap is deferred: Unicode path identity (section 4). |
+| SQLite | Satisfied. Migrations are versioned and transactional. Foreign keys, WAL and `busy_timeout` are set explicitly. There is one writer connection and a read pool. Unit A checked 42 queue query plans. File rows are unique by their fold key (0018), and the ingest lookup uses that index. Migration 0018 is safe to run again. |
 | AI integration | Satisfied. The models are local and behind narrow types. Failures back off per stage, and output is validated (NaN, Inf, output shape). There are no secrets, and the prompts live in `internal/search`. |
 | TypeScript, Vue and Pinia | Satisfied. Strict mode is on, with no `any`, casts or suppressions. Every component is `<script setup lang="ts">`. All stores are setup stores; destructuring uses `useList`'s own refs. Listeners are disposed. Large lists are virtualized. |
 
 ## 3. Deviations from the plan
 
-**Fixed:** the scan status showed a raw file count that included blocked items (§9, "every count and the indexing status").
+**Fixed:**
+- The scan status showed a raw file count that included blocked items (§9, "every count and the indexing status").
+- **File identity.** The README says paths compare with Unicode case folding, but file rows were matched with SQLite `NOCASE`, which folds only A–Z. Renaming "Été.jpg" to "été.jpg" while its content changed left two rows, and every later scan swapped the file between two assets. Files are now looked up by their fold key, and migration 0018 makes that key unique (decision 8, below).
 
-**Found and left as they are,** because each needs a product decision. None is recorded in the README's deviations yet.
+**Decided on 1 October:** each deviation below is now recorded in the README, either as an accepted deviation or as remaining scope.
 
-1. **Politeness (§6).** Pausing on battery and a manual pause exist. Pausing for gaming or full screen, pausing when the CPU is busy, and "index only when idle" do not.
-2. **Pipeline shape (§6).** The plan describes bounded channels between stages. The code uses durable SQLite stage queues with bounded batches, which survive crashes, as §6 also asks.
-3. **Vocabulary size (§4).** There are 182 built-in Things; the plan says about 300 to 1,000.
-4. **Clustering order (§4).** The plan matches new faces against named people first. The code clusters named and unnamed people together, and a named person can't be merged away automatically.
-5. **Model location (§9, "Data location").** The models ship beside `Lumen.exe` in the runtime folder, not in the per-user app-data folder. The database and thumbnails do live in app data.
-6. **Things and Events (§2).** Renaming a Thing, pinning a Thing and pinning an Event are specified but not built.
-7. **Duplicates (§9).** The best copy is never pre-selected. The review screen only previews copies and shows them in Explorer.
-8. **File identity (README).** The README says paths compare with Unicode case folding, but file rows are matched with SQLite `NOCASE`, which folds only A–Z. Renaming "Été.jpg" to "été.jpg" and changing its content in the same step leaves two rows and two assets for one file.
+1. **Politeness (§6).** Pausing on battery and a manual pause exist. Pausing for gaming or full screen, pausing when the CPU is busy, and "index only when idle" are **deferred to Phase 6**.
+2. **Pipeline shape (§6).** The code uses durable SQLite stage queues with bounded batches instead of channels. **Accepted.**
+3. **Vocabulary size (§4).** There are 182 built-in Things, against the plan's 300 to 1,000. **Accepted:** more are added only with measurement.
+4. **Clustering order (§4).** Named and unnamed people cluster together, instead of matching named people first. **Accepted.**
+5. **Model location (§9, "Data location").** The models ship beside `Lumen.exe`. **Accepted.**
+6. **Things and Events (§2).** Renaming and pinning Things, and pinning Events, **move into the Phase 5 remainder.**
+7. **Duplicates (§9).** Pre-selecting the best copy is **Phase 5 scope, built together with Trash.**
 
 ## 4. Deferred items and recommendations
 
-- **Unicode file identity** (item 8 above).
-  - Unit A drafted a migration and tested it on a scratch store: drop duplicate folded paths, keeping the highest id; mark the displaced assets missing; add a unique index on `fold(path)`.
-  - It's deferred because it changes the schema and needs the decision in open question 8.
 - **Native inference can't be cancelled mid-call.** ONNX Runtime calls can't be interrupted, so cancellation now happens between batches, faces and frames. That bounds a shutdown to one model run.
 - **A Vitest quirk.** On one Places test path, a rejected promise returned by `vi.fn` failed the test even though the view handles it. A plain function behaves as expected. The test uses a plain function and says why. Worth a look when Vitest is next upgraded.
 - **Timing-sensitive Go test.** `TestWatchReportsChangesAndReleasesHandle` failed once with its 5-second wait while seven agents loaded the machine. It passed 5 times out of 5 alone, and in every later suite run. Consider a longer wait if it recurs on slow CI.
@@ -194,17 +192,21 @@ Every finding below was checked in the code before it was fixed, and each fix ha
   - The three face-corpus tests need `LUMEN_FACE_PHOTOS`.
 - **Dependencies.** None were upgraded; there was no defect that called for it.
 
-## 5. Open questions
+## 5. Decisions (1 October 2026)
 
-1. **Politeness controls.** Defer them and record the deferral in the README, or schedule them? I recommend deferring them to Phase 6's performance pass.
-2. **Pipeline shape.** Record the SQLite-queue design as an accepted deviation? I recommend yes, since a redesign would be large and gain little.
-3. **Vocabulary size.** Keep the measured 182 labels and record it, or grow towards 300+? I recommend keeping them, and growing only with measurement.
-4. **Named-first clustering.** Keep joint clustering and record it, or match named people first? I recommend keeping it for now; it was tuned on real photos.
-5. **Model location.** Accept "models beside the exe", since they ship read-only in one installer, and record it? I recommend yes.
-6. **Things rename and pin, Events pin.** Are these still v1 scope? If so, they belong with the Phase 5 remainder.
-7. **Best copy in Duplicates.** Is it still v1 scope? The plan says Lumen pre-selects the best version but never deletes without confirmation.
-8. **Unicode path identity.** When existing duplicate rows point at different content, keep the newest row and mark the others missing (unit A's proposal), or ask the user? I recommend unit A's proposal: no data is deleted, and edits stay on the missing assets.
-9. **Scan status.** It shows no count now. Is that acceptable, or should it show the count of visible assets found? I recommend leaving it as it is; the grid already fills in live.
+The product owner took the recommended option on all nine questions.
+
+| # | Question | Decision | Where it's recorded |
+| --- | --- | --- | --- |
+| 1 | Politeness controls | Defer to Phase 6's performance pass | README, Phase 5 status |
+| 2 | Pipeline shape | Accept the SQLite queues | README deviations |
+| 3 | Vocabulary size | Keep the measured set, and grow only with measurement | README deviations |
+| 4 | Clustering order | Keep joint clustering | README deviations |
+| 5 | Model location | Accept "beside the exe" | README deviations |
+| 6 | Things rename and pin, Events pin | Phase 5 scope | README, still to finish |
+| 7 | Best copy in Duplicates | Phase 5 scope, together with Trash | README, still to finish |
+| 8 | Unicode path identity | Keep the newest row and mark the others missing | Fixed: migration 0018 |
+| 9 | Scan status | No count while scanning | Already in place (`95e9d86`) |
 
 ## 6. Readiness for the next phase
 
@@ -213,10 +215,10 @@ Every finding below was checked in the code before it was fixed, and each fix ha
 - `wails3 build` succeeds, and the bindings have no drift.
 - The production app passed both acceptance runs on upgraded libraries, with clean shutdowns.
 
-The open questions are product decisions. None of them blocks Phase 5's remaining work, though questions 6 and 7 decide part of its scope.
+Phase 5's remaining scope now also covers renaming and pinning Things, pinning Events, and best-copy pre-selection in Duplicates (with Trash).
 
 ### Upgrade notes
 
-- **No new migration.** Libraries at schema 16 apply the earlier 0017 once, as before.
+- **Migration 0018 runs once.** It keeps one row per file in any case, which is the newest. An asset left with no file is marked missing: its names, tags and albums are kept, should the content come back. It then adds the unique index `files_path_fold`. It is safe to run again. Libraries at schema 16 also apply 0017 first.
 - **Video AI reruns once.** `VideoFramesVersion` is now `+video-frames-3` and `VideoThumbnailVersion` is now `ffmpeg-9.0+vips-8.18-2`, so every video's poster, sprite and AI stages run again. Photos are unaffected.
 - **Old frame folders are removed in the background** after start. Shutdown can now interrupt that cleanup.
