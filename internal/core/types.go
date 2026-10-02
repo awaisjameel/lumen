@@ -157,7 +157,13 @@ const (
 	BlockPlace  BlockKind = "place"
 	BlockFolder BlockKind = "folder"
 	BlockAlbum  BlockKind = "album"
+	BlockEvent  BlockKind = "event" // target: the event's block tag (an event_tags row)
+	BlockFace   BlockKind = "face"  // target: a face_blocks row, the face as it was found
 )
+
+// FaceLookalikeMin is the cosine similarity at which a face counts as a
+// look-alike of a blocked face. Placeholder: U7 measures it on the face corpus.
+const FaceLookalikeMin = 0.5
 
 // BlockMode chooses whether only the label or also its covered media vanish.
 type BlockMode string
@@ -203,6 +209,19 @@ type GridItem struct {
 	Favourite bool  `json:"f,omitempty"`
 	Thumb     int   `json:"t"`            // thumbnail version; 0 = not made yet
 	At        int64 `json:"at,omitempty"` // search results: the best-matching moment of a video, ms
+}
+
+// CoveredItem is a photo a block covers, as the Blocked screen's browser
+// lists it: its grid cell and the other photo-mode blocks that also hide it.
+type CoveredItem struct {
+	GridItem
+	HiddenBy []BlockRef `json:"hiddenBy"`
+}
+
+// BlockRef names a block.
+type BlockRef struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // Filter narrows the grid to a subset of the library.
@@ -297,6 +316,17 @@ type DuplicateItem struct {
 	Height  int      `json:"height"`
 	Thumb   int      `json:"thumb"`
 	TakenAt int64    `json:"takenAt"` // wall-clock seconds, see WallClock
+	// What the best-copy rule reads.
+	Ext      string  `json:"ext"`      // lower case, with the dot
+	Camera   bool    `json:"camera"`   // EXIF names a camera
+	ExifDate bool    `json:"exifDate"` // the date came from EXIF
+	GPS      bool    `json:"gps"`
+	AddedAt  int64   `json:"addedAt"` // when Lumen first saw it, Unix seconds
+	Mtimes   []int64 `json:"mtimes"`  // per path, Unix seconds
+	// Best marks the item the rule keeps; in an exact group, Keep is its
+	// path to keep.
+	Best bool   `json:"best"`
+	Keep string `json:"keep,omitempty"`
 }
 
 // DuplicateKind says why assets were grouped for review.

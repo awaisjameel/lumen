@@ -281,18 +281,26 @@ func baseVisibleOf(alias string) string {
 	return alias + "hidden = 0 AND " + alias + "trashed_at IS NULL AND " + alias + "missing_since IS NULL"
 }
 
-// blockVisible is true when no photo block covers the assets row alias. A
-// block is evaluated against current metadata, membership and file paths, so
-// newly indexed media is covered without a second queue or saved membership.
-// Its own aliases (blk_*) never collide with the caller's.
-//
-// The triggers of migrations 0014-0016 bump event_revision whenever an input
-// read here changes; keep them in step with this predicate.
+// blockVisible is true when no photo block covers the assets row alias.
 func blockVisible(asset string) string {
+	return "NOT EXISTS (SELECT 1 FROM blocks blk WHERE blk.mode = 'photos' AND " + blockMatch(asset, "blk") + ")"
+}
+
+// blockMatch is true when the blocks row alias blk covers the assets row alias
+// asset, whatever the block's mode: visibility and the Blocked screen's
+// browser ask the same question with the same SQL. Most blocks are evaluated
+// against current metadata, membership and file paths, so newly indexed media
+// is covered without a second queue; event and face blocks read the members
+// that settling and face saving keep current (migration 0023). Its own
+// aliases (blk_*) never collide with the caller's.
+//
+// The triggers of migrations 0014-0016 and 0023 bump event_revision whenever
+// an input read here changes; keep them in step with this predicate.
+func blockMatch(asset, blk string) string {
 	id := asset + ".id"
 	takenDay := "strftime('%Y-%m-%d', " + asset + ".taken_at, 'unixepoch')"
 	rule := func(field string) string { return "json_extract(blk_album.rule_json, '$." + field + "')" }
-	return `NOT EXISTS (SELECT 1 FROM blocks blk WHERE blk.mode = 'photos' AND (
+	return `(
 		(blk.kind = 'asset' AND blk.target_id = ` + id + `)
 		OR (blk.kind = 'person' AND EXISTS (SELECT 1 FROM faces blk_face
 			WHERE blk_face.asset_id = ` + id + ` AND blk_face.person_id = blk.target_id))
@@ -317,7 +325,11 @@ func blockVisible(asset string) string {
 					WHERE blk_rule_face.asset_id = ` + id + ` AND blk_rule_face.person_id = ` + rule("person") + `))
 			)
 		)))
-	))`
+		OR (blk.kind = 'event' AND EXISTS (SELECT 1 FROM event_members blk_event
+			WHERE blk_event.tag_id = blk.target_id AND blk_event.asset_id = ` + id + `))
+		OR (blk.kind = 'face' AND EXISTS (SELECT 1 FROM face_block_faces blk_face_block
+			WHERE blk_face_block.asset_id = ` + id + ` AND blk_face_block.face_block_id = blk.target_id))
+	)`
 }
 
 // tagAppliesTo is the condition for the asset_tags row alias to count: the
