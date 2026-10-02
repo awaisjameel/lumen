@@ -758,20 +758,6 @@ func twoWithSidecars(t *testing.T) (l library, assets []int64) {
 	return l, assets
 }
 
-// names lists the file names in a folder, as they are spelt.
-func names(t *testing.T, dir string) []string {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out []string
-	for _, e := range entries {
-		out = append(out, e.Name())
-	}
-	return out
-}
-
 func TestASidecarMovesWithItsPhotoUnderThePhotosNewName(t *testing.T) {
 	l, _ := twoWithSidecars(t)
 	l.add("other/IMG_1.jpg", "another photo with the same name", day(2024, time.August, 9))

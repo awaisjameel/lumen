@@ -388,17 +388,6 @@ func TestExportWritesBesideEachFileOfAnAssetWithExactCopies(t *testing.T) {
 	}
 }
 
-// eventually fails the test unless cond holds within a few seconds.
-func eventually(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		if cond() {
-			return
-		}
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
-
 var fastXMP = xmpTiming{cooldown: 5 * time.Millisecond, poll: 10 * time.Millisecond, retry: 10 * time.Millisecond}
 
 func TestTheBackgroundPassExportsChangesAndStopsWhenTurnedOff(t *testing.T) {
