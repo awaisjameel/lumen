@@ -419,6 +419,7 @@ const en = {
   'error.signinUnavailable': 'This PC has no Windows sign-in that Lumen can use, so the PIN cannot be reset.',
 
   // Event blocks.
+  'blocked.blockEvent': 'Block this event',
 
   // Face blocks.
   'blocked.blockFace': 'Block this face…',

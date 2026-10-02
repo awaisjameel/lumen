@@ -47,7 +47,13 @@ export function AssetAlbums(id: number): $CancellablePromise<number[] | null> {
 
 /**
  * BlockFace blocks one face, and with lookalikes the faces like it too, in
- * existing and future photos. Phase 5 unit U7.
+ * existing and future photos. It behaves as SetBlock does: it needs the PIN
+ * to have been created, offers Undo for a new block only, and refuses to
+ * change an existing block's mode while the Blocked screen is locked. Asking
+ * again for a face already blocked widens its block to look-alikes (that
+ * hides more, so it needs no unlock), narrows it to the face alone only while
+ * unlocked (that reveals photos, like a mode change), and otherwise returns it
+ * as it is.
  */
 export function BlockFace(faceID: number, mode: core$0.BlockMode, lookalikes: boolean): $CancellablePromise<core$0.BlockChange> {
     return $Call.ByID(1231754019, faceID, mode, lookalikes);

@@ -2,10 +2,8 @@ package services
 
 import (
 	"context"
-	"errors"
 
 	"lumen/internal/core"
-	"lumen/internal/store"
 )
 
 // BlockFace blocks one face, and with lookalikes the faces like it too, in
@@ -17,26 +15,7 @@ import (
 // unlocked (that reveals photos, like a mode change), and otherwise returns it
 // as it is.
 func (s *LibraryService) BlockFace(ctx context.Context, faceID int64, mode core.BlockMode, lookalikes bool) (core.BlockChange, error) {
-	configured, err := s.store.HasBlockPIN(ctx)
-	if err != nil {
-		return core.BlockChange{}, err
-	}
-	if !configured {
-		return core.BlockChange{}, ErrBlockLocked
-	}
-	s.blocked.Lock()
-	defer s.blocked.Unlock()
-	id, created, err := s.store.SetFaceBlock(ctx, faceID, mode, lookalikes, s.unlockedNow())
-	if errors.Is(err, store.ErrBlockChangeLocked) {
-		return core.BlockChange{}, ErrBlockLocked
-	}
-	if err == nil {
-		if created {
-			s.blocked.lastID, s.blocked.lastAt = id, s.now()
-		} else if id == s.blocked.lastID {
-			s.blocked.lastID = 0
-		}
-		s.viewsChanged()
-	}
-	return core.BlockChange{ID: id, Created: created}, err
+	return s.saveBlock(ctx, func(allowChange bool) (int64, bool, error) {
+		return s.store.SetFaceBlock(ctx, faceID, mode, lookalikes, allowChange)
+	})
 }

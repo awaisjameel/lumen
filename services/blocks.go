@@ -152,6 +152,16 @@ func (s *LibraryService) Blocks(ctx context.Context) ([]core.Block, error) {
 
 // SetBlock adds or changes one visibility rule.
 func (s *LibraryService) SetBlock(ctx context.Context, kind core.BlockKind, targetID int64, path string, mode core.BlockMode) (core.BlockChange, error) {
+	return s.saveBlock(ctx, func(allowChange bool) (int64, bool, error) {
+		return s.store.SetBlockWithCreated(ctx, kind, targetID, path, mode, allowChange)
+	})
+}
+
+// saveBlock holds the rules every way of making a block shares: the PIN must
+// have been created, an existing block changes only while the Blocked screen
+// is unlocked (save is told whether it may), and only a new block offers
+// Undo.
+func (s *LibraryService) saveBlock(ctx context.Context, save func(allowChange bool) (id int64, created bool, err error)) (core.BlockChange, error) {
 	configured, err := s.store.HasBlockPIN(ctx)
 	if err != nil {
 		return core.BlockChange{}, err
@@ -161,7 +171,7 @@ func (s *LibraryService) SetBlock(ctx context.Context, kind core.BlockKind, targ
 	}
 	s.blocked.Lock()
 	defer s.blocked.Unlock()
-	id, created, err := s.store.SetBlockWithCreated(ctx, kind, targetID, path, mode, s.unlockedNow())
+	id, created, err := save(s.unlockedNow())
 	if errors.Is(err, store.ErrBlockChangeLocked) {
 		return core.BlockChange{}, ErrBlockLocked
 	}

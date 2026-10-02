@@ -4,7 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { AlbumKind, BlockKind, DateSource, engine, Kind, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Block from '../shared/block'
-import type { AssetDetail, Changes, Face } from '../bridge'
+import type { AssetDetail, Changes, Event, Face } from '../bridge'
 import { emptyRule } from '../albums/store'
 import { block } from '../shared/block'
 import { useLibrary } from './store'
@@ -28,6 +28,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     setAlbumItem: vi.fn(),
     place: vi.fn(),
     tagAsset: vi.fn(),
+    event: vi.fn(),
   },
 }))
 
@@ -292,4 +293,38 @@ it('leaves the faces as they were when the face block is cancelled', async () =>
   await wrapper.get('.block-face').trigger('click')
   await flushPromises()
   expect(vi.mocked(engine.assetFaces).mock.calls).toHaveLength(asked)
+})
+
+const eventOf = (name: string): Event => ({
+  id: 1,
+  name,
+  startAt: 0,
+  endAt: 0,
+  count: 2,
+  cover: 1,
+  coverThumb: 0,
+  placeId: 0,
+  pinned: false,
+})
+
+it('offers to block the event holding the photo, titled with its name', async () => {
+  vi.mocked(engine.event).mockReset().mockResolvedValueOnce(eventOf('Wedding'))
+  vi.mocked(block).mockResolvedValueOnce(true)
+  wrapper = mount(DetailsPanel, { props: { sel: { day: 'results', id: 1 } } })
+  await flushPromises()
+  await wrapper.get('.block-event').trigger('click')
+  await flushPromises()
+  expect(engine.event).toHaveBeenCalledWith(1)
+  expect(block).toHaveBeenLastCalledWith(BlockKind.BlockEvent, 1, 'Wedding')
+})
+
+it('blocks nothing and says why when the photo is in no event it can show', async () => {
+  vi.mocked(engine.event).mockReset().mockRejectedValueOnce(new Error('not found'))
+  vi.mocked(block).mockClear()
+  wrapper = mount(DetailsPanel, { props: { sel: { day: 'results', id: 1 } } })
+  await flushPromises()
+  await wrapper.get('.block-event').trigger('click')
+  await flushPromises()
+  expect(block).not.toHaveBeenCalled()
+  expect(wrapper.text()).toContain('not found')
 })

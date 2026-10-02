@@ -818,3 +818,23 @@ func BenchmarkSavingAFaceBatchWithTheAnchorsUnchangedAt300000Faces(b *testing.B)
 func BenchmarkSavingAFaceBatchWithTheAnchorsChangedAt300000Faces(b *testing.B) {
 	benchAnchorBatch(b, true)
 }
+
+func TestABlockedPersonRuleAlbumDoesNotHideAPhotoOnlyAFaceCoveredByLabelModeLinksToThePerson(t *testing.T) {
+	l := newFaceLibrary(t, 3)
+	l.save(t, "m1", 0, faceAt(0.1, 0))
+	l.save(t, "m1", 1, faceAt(0.1, 170))
+	l.save(t, "m1", 2, faceAt(0.1, 100))
+	ali, err := l.st.NameFaces(l.ctx, []int64{l.faceID(t, 0, 0.1), l.faceID(t, 1, 0.1)}, "Ali")
+	check(t, err)
+	album, err := l.st.CreateAlbum(l.ctx, "Ali", core.AlbumSmart, core.AlbumRule{Person: ali}, nil)
+	check(t, err)
+	_, _, err = l.st.SetFaceBlock(l.ctx, l.faceID(t, 0, 0.1), core.BlockLabel, false, false)
+	check(t, err)
+	_, err = l.st.SetBlock(l.ctx, core.BlockAlbum, album, "", core.BlockPhotos)
+	check(t, err)
+	// Photo 0's only link to Ali is the covered face, so the album no longer
+	// holds it and its block no longer hides it; photo 1 is still Ali's.
+	if got := l.shown(t); !slices.Equal(got, []bool{true, false, true}) {
+		t.Fatalf("shown = %v, want [true false true]", got)
+	}
+}

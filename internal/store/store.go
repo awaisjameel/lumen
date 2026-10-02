@@ -322,7 +322,8 @@ func blockMatch(asset, blk string) string {
 					WHERE blk_rule_tag.asset_id = ` + id + ` AND blk_rule_tag.tag_id = ` + rule("tag") + `
 					AND ` + tagAppliesTo("blk_rule_tag", tagConfidenceSQL) + `))
 				AND (COALESCE(` + rule("person") + `, 0) = 0 OR EXISTS (SELECT 1 FROM faces blk_rule_face
-					WHERE blk_rule_face.asset_id = ` + id + ` AND blk_rule_face.person_id = ` + rule("person") + `))
+					WHERE blk_rule_face.asset_id = ` + id + ` AND blk_rule_face.person_id = ` + rule("person") + `
+					AND NOT EXISTS (SELECT 1 FROM face_block_faces blk_rule_cover WHERE blk_rule_cover.face_id = blk_rule_face.id)))
 			)
 		)))
 		OR (` + blk + `.kind = 'event' AND EXISTS (SELECT 1 FROM event_members blk_event

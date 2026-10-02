@@ -257,6 +257,17 @@ async function blockPlace() {
     await loadExtras(props.sel?.id)
 }
 
+async function blockEvent() {
+  const item = detail.value
+  if (!item) return
+  try {
+    const event = await engine.event(item.id) // the event holding this photo; its name titles the dialog
+    if (await block(BlockKind.BlockEvent, item.id, event.name)) await loadExtras(props.sel?.id)
+  } catch (e) {
+    error.value = errorText(e)
+  }
+}
+
 async function blockFolder(path: string) {
   const cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'))
   if (cut <= 0) return
@@ -359,6 +370,10 @@ function showInFolder(id: number) {
       <section v-if="detail.camera">
         <h3>{{ t('details.camera') }}</h3>
         <p>{{ detail.camera }}</p>
+      </section>
+
+      <section v-if="!lib.inTrash">
+        <button class="btn btn-subtle block-event" @click="blockEvent">{{ t('blocked.blockEvent') }}</button>
       </section>
 
       <section v-if="detail.lat !== null && detail.lon !== null">
