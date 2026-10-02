@@ -256,6 +256,145 @@ func TestLabelModeTakesCoveredFacesOutOfFaceListsButKeepsThePhotos(t *testing.T)
 	}
 }
 
+// gridOf is the photos (by index) the grid shows for the view v.
+func (l *faceLibrary) gridOf(t *testing.T, v core.View) []int {
+	t.Helper()
+	where, args, err := l.st.viewFilterSQL(l.ctx, v, 0.2)
+	check(t, err)
+	ids, err := queryAll(l.ctx, l.st.r, scanID, "SELECT id FROM assets WHERE "+where+" ORDER BY id", args...)
+	check(t, err)
+	var out []int
+	for _, id := range ids {
+		out = append(out, slices.Index(l.assets, id)+1)
+	}
+	return out
+}
+
+func TestLabelModeKeepsACoveredFaceOutOfThePersonGridAndPersonRuleAlbums(t *testing.T) {
+	l := newFaceLibrary(t, 3)
+	l.save(t, "m1", 0, faceAt(0.1, 0))
+	l.save(t, "m1", 1, faceAt(0.1, 10))
+	l.save(t, "m1", 2, faceAt(0.1, 170))
+	ali, err := l.st.NameFaces(l.ctx, []int64{l.faceID(t, 0, 0.1), l.faceID(t, 2, 0.1)}, "Ali")
+	check(t, err)
+	album, err := l.st.CreateAlbum(l.ctx, "Ali", core.AlbumSmart, core.AlbumRule{Person: ali}, nil)
+	check(t, err)
+	if got := l.gridOf(t, core.View{Person: ali}); !slices.Equal(got, []int{1, 3}) {
+		t.Fatalf("Ali's grid before the block = %v", got)
+	}
+	_, _, err = l.st.SetFaceBlock(l.ctx, l.faceID(t, 0, 0.1), core.BlockLabel, true, false)
+	check(t, err)
+	if got := l.shown(t); !slices.Equal(got, []bool{true, true, true}) {
+		t.Fatalf("label mode hid photos: %v", got)
+	}
+	// Photos 1 and 2 stay in the library, but Ali is no longer in them.
+	if got := l.gridOf(t, core.View{Person: ali}); !slices.Equal(got, []int{3}) {
+		t.Fatalf("Ali's grid = %v, want only the photo whose face is not covered", got)
+	}
+	if got := l.gridOf(t, core.View{Album: album}); !slices.Equal(got, []int{3}) {
+		t.Fatalf("the smart album for Ali = %v, want only the photo whose face is not covered", got)
+	}
+	if got := l.gridOf(t, core.View{}); !slices.Equal(got, []int{1, 2, 3}) {
+		t.Fatalf("the whole library = %v", got)
+	}
+}
+
+func TestAPersonWhoseEveryFaceIsCoveredIsNotSuggestedSearchedOrGivenAPage(t *testing.T) {
+	l := newFaceLibrary(t, 3)
+	l.save(t, "m1", 0, faceAt(0.1, 0))
+	l.save(t, "m1", 1, faceAt(0.1, 10))
+	l.save(t, "m1", 2, faceAt(0.1, 170))
+	ali, err := l.st.NameFaces(l.ctx, []int64{l.faceID(t, 0, 0.1), l.faceID(t, 2, 0.1)}, "Alix")
+	check(t, err)
+	bo, err := l.st.NameFaces(l.ctx, []int64{l.faceID(t, 1, 0.1)}, "Box")
+	check(t, err)
+	names := func() (suggested, named []string) {
+		got, err := l.st.SearchPeople(l.ctx, "x", 10)
+		check(t, err)
+		for _, p := range got {
+			suggested = append(suggested, p.Name)
+		}
+		all, err := l.st.NamedPeople(l.ctx)
+		check(t, err)
+		for _, p := range all {
+			named = append(named, p.Name)
+		}
+		return suggested, named
+	}
+	if sug, named := names(); len(sug) != 2 || len(named) != 2 {
+		t.Fatalf("before the block: suggested %v, named %v", sug, named)
+	}
+	_, _, err = l.st.SetFaceBlock(l.ctx, l.faceID(t, 1, 0.1), core.BlockLabel, false, false)
+	check(t, err)
+	if sug, named := names(); !slices.Equal(sug, []string{"Alix"}) || !slices.Equal(named, []string{"Alix"}) {
+		t.Fatalf("after the block: suggested %v, named %v; want only Alix", sug, named)
+	}
+	if _, err := l.st.Person(l.ctx, bo); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("page of a person every face of whom is covered: %v", err)
+	}
+	// One face covered is not all of them: Ali still has a page and a count.
+	_, _, err = l.st.SetFaceBlock(l.ctx, l.faceID(t, 0, 0.1), core.BlockLabel, false, false)
+	check(t, err)
+	if p, err := l.st.Person(l.ctx, ali); err != nil || p.Count != 1 {
+		t.Fatalf("Ali's page = %+v, %v; want one photo", p, err)
+	}
+}
+
+func TestNarrowingAFaceBlockToTheFaceAloneNeedsThePIN(t *testing.T) {
+	l := newFaceLibrary(t, 3)
+	l.save(t, "m1", 0, faceAt(0.1, 0))
+	l.save(t, "m1", 1, faceAt(0.1, 20))
+	l.save(t, "m1", 2, faceAt(0.1, 170))
+	face := l.faceID(t, 0, 0.1)
+	id, _, err := l.st.SetFaceBlock(l.ctx, face, core.BlockPhotos, true, false)
+	check(t, err)
+	if _, _, err := l.st.SetFaceBlock(l.ctx, face, core.BlockPhotos, false, false); !errors.Is(err, ErrBlockChangeLocked) {
+		t.Fatalf("narrowing while locked: %v", err)
+	}
+	if got := l.shown(t); !slices.Equal(got, []bool{false, false, true}) {
+		t.Fatalf("a refused narrowing moved the block: %v", got)
+	}
+	again, created, err := l.st.SetFaceBlock(l.ctx, face, core.BlockPhotos, false, true)
+	if err != nil || created || again != id {
+		t.Fatalf("narrowing unlocked = %d, %v, %v", again, created, err)
+	}
+	if got := l.shown(t); !slices.Equal(got, []bool{false, true, true}) {
+		t.Fatalf("shown after narrowing = %v, want only the face's own photo hidden", got)
+	}
+	// Narrowed, it stays narrow as new look-alikes arrive, and widening
+	// again is allowed while locked.
+	l.save(t, "m1", 2, faceAt(0.1, 5))
+	if got := l.shown(t); !slices.Equal(got, []bool{false, true, true}) {
+		t.Fatalf("a narrowed block covered a new look-alike: %v", got)
+	}
+	_, _, err = l.st.SetFaceBlock(l.ctx, face, core.BlockPhotos, true, false)
+	check(t, err)
+	if got := l.shown(t); !slices.Equal(got, []bool{false, false, false}) {
+		t.Fatalf("shown after widening again = %v", got)
+	}
+}
+
+func TestReanalysingTheAnchorWithTheSameVectorDoesNotScanTheModelAgain(t *testing.T) {
+	l := newFaceLibrary(t, 2)
+	l.save(t, "m1", 0, faceAt(0.1, 0))
+	id, _, err := l.st.SetFaceBlock(l.ctx, l.faceID(t, 0, 0.1), core.BlockPhotos, true, false)
+	check(t, err)
+	block := l.blockOf(t, id)
+	// A face that looks like the block and was never judged, as if it had
+	// been written by something other than a face save: only a scan finds it.
+	check(t, errOf(l.st.w.ExecContext(l.ctx, `INSERT INTO faces (asset_id, at_ms, x, y, w, h, score, sharpness, yaw, model, vec)
+		VALUES (?, 0, 0.1, 0.2, 0.2, 0.3, 0.9, 50, 0, 'm1', ?)`, l.assets[1], float32Bytes(vecAt(4, 5)))))
+
+	l.save(t, "m1", 0, faceAt(0.1, 0)) // found again, unchanged
+	if got := l.covered(t, block); !slices.Equal(got, []string{"p1@0.1/m1"}) {
+		t.Fatalf("an unchanged anchor scanned the model's faces: covered %v", got)
+	}
+	l.save(t, "m1", 0, faceAt(0.1, 1)) // found again, with a different vector
+	if got := l.covered(t, block); !slices.Equal(got, []string{"p1@0.1/m1", "p2@0.1/m1"}) {
+		t.Fatalf("a changed anchor did not scan the model's faces: covered %v", got)
+	}
+}
+
 func TestACoveredFaceLeavesAPersonsCover(t *testing.T) {
 	l := newFaceLibrary(t, 2)
 	l.save(t, "m1", 0, faceAt(0.1, 0))
@@ -485,9 +624,9 @@ func TestADotOverEncodedBytesMatchesTheDotOfTheVectors(t *testing.T) {
 	}
 }
 
-// randomUnit returns a random unit vector of dim values.
-func randomUnit(rng *rand.Rand, dim int) []float32 {
-	v := make([]float32, dim)
+// randomUnit returns a random unit vector of 512 values (the ArcFace size).
+func randomUnit(rng *rand.Rand) []float32 {
+	v := make([]float32, 512)
 	var norm float64
 	for i := range v {
 		v[i] = float32(rng.NormFloat64())
@@ -529,7 +668,7 @@ func bigFaceLibrary(b *testing.B, n, perAsset int) (st *Store, assets []int64) {
 		defer ins.Close()
 		for _, a := range assets {
 			for k := range perAsset {
-				if _, err := ins.ExecContext(ctx, a, float32(k)*0.1, float32Bytes(randomUnit(rng, 512))); err != nil {
+				if _, err := ins.ExecContext(ctx, a, float32(k)*0.1, float32Bytes(randomUnit(rng))); err != nil {
 					return err
 				}
 			}
@@ -605,7 +744,7 @@ func BenchmarkSavingAFaceBatchWithFiveLookalikeBlocks(b *testing.B) {
 		for i := range batch {
 			batch[i].Faces = batch[i].Faces[:0]
 			for k := range 3 {
-				batch[i].Faces = append(batch[i].Faces, DetectedFace{X: float32(k) * 0.3, Y: 0.2, W: 0.2, H: 0.3, Score: 0.9, Sharpness: 50, Vec: randomUnit(rng, 512)})
+				batch[i].Faces = append(batch[i].Faces, DetectedFace{X: float32(k) * 0.3, Y: 0.2, W: 0.2, H: 0.3, Score: 0.9, Sharpness: 50, Vec: randomUnit(rng)})
 			}
 		}
 		b.StartTimer()
@@ -613,4 +752,69 @@ func BenchmarkSavingAFaceBatchWithFiveLookalikeBlocks(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+// benchAnchorBatch is the faces stage saving 32 photos while 5 look-alike
+// blocks exist over a library of 300,000 faces: the 5 anchor photos, found
+// again as they were (or with changed vectors, which forces a rescan of the
+// model), and 27 others with 3 new faces each.
+func benchAnchorBatch(b *testing.B, changed bool) {
+	b.Helper()
+	st, assets := bigFaceLibrary(b, 3000, 100)
+	ctx := context.Background()
+	var batch []FaceResult
+	for k := range 5 {
+		faces, err := queryAll(ctx, st.r, func(r *sql.Rows) (f DetectedFace, err error) {
+			var vec []byte
+			err = r.Scan(&f.X, &f.Y, &f.W, &f.H, &f.Score, &f.Sharpness, &f.Yaw, &vec)
+			f.Vec = bytesFloat32(vec)
+			return f, err
+		}, "SELECT x, y, w, h, score, sharpness, yaw, vec FROM faces WHERE asset_id = ? ORDER BY id", assets[k])
+		if err != nil {
+			b.Fatal(err)
+		}
+		var face int64
+		if err := st.r.QueryRowContext(ctx, "SELECT min(id) FROM faces WHERE asset_id = ?", assets[k]).Scan(&face); err != nil {
+			b.Fatal(err)
+		}
+		if _, _, err := st.SetFaceBlock(ctx, face, core.BlockPhotos, true, true); err != nil {
+			b.Fatal(err)
+		}
+		batch = append(batch, FaceResult{AssetID: assets[k], Faces: faces})
+	}
+	for i := range 27 {
+		batch = append(batch, FaceResult{AssetID: assets[10+i]})
+	}
+	rng := rand.New(rand.NewPCG(11, 12))
+	b.ResetTimer()
+	for range b.N {
+		b.StopTimer()
+		for i := 5; i < len(batch); i++ {
+			batch[i].Faces = batch[i].Faces[:0]
+			for k := range 3 {
+				batch[i].Faces = append(batch[i].Faces, DetectedFace{X: float32(k) * 0.3, Y: 0.2, W: 0.2, H: 0.3, Score: 0.9, Sharpness: 50, Vec: randomUnit(rng)})
+			}
+		}
+		if changed {
+			for i := range 5 {
+				batch[i].Faces[0].Vec = randomUnit(rng)
+			}
+		}
+		b.StartTimer()
+		if err := st.SaveFaces(ctx, "m1", "m1", batch); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkSavingAFaceBatchWithTheAnchorsUnchangedAt300000Faces is the usual
+// re-analysis: the anchors come out as they were, so no model scan is made.
+func BenchmarkSavingAFaceBatchWithTheAnchorsUnchangedAt300000Faces(b *testing.B) {
+	benchAnchorBatch(b, false)
+}
+
+// BenchmarkSavingAFaceBatchWithTheAnchorsChangedAt300000Faces is the worst
+// case: all five anchors have new vectors, so five scans of the model are made.
+func BenchmarkSavingAFaceBatchWithTheAnchorsChangedAt300000Faces(b *testing.B) {
+	benchAnchorBatch(b, true)
 }

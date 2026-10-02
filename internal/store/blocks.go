@@ -109,7 +109,7 @@ func (s *Store) setBlock(ctx context.Context, kind core.BlockKind, targetID int6
 		case core.BlockEvent:
 			target, name, err = s.eventBlockTarget(ctx, tx, targetID)
 		case core.BlockFace:
-			target, name, err = s.faceBlockTarget(ctx, tx, targetID, lookalikes)
+			target, name, err = s.faceBlockTarget(ctx, tx, targetID, lookalikes, allowChange)
 		case core.BlockFolder:
 			var sources []string
 			sources, err = queryAll(ctx, tx, func(r *sql.Rows) (p string, e error) { e = r.Scan(&p); return p, e },

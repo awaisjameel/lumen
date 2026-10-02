@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/binary"
@@ -26,13 +27,22 @@ import (
 // hidden anyway).
 const faceShown = "NOT EXISTS (SELECT 1 FROM face_block_faces blk_shown WHERE blk_shown.face_id = f.id)"
 
+// personCovered is true when the people row person has faces and a face block
+// covers every one of them, so in label mode nothing of them is left to show:
+// they are not suggested, searched for by name or given a page. person is an
+// SQL expression for the person's id.
+func personCovered(person string) string {
+	return "(EXISTS (SELECT 1 FROM faces pc WHERE pc.person_id = " + person + ") AND NOT EXISTS (SELECT 1 FROM faces f WHERE f.person_id = " + person + " AND " + faceShown + "))"
+}
+
 // faceBlockTarget returns the face_blocks row for the face faceID, making it
 // if the face has none yet: where the face is, its vector, and the faces it
 // covers (with lookalikes, the faces like it too), and the block's name. A
-// block the face already anchors is returned as it is, except that asking for
-// look-alikes widens it: that hides more, so it needs no PIN, where narrowing
-// would reveal photos and is left to removing the block.
-func (s *Store) faceBlockTarget(ctx context.Context, tx *sql.Tx, faceID int64, lookalikes bool) (faceBlockID int64, name string, err error) {
+// block the face already anchors is returned, widened when look-alikes are now
+// asked for (that hides more, so it needs no PIN) and narrowed to the face
+// alone when they are not (that reveals photos, so like a change of mode it
+// needs allowChange, else ErrBlockChangeLocked).
+func (s *Store) faceBlockTarget(ctx context.Context, tx *sql.Tx, faceID int64, lookalikes, allowChange bool) (faceBlockID int64, name string, err error) {
 	var f struct {
 		asset, frame int64
 		box          box
@@ -60,8 +70,13 @@ func (s *Store) faceBlockTarget(ctx context.Context, tx *sql.Tx, faceID int64, l
 	err = tx.QueryRowContext(ctx, "SELECT id, lookalikes FROM face_blocks WHERE face_id = ?", faceID).Scan(&faceBlockID, &had)
 	switch {
 	case err == nil:
-		if lookalikes && !had {
+		switch {
+		case lookalikes && !had:
 			err = widenFaceBlock(ctx, tx, faceBlockID)
+		case !lookalikes && had && !allowChange:
+			err = ErrBlockChangeLocked
+		case !lookalikes && had:
+			err = narrowFaceBlock(ctx, tx, faceBlockID, faceID)
 		}
 		return faceBlockID, name, err
 	case !errors.Is(err, sql.ErrNoRows):
@@ -119,6 +134,15 @@ func widenFaceBlock(ctx context.Context, tx *sql.Tx, blockID int64) error {
 		}
 	}
 	return nil
+}
+
+// narrowFaceBlock makes block blockID cover only its anchor, faceID.
+func narrowFaceBlock(ctx context.Context, tx *sql.Tx, blockID, faceID int64) error {
+	if _, err := tx.ExecContext(ctx, "UPDATE face_blocks SET lookalikes = 0 WHERE id = ?", blockID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, "DELETE FROM face_block_faces WHERE face_block_id = ? AND face_id != ?", blockID, faceID)
+	return err
 }
 
 // FaceBlockAssets returns the photos that hold a blocked face's anchor, for
@@ -229,6 +253,7 @@ type anchorBlock struct {
 	face       int64 // the anchor face now; 0 while none
 	lookalikes bool
 	box        storedBox
+	vec        []byte // its vector under the model being saved, as stored; nil while none
 }
 
 func reanchor(ctx context.Context, tx *sql.Tx, model string, saved []savedFaces) error {
@@ -244,11 +269,12 @@ func reanchor(ctx context.Context, tx *sql.Tx, model string, saved []savedFaces)
 	}
 	blocks, err := queryAll(ctx, tx, func(r *sql.Rows) (b anchorBlock, err error) {
 		var face sql.NullInt64
-		err = r.Scan(&b.id, &b.asset, &b.box.Frame, &b.box.X, &b.box.Y, &b.box.W, &b.box.H, &face, &b.lookalikes)
+		err = r.Scan(&b.id, &b.asset, &b.box.Frame, &b.box.X, &b.box.Y, &b.box.W, &b.box.H, &face, &b.lookalikes, &b.vec)
 		b.face, b.box.id = face.Int64, b.id
 		return b, err
-	}, `SELECT id, asset_id, at_ms, x, y, w, h, face_id, lookalikes FROM face_blocks
-		WHERE asset_id IN (SELECT value FROM json_each(?))`, string(list))
+	}, `SELECT id, asset_id, at_ms, x, y, w, h, face_id, lookalikes,
+			(SELECT vec FROM face_block_vectors WHERE face_block_id = face_blocks.id AND model = ?1)
+		FROM face_blocks WHERE asset_id IN (SELECT value FROM json_each(?2))`, model, string(list))
 	if err != nil || len(blocks) == 0 {
 		return err
 	}
@@ -291,8 +317,16 @@ func anchorAt(ctx context.Context, tx *sql.Tx, model string, b anchorBlock, asse
 		faceID, face.Frame, face.X, face.Y, face.W, face.H, b.id); err != nil {
 		return err
 	}
+	vec := float32Bytes(face.Vec)
+	// The same face with the same vector: every face of the model was judged
+	// by it already, when it was stored or when each face was saved, so the
+	// scan of the model's faces (the costly part) would find nothing new.
+	same := b.face == faceID && bytes.Equal(b.vec, vec)
+	if same {
+		return nil
+	}
 	if _, err := tx.ExecContext(ctx, "INSERT OR REPLACE INTO face_block_vectors (face_block_id, model, vec) VALUES (?, ?, ?)",
-		b.id, model, float32Bytes(face.Vec)); err != nil {
+		b.id, model, vec); err != nil {
 		return err
 	}
 	if b.face != 0 && b.face != faceID && !b.lookalikes {

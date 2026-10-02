@@ -152,3 +152,29 @@ func TestBlockFaceOfOneFaceLeavesItsLookalikesAndWideningNeedsNoPIN(t *testing.T
 		t.Fatalf("shown = %v, want the look-alike hidden too", got)
 	}
 }
+
+func TestBlockFaceNarrowsABlockToTheFaceAloneOnlyWhileUnlocked(t *testing.T) {
+	ctx := t.Context()
+	s, st, assets, faces := faceLibrary(t)
+	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BlockFace(ctx, faces[0], core.BlockPhotos, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BlockFace(ctx, faces[0], core.BlockPhotos, false); !errors.Is(err, ErrBlockLocked) {
+		t.Fatalf("narrowing while locked: %v", err)
+	}
+	if got := shownAssets(t, st, assets); !slices.Equal(got, []bool{false, false, true}) {
+		t.Fatalf("a refused narrowing changed what is shown: %v", got)
+	}
+	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BlockFace(ctx, faces[0], core.BlockPhotos, false); err != nil {
+		t.Fatalf("narrowing unlocked: %v", err)
+	}
+	if got := shownAssets(t, st, assets); !slices.Equal(got, []bool{false, true, true}) {
+		t.Fatalf("shown after narrowing = %v", got)
+	}
+}

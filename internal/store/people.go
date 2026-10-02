@@ -63,7 +63,7 @@ func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''),
 				(SELECT count(DISTINCT f.asset_id) FROM faces f JOIN assets a ON a.id = f.asset_id
 					WHERE f.person_id = p.id AND `+visibleA+` AND `+faceShown+`)
-			FROM people p WHERE p.id = ? AND NOT `+labelBlocked(core.BlockPerson, "p.id"), id)
+			FROM people p WHERE p.id = ? AND NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND NOT `+personCovered("p.id"), id)
 		if err != nil {
 			return err
 		}
@@ -138,12 +138,13 @@ func (s *Store) AssetFaces(ctx context.Context, assetID int64) ([]core.Face, err
 }
 
 // NamedPeople returns everyone the user has named (for finding names in a
-// search).
+// search), except those every face of whom a face block covers.
 func (s *Store) NamedPeople(ctx context.Context) ([]core.Person, error) {
 	return queryAll(ctx, s.r, func(r *sql.Rows) (p core.Person, err error) {
 		err = r.Scan(&p.ID, &p.Name)
 		return p, err
 	}, `SELECT id, name FROM people WHERE name IS NOT NULL AND NOT `+labelBlocked(core.BlockPerson, "people.id")+`
+		AND NOT `+personCovered("people.id")+`
 		ORDER BY length(name) DESC, name`)
 }
 
@@ -178,7 +179,7 @@ func (s *Store) SearchPeople(ctx context.Context, text string, limit int) ([]cor
 			err = r.Scan(&p.ID, &p.Name)
 			return p, err
 		}, `SELECT id, name FROM people WHERE name IS NOT NULL AND `+nameMatch+`
-			AND NOT `+labelBlocked(core.BlockPerson, "people.id")+`
+			AND NOT `+labelBlocked(core.BlockPerson, "people.id")+` AND NOT `+personCovered("people.id")+`
 			ORDER BY `+nameFirst+` LIMIT ?2`, core.Fold(text), limit)
 		if err != nil {
 			return err

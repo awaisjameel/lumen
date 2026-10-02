@@ -190,7 +190,7 @@ func (f assetFilter) where(minScore float64) (where string, args []any) {
 		args = append(args, f.tag, minScore)
 	}
 	if f.person != 0 {
-		where += " AND id IN (SELECT asset_id FROM faces WHERE person_id = ?)"
+		where += " AND id IN (SELECT f.asset_id FROM faces f WHERE f.person_id = ? AND " + faceShown + ")"
 		args = append(args, f.person)
 	}
 	if f.place != 0 {

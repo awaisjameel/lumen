@@ -13,7 +13,9 @@ import (
 // to have been created, offers Undo for a new block only, and refuses to
 // change an existing block's mode while the Blocked screen is locked. Asking
 // again for a face already blocked widens its block to look-alikes (that
-// hides more, so it needs no unlock) and otherwise returns it as it is.
+// hides more, so it needs no unlock), narrows it to the face alone only while
+// unlocked (that reveals photos, like a mode change), and otherwise returns it
+// as it is.
 func (s *LibraryService) BlockFace(ctx context.Context, faceID int64, mode core.BlockMode, lookalikes bool) (core.BlockChange, error) {
 	configured, err := s.store.HasBlockPIN(ctx)
 	if err != nil {
