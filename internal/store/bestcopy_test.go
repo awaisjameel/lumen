@@ -325,7 +325,7 @@ func TestDuplicateGroupsMarkTheBestCopyAndTheFileToKeep(t *testing.T) {
 	}
 }
 
-func TestExtraCopiesNamesEveryFileButTheOneKept(t *testing.T) {
+func TestCopiesToRecycleNamesOnlyTheFilesAskedFor(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
 	src, err := st.AddSource(ctx, `C:\Photos`)
 	check(t, err)
@@ -333,45 +333,52 @@ func TestExtraCopiesNamesEveryFileButTheOneKept(t *testing.T) {
 	b := item(src.ID, `C:\Photos\Copy\b.jpg`, "a")
 	c := item(src.ID, `C:\Photos\c.jpg`, "a")
 	other := item(src.ID, `C:\Photos\other.jpg`, "other")
+	a.Size, a.MTime = 11, 111
 	check(t, errOf(st.Ingest(ctx, []IngestItem{a, b, c, other})))
 	var id, otherID int64
 	check(t, st.r.QueryRowContext(ctx, `SELECT id FROM assets WHERE content_hash = ?`, a.Hash).Scan(&id))
 	check(t, st.r.QueryRowContext(ctx, `SELECT id FROM assets WHERE content_hash = ?`, other.Hash).Scan(&otherID))
 
-	extra, err := st.ExtraCopies(ctx, id, `c:\photos\C.JPG`) // paths compare without case
+	// Paths compare without case; c is in neither list, so it is not named.
+	kept, extra, err := st.CopiesToRecycle(ctx, id, `c:\photos\A.JPG`, []string{`C:\Photos\Copy\b.jpg`, `C:\PHOTOS\COPY\B.JPG`})
 	check(t, err)
-	var paths []string
-	for _, f := range extra {
-		paths = append(paths, f.Path)
-		if f.AssetID != id {
-			t.Fatalf("file %+v belongs to another asset", f)
-		}
+	if kept.Path != a.Path || kept.AssetID != id || kept.Size != 11 || kept.MTime != 111 {
+		t.Fatalf("kept = %+v, want a.jpg as recorded", kept)
 	}
-	if !slices.Equal(paths, []string{`C:\Photos\a.jpg`, `C:\Photos\Copy\b.jpg`}) {
-		t.Fatalf("extra = %v", paths)
+	if len(extra) != 1 || extra[0].Path != b.Path || extra[0].AssetID != id {
+		t.Fatalf("extra = %+v, want b.jpg once", extra)
 	}
 
-	// Another asset's file, an unknown path and no path at all name nothing.
-	for _, keep := range []string{`C:\Photos\other.jpg`, `C:\Photos\missing.jpg`, ""} {
-		if got, err := st.ExtraCopies(ctx, id, keep); !errors.Is(err, ErrNotFound) || len(got) != 0 {
-			t.Errorf("keep %q: got %v, %v; want ErrNotFound and no files", keep, got, err)
+	// Every request that names something else is refused, and names nothing.
+	for name, ask := range map[string]struct {
+		id      int64
+		keep    string
+		recycle []string
+	}{
+		"nothing to recycle":     {id, a.Path, nil},
+		"the kept file listed":   {id, a.Path, []string{b.Path, a.Path}},
+		"another photo's file":   {id, a.Path, []string{b.Path, other.Path}},
+		"an unknown file":        {id, a.Path, []string{`C:\Photos\missing.jpg`}},
+		"another photo's keeper": {id, other.Path, []string{b.Path}},
+		"no keeper":              {id, "", []string{b.Path}},
+		"an unknown photo":       {9999, a.Path, []string{b.Path}},
+	} {
+		if k, got, err := st.CopiesToRecycle(ctx, ask.id, ask.keep, ask.recycle); !errors.Is(err, ErrNotFound) || len(got) != 0 || k.Path != "" {
+			t.Errorf("%s: got %+v, %v, %v; want ErrNotFound and nothing named", name, k, got, err)
 		}
 	}
-	if _, err := st.ExtraCopies(ctx, 9999, a.Path); !errors.Is(err, ErrNotFound) {
-		t.Errorf("unknown asset: err = %v, want ErrNotFound", err)
-	}
 
-	// A hidden, trashed or missing asset is not one the Duplicates screen lists.
+	// A hidden, trashed or missing photo is not one the Duplicates screen lists.
 	for _, set := range []string{"hidden = 1", "trashed_at = 5", "missing_since = 5"} {
-		_, err := st.w.ExecContext(ctx, `UPDATE assets SET `+set+` WHERE id = ?`, otherID)
+		_, err := st.w.ExecContext(ctx, `UPDATE assets SET `+set+` WHERE id = ?`, id)
 		check(t, err)
-		if _, err := st.ExtraCopies(ctx, otherID, other.Path); !errors.Is(err, ErrNotFound) {
+		if _, _, err := st.CopiesToRecycle(ctx, id, a.Path, []string{b.Path}); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%s: err = %v, want ErrNotFound", set, err)
 		}
-		_, err = st.w.ExecContext(ctx, `UPDATE assets SET hidden = 0, trashed_at = NULL, missing_since = NULL WHERE id = ?`, otherID)
+		_, err = st.w.ExecContext(ctx, `UPDATE assets SET hidden = 0, trashed_at = NULL, missing_since = NULL WHERE id = ?`, id)
 		check(t, err)
 	}
-	if got, err := st.ExtraCopies(ctx, otherID, other.Path); err != nil || len(got) != 0 {
-		t.Errorf("a single file has no extra copies: got %v, %v", got, err)
+	if _, _, err := st.CopiesToRecycle(ctx, otherID, other.Path, []string{other.Path}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a single file has nothing to recycle: err = %v", err)
 	}
 }

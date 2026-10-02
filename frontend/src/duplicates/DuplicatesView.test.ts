@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { DuplicateKind, engine } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { DuplicateGroup, DuplicateItem } from '../bridge'
+import { showBlocksChanged } from '../shared/block'
 import { notice } from '../shared/errors'
 import { clearTrashUndo, trashUndo } from '../trash/undo'
 import { useDuplicates } from './store'
@@ -352,7 +353,9 @@ describe('choosing the copy to keep', () => {
     expect(reviewDialog().get('.keeps').text()).toBe('C:\\Photos\\b\\IMG_9 copy.jpg')
     expect(engine.deleteCopies).not.toHaveBeenCalled()
     await confirm()
-    expect(engine.deleteCopies).toHaveBeenCalledExactlyOnceWith(9, 'C:\\Photos\\b\\IMG_9 copy.jpg')
+    expect(engine.deleteCopies).toHaveBeenCalledExactlyOnceWith(9, 'C:\\Photos\\b\\IMG_9 copy.jpg', [
+      'C:\\Photos\\a\\IMG_9.jpg',
+    ])
     expect(engine.trashAssets).not.toHaveBeenCalled()
     expect(trashUndo.value).toBeNull() // recycled files are not in the Trash to restore
   })
@@ -362,7 +365,9 @@ describe('choosing the copy to keep', () => {
     await radios()[0]?.setValue()
     await review()
     await confirm()
-    expect(engine.deleteCopies).toHaveBeenCalledExactlyOnceWith(9, 'C:\\Photos\\a\\IMG_9.jpg')
+    expect(engine.deleteCopies).toHaveBeenCalledExactlyOnceWith(9, 'C:\\Photos\\a\\IMG_9.jpg', [
+      'C:\\Photos\\b\\IMG_9 copy.jpg',
+    ])
   })
 
   it('says how many files the Recycle Bin would not take', async () => {
@@ -420,5 +425,98 @@ describe('choosing the copy to keep', () => {
       items: [{ ...photo(1, 'C:\\one.jpg'), best: true, keep: 'C:\\one.jpg' }],
     })
     expect(wrapper?.get<HTMLButtonElement>('.group-actions .btn').element.disabled).toBe(true)
+  })
+
+  it('closes an open review when a reload no longer holds one of its photos', async () => {
+    await mountWith(similar(2))
+    await review()
+    expect(opened()).toBe(true)
+    expect(reviewDialog().text()).toContain('p3.jpg')
+    // Photo 3 was blocked meanwhile: the group reloads without it.
+    vi.mocked(engine.duplicateGroups).mockResolvedValue([{ ...similar(2), items: similar(2).items.slice(0, 2) }])
+    await useDuplicates().load()
+    await flushPromises()
+    expect(opened()).toBe(false)
+    expect(reviewDialog().text()).not.toContain('p3.jpg')
+    expect(reviewDialog().text()).toBe('')
+    expect(engine.trashAssets).not.toHaveBeenCalled()
+  })
+
+  it('closes an open review when its whole group is gone from the reload', async () => {
+    await mountWith(exact)
+    await review()
+    expect(reviewDialog().text()).toContain('IMG_9')
+    vi.mocked(engine.duplicateGroups).mockResolvedValue([])
+    await useDuplicates().load()
+    await flushPromises()
+    expect(opened()).toBe(false)
+    expect(reviewDialog().text()).toBe('')
+  })
+
+  it('closes an open review when a copy it did not list joins the group', async () => {
+    await mountWith(exact)
+    await review()
+    const joined = exact.items.map((it) => ({
+      ...it,
+      paths: [...it.paths, 'C:\\Photos\\c\\IMG_9.jpg'],
+      mtimes: [200, 100, 50],
+    }))
+    vi.mocked(engine.duplicateGroups).mockResolvedValue([{ ...exact, items: joined }])
+    await useDuplicates().load()
+    await flushPromises()
+    expect(opened()).toBe(false)
+  })
+
+  it('keeps an open review when a reload only brings a new thumbnail', async () => {
+    await mountWith(similar(2))
+    await review()
+    vi.mocked(engine.duplicateGroups).mockResolvedValue([
+      { ...similar(2), items: similar(2).items.map((it) => ({ ...it, thumb: 2 })) },
+    ])
+    await useDuplicates().load()
+    await flushPromises()
+    expect(opened()).toBe(true)
+    expect(reviewDialog().text()).toContain('p3.jpg')
+  })
+
+  it('disables Review and the confirmation while a confirmed move is under way, and acts once', async () => {
+    let finish!: (value: { recycled: number; kept: string[] }) => void
+    vi.mocked(engine.deleteCopies).mockReturnValue(new Promise((resolve) => (finish = resolve)))
+    await mountWith(exact)
+    await review()
+    await confirm()
+    expect(wrapper?.get<HTMLButtonElement>('.group-actions .btn').element.disabled).toBe(true)
+    expect(reviewDialog().get<HTMLButtonElement>('.btn-primary').element.disabled).toBe(true)
+    await reviewDialog().get('.btn-primary').trigger('click')
+    await reviewDialog().findAll('.btn')[0]?.trigger('click') // Cancel does not close it either
+    expect(opened()).toBe(true)
+    expect(engine.deleteCopies).toHaveBeenCalledTimes(1)
+    finish({ recycled: 1, kept: [] })
+    await flushPromises()
+    expect(opened()).toBe(false)
+    expect(wrapper?.get<HTMLButtonElement>('.group-actions .btn').element.disabled).toBe(false)
+    expect(engine.deleteCopies).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the user’s choice when an unrelated block change refreshes the list', async () => {
+    await mountWith(similar(2))
+    await radios()[0]?.setValue()
+    await showBlocksChanged()
+    await flushPromises()
+    await review()
+    expect(reviewDialog().get('.keeps').text()).toBe('C:\\Photos\\p1.jpg')
+  })
+
+  it('still forgets the choice when the refresh after a block shows its photo is gone', async () => {
+    await mountWith(similar(2))
+    await radios()[0]?.setValue()
+    vi.mocked(engine.duplicateGroups).mockResolvedValue([{ ...similar(2), items: similar(2).items.slice(1) }])
+    await showBlocksChanged()
+    await flushPromises()
+    // Photo 1 is back later (unblocked): the suggestion applies, not the old choice.
+    vi.mocked(engine.duplicateGroups).mockResolvedValue([similar(2)])
+    await useDuplicates().load()
+    await flushPromises()
+    expect(checked()).toEqual([false, true, false])
   })
 })

@@ -7,7 +7,7 @@ import { DuplicateKind } from '../bridge'
 import { t } from '../shared/i18n'
 import type { Review } from './store'
 
-const props = defineProps<{ review: Review | null }>()
+const props = defineProps<{ review: Review | null; busy: boolean }>()
 const emit = defineEmits<{ confirm: []; cancel: [] }>()
 
 const dialog = ref<HTMLDialogElement | null>(null)
@@ -44,8 +44,8 @@ watch(
       </ul>
       <div class="actions">
         <!-- Cancel is focused: Enter must not move files by accident. -->
-        <button class="btn" autofocus @click="emit('cancel')">{{ t('common.cancel') }}</button>
-        <button class="btn btn-primary" @click="emit('confirm')">
+        <button class="btn" autofocus :disabled="busy" @click="emit('cancel')">{{ t('common.cancel') }}</button>
+        <button class="btn btn-primary" :disabled="busy" @click="emit('confirm')">
           {{ t(exact ? 'duplicates.reviewOkRecycle' : 'duplicates.reviewOkTrash') }}
         </button>
       </div>

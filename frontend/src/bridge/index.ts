@@ -304,9 +304,9 @@ export const engine = {
   blockedItems: async (blockID: number): Promise<CoveredItem[]> =>
     ((await LibraryService.BlockedItems(blockID)) ?? []).map((it) => ({ ...it, hiddenBy: it.hiddenBy ?? [] })),
   trashCovered: (ids: number[]): Promise<void> => LibraryService.TrashCovered(ids),
-  /** Recycles every file of an asset except keep: the extra files of exact copies. */
-  deleteCopies: async (assetID: number, keep: string): Promise<DiskDeletion> => {
-    const r = await LibraryService.DeleteCopies(assetID, keep)
+  /** Recycles the listed files of an asset, keeping keep: the extra files of exact copies. */
+  deleteCopies: async (assetID: number, keep: string, recycle: string[]): Promise<DiskDeletion> => {
+    const r = await LibraryService.DeleteCopies(assetID, keep, recycle)
     return { ...r, kept: r.kept ?? [] }
   },
 

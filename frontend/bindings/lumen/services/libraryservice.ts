@@ -113,11 +113,15 @@ export function DeleteAllTrashFromDisk(): $CancellablePromise<core$0.DiskDeletio
 }
 
 /**
- * DeleteCopies moves every file of the asset assetID except keep to the
- * Windows Recycle Bin: the extra files of exact copies. Phase 5 unit U9.
+ * DeleteCopies moves the files recycle of the asset assetID, the extra files
+ * of exact copies, to the Windows Recycle Bin, keeping the file keep. keep and
+ * every path of recycle must be current files of the asset, and recycle must
+ * not be empty or hold keep, else nothing happens and the call fails with
+ * ErrNotFound. Files of the asset in neither list are left alone, and so is a
+ * file edited since it was indexed: it is reported in Kept.
  */
-export function DeleteCopies(assetID: number, keep: string): $CancellablePromise<core$0.DiskDeletion> {
-    return $Call.ByID(940230471, assetID, keep);
+export function DeleteCopies(assetID: number, keep: string, recycle: string[] | null): $CancellablePromise<core$0.DiskDeletion> {
+    return $Call.ByID(940230471, assetID, keep, recycle);
 }
 
 /**

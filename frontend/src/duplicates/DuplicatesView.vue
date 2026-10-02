@@ -28,6 +28,7 @@ const error = ref('')
 const preview = shallowRef<DuplicateItem | null>(null)
 const previewDialog = ref<HTMLDialogElement | null>(null)
 const reviewing = shallowRef<Review | null>(null)
+const acting = ref(false) // a confirmed move is under way
 
 const exact = computed(() => duplicates.list.filter((g) => g.kind === DuplicateKind.DuplicateExact))
 const similar = computed(() => duplicates.list.filter((g) => g.kind === DuplicateKind.DuplicateSimilar))
@@ -144,14 +145,27 @@ function startReview(group: DuplicateGroup) {
   reviewing.value = choices.reviewOf(group)
 }
 
+// A review lists paths of photos the reload may have hidden (blocked, missing)
+// or changed: it must not outlive the group it describes.
+watch(
+  () => duplicates.list,
+  () => {
+    if (reviewing.value && !choices.holds(reviewing.value) && !acting.value) reviewing.value = null
+  },
+)
+
+function cancelReview() {
+  if (!acting.value) reviewing.value = null
+}
+
 async function confirmReview() {
   const review = reviewing.value
-  if (!review) return
-  reviewing.value = null
+  if (!review || acting.value) return
+  acting.value = true
   error.value = ''
   try {
     if (review.kind === DuplicateKind.DuplicateExact) {
-      const done = await engine.deleteCopies(review.keep.id, review.keepPath)
+      const done = await engine.deleteCopies(review.keep.id, review.keepPath, review.recycle)
       if (done.kept.length) notice.value = t('trash.kept', { n: done.kept.length })
     } else {
       const ids = review.trash.map((item) => item.id)
@@ -161,6 +175,8 @@ async function confirmReview() {
   } catch (e) {
     error.value = errorText(e)
   }
+  acting.value = false
+  reviewing.value = null
   await refresh() // the groups changed, or the move failed part way
 }
 
@@ -286,7 +302,7 @@ async function openPreview(item: DuplicateItem) {
               <button
                 class="btn"
                 :aria-label="t('duplicates.reviewNamed', { name: filename(row.group.items[0]?.paths[0] ?? '') })"
-                :disabled="!choices.reviewOf(row.group)"
+                :disabled="acting || !choices.reviewOf(row.group)"
                 @click="startReview(row.group)"
               >
                 {{ t('duplicates.review') }}
@@ -317,7 +333,7 @@ async function openPreview(item: DuplicateItem) {
         <p v-for="path in preview.paths" :key="path">{{ path }}</p>
       </template>
     </dialog>
-    <ReviewDialog :review="reviewing" @confirm="confirmReview" @cancel="reviewing = null" />
+    <ReviewDialog :review="reviewing" :busy="acting" @confirm="confirmReview" @cancel="cancelReview" />
   </div>
 </template>
 

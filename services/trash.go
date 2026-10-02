@@ -72,6 +72,8 @@ func (s *LibraryService) TrashFileCount(ctx context.Context, ids []int64) (int, 
 // DeleteFromDisk moves the files of trashed assets to the Windows Recycle
 // Bin. Assets that are not in the Trash are refused.
 func (s *LibraryService) DeleteFromDisk(ctx context.Context, ids []int64) (core.DiskDeletion, error) {
+	s.recycling.Lock()
+	defer s.recycling.Unlock()
 	files, err := s.store.TrashedFiles(ctx, ids)
 	if err != nil {
 		return core.DiskDeletion{}, err
@@ -82,6 +84,8 @@ func (s *LibraryService) DeleteFromDisk(ctx context.Context, ids []int64) (core.
 // DeleteAllTrashFromDisk moves the files of everything in the Trash to the
 // Windows Recycle Bin.
 func (s *LibraryService) DeleteAllTrashFromDisk(ctx context.Context) (core.DiskDeletion, error) {
+	s.recycling.Lock()
+	defer s.recycling.Unlock()
 	files, err := s.store.AllTrashedFiles(ctx)
 	if err != nil {
 		return core.DiskDeletion{}, err
@@ -94,6 +98,7 @@ func (s *LibraryService) DeleteAllTrashFromDisk(ctx context.Context) (core.DiskD
 // and albums should the file come back. A file the shell would not recycle,
 // or could not, is untouched and reported as kept. Nothing here deletes a
 // file: that is the recycler's whole job, and it only ever recycles.
+// The caller holds s.recycling, from reading the files to be recycled.
 func (s *LibraryService) recycleFiles(ctx context.Context, files []store.TrashedFile) (core.DiskDeletion, error) {
 	result := core.DiskDeletion{Kept: []string{}}
 	if len(files) == 0 {

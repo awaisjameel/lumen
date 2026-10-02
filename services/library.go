@@ -62,7 +62,11 @@ type LibraryService struct {
 	now     func() time.Time // the clock: time.Now, or a test's
 	recycle recycler         // moves files to the Recycle Bin; nil means fileops.Recycle (a test's fake otherwise)
 	gate    *BlockGate       // whether the Blocked screen is unlocked, shared with media serving
-	blocked struct {         // PIN tries and Undo; guarded by its mutex
+	// recycling serialises every move of files to the Recycle Bin, from its
+	// validation to the removal of the rows: two requests must not each see
+	// the other's files as the copies still to keep.
+	recycling sync.Mutex
+	blocked   struct { // PIN tries and Undo; guarded by its mutex
 		sync.Mutex
 		failures int
 		retryAt  time.Time

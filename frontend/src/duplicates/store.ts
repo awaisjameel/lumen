@@ -79,19 +79,36 @@ export const useKeepChoices = defineStore('duplicateChoices', () => {
     return review.trash.length || review.recycle.length ? review : null
   }
 
-  // Forget choices whose photo (or file) has left every group.
-  watch(
-    () => duplicates.list,
-    (groups) => {
-      const alive = new Map<string, DuplicateItem>()
-      for (const g of groups) for (const it of g.items) alive.set(choiceKey(g, it), it)
-      const kept = [...chosen.value].filter(([key, path]) => {
-        const item = alive.get(key)
-        return item !== undefined && (path === '' || item.paths.includes(path))
-      })
-      if (kept.length !== chosen.value.size) chosen.value = new Map(kept)
-    },
-  )
+  /**
+   * Whether the review still describes what the group would do now: the same
+   * photo kept and the same ones (or files) removed. A reload that dropped a
+   * member (blocked, missing, trashed) or brought a new one makes it false.
+   */
+  function holds(review: Review): boolean {
+    const group = duplicates.list.find((g) => g.kind === review.kind && g.items.some((it) => it.id === review.keep.id))
+    const now = group ? reviewOf(group) : null
+    return (
+      now !== null &&
+      now.keep.id === review.keep.id &&
+      now.keepPath === review.keepPath &&
+      JSON.stringify([now.trash.map((it) => it.id), now.recycle]) ===
+        JSON.stringify([review.trash.map((it) => it.id), review.recycle])
+    )
+  }
 
-  return { keeperOf, choose, reviewOf }
+  // Forget choices whose photo (or file) has left every group, once a load has
+  // completed: invalidating after a block change empties the list for a moment,
+  // which says nothing about the groups.
+  watch([() => duplicates.list, () => duplicates.loaded], ([groups, loaded]) => {
+    if (!loaded) return
+    const alive = new Map<string, DuplicateItem>()
+    for (const g of groups) for (const it of g.items) alive.set(choiceKey(g, it), it)
+    const kept = [...chosen.value].filter(([key, path]) => {
+      const item = alive.get(key)
+      return item !== undefined && (path === '' || item.paths.includes(path))
+    })
+    if (kept.length !== chosen.value.size) chosen.value = new Map(kept)
+  })
+
+  return { keeperOf, choose, reviewOf, holds }
 })

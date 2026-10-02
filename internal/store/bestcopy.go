@@ -194,15 +194,28 @@ func markBest(groups []core.DuplicateGroup) {
 	}
 }
 
-// ExtraCopies returns the files of the asset assetID other than keep, the
-// ones DeleteCopies moves to the Recycle Bin. The asset must be one the
-// library shows (not hidden, trashed, missing or blocked), and keep must be
-// one of its files; otherwise the call fails with ErrNotFound and names
-// nothing, so a stale or forged request can never reach another photo's
-// files. Files come in path order.
-func (s *Store) ExtraCopies(ctx context.Context, assetID int64, keep string) ([]TrashedFile, error) {
-	var extra []TrashedFile
-	err := s.read(ctx, func(tx *sql.Tx) error {
+// CopyFile is one file of an asset as the library recorded it, so that a
+// caller can check the file on disk is still that one before touching it.
+type CopyFile struct {
+	TrashedFile
+	Size  int64
+	MTime int64 // unix nanoseconds, as the scanner records it
+}
+
+// CopiesToRecycle checks a request to recycle the exact copies recycle of the
+// asset assetID while keeping the file keep, and returns the recorded rows of
+// the file to keep and of the files to recycle (in the order asked, without
+// repeats). The asset must be one the library shows (not hidden, trashed,
+// missing or blocked); keep and every path of recycle must be current files
+// of it; recycle must not be empty or hold keep. Otherwise the call fails
+// with ErrNotFound and names nothing, so a stale or forged request can never
+// reach another photo's files, or a file the user did not review. Files of
+// the asset that are in neither list are left out: they are not touched.
+func (s *Store) CopiesToRecycle(ctx context.Context, assetID int64, keep string, recycle []string) (kept CopyFile, extra []CopyFile, err error) {
+	if len(recycle) == 0 {
+		return CopyFile{}, nil, ErrNotFound
+	}
+	err = s.read(ctx, func(tx *sql.Tx) error {
 		var shown int
 		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM assets a WHERE a.id = ? AND "+visibleA, assetID).Scan(&shown); err != nil {
 			return err
@@ -210,26 +223,37 @@ func (s *Store) ExtraCopies(ctx context.Context, assetID int64, keep string) ([]
 		if shown == 0 {
 			return ErrNotFound
 		}
-		files, err := queryAll(ctx, tx, func(r *sql.Rows) (f TrashedFile, err error) {
-			err = r.Scan(&f.ID, &f.AssetID, &f.Path)
+		files, err := queryAll(ctx, tx, func(r *sql.Rows) (f CopyFile, err error) {
+			err = r.Scan(&f.ID, &f.AssetID, &f.Path, &f.Size, &f.MTime)
 			return f, err
-		}, "SELECT id, asset_id, path FROM files WHERE asset_id = ? ORDER BY path, id", assetID)
+		}, "SELECT id, asset_id, path, size, mtime FROM files WHERE asset_id = ? ORDER BY path, id", assetID)
 		if err != nil {
 			return err
 		}
-		kept := false
+		byPath := make(map[string]CopyFile, len(files))
 		for _, f := range files {
-			if core.Fold(f.Path) == core.Fold(keep) {
-				kept = true
-			} else {
+			byPath[core.Fold(f.Path)] = f
+		}
+		k, ok := byPath[core.Fold(keep)]
+		if !ok {
+			return ErrNotFound
+		}
+		kept = k
+		seen := map[int64]bool{kept.ID: true}
+		for _, p := range recycle {
+			f, ok := byPath[core.Fold(p)]
+			if !ok || f.ID == kept.ID {
+				return ErrNotFound
+			}
+			if !seen[f.ID] {
+				seen[f.ID] = true
 				extra = append(extra, f)
 			}
 		}
-		if !kept {
-			extra = nil
-			return ErrNotFound
-		}
 		return nil
 	})
-	return extra, err
+	if err != nil {
+		return CopyFile{}, nil, err
+	}
+	return kept, extra, nil
 }
