@@ -204,7 +204,7 @@ func idOfPhoto(t *testing.T, st *store.Store, name string) int64 {
 	}
 	for _, d := range days {
 		for _, it := range d.Items {
-			det, err := st.AssetDetail(t.Context(), it.ID)
+			det, err := st.AssetDetail(t.Context(), it.ID, false)
 			if err != nil {
 				t.Fatal(err)
 			}

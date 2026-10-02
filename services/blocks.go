@@ -35,17 +35,7 @@ const (
 )
 
 // unlockedNow reports whether the list is unlocked, and counts this as a use.
-// Call with s.blocked held.
-func (s *LibraryService) unlockedNow() bool {
-	now := s.now()
-	if s.blocked.unlocked && now.Sub(s.blocked.usedAt) > blockUnlockIdle {
-		s.blocked.unlocked = false
-	}
-	if s.blocked.unlocked {
-		s.blocked.usedAt = now
-	}
-	return s.blocked.unlocked
-}
+func (s *LibraryService) unlockedNow() bool { return s.gate.unlockedAt(s.now()) }
 
 // BlockPINConfigured reports whether the first block must establish a PIN.
 func (s *LibraryService) BlockPINConfigured(ctx context.Context) (bool, error) {
@@ -77,7 +67,7 @@ func (s *LibraryService) UnlockBlocks(ctx context.Context, pin string) error {
 		}
 		return store.ErrInvalidPIN
 	}
-	s.blocked.unlocked, s.blocked.usedAt = true, s.now()
+	s.gate.open(s.now())
 	s.blocked.failures = 0
 	return nil
 }
@@ -117,7 +107,7 @@ func (s *LibraryService) ResetBlockPIN(ctx context.Context, pin string) error {
 	if err := s.store.ReplaceBlockPIN(ctx, pin); err != nil {
 		return err
 	}
-	s.blocked.unlocked = false
+	s.gate.close()
 	return nil
 }
 
@@ -146,7 +136,7 @@ func lumenWindow() uintptr {
 // LockBlocks closes access to the private list as the user leaves the screen.
 func (s *LibraryService) LockBlocks() {
 	s.blocked.Lock()
-	s.blocked.unlocked = false
+	s.gate.close()
 	s.blocked.Unlock()
 }
 

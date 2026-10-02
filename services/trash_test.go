@@ -108,7 +108,7 @@ func newTrashFixture(t *testing.T) trashFixture {
 		}
 		f.ids[name] = d
 	}
-	f.svc = NewLibraryService(st, nil)
+	f.svc = NewLibraryService(st, nil, nil)
 	f.svc.recycle = f.rec.recycle
 	return f
 }
@@ -121,7 +121,7 @@ func assetAt(ctx context.Context, st *store.Store, path string) (int64, error) {
 	}
 	for _, d := range days {
 		for _, it := range d.Items {
-			detail, err := st.AssetDetail(ctx, it.ID)
+			detail, err := st.AssetDetail(ctx, it.ID, false)
 			if err != nil {
 				return 0, err
 			}
@@ -207,13 +207,13 @@ func TestDeleteFromDiskRecyclesEveryCopyAndForgetsTheirFiles(t *testing.T) {
 	if n := f.inTrash(t); n != 1 {
 		t.Fatalf("TrashCount = %d, want just b", n)
 	}
-	if _, err := f.st.AssetFile(ctx, f.ids["a"]); !errors.Is(err, store.ErrNotFound) {
+	if _, err := f.st.AssetFile(ctx, f.ids["a"], false); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a is still served: %v", err)
 	}
 	if n, _ := f.st.CountVisible(ctx); n != 1 {
 		t.Fatalf("visible = %d, want only c", n)
 	}
-	if _, err := f.st.AssetFile(ctx, f.ids["b"]); err != nil {
+	if _, err := f.st.AssetFile(ctx, f.ids["b"], false); err != nil {
 		t.Fatalf("b was affected: %v", err)
 	}
 }
@@ -271,11 +271,11 @@ func TestDeleteFromDiskReportsKeptAndFailedFilesAndForgetsOnlyRecycledOnes(t *te
 		t.Fatalf("TrashCount = %d, want a and b still there", n)
 	}
 	for _, name := range []string{"a", "b"} {
-		if _, err := f.st.AssetFile(ctx, f.ids[name]); err != nil {
+		if _, err := f.st.AssetFile(ctx, f.ids[name], false); err != nil {
 			t.Errorf("%s no longer has its remaining file: %v", name, err)
 		}
 	}
-	if _, err := f.st.AssetFile(ctx, f.ids["c"]); !errors.Is(err, store.ErrNotFound) {
+	if _, err := f.st.AssetFile(ctx, f.ids["c"], false); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("c is still served: %v", err)
 	}
 	for _, p := range []string{f.copyOfA, f.paths["b"]} {
@@ -471,7 +471,7 @@ func TestDeleteFromDiskLeavesAFileThatTookOverARecycledFilesRowId(t *testing.T) 
 	if err != nil {
 		t.Fatalf("the newcomer's asset is gone: %v", err)
 	}
-	if ok, err := f.st.AssetVisible(ctx, id); err != nil || !ok {
+	if ok, err := f.st.AssetVisible(ctx, id, false); err != nil || !ok {
 		t.Fatalf("the newcomer is not visible (%v, %v): its row was removed by a stale id", ok, err)
 	}
 }

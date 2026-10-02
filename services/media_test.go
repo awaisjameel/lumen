@@ -77,13 +77,13 @@ func TestVideoMediaRoutes(t *testing.T) {
 	if err := st.SaveThumbnails(ctx, "v", []store.ThumbResult{{AssetID: id}}); err != nil {
 		t.Fatal(err)
 	}
-	stream, err := NewStreamer(st, d)
+	stream, err := NewStreamer(st, d, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	go stream.Run()
 	defer stream.Close()
-	m := NewMediaService(st, cache, stream)
+	m := NewMediaService(st, cache, stream, nil)
 	for _, tc := range []struct {
 		url, kind string
 	}{
@@ -271,7 +271,7 @@ func newShownLibrary(t *testing.T, n int) *shownLibrary {
 		t.Fatal(err)
 	}
 	lib.sink = &countingSink{ViewSink: st}
-	lib.m = NewMediaService(st, cache, nil)
+	lib.m = NewMediaService(st, cache, nil, nil)
 	lib.m.views.sink = lib.sink
 	return lib
 }
@@ -383,7 +383,7 @@ func TestThumbCacheCapSettingIsStoredClampedAndReachesTheCache(t *testing.T) {
 	ctx := t.Context()
 	l := newShownLibrary(t, 1)
 	ix := index.New(l.st, core.PathsIn(t.TempDir()), l.cache, index.Models{}, quietEvents{})
-	s := NewLibraryService(l.st, ix)
+	s := NewLibraryService(l.st, ix, nil)
 	if got, err := s.Settings(ctx); err != nil || got.ThumbCacheMB != 2048 {
 		t.Fatalf("default cap = %d MB (%v), want 2048", got.ThumbCacheMB, err)
 	}
@@ -398,7 +398,7 @@ func TestThumbCacheCapSettingIsStoredClampedAndReachesTheCache(t *testing.T) {
 		}
 	}
 	// Without an indexer (as in these tests) the setting is still stored.
-	check(t, NewLibraryService(l.st, nil).SetThumbCacheMB(ctx, 512))
+	check(t, NewLibraryService(l.st, nil, nil).SetThumbCacheMB(ctx, 512))
 }
 
 func TestThumbCacheBytesIsTheCachesRunningTotal(t *testing.T) {

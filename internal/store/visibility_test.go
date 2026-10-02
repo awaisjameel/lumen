@@ -261,7 +261,7 @@ func TestTimelineFiltersRecheckLabelBlocksInTheirReadSnapshot(t *testing.T) {
 			if _, err := st.DayBuckets(ctx, view, core.TagConfidenceDefault); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("blocked timeline did not return not found: %v", err)
 			}
-			visible, err := st.AssetVisible(ctx, asset)
+			visible, err := st.AssetVisible(ctx, asset, false)
 			check(t, err)
 			if !visible {
 				t.Fatal("label-only block hid the asset")

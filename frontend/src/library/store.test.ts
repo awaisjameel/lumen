@@ -81,6 +81,7 @@ beforeEach(() => {
     eventGapHours: 12,
     thumbCacheMB: 2048,
     ocr: false,
+    xmp: false,
   })
   vi.mocked(engine.progress).mockReset().mockResolvedValue(progress)
   vi.mocked(startMedia).mockReset().mockResolvedValue(undefined)

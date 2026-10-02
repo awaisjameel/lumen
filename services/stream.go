@@ -33,6 +33,7 @@ import (
 // user's files through it.
 type Streamer struct {
 	store   *store.Store
+	gate    *BlockGate // the Blocked screen's lock: covered videos play only while it is open
 	decoder videoConverter
 	srv     *http.Server
 	ln      net.Listener
@@ -50,7 +51,10 @@ type videoConverter interface {
 }
 
 // NewStreamer starts listening on a free loopback port. Serve it with Run.
-func NewStreamer(st *store.Store, d media.Decoders) (*Streamer, error) {
+func NewStreamer(st *store.Store, d media.Decoders, gate *BlockGate) (*Streamer, error) {
+	if gate == nil {
+		gate = &BlockGate{}
+	}
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return nil, err
@@ -60,7 +64,7 @@ func NewStreamer(st *store.Store, d media.Decoders) (*Streamer, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Streamer{store: st, decoder: d, ln: ln, secret: hex.EncodeToString(b[:]), cancel: cancel}
+	s := &Streamer{store: st, gate: gate, decoder: d, ln: ln, secret: hex.EncodeToString(b[:]), cancel: cancel}
 	s.srv = &http.Server{
 		Handler:           s,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -133,7 +137,7 @@ func (s *Streamer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // serveVideo serves a video file the WebView plays as it is.
 func (s *Streamer) serveVideo(w http.ResponseWriter, r *http.Request, id int64) {
-	f, path, ok := assetFile(r.Context(), s.store, id, w)
+	f, path, ok := assetFile(r.Context(), s.store, id, s.gate.Unlocked(), w)
 	if !ok {
 		return
 	}
@@ -152,7 +156,7 @@ func (s *Streamer) servePlay(w http.ResponseWriter, r *http.Request, id int64) {
 		http.Error(w, "invalid time", http.StatusBadRequest)
 		return
 	}
-	f, path, ok := assetFile(r.Context(), s.store, id, w)
+	f, path, ok := assetFile(r.Context(), s.store, id, s.gate.Unlocked(), w)
 	if !ok {
 		return
 	}

@@ -95,7 +95,7 @@ func TestIndexerFindsPhotosByDescription(t *testing.T) {
 	days, _ := st.DayItems(ctx, "1970-01-01", "2100-01-01", core.View{}, core.TagConfidenceDefault)
 	for _, d := range days {
 		for _, it := range d.Items {
-			det, _ := st.AssetDetail(ctx, it.ID)
+			det, _ := st.AssetDetail(ctx, it.ID, false)
 			name := filepath.Base(det.Paths[0])
 			byName[name[:len(name)-4]] = it.ID
 		}

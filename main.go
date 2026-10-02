@@ -96,7 +96,10 @@ func run() error {
 
 	decoders := media.Decoders{FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe()}
 	cache := media.NewCache(paths.ThumbDir, decoders)
-	stream, err := services.NewStreamer(st, decoders)
+	// The Blocked screen's lock, shared so that covered photos and videos are
+	// served only while it is open.
+	gate := &services.BlockGate{}
+	stream, err := services.NewStreamer(st, decoders, gate)
 	if err != nil {
 		slog.Error("videos can't play: no video server", "err", err)
 	}
@@ -106,10 +109,10 @@ func run() error {
 
 	for _, svc := range []application.Service{
 		service(&background{ix: ix, search: models.Search, cache: cache, stream: stream}, application.ServiceOptions{}),
-		service(services.NewLibraryService(st, ix), application.ServiceOptions{}),
+		service(services.NewLibraryService(st, ix, gate), application.ServiceOptions{}),
 		service(services.NewSearchService(st, models.Search, models.People != nil, ix), application.ServiceOptions{}),
 		service(services.NewPeopleService(st, models.People), application.ServiceOptions{}),
-		service(services.NewMediaService(st, cache, stream), application.ServiceOptions{Route: "/media"}),
+		service(services.NewMediaService(st, cache, stream, gate), application.ServiceOptions{Route: "/media"}),
 	} {
 		app.RegisterService(svc)
 	}

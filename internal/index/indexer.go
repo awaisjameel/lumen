@@ -5,6 +5,7 @@ package index
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
 	"os"
@@ -409,6 +410,17 @@ func (ix *Indexer) Stop() {
 func (ix *Indexer) run(fn func()) {
 	ix.wg.Add(1)
 	go func() { defer ix.wg.Done(); fn() }()
+}
+
+// HoldScans waits for a running scan to finish and keeps new ones from
+// starting until release is called: organising moves files the scanner must
+// not see half-moved. Changes the watchers report meanwhile are scanned after
+// release. Phase 5 unit U10 builds it.
+func (ix *Indexer) HoldScans(ctx context.Context) (release func(), err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, errors.ErrUnsupported
 }
 
 // RescanAll queues a scan of every enabled source and restarts the watchers.

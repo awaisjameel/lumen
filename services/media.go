@@ -30,13 +30,18 @@ type MediaService struct {
 	store  *store.Store
 	cache  *media.Cache
 	stream *Streamer
+	gate   *BlockGate                          // the Blocked screen's lock: covered photos are served only while it is open
 	views  viewFlusher                         // saves which thumbnails were shown, for the cache's size cap
 	open   func(path string) (*os.File, error) // opens a cached picture; tests make it fail
 }
 
-// NewMediaService returns the media service. stream may be nil (no videos).
-func NewMediaService(st *store.Store, cache *media.Cache, stream *Streamer) *MediaService {
-	return &MediaService{store: st, cache: cache, stream: stream,
+// NewMediaService returns the media service. stream may be nil (no videos);
+// a nil gate is one that stays locked.
+func NewMediaService(st *store.Store, cache *media.Cache, stream *Streamer, gate *BlockGate) *MediaService {
+	if gate == nil {
+		gate = &BlockGate{}
+	}
+	return &MediaService{store: st, cache: cache, stream: stream, gate: gate,
 		views: viewFlusher{cache: cache, sink: st, every: viewFlushEvery}, open: core.OpenShared}
 }
 
@@ -73,7 +78,7 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	visible, err := m.store.AssetVisible(r.Context(), id)
+	visible, err := m.store.AssetVisible(r.Context(), id, m.gate.Unlocked())
 	if err != nil {
 		http.Error(w, "the file could not be read", http.StatusInternalServerError)
 		return
@@ -109,7 +114,7 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int64, size int) {
 	m.serveCachedPicture(w, r, id, m.cache.Path(id, size), func() bool {
 		// Missing from the cache (the folder was cleared, or the size cap evicted it): rebuild it now if the asset had one.
-		f, path, ok := assetFile(r.Context(), m.store, id, w)
+		f, path, ok := assetFile(r.Context(), m.store, id, m.gate.Unlocked(), w)
 		if !ok {
 			return false
 		}
@@ -123,7 +128,7 @@ func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int
 
 func (m *MediaService) serveSprite(w http.ResponseWriter, r *http.Request, id int64) {
 	m.serveCachedPicture(w, r, id, m.cache.SpritePath(id), func() bool {
-		f, orig, ok := assetFile(r.Context(), m.store, id, w)
+		f, orig, ok := assetFile(r.Context(), m.store, id, m.gate.Unlocked(), w)
 		if !ok {
 			return false
 		}
@@ -157,7 +162,7 @@ func (m *MediaService) serveCachedPicture(w http.ResponseWriter, r *http.Request
 }
 
 func (m *MediaService) serveFrame(w http.ResponseWriter, r *http.Request, id, at int64) {
-	f, path, ok := assetFile(r.Context(), m.store, id, w)
+	f, path, ok := assetFile(r.Context(), m.store, id, m.gate.Unlocked(), w)
 	if !ok {
 		return
 	}
@@ -173,7 +178,7 @@ func (m *MediaService) serveFrame(w http.ResponseWriter, r *http.Request, id, at
 }
 
 func (m *MediaService) serveOriginal(w http.ResponseWriter, r *http.Request, id int64) {
-	f, path, ok := assetFile(r.Context(), m.store, id, w)
+	f, path, ok := assetFile(r.Context(), m.store, id, m.gate.Unlocked(), w)
 	if !ok {
 		return
 	}
@@ -186,9 +191,10 @@ func (m *MediaService) serveOriginal(w http.ResponseWriter, r *http.Request, id 
 
 // assetFile looks an asset up, with the first of its files that can be
 // read now (a copy on an unplugged drive is passed over). It answers the
-// request itself (404, or 500) when there is nothing to serve.
-func assetFile(ctx context.Context, st *store.Store, id int64, w http.ResponseWriter) (store.MediaFile, string, bool) {
-	f, err := st.AssetFile(ctx, id)
+// request itself (404, or 500) when there is nothing to serve. unlocked is
+// the Blocked screen's state, read once per request.
+func assetFile(ctx context.Context, st *store.Store, id int64, unlocked bool, w http.ResponseWriter) (store.MediaFile, string, bool) {
+	f, err := st.AssetFile(ctx, id, unlocked)
 	if err != nil {
 		served(w, err, id)
 		return f, "", false

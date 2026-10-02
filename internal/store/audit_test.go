@@ -22,7 +22,7 @@ func TestMetadataPreservesCaptureDatesBeforeUnixEpoch(t *testing.T) {
 	}
 	at := time.Date(1965, time.May, 12, 14, 30, 0, 0, time.UTC).Unix()
 	check(t, st.SaveMetadata(ctx, "v2", []MetadataResult{{AssetID: jobs[0].AssetID, TakenAt: at}}))
-	detail, err := st.AssetDetail(ctx, jobs[0].AssetID)
+	detail, err := st.AssetDetail(ctx, jobs[0].AssetID, false)
 	check(t, err)
 	if detail.TakenAt != at || detail.DateFrom != core.DateFromEXIF {
 		t.Fatalf("lost capture date: %+v", detail)

@@ -75,6 +75,7 @@ const (
 	SettingEventGapHours = "event_gap_hours"    // split events after this many quiet hours
 	SettingThumbCacheMB  = "thumb_cache_mb"     // int: the thumbnail cache's size cap, in MB
 	SettingOCR           = "ocr_enabled"        // bool: read text in screenshots and documents (off by default)
+	SettingXMP           = "xmp_enabled"        // bool: write XMP sidecars beside photos (off by default)
 )
 
 // Settings are the user-facing preferences.
@@ -85,6 +86,80 @@ type Settings struct {
 	EventGapHours int     `json:"eventGapHours"`
 	ThumbCacheMB  int     `json:"thumbCacheMB"` // ThumbCacheMinMB..ThumbCacheMaxMB
 	OCR           bool    `json:"ocr"`
+	XMP           bool    `json:"xmp"`
+}
+
+// XMPExport is what an export pass did.
+type XMPExport struct {
+	Written   int `json:"written"`   // sidecars made or brought up to date
+	Unchanged int `json:"unchanged"` // sidecars that already said the same
+	Skipped   int `json:"skipped"`   // sidecars Lumen did not write, or that someone edited since: left alone
+}
+
+// OrganiseRunState is where a run of moves stands.
+type OrganiseRunState string
+
+// The states of an organise run.
+const (
+	OrganisePlanned OrganiseRunState = "planned" // previewed, nothing moved
+	OrganiseRunning OrganiseRunState = "running"
+	OrganiseDone    OrganiseRunState = "done"
+	OrganiseUndoing OrganiseRunState = "undoing"
+	OrganiseUndone  OrganiseRunState = "undone"
+	OrganiseFailed  OrganiseRunState = "failed" // stopped part-way: it can be resumed or undone
+)
+
+// OrganiseMoveState is where one file's move stands.
+type OrganiseMoveState string
+
+// The states of one move.
+const (
+	MovePlanned OrganiseMoveState = "planned"
+	MoveMoving  OrganiseMoveState = "moving" // journaled; the file may or may not have moved yet
+	MoveMoved   OrganiseMoveState = "moved"
+	MoveUndoing OrganiseMoveState = "undoing"
+	MoveUndone  OrganiseMoveState = "undone"
+	MoveSkipped OrganiseMoveState = "skipped" // changed or no longer visible since the preview
+	MoveFailed  OrganiseMoveState = "failed"
+)
+
+// OrganiseMove is one file's move, planned or made.
+type OrganiseMove struct {
+	Seq     int               `json:"seq"`
+	AssetID int64             `json:"assetId"`
+	From    string            `json:"from"`
+	To      string            `json:"to"`
+	State   OrganiseMoveState `json:"state"`
+	Renamed bool              `json:"renamed"`         // its name took a " (2)" because another file had it
+	Error   string            `json:"error,omitempty"` // why it was skipped or failed
+}
+
+// OrganisePlan is a dry run: the moves a template would make, saved as a
+// planned run so that starting it moves exactly what was previewed.
+type OrganisePlan struct {
+	RunID    int64          `json:"runId"`
+	Template string         `json:"template"`
+	Moves    []OrganiseMove `json:"moves"`
+	Renamed  int            `json:"renamed"` // moves whose name changed for a collision
+	InPlace  int            `json:"inPlace"` // files already where the template puts them
+}
+
+// OrganiseRun is a run of moves, as the list of past runs shows it.
+type OrganiseRun struct {
+	ID        int64            `json:"id"`
+	Template  string           `json:"template"`
+	CreatedAt int64            `json:"createdAt"` // Unix seconds
+	State     OrganiseRunState `json:"state"`
+	Moved     int              `json:"moved"`
+	Total     int              `json:"total"`
+}
+
+// OrganiseProgress is a run's progress, sent while it moves or undoes files.
+type OrganiseProgress struct {
+	RunID int64            `json:"runId"`
+	State OrganiseRunState `json:"state"`
+	Done  int              `json:"done"`
+	Total int              `json:"total"`
 }
 
 // The thumbnail cache's size cap, in MB: the default, and the range the

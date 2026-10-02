@@ -26,13 +26,15 @@ import (
 
 // Events the UI can subscribe to.
 const (
-	EventProgress       = "index:progress"
-	EventLibraryChanged = "library:changed"
+	EventProgress         = "index:progress"
+	EventLibraryChanged   = "library:changed"
+	EventOrganiseProgress = "organise:progress" // a run moving or undoing files
 )
 
 func init() {
 	application.RegisterEvent[core.Progress](EventProgress)
 	application.RegisterEvent[core.Changes](EventLibraryChanged)
+	application.RegisterEvent[core.OrganiseProgress](EventOrganiseProgress)
 }
 
 // Emitter forwards indexer events to the UI (it implements index.Events).
@@ -59,10 +61,9 @@ type LibraryService struct {
 	ix      *index.Indexer
 	now     func() time.Time // the clock: time.Now, or a test's
 	recycle recycler         // moves files to the Recycle Bin; nil means fileops.Recycle (a test's fake otherwise)
-	blocked struct {         // the PIN, rate limiting and Undo; guarded by its mutex
+	gate    *BlockGate       // whether the Blocked screen is unlocked, shared with media serving
+	blocked struct {         // PIN tries and Undo; guarded by its mutex
 		sync.Mutex
-		unlocked bool
-		usedAt   time.Time // the unlocked list's last use (see blockUnlockIdle)
 		failures int
 		retryAt  time.Time
 		lastID   int64
@@ -73,9 +74,13 @@ type LibraryService struct {
 	verify func(ctx context.Context, owner uintptr, reason string) error
 }
 
-// NewLibraryService returns the library service.
-func NewLibraryService(st *store.Store, ix *index.Indexer) *LibraryService {
-	return &LibraryService{store: st, ix: ix, now: time.Now}
+// NewLibraryService returns the library service. gate is the Blocked
+// screen's lock it shares with media serving; nil gives it one of its own.
+func NewLibraryService(st *store.Store, ix *index.Indexer, gate *BlockGate) *LibraryService {
+	if gate == nil {
+		gate = &BlockGate{}
+	}
+	return &LibraryService{store: st, ix: ix, now: time.Now, gate: gate}
 }
 
 // Sources lists the folders in the library.
@@ -202,7 +207,7 @@ func (s *LibraryService) Focus(from, to string) { s.ix.SetFocus(from, to) }
 
 // Asset returns the details for one asset.
 func (s *LibraryService) Asset(ctx context.Context, id int64) (core.AssetDetail, error) {
-	return s.store.AssetDetail(ctx, id)
+	return s.store.AssetDetail(ctx, id, s.unlockedNow())
 }
 
 // DuplicateGroups returns exact file copies and likely similar photos for review.
@@ -291,7 +296,7 @@ func (s *LibraryService) SetAlbumItem(ctx context.Context, assetID, albumID int6
 // ShowInFolder opens Explorer with one of the asset's files selected: path,
 // which must be one of them, or "" for the first that is there.
 func (s *LibraryService) ShowInFolder(ctx context.Context, id int64, path string) error {
-	f, err := s.store.AssetFile(ctx, id)
+	f, err := s.store.AssetFile(ctx, id, s.unlockedNow())
 	if err != nil {
 		return err
 	}
@@ -348,8 +353,12 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 		return core.Settings{}, err
 	}
 	ocr, err := s.store.Bool(ctx, core.SettingOCR, false)
+	if err != nil {
+		return core.Settings{}, err
+	}
+	xmp, err := s.store.Bool(ctx, core.SettingXMP, false)
 	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf, EventGapHours: gap,
-		ThumbCacheMB: cacheMB, OCR: ocr}, err
+		ThumbCacheMB: cacheMB, OCR: ocr, XMP: xmp}, err
 }
 
 // SetEventGapHours sets the quiet period that splits detected events.

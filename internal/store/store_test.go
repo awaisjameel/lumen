@@ -68,7 +68,7 @@ func TestAssetDetailReadsPathsFromItsMetadataSnapshot(t *testing.T) {
 		}, false)
 	}))
 	check(t, conn.Close())
-	detail, err := st.AssetDetail(ctx, id)
+	detail, err := st.AssetDetail(ctx, id, false)
 	check(t, err)
 	check(t, changeErr)
 	if detail.TakenAt != before.TakenAt || len(detail.Paths) != 1 || detail.Paths[0] != before.Path {

@@ -21,6 +21,13 @@ const photo = (id: number, path: string): DuplicateItem => ({
   height: 300,
   thumb: 1,
   takenAt: 0,
+  ext: '.jpg',
+  camera: false,
+  exifDate: false,
+  gps: false,
+  addedAt: 0,
+  mtimes: [0],
+  best: false,
 })
 let wrapper: ReturnType<typeof mount> | undefined
 

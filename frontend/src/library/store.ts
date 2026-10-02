@@ -78,6 +78,7 @@ export const useLibrary = defineStore('library', () => {
     eventGapHours: EVENT_GAP_DEFAULT,
     thumbCacheMB: THUMB_CACHE_DEFAULT_MB,
     ocr: false,
+    xmp: false,
   })
   const settingsError = ref('')
   let eventGapSave: LatestSave<number> | null = null

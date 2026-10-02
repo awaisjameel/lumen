@@ -14,7 +14,24 @@ vi.mock('../bridge', async (importOriginal) => ({
 const groups: DuplicateGroup[] = [
   {
     kind: DuplicateKind.DuplicateExact,
-    items: [{ id: 1, paths: ['C:\\private.jpg'], size: 100, width: 10, height: 10, thumb: 1, takenAt: 0 }],
+    items: [
+      {
+        id: 1,
+        paths: ['C:\\private.jpg'],
+        size: 100,
+        width: 10,
+        height: 10,
+        thumb: 1,
+        takenAt: 0,
+        ext: '.jpg',
+        camera: false,
+        exifDate: false,
+        gps: false,
+        addedAt: 0,
+        mtimes: [0],
+        best: false,
+      },
+    ],
   },
 ]
 

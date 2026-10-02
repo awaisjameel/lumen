@@ -30,7 +30,7 @@ func TestVideoMetadataFramesAndSearchPersistence(t *testing.T) {
 	if err := st.SaveThumbnails(ctx, "video", []ThumbResult{{AssetID: id}}); err != nil {
 		t.Fatal(err)
 	}
-	detail, err := st.AssetDetail(ctx, id)
+	detail, err := st.AssetDetail(ctx, id, false)
 	if err != nil || detail.Video == nil || detail.Video.Duration != 12_000 || detail.Video.Play != core.PlayConvert {
 		t.Fatalf("details: %+v, %v", detail, err)
 	}

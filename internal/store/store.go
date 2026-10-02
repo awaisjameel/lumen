@@ -301,16 +301,16 @@ func blockMatch(asset, blk string) string {
 	takenDay := "strftime('%Y-%m-%d', " + asset + ".taken_at, 'unixepoch')"
 	rule := func(field string) string { return "json_extract(blk_album.rule_json, '$." + field + "')" }
 	return `(
-		(blk.kind = 'asset' AND blk.target_id = ` + id + `)
-		OR (blk.kind = 'person' AND EXISTS (SELECT 1 FROM faces blk_face
-			WHERE blk_face.asset_id = ` + id + ` AND blk_face.person_id = blk.target_id))
-		OR (blk.kind = 'tag' AND EXISTS (SELECT 1 FROM asset_tags blk_tag
-			WHERE blk_tag.asset_id = ` + id + ` AND blk_tag.tag_id = blk.target_id AND ` + tagAppliesTo("blk_tag", tagConfidenceSQL) + `))
-		OR (blk.kind = 'place' AND blk.target_id = ` + asset + `.place_id)
-		OR (blk.kind = 'folder' AND EXISTS (SELECT 1 FROM files blk_file WHERE blk_file.asset_id = ` + id + ` AND (
-			` + foldKey("blk_file.path") + ` = ` + foldKey("blk.path") + `
-			OR instr(` + foldKey("blk_file.path") + `, ` + foldKey(`rtrim(blk.path, '\') || '\'`) + `) = 1)))
-		OR (blk.kind = 'album' AND EXISTS (SELECT 1 FROM albums blk_album WHERE blk_album.id = blk.target_id AND (
+		(` + blk + `.kind = 'asset' AND ` + blk + `.target_id = ` + id + `)
+		OR (` + blk + `.kind = 'person' AND EXISTS (SELECT 1 FROM faces blk_face
+			WHERE blk_face.asset_id = ` + id + ` AND blk_face.person_id = ` + blk + `.target_id))
+		OR (` + blk + `.kind = 'tag' AND EXISTS (SELECT 1 FROM asset_tags blk_tag
+			WHERE blk_tag.asset_id = ` + id + ` AND blk_tag.tag_id = ` + blk + `.target_id AND ` + tagAppliesTo("blk_tag", tagConfidenceSQL) + `))
+		OR (` + blk + `.kind = 'place' AND ` + blk + `.target_id = ` + asset + `.place_id)
+		OR (` + blk + `.kind = 'folder' AND EXISTS (SELECT 1 FROM files blk_file WHERE blk_file.asset_id = ` + id + ` AND (
+			` + foldKey("blk_file.path") + ` = ` + foldKey(blk+".path") + `
+			OR instr(` + foldKey("blk_file.path") + `, ` + foldKey(`rtrim(`+blk+`.path, '\') || '\'`) + `) = 1)))
+		OR (` + blk + `.kind = 'album' AND EXISTS (SELECT 1 FROM albums blk_album WHERE blk_album.id = ` + blk + `.target_id AND (
 			(blk_album.kind = 'manual' AND EXISTS (SELECT 1 FROM album_items blk_item
 				WHERE blk_item.asset_id = ` + id + ` AND blk_item.album_id = blk_album.id))
 			OR (blk_album.kind = 'smart'
@@ -325,10 +325,10 @@ func blockMatch(asset, blk string) string {
 					WHERE blk_rule_face.asset_id = ` + id + ` AND blk_rule_face.person_id = ` + rule("person") + `))
 			)
 		)))
-		OR (blk.kind = 'event' AND EXISTS (SELECT 1 FROM event_members blk_event
-			WHERE blk_event.tag_id = blk.target_id AND blk_event.asset_id = ` + id + `))
-		OR (blk.kind = 'face' AND EXISTS (SELECT 1 FROM face_block_faces blk_face_block
-			WHERE blk_face_block.asset_id = ` + id + ` AND blk_face_block.face_block_id = blk.target_id))
+		OR (` + blk + `.kind = 'event' AND EXISTS (SELECT 1 FROM event_members blk_event
+			WHERE blk_event.tag_id = ` + blk + `.target_id AND blk_event.asset_id = ` + id + `))
+		OR (` + blk + `.kind = 'face' AND EXISTS (SELECT 1 FROM face_block_faces blk_face_block
+			WHERE blk_face_block.asset_id = ` + id + ` AND blk_face_block.face_block_id = ` + blk + `.target_id))
 	)`
 }
 

@@ -34,7 +34,7 @@ func TestBlockedListRequiresPINAndUndoIsSingleUse(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatalf("asset: %+v, %v", items, err)
 	}
-	s := NewLibraryService(st, nil)
+	s := NewLibraryService(st, nil, nil)
 	if _, err := s.SetBlock(ctx, core.BlockAsset, 1, "", core.BlockPhotos); !errors.Is(err, ErrBlockLocked) {
 		t.Fatalf("block before PIN: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestBlockedListRequiresPINAndUndoIsSingleUse(t *testing.T) {
 	if err := s.UndoBlock(ctx, id.ID); !errors.Is(err, ErrBlockUndoExpired) {
 		t.Fatalf("second undo: %v", err)
 	}
-	if visible, err := st.AssetVisible(ctx, 1); err != nil || !visible {
+	if visible, err := st.AssetVisible(ctx, 1, false); err != nil || !visible {
 		t.Fatalf("asset after undo: %v, %v", visible, err)
 	}
 }
@@ -135,7 +135,7 @@ func TestBlockPINRateLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil)
+	s := NewLibraryService(st, nil, nil)
 	now := time.Now()
 	s.now = func() time.Time { return now }
 	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
@@ -183,7 +183,7 @@ func TestConcurrentPINGuessesShareOneCooldown(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil)
+	s := NewLibraryService(st, nil, nil)
 	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestUndoExpiresAndOnlyRemovesTheLatestNewBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil)
+	s := NewLibraryService(st, nil, nil)
 	now := time.Now()
 	s.now = func() time.Time { return now }
 	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
@@ -273,7 +273,7 @@ func resetFixture(t *testing.T) (s *LibraryService, st *store.Store, stub *signI
 		Hash: []byte("a"), Kind: core.KindPhoto, Ext: ".jpg", TakenAt: 1}}); err != nil {
 		t.Fatal(err)
 	}
-	s = NewLibraryService(st, nil)
+	s = NewLibraryService(st, nil, nil)
 	stub = new(signInStub)
 	s.verify = func(_ context.Context, owner uintptr, reason string) error {
 		stub.calls++
@@ -327,7 +327,7 @@ func TestResetBlockPINKeepsTheBlocksAndLeavesTheListLocked(t *testing.T) {
 	if _, err := s.Blocks(ctx); !errors.Is(err, ErrBlockLocked) {
 		t.Fatalf("the list after a reset: %v, want it locked", err)
 	}
-	if visible, err := st.AssetVisible(ctx, 1); err != nil || visible {
+	if visible, err := st.AssetVisible(ctx, 1, false); err != nil || visible {
 		t.Fatalf("the blocked photo after a reset: visible %v, %v", visible, err)
 	}
 	if err := s.UnlockBlocks(ctx, "654321"); err != nil {
@@ -389,7 +389,7 @@ func TestResetBlockPINWithNoPINYetAsksNothingAndCreatesNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil)
+	s := NewLibraryService(st, nil, nil)
 	asked := false
 	s.verify = func(context.Context, uintptr, string) error { asked = true; return nil }
 	if err := s.ResetBlockPIN(ctx, "654321"); !errors.Is(err, store.ErrNotFound) {

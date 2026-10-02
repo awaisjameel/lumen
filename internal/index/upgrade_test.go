@@ -42,7 +42,7 @@ func photosByName(t *testing.T, st *store.Store) map[string]core.GridItem {
 	out := map[string]core.GridItem{}
 	for _, d := range days {
 		for _, it := range d.Items {
-			a, err := st.AssetDetail(ctx, it.ID)
+			a, err := st.AssetDetail(ctx, it.ID, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,7 +151,7 @@ func TestFacesFoundBeforeTheAnalysisChangeStandWhereNoneWere(t *testing.T) {
 	before := ix.facesBeforeAnalysis()
 	var items []store.JobItem
 	for name, it := range byName {
-		a, err := st.AssetDetail(ctx, it.ID)
+		a, err := st.AssetDetail(ctx, it.ID, false)
 		if err != nil {
 			t.Fatal(err)
 		}

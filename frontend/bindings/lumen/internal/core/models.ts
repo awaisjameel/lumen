@@ -158,6 +158,16 @@ export enum BlockKind {
     BlockPlace = "place",
     BlockFolder = "folder",
     BlockAlbum = "album",
+
+    /**
+     * target: the event's block tag (an event_tags row)
+     */
+    BlockEvent = "event",
+
+    /**
+     * target: a face_blocks row, the face as it was found
+     */
+    BlockFace = "face",
 };
 
 /**
@@ -175,6 +185,14 @@ export enum BlockMode {
     BlockLabel = "label",
     BlockPhotos = "photos",
 };
+
+/**
+ * BlockRef names a block.
+ */
+export interface BlockRef {
+    "id": number;
+    "name": string;
+}
 
 /**
  * Changes says what changed in the library: the payload of library:changed,
@@ -201,6 +219,34 @@ export interface Changes {
      * faces were found or grouped into people
      */
     "people": boolean;
+}
+
+/**
+ * CoveredItem is a photo a block covers, as the Blocked screen's browser
+ * lists it: its grid cell and the other photo-mode blocks that also hide it.
+ */
+export interface CoveredItem {
+    "id": number;
+    "w": number;
+    "h": number;
+    "v"?: boolean;
+
+    /**
+     * a video's length, ms
+     */
+    "d"?: number;
+    "f"?: boolean;
+
+    /**
+     * thumbnail version; 0 = not made yet
+     */
+    "t": number;
+
+    /**
+     * search results: the best-matching moment of a video, ms
+     */
+    "at"?: number;
+    "hiddenBy": BlockRef[] | null;
 }
 
 /**
@@ -307,6 +353,40 @@ export interface DuplicateItem {
      * wall-clock seconds, see WallClock
      */
     "takenAt": number;
+
+    /**
+     * What the best-copy rule reads.
+     * lower case, with the dot
+     */
+    "ext": string;
+
+    /**
+     * EXIF names a camera
+     */
+    "camera": boolean;
+
+    /**
+     * the date came from EXIF
+     */
+    "exifDate": boolean;
+    "gps": boolean;
+
+    /**
+     * when Lumen first saw it, Unix seconds
+     */
+    "addedAt": number;
+
+    /**
+     * per path, Unix seconds
+     */
+    "mtimes": number[] | null;
+
+    /**
+     * Best marks the item the rule keeps; in an exact group, Keep is its
+     * path to keep.
+     */
+    "best": boolean;
+    "keep"?: string;
 }
 
 /**
@@ -465,6 +545,128 @@ export enum Kind {
      */
     KindPhoto = "photo",
     KindVideo = "video",
+};
+
+/**
+ * OrganiseMove is one file's move, planned or made.
+ */
+export interface OrganiseMove {
+    "seq": number;
+    "assetId": number;
+    "from": string;
+    "to": string;
+    "state": OrganiseMoveState;
+
+    /**
+     * its name took a " (2)" because another file had it
+     */
+    "renamed": boolean;
+
+    /**
+     * why it was skipped or failed
+     */
+    "error"?: string;
+}
+
+/**
+ * OrganiseMoveState is where one file's move stands.
+ */
+export enum OrganiseMoveState {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The states of one move.
+     */
+    MovePlanned = "planned",
+
+    /**
+     * journaled; the file may or may not have moved yet
+     */
+    MoveMoving = "moving",
+    MoveMoved = "moved",
+    MoveUndoing = "undoing",
+    MoveUndone = "undone",
+
+    /**
+     * changed or no longer visible since the preview
+     */
+    MoveSkipped = "skipped",
+    MoveFailed = "failed",
+};
+
+/**
+ * OrganisePlan is a dry run: the moves a template would make, saved as a
+ * planned run so that starting it moves exactly what was previewed.
+ */
+export interface OrganisePlan {
+    "runId": number;
+    "template": string;
+    "moves": OrganiseMove[] | null;
+
+    /**
+     * moves whose name changed for a collision
+     */
+    "renamed": number;
+
+    /**
+     * files already where the template puts them
+     */
+    "inPlace": number;
+}
+
+/**
+ * OrganiseProgress is a run's progress, sent while it moves or undoes files.
+ */
+export interface OrganiseProgress {
+    "runId": number;
+    "state": OrganiseRunState;
+    "done": number;
+    "total": number;
+}
+
+/**
+ * OrganiseRun is a run of moves, as the list of past runs shows it.
+ */
+export interface OrganiseRun {
+    "id": number;
+    "template": string;
+
+    /**
+     * Unix seconds
+     */
+    "createdAt": number;
+    "state": OrganiseRunState;
+    "moved": number;
+    "total": number;
+}
+
+/**
+ * OrganiseRunState is where a run of moves stands.
+ */
+export enum OrganiseRunState {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The states of an organise run.
+     *
+     * previewed, nothing moved
+     */
+    OrganisePlanned = "planned",
+    OrganiseRunning = "running",
+    OrganiseDone = "done",
+    OrganiseUndoing = "undoing",
+    OrganiseUndone = "undone",
+
+    /**
+     * stopped part-way: it can be resumed or undone
+     */
+    OrganiseFailed = "failed",
 };
 
 /**
@@ -628,6 +830,7 @@ export interface Settings {
      */
     "thumbCacheMB": number;
     "ocr": boolean;
+    "xmp": boolean;
 }
 
 /**
@@ -769,4 +972,24 @@ export interface View {
      * 0 = any event
      */
     "event"?: number;
+}
+
+/**
+ * XMPExport is what an export pass did.
+ */
+export interface XMPExport {
+    /**
+     * sidecars made or brought up to date
+     */
+    "written": number;
+
+    /**
+     * sidecars that already said the same
+     */
+    "unchanged": number;
+
+    /**
+     * sidecars Lumen did not write, or that someone edited since: left alone
+     */
+    "skipped": number;
 }

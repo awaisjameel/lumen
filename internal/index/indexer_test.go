@@ -280,7 +280,7 @@ func TestIndexerEndToEnd(t *testing.T) {
 	trip, _ := st.DayItems(ctx, "2024-01-01", "2024-01-01", core.View{}, core.TagConfidenceDefault)
 	var dupPaths int
 	for _, it := range trip[0].Items {
-		d, _ := st.AssetDetail(ctx, it.ID)
+		d, _ := st.AssetDetail(ctx, it.ID, false)
 		dupPaths = max(dupPaths, len(d.Paths))
 	}
 	if dupPaths != 2 {

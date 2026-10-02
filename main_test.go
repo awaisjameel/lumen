@@ -218,7 +218,7 @@ func TestServiceErrorsCarryTheirCodes(t *testing.T) {
 	}
 	defer st.Close()
 	b := application.NewBindings(nil, nil)
-	if err := b.Add(service(services.NewLibraryService(st, nil), application.ServiceOptions{})); err != nil {
+	if err := b.Add(service(services.NewLibraryService(st, nil, nil), application.ServiceOptions{})); err != nil {
 		t.Fatal(err)
 	}
 	m := b.Get(&application.CallOptions{MethodName: "lumen/services.LibraryService.UnlockBlocks"})

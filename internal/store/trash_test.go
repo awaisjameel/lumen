@@ -263,10 +263,10 @@ func TestTrashShowsOnlyPhotosThatAreStillOnDiskAndNotHidden(t *testing.T) {
 	if n, err := f.st.TrashCount(f.ctx); err != nil || n != 0 {
 		t.Fatalf("TrashCount = %d, %v, want 0", n, err)
 	}
-	if ok, err := f.st.AssetVisible(f.ctx, f.a); err != nil || ok {
+	if ok, err := f.st.AssetVisible(f.ctx, f.a, false); err != nil || ok {
 		t.Fatalf("a hidden trashed photo is servable: %v, %v", ok, err)
 	}
-	if ok, err := f.st.AssetVisible(f.ctx, f.b); err != nil || ok {
+	if ok, err := f.st.AssetVisible(f.ctx, f.b, false); err != nil || ok {
 		t.Fatalf("a missing trashed photo is servable: %v, %v", ok, err)
 	}
 }
@@ -275,7 +275,7 @@ func TestATrashedBlockedPhotoShowsInTheTrashAndItsMediaIsServed(t *testing.T) {
 	f := newTrashFixture(t)
 	_, err := f.st.SetBlock(f.ctx, core.BlockAsset, f.a, "", core.BlockPhotos)
 	check(t, err)
-	if ok, err := f.st.AssetVisible(f.ctx, f.a); err != nil || ok {
+	if ok, err := f.st.AssetVisible(f.ctx, f.a, false); err != nil || ok {
 		t.Fatalf("a blocked photo is servable outside the Trash: %v, %v", ok, err)
 	}
 	f.trash(t, f.a)
@@ -285,21 +285,21 @@ func TestATrashedBlockedPhotoShowsInTheTrashAndItsMediaIsServed(t *testing.T) {
 	if len(buckets) != 1 || buckets[0].Count != 1 {
 		t.Fatalf("Trash buckets = %+v, want the blocked photo", buckets)
 	}
-	if ok, err := f.st.AssetVisible(f.ctx, f.a); err != nil || !ok {
+	if ok, err := f.st.AssetVisible(f.ctx, f.a, false); err != nil || !ok {
 		t.Fatalf("the blocked trashed photo is not servable: %v, %v", ok, err)
 	}
-	if file, err := f.st.AssetFile(f.ctx, f.a); err != nil || len(file.Paths) == 0 {
+	if file, err := f.st.AssetFile(f.ctx, f.a, false); err != nil || len(file.Paths) == 0 {
 		t.Fatalf("AssetFile = %+v, %v", file, err)
 	}
-	if d, err := f.st.AssetDetail(f.ctx, f.a); err != nil || d.ID != f.a {
+	if d, err := f.st.AssetDetail(f.ctx, f.a, false); err != nil || d.ID != f.a {
 		t.Fatalf("AssetDetail = %+v, %v", d, err)
 	}
 	// It is still blocked elsewhere: restoring it hides it again.
 	f.restore(t, f.a)
-	if ok, err := f.st.AssetVisible(f.ctx, f.a); err != nil || ok {
+	if ok, err := f.st.AssetVisible(f.ctx, f.a, false); err != nil || ok {
 		t.Fatalf("a restored blocked photo is servable: %v, %v", ok, err)
 	}
-	if _, err := f.st.AssetFile(f.ctx, f.a); !errors.Is(err, ErrNotFound) {
+	if _, err := f.st.AssetFile(f.ctx, f.a, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("AssetFile of a restored blocked photo: %v", err)
 	}
 }
@@ -322,11 +322,11 @@ func TestMediaOfAVisibleOrTrashedPhotoIsServedAndOthersAreNot(t *testing.T) {
 			if c.change != "" {
 				check(t, errOf(f.st.w.ExecContext(f.ctx, "UPDATE assets SET "+c.change+" WHERE id = ?", f.a)))
 			}
-			if ok, err := f.st.AssetVisible(f.ctx, f.a); err != nil || ok != c.want {
+			if ok, err := f.st.AssetVisible(f.ctx, f.a, false); err != nil || ok != c.want {
 				t.Errorf("AssetVisible = %v, %v, want %v", ok, err, c.want)
 			}
-			_, fileErr := f.st.AssetFile(f.ctx, f.a)
-			_, detailErr := f.st.AssetDetail(f.ctx, f.a)
+			_, fileErr := f.st.AssetFile(f.ctx, f.a, false)
+			_, detailErr := f.st.AssetDetail(f.ctx, f.a, false)
 			if (fileErr == nil) != c.want || (detailErr == nil) != c.want {
 				t.Errorf("AssetFile: %v, AssetDetail: %v, want served = %v", fileErr, detailErr, c.want)
 			}
