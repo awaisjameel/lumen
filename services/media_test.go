@@ -440,16 +440,17 @@ func TestAThumbnailEvictedWhileBeingServedIsRebuiltInsteadOfAnswering404(t *test
 	}
 }
 
-// coveredMedia is a library of three assets, each with cached pictures, served
+// coveredMedia is a library of four assets, each with cached pictures, served
 // by a MediaService and a Streamer that share one gate: a photo and a video
-// that an asset block covers, and a photo nothing covers. No FFmpeg is needed: the pictures are in the cache already and
+// that an asset block covers, and a photo and a video nothing covers. No FFmpeg is needed: the pictures are in the cache already and
 // the converter is a fake.
 type coveredMedia struct {
-	st                      *store.Store
-	gate                    *BlockGate
-	m                       *MediaService
-	stream                  *Streamer
-	photo, video, openPhoto int64
+	st                                 *store.Store
+	gate                               *BlockGate
+	m                                  *MediaService
+	stream                             *Streamer
+	photo, video, openPhoto, openVideo int64
+	clock                              *time.Time // the gate's time, which a test moves
 }
 
 // fixedConversion is a converter whose output is a few bytes.
@@ -473,6 +474,9 @@ func newCoveredMedia(t *testing.T) *coveredMedia {
 		t.Fatal(err)
 	}
 	c := &coveredMedia{st: st, gate: &BlockGate{}}
+	now := time.Now()
+	c.clock = &now
+	c.gate.clock = func() time.Time { return now }
 	files := []struct {
 		name string
 		kind core.Kind
@@ -482,6 +486,7 @@ func newCoveredMedia(t *testing.T) *coveredMedia {
 		{"covered", core.KindPhoto, ".jpg", &c.photo},
 		{"covered", core.KindVideo, ".mp4", &c.video},
 		{"open", core.KindPhoto, ".jpg", &c.openPhoto},
+		{"open", core.KindVideo, ".mp4", &c.openVideo},
 	}
 	cache := media.NewCache(filepath.Join(dir, "thumbs"), &fakeDecoder{})
 	var meta []store.MetadataResult
@@ -507,13 +512,15 @@ func newCoveredMedia(t *testing.T) *coveredMedia {
 			t.Fatal(err)
 		}
 	}
-	// A frame of the video, in the cache as a request would have left it.
-	frame := cache.FramePath(c.video, 1000)
-	if err := os.MkdirAll(filepath.Dir(frame), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(frame, []byte("frame"), 0o600); err != nil {
-		t.Fatal(err)
+	// A frame of each video, in the cache as a request would have left it.
+	for _, id := range []int64{c.video, c.openVideo} {
+		frame := cache.FramePath(id, 1000)
+		if err := os.MkdirAll(filepath.Dir(frame), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(frame, []byte("frame"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := st.SaveMetadata(ctx, "v", meta); err != nil {
 		t.Fatal(err)
@@ -578,7 +585,7 @@ func TestCoveredMediaIsServedOnEveryRouteOnlyWhileTheGateIsUnlocked(t *testing.T
 			if got := status(); got != http.StatusNotFound {
 				t.Fatalf("locked: status %d, want 404", got)
 			}
-			c.gate.open(time.Now())
+			c.gate.open(c.gate.now())
 			if got := status(); got != http.StatusOK {
 				t.Fatalf("unlocked: status %d, want 200", got)
 			}
@@ -594,7 +601,7 @@ func TestUncoveredMediaIsServedWhetherTheGateIsLockedOrNot(t *testing.T) {
 	c := newCoveredMedia(t)
 	for _, unlocked := range []bool{false, true} {
 		if unlocked {
-			c.gate.open(time.Now())
+			c.gate.open(c.gate.now())
 		}
 		for _, url := range []string{fmt.Sprintf("/thumb/%d/256?v=1", c.openPhoto), fmt.Sprintf("/original/%d", c.openPhoto)} {
 			if got := c.get(t, url); got != http.StatusOK {
@@ -611,5 +618,187 @@ func TestMediaServiceWithoutAGateNeverServesCoveredMedia(t *testing.T) {
 	m.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/thumb/%d/256?v=1", c.photo), http.NoBody))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status %d, want 404", rec.Code)
+	}
+}
+
+// lockingWriter closes the gate as the first bytes are written, then keeps
+// recording what is written after that.
+type lockingWriter struct {
+	*httptest.ResponseRecorder
+	gate *BlockGate
+	once sync.Once
+}
+
+func (w *lockingWriter) Write(p []byte) (int, error) {
+	w.once.Do(w.gate.close)
+	return w.ResponseRecorder.Write(p)
+}
+
+// bigFile fills the file of asset id with size bytes.
+func (c *coveredMedia) bigFile(t *testing.T, id int64, size int) {
+	t.Helper()
+	f, err := c.st.AssetFile(t.Context(), id, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.Paths[0], make([]byte, size), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLockingStopsACoveredPhotoOrVideoAlreadyBeingSent(t *testing.T) {
+	const size = 1 << 20
+	cases := []struct {
+		name string
+		id   func(c *coveredMedia) int64
+		do   func(c *coveredMedia, w http.ResponseWriter, id int64)
+	}{
+		{"original", func(c *coveredMedia) int64 { return c.photo }, func(c *coveredMedia, w http.ResponseWriter, id int64) {
+			c.m.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("/original/%d", id), http.NoBody))
+		}},
+		{"video file", func(c *coveredMedia) int64 { return c.video }, func(c *coveredMedia, w http.ResponseWriter, id int64) {
+			c.stream.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("%s/video/%d", c.stream.Base(), id), http.NoBody))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newCoveredMedia(t)
+			id := tc.id(c)
+			c.bigFile(t, id, size)
+			c.gate.open(c.gate.now())
+			w := &lockingWriter{ResponseRecorder: httptest.NewRecorder(), gate: c.gate}
+			tc.do(c, w, id)
+			if got := w.Body.Len(); got == 0 || got >= size/2 {
+				t.Fatalf("%d of %d bytes were sent after the screen locked as the first were; want the response cut at once", got, size)
+			}
+		})
+	}
+}
+
+// longConversion writes until a write fails, saying whether its context ended.
+type longConversion struct {
+	written   atomic.Int64
+	cancelled atomic.Bool
+}
+
+func (c *longConversion) ConvertMP4(ctx context.Context, _ string, _ int64) (func(io.Writer) error, error) {
+	return func(w io.Writer) error {
+		chunk := make([]byte, 64<<10)
+		for range 100 {
+			n, err := w.Write(chunk)
+			c.written.Add(int64(n))
+			if err != nil {
+				c.cancelled.Store(ctx.Err() != nil)
+				return err
+			}
+		}
+		return nil
+	}, nil
+}
+
+func TestLockingStopsAConvertedCoveredVideoAndItsConversion(t *testing.T) {
+	c := newCoveredMedia(t)
+	conv := &longConversion{}
+	c.stream.decoder = conv
+	c.gate.open(c.gate.now())
+	w := &lockingWriter{ResponseRecorder: httptest.NewRecorder(), gate: c.gate}
+	c.stream.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/play/%d", c.stream.Base(), c.video), http.NoBody))
+	if got := conv.written.Load(); got == 0 || got >= 10<<20 {
+		t.Fatalf("%d bytes of 100 chunks were converted after the lock; want it stopped at once", got)
+	}
+	if !conv.cancelled.Load() {
+		t.Fatal("the conversion's context was not ended by the lock")
+	}
+}
+
+func TestLockingDoesNotStopAVideoThatNeedsNoUnlock(t *testing.T) {
+	c := newCoveredMedia(t)
+	const size = 1 << 20
+	c.bigFile(t, c.openVideo, size)
+	c.gate.open(c.gate.now())
+	w := &lockingWriter{ResponseRecorder: httptest.NewRecorder(), gate: c.gate}
+	c.stream.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/video/%d", c.stream.Base(), c.openVideo), http.NoBody))
+	if got := w.Body.Len(); got != size {
+		t.Fatalf("%d of %d bytes of an ordinary video were sent, with the screen locking meanwhile", got, size)
+	}
+}
+
+func TestBrowsingOrdinaryMediaDoesNotKeepTheBlockedScreenUnlocked(t *testing.T) {
+	c := newCoveredMedia(t)
+	c.gate.open(c.gate.now())
+	for range 3 { // 27 minutes of browsing, with the screen's idle timeout at 10
+		*c.clock = c.clock.Add(blockUnlockIdle - time.Minute)
+		for _, url := range []string{
+			fmt.Sprintf("/thumb/%d/256?v=1", c.openPhoto), fmt.Sprintf("/thumb/%d/1024?v=1", c.openPhoto),
+			fmt.Sprintf("/original/%d", c.openPhoto), fmt.Sprintf("/sprite/%d?v=1", c.openVideo),
+			fmt.Sprintf("/frame/%d/1000", c.openVideo),
+		} {
+			if got := c.get(t, url); got != http.StatusOK {
+				t.Fatalf("%s: status %d", url, got)
+			}
+		}
+		if got := c.streamed(t, fmt.Sprintf("/video/%d", c.openVideo)); got != http.StatusOK {
+			t.Fatalf("ordinary video: status %d", got)
+		}
+		// A photo that is gone is nothing the screen is used for either.
+		if got := c.get(t, "/thumb/999/256?v=1"); got != http.StatusNotFound {
+			t.Fatalf("unknown photo: status %d", got)
+		}
+	}
+	if c.gate.Unlocked() {
+		t.Fatal("ordinary browsing kept the Blocked screen unlocked past its idle timeout")
+	}
+}
+
+func TestServingCoveredMediaCountsAsUseOfTheBlockedScreen(t *testing.T) {
+	c := newCoveredMedia(t)
+	c.gate.open(c.gate.now())
+	for range 3 {
+		*c.clock = c.clock.Add(blockUnlockIdle - time.Minute)
+		if got := c.get(t, fmt.Sprintf("/thumb/%d/256?v=1", c.photo)); got != http.StatusOK {
+			t.Fatalf("covered thumbnail: status %d, want 200 while it is being looked at", got)
+		}
+	}
+	*c.clock = c.clock.Add(blockUnlockIdle + time.Second)
+	if got := c.get(t, fmt.Sprintf("/thumb/%d/256?v=1", c.photo)); got != http.StatusNotFound {
+		t.Fatalf("covered thumbnail after the idle timeout: status %d, want 404", got)
+	}
+}
+
+// stalledConversion produces nothing until its context ends.
+type stalledConversion struct {
+	started chan struct{}
+	ended   chan error
+}
+
+func (c stalledConversion) ConvertMP4(ctx context.Context, _ string, _ int64) (func(io.Writer) error, error) {
+	return func(io.Writer) error {
+		close(c.started)
+		select {
+		case <-ctx.Done():
+			c.ended <- ctx.Err()
+		case <-time.After(5 * time.Second):
+			c.ended <- nil
+		}
+		return nil
+	}, nil
+}
+
+func TestLockingEndsAConversionThatIsNotSendingAnything(t *testing.T) {
+	c := newCoveredMedia(t)
+	conv := stalledConversion{make(chan struct{}), make(chan error, 1)}
+	c.stream.decoder = conv
+	c.gate.open(c.gate.now())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.stream.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+			fmt.Sprintf("%s/play/%d", c.stream.Base(), c.video), http.NoBody))
+	}()
+	awaitStream(t, conv.started)
+	c.gate.close()
+	awaitStream(t, done)
+	if err := <-conv.ended; err == nil {
+		t.Fatal("the conversion went on after the screen locked")
 	}
 }

@@ -78,15 +78,18 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	visible, err := m.store.AssetVisible(r.Context(), id, m.gate.Unlocked())
-	if err != nil {
-		http.Error(w, "the file could not be read", http.StatusInternalServerError)
+	adm, ok := admit(w, r, m.gate, id, func(ctx context.Context, unlocked bool) error {
+		visible, err := m.store.AssetVisible(ctx, id, unlocked)
+		if err == nil && !visible {
+			err = store.ErrNotFound
+		}
+		return err
+	})
+	if !ok {
 		return
 	}
-	if !visible {
-		http.NotFound(w, r)
-		return
-	}
+	defer adm.release()
+	r, w = adm.r, adm.w
 	switch {
 	case parts[0] == "thumb" && len(parts) == 3:
 		size, err := strconv.Atoi(parts[2])
@@ -94,27 +97,27 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		m.serveThumb(w, r, id, size)
+		m.serveThumb(w, r, id, size, adm.unlocked)
 	case parts[0] == "sprite" && len(parts) == 2:
-		m.serveSprite(w, r, id)
+		m.serveSprite(w, r, id, adm.unlocked)
 	case parts[0] == "original" && len(parts) == 2:
-		m.serveOriginal(w, r, id)
+		m.serveOriginal(w, r, id, adm.unlocked)
 	case parts[0] == "frame" && len(parts) == 3:
 		at, err := strconv.ParseInt(parts[2], 10, 64)
 		if err != nil || at < 0 {
 			http.NotFound(w, r)
 			return
 		}
-		m.serveFrame(w, r, id, at)
+		m.serveFrame(w, r, id, at, adm.unlocked)
 	default:
 		http.NotFound(w, r)
 	}
 }
 
-func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int64, size int) {
+func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int64, size int, unlocked bool) {
 	m.serveCachedPicture(w, r, id, m.cache.Path(id, size), func() bool {
 		// Missing from the cache (the folder was cleared, or the size cap evicted it): rebuild it now if the asset had one.
-		f, path, ok := assetFile(r.Context(), m.store, id, m.gate.Unlocked(), w)
+		f, path, ok := assetFile(r.Context(), m.store, id, unlocked, w)
 		if !ok {
 			return false
 		}
@@ -126,9 +129,9 @@ func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int
 	})
 }
 
-func (m *MediaService) serveSprite(w http.ResponseWriter, r *http.Request, id int64) {
+func (m *MediaService) serveSprite(w http.ResponseWriter, r *http.Request, id int64, unlocked bool) {
 	m.serveCachedPicture(w, r, id, m.cache.SpritePath(id), func() bool {
-		f, orig, ok := assetFile(r.Context(), m.store, id, m.gate.Unlocked(), w)
+		f, orig, ok := assetFile(r.Context(), m.store, id, unlocked, w)
 		if !ok {
 			return false
 		}
@@ -161,8 +164,8 @@ func (m *MediaService) serveCachedPicture(w http.ResponseWriter, r *http.Request
 	serveOpened(w, r, file, "image/jpeg")
 }
 
-func (m *MediaService) serveFrame(w http.ResponseWriter, r *http.Request, id, at int64) {
-	f, path, ok := assetFile(r.Context(), m.store, id, m.gate.Unlocked(), w)
+func (m *MediaService) serveFrame(w http.ResponseWriter, r *http.Request, id, at int64, unlocked bool) {
+	f, path, ok := assetFile(r.Context(), m.store, id, unlocked, w)
 	if !ok {
 		return
 	}
@@ -177,8 +180,8 @@ func (m *MediaService) serveFrame(w http.ResponseWriter, r *http.Request, id, at
 	serveCached(w, r, frame)
 }
 
-func (m *MediaService) serveOriginal(w http.ResponseWriter, r *http.Request, id int64) {
-	f, path, ok := assetFile(r.Context(), m.store, id, m.gate.Unlocked(), w)
+func (m *MediaService) serveOriginal(w http.ResponseWriter, r *http.Request, id int64, unlocked bool) {
+	f, path, ok := assetFile(r.Context(), m.store, id, unlocked, w)
 	if !ok {
 		return
 	}
@@ -188,6 +191,66 @@ func (m *MediaService) serveOriginal(w http.ResponseWriter, r *http.Request, id 
 	}
 	serveFile(w, r, path, core.ContentType(f.Ext))
 }
+
+// admission is a request that may be answered: r and w are the ones to answer
+// it with, and release must be called once it is.
+type admission struct {
+	r        *http.Request
+	w        http.ResponseWriter
+	unlocked bool // answered only because the Blocked screen is open
+	release  func()
+}
+
+// admit decides whether a request for asset id may be answered, check being
+// the store's question (it fails with store.ErrNotFound for an asset that may
+// not be served) asked with or without the Blocked screen open. The locked
+// question comes first and an asset it accepts is answered without the gate,
+// so browsing the library never counts as using the Blocked screen. Only for
+// an asset that the open screen would allow, and the locked question refused,
+// is the gate asked; that counts as a use, and the request is then bound to
+// the gate: its context ends, and writing to its
+// writer fails, the moment the screen locks, so no covered response outlives
+// the unlock. admit answers a request it refuses itself.
+func admit(w http.ResponseWriter, r *http.Request, gate *BlockGate, id int64, check func(ctx context.Context, unlocked bool) error) (admission, bool) {
+	err := check(r.Context(), false)
+	if err == nil {
+		return admission{r: r, w: w, release: func() {}}, true
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		served(w, err, id)
+		return admission{}, false
+	}
+	// Whether the screen being open would allow it is asked of the store
+	// first, so a photo that is not there at all is no use of the gate.
+	if err := check(r.Context(), true); err != nil {
+		served(w, err, id)
+		return admission{}, false
+	}
+	ctx, release, open := gate.Hold(r.Context())
+	if !open {
+		served(w, store.ErrNotFound, id)
+		return admission{}, false
+	}
+	return admission{r: r.WithContext(ctx), w: boundWriter{ResponseWriter: w, ctx: ctx}, unlocked: true, release: release}, true
+}
+
+// boundWriter fails every write once its context has ended, which stops a
+// file or a conversion being sent (ServeContent and the converters stop at
+// the first failed write).
+type boundWriter struct {
+	http.ResponseWriter
+	ctx context.Context
+}
+
+func (w boundWriter) Write(p []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+// Unwrap lets http.ResponseController reach the connection.
+func (w boundWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // assetFile looks an asset up, with the first of its files that can be
 // read now (a copy on an unplugged drive is passed over). It answers the
@@ -199,13 +262,22 @@ func assetFile(ctx context.Context, st *store.Store, id int64, unlocked bool, w 
 		served(w, err, id)
 		return f, "", false
 	}
+	path, ok := readablePath(f)
+	if !ok {
+		http.Error(w, "the file is not available", http.StatusNotFound)
+		return f, "", false
+	}
+	return f, path, true
+}
+
+// readablePath is the first of the asset's files that can be read now.
+func readablePath(f store.MediaFile) (string, bool) {
 	for _, p := range f.Paths {
 		if _, err := os.Stat(p); err == nil {
-			return f, p, true
+			return p, true
 		}
 	}
-	http.Error(w, "the file is not available", http.StatusNotFound)
-	return f, "", false
+	return "", false
 }
 
 // served reports whether err is nil. Otherwise it answers with the status

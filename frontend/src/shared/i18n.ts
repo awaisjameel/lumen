@@ -434,6 +434,8 @@ const en = {
   'covered.hiddenBy': 'Also hidden by {names}',
   'covered.openPhoto': 'Open photo',
   'covered.openVideo': 'Open video',
+  'covered.trashTitle': 'Move to Trash?',
+  'covered.trashText': 'Photos in the Trash can be seen without your PIN until you delete them from disk.',
 
   // Duplicates: best copy.
   'duplicates.bestHint':

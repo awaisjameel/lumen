@@ -2,13 +2,17 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { BlockKind, BlockMode, engine, ErrorCode } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Block, CoveredItem } from '../bridge'
+import { confirm } from '../shared/confirm'
 import { notice } from '../shared/errors'
+import { t } from '../shared/i18n'
 import { useCoveredPhotos } from './covered'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   engine: { blockedItems: vi.fn(), trashCovered: vi.fn() },
 }))
+
+vi.mock('../shared/confirm', () => ({ confirm: vi.fn() }))
 
 const block = (id: number): Block => ({
   id,
@@ -30,6 +34,7 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue([item(1), item(2), item(3)])
   vi.mocked(engine.trashCovered).mockReset().mockResolvedValue(undefined)
+  vi.mocked(confirm).mockReset().mockResolvedValue(true)
   notice.value = ''
 })
 
@@ -175,4 +180,63 @@ it('does not bring photos back when the browser was closed while the Trash was w
   expect(covered.items).toEqual([])
   expect(covered.viewing).toBeNull()
   expect(hooks.used).not.toHaveBeenCalled()
+})
+
+it('asks first, saying the Trash is open to anyone, and moves nothing if the user declines', async () => {
+  const covered = await opened()
+  covered.view(2)
+  vi.mocked(confirm).mockResolvedValue(false)
+  covered.source.actions.moveToTrash?.()
+  await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce())
+  expect(confirm).toHaveBeenCalledWith(t('covered.trashTitle'), t('covered.trashText'), t('trash.move'))
+  expect(t('covered.trashText')).toContain('without your PIN')
+  await Promise.resolve()
+  expect(engine.trashCovered).not.toHaveBeenCalled()
+  expect(covered.items).toHaveLength(3)
+  expect(covered.viewing).toBe(2)
+})
+
+it('moves nothing when the screen locks while the question is open', async () => {
+  const covered = await opened()
+  covered.view(2)
+  let answer!: (yes: boolean) => void
+  vi.mocked(confirm).mockReturnValue(new Promise<boolean>((resolve) => (answer = resolve)))
+  covered.source.actions.moveToTrash?.()
+  covered.close()
+  answer(true)
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(engine.trashCovered).not.toHaveBeenCalled()
+})
+
+it('tells the screen the photos are in use at most once every few seconds', async () => {
+  vi.useFakeTimers()
+  try {
+    const covered = await opened()
+    covered.touch()
+    covered.touch()
+    covered.source.touch?.()
+    expect(hooks.used).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(5000)
+    covered.touch()
+    expect(hooks.used).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('moves nothing when the browser was opened again while the question was open', async () => {
+  const covered = await opened()
+  covered.view(2)
+  let answer!: (yes: boolean) => void
+  vi.mocked(confirm).mockReturnValue(new Promise<boolean>((resolve) => (answer = resolve)))
+  covered.source.actions.moveToTrash?.()
+  await covered.open(block(6)) // the same photos are listed again, for another block
+  covered.view(2)
+  answer(true)
+  await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce())
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(engine.trashCovered).not.toHaveBeenCalled()
+  expect(covered.items).toHaveLength(3)
 })

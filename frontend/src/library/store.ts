@@ -759,6 +759,8 @@ export interface ViewerSource {
   step: (dir: 1 | -1) => Promise<void>
   /** Closes the Viewer. */
   close: () => void
+  /** Called as the photo is looked at (a video playing), by sources whose screen locks when unused. */
+  touch?: () => void
   readonly actions: ViewerActions
 }
 

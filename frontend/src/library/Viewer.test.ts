@@ -211,3 +211,12 @@ it('shows no details panel for a source without details, whatever the library ha
   await flushPromises()
   expect(wrapper.find('aside').exists()).toBe(false)
 })
+
+it('tells its source it is being watched as a video plays', async () => {
+  const touch = vi.fn()
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, id: 5 })
+  wrapper = mount(Viewer, { props: { source: { ...fakeSource(), touch } }, global: { stubs: { teleport: true } } })
+  await flushPromises()
+  await wrapper.get('video').trigger('timeupdate')
+  expect(touch).toHaveBeenCalled()
+})

@@ -211,7 +211,13 @@ func (s *LibraryService) Focus(from, to string) { s.ix.SetFocus(from, to) }
 
 // Asset returns the details for one asset.
 func (s *LibraryService) Asset(ctx context.Context, id int64) (core.AssetDetail, error) {
-	return s.store.AssetDetail(ctx, id, s.unlockedNow())
+	d, err := s.store.AssetDetail(ctx, id, false)
+	if errors.Is(err, store.ErrNotFound) && s.unlockedNow() {
+		// Only a photo the open Blocked screen shows is asked of the gate, so
+		// looking at ordinary photos is no use of it.
+		return s.store.AssetDetail(ctx, id, true)
+	}
+	return d, err
 }
 
 // DuplicateGroups returns exact file copies and likely similar photos for review.
@@ -300,7 +306,10 @@ func (s *LibraryService) SetAlbumItem(ctx context.Context, assetID, albumID int6
 // ShowInFolder opens Explorer with one of the asset's files selected: path,
 // which must be one of them, or "" for the first that is there.
 func (s *LibraryService) ShowInFolder(ctx context.Context, id int64, path string) error {
-	f, err := s.store.AssetFile(ctx, id, s.unlockedNow())
+	f, err := s.store.AssetFile(ctx, id, false)
+	if errors.Is(err, store.ErrNotFound) && s.unlockedNow() {
+		f, err = s.store.AssetFile(ctx, id, true)
+	}
 	if err != nil {
 		return err
 	}

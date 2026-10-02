@@ -77,6 +77,7 @@ function videoReady() {
 let seeking = false
 
 function videoTime() {
+  src.value.touch?.()
   if (video.value && !seeking)
     videoPosition.value = (converting.value ? videoStart.value : 0) + video.value.currentTime * 1000
 }

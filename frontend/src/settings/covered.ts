@@ -1,7 +1,9 @@
 import { computed, markRaw, reactive, ref, shallowRef } from 'vue'
 import { engine, errorCode, ErrorCode } from '../bridge'
 import type { Block, CoveredItem } from '../bridge'
+import { confirm } from '../shared/confirm'
 import { reportError } from '../shared/errors'
+import { t } from '../shared/i18n'
 import type { ViewerActions, ViewerSource } from '../library/store'
 
 /** What the browser needs of the Blocked screen around it. */
@@ -11,6 +13,9 @@ export interface CoveredHooks {
   /** A load failed (or the engine said the screen is locked): the screen says why and, if locked, relocks. */
   failed(e: unknown): void
 }
+
+/** Scrolling and playback tell the screen it is in use at most this often (ms). */
+const USE_THROTTLE_MS = 5000
 
 /**
  * The Blocked screen's browser: the photos of the block it was opened on, and
@@ -56,6 +61,15 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
     loading.value = false
   }
 
+  /** Says the photos are being looked at (scrolling, playing a video), without telling the screen at every event. */
+  let lastUse = Number.NEGATIVE_INFINITY
+  function touch() {
+    const now = Date.now()
+    if (now - lastUse < USE_THROTTLE_MS) return
+    lastUse = now
+    hooks.used()
+  }
+
   function view(id: number) {
     viewing.value = id
     hooks.used()
@@ -70,14 +84,19 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
 
   /**
    * Moves the photo in the Viewer to the Trash, and the Viewer on to the next
-   * one (else the previous). The Viewer covers the screen, so a failure is
-   * reported on the app-wide notice; a locked screen relocks instead.
+   * one (else the previous), once the user has been told that the Trash is
+   * open to anyone: a photo kept behind the PIN leaves its protection there.
+   * The Viewer covers the screen, so a failure is reported on the app-wide
+   * notice; a locked screen relocks instead.
    */
   async function moveToTrash() {
     const id = viewing.value
-    const at = id === null ? undefined : position.value.get(id)
-    if (id === null || at === undefined) return
+    if (id === null || !position.value.has(id)) return
     const mine = request
+    if (!(await confirm(t('covered.trashTitle'), t('covered.trashText'), t('trash.move')))) return
+    if (mine !== request) return // the screen locked, or was left, while the question was open
+    const at = position.value.get(id)
+    if (at === undefined) return
     const next = items.value[at + 1] ?? items.value[at - 1]
     try {
       await engine.trashCovered([id])
@@ -105,6 +124,7 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
       return at === undefined ? null : (items.value[at] ?? null)
     },
     sel: null,
+    touch,
     step,
     close() {
       viewing.value = null
@@ -113,7 +133,7 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
   }
 
   // Reactive, so a component reading it need not unwrap each ref.
-  return reactive({ block, items, loading, viewing, source: markRaw(source), open, close, view })
+  return reactive({ block, items, loading, viewing, source: markRaw(source), open, close, view, touch })
 }
 
 export type CoveredPhotos = ReturnType<typeof useCoveredPhotos>

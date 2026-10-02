@@ -14,6 +14,7 @@ import {
 import type * as Bridge from '../bridge'
 import type { AssetDetail, CoveredItem } from '../bridge'
 import type * as Block from '../shared/block'
+import { confirm } from '../shared/confirm'
 import { notice } from '../shared/errors'
 import { t } from '../shared/i18n'
 import BlockedView from './BlockedView.vue'
@@ -38,7 +39,7 @@ vi.mock('../shared/block', async (importOriginal) => ({
   ...(await importOriginal<typeof Block>()),
   showBlocksChanged: vi.fn().mockResolvedValue(undefined),
 }))
-vi.mock('../shared/confirm', () => ({ confirm: vi.fn().mockResolvedValue(true) }))
+vi.mock('../shared/confirm', () => ({ confirm: vi.fn() }))
 
 const privateBlock = {
   id: 1,
@@ -73,6 +74,7 @@ beforeEach(() => {
   vi.mocked(engine.blockedItems).mockReset().mockResolvedValue([])
   vi.mocked(engine.trashCovered).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.asset).mockReset().mockResolvedValue(photoDetail(1))
+  vi.mocked(confirm).mockReset().mockResolvedValue(true)
   notice.value = ''
 })
 afterEach(() => {
@@ -562,4 +564,59 @@ it('closes the Viewer and locks the engine on leaving the screen', async () => {
   wrapper = undefined
   expect(document.querySelector('.viewer')).toBeNull()
   expect(engine.lockBlocks).toHaveBeenCalledTimes(1)
+})
+
+it('locks the engine as well when the screen relocks from being left idle', async () => {
+  vi.useFakeTimers()
+  await browsing([covered(1)])
+  expect(engine.lockBlocks).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(idle)
+  expect(engine.lockBlocks).toHaveBeenCalledTimes(1)
+})
+
+it('counts scrolling the covered photos as use of the screen', async () => {
+  vi.useFakeTimers()
+  const view = await browsing([covered(1), covered(2)])
+  for (let i = 0; i < 3; i++) {
+    await vi.advanceTimersByTimeAsync(idle - 1000)
+    await view.get('.scroller').trigger('scroll')
+  }
+  expect(view.find('.covered').exists()).toBe(true)
+  expect(engine.lockBlocks).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(idle)
+  expect(view.find('.covered').exists()).toBe(false)
+  expect(engine.lockBlocks).toHaveBeenCalledTimes(1)
+})
+
+it('counts a covered video playing as use of the screen', async () => {
+  vi.useFakeTimers()
+  vi.mocked(engine.asset).mockResolvedValue({
+    ...photoDetail(7),
+    kind: Kind.KindVideo,
+    ext: '.mp4',
+    webNative: false,
+    video: { duration: 60000, codec: 'h264', audio: 'aac', play: Playback.PlayDirect },
+  })
+  const view = await browsing([covered(7, { v: true, d: 60000 })])
+  await cells()[0]?.trigger('click')
+  await flushPromises()
+  for (let i = 0; i < 3; i++) {
+    await vi.advanceTimersByTimeAsync(idle - 1000)
+    await view.get('.viewer video').trigger('timeupdate')
+  }
+  expect(view.find('.viewer').exists()).toBe(true)
+  await vi.advanceTimersByTimeAsync(idle)
+  expect(view.find('.viewer').exists()).toBe(false)
+})
+
+it('asks before moving a covered photo to the Trash, and moves nothing if the user declines', async () => {
+  const view = await browsing([covered(1), covered(2)])
+  await cells()[0]?.trigger('click')
+  await flushPromises()
+  vi.mocked(confirm).mockResolvedValue(false)
+  await view.get('.viewer button[aria-label="Move to Trash"]').trigger('click')
+  await flushPromises()
+  expect(confirm).toHaveBeenCalledExactlyOnceWith(t('covered.trashTitle'), t('covered.trashText'), t('trash.move'))
+  expect(engine.trashCovered).not.toHaveBeenCalled()
+  expect(cells()).toHaveLength(2)
 })

@@ -81,7 +81,7 @@ const names = (item: CoveredItem) => listFormat.format(item.hiddenBy.map((b) => 
     <p v-if="labelOnly" class="muted">{{ t('covered.stillShown') }}</p>
     <p v-if="covered.loading" class="muted" role="status">{{ t('covered.loading') }}</p>
     <p v-else-if="!covered.items.length" role="status">{{ t('covered.empty') }}</p>
-    <div ref="scroller" class="scroller">
+    <div ref="scroller" class="scroller" @scroll.passive="covered.touch">
       <div class="rows" :style="{ height: virtualizer.getTotalSize() + 'px' }">
         <div
           v-for="row in visible"

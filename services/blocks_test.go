@@ -681,3 +681,45 @@ func TestSetBlockModeNeedsThePINUnlockAndChangesWhatIsShown(t *testing.T) {
 		t.Fatalf("SetBlockMode after leaving the screen: %v", err)
 	}
 }
+
+func TestLookingAtOrdinaryPhotosDoesNotKeepTheBlockedScreenUnlocked(t *testing.T) {
+	ctx := t.Context()
+	s, _, block := coveredLibrary(t)
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.BlockedItems(ctx, block)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("BlockedItems = %+v, %v", items, err)
+	}
+	for range 3 { // the details panel of the photo outside the folder, again and again
+		now = now.Add(blockUnlockIdle - time.Minute)
+		if d, err := s.Asset(ctx, 3); err != nil || d.ID != 3 {
+			t.Fatalf("Asset of an ordinary photo = %+v, %v", d, err)
+		}
+	}
+	if _, err := s.BlockedItems(ctx, block); !errors.Is(err, ErrBlockLocked) {
+		t.Fatalf("looking at ordinary photos kept the screen unlocked: %v", err)
+	}
+}
+
+func TestAskingForACoveredPhotosDetailsCountsAsUseOfTheBlockedScreen(t *testing.T) {
+	ctx := t.Context()
+	s, _, block := coveredLibrary(t)
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		now = now.Add(blockUnlockIdle - time.Minute)
+		if d, err := s.Asset(ctx, 1); err != nil || d.ID != 1 {
+			t.Fatalf("Asset of a covered photo = %+v, %v", d, err)
+		}
+	}
+	if _, err := s.BlockedItems(ctx, block); err != nil {
+		t.Fatalf("details of a covered photo did not count as a use: %v", err)
+	}
+}

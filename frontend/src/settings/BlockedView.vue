@@ -54,10 +54,17 @@ function relock() {
   })
 }
 
+// Left unused for too long: the screen locks, and so does the engine, which
+// otherwise goes on serving the covered photos until its own timeout.
+function expire() {
+  void engine.lockBlocks().catch(reportError)
+  relock()
+}
+
 function used(revision: number) {
   if (!isActive() || revision !== sessionRevision) return
   clearTimeout(idleTimer)
-  idleTimer = window.setTimeout(relock, BLOCK_UNLOCK_IDLE_MINUTES * 60 * 1000)
+  idleTimer = window.setTimeout(expire, BLOCK_UNLOCK_IDLE_MINUTES * 60 * 1000)
 }
 
 function openReset() {
