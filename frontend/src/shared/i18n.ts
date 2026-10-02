@@ -417,6 +417,18 @@ const en = {
   'blocked.pinChanged': 'Your PIN was changed. Enter the new PIN to open the Blocked screen.',
   'error.signinFailed': 'Windows could not confirm it is you, so the PIN was not changed.',
   'error.signinUnavailable': 'This PC has no Windows sign-in that Lumen can use, so the PIN cannot be reset.',
+
+  // Event blocks.
+
+  // Face blocks.
+
+  // Blocked: covered photos.
+
+  // Duplicates: best copy.
+
+  // Organise on disk.
+
+  // XMP sidecars.
 } as const satisfies Record<string, Message>
 
 export type MessageKey = keyof typeof en
