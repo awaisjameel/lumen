@@ -30,8 +30,10 @@ onBeforeUnmount(() => (active = false))
 
 // Built-ins without photos and the internal sink kind never show.
 const listed = computed(() => things.list.filter((x) => x.kind !== TagKind.TagBuiltin || x.count > 0))
-const mine = computed(() => listed.value.filter((x) => x.kind !== TagKind.TagBuiltin))
-const builtin = computed(() => listed.value.filter((x) => x.kind === TagKind.TagBuiltin))
+// Pinned Things come first whoever made them (the engine sends them newest pin first).
+const pinned = computed(() => listed.value.filter((x) => x.pinned))
+const mine = computed(() => listed.value.filter((x) => !x.pinned && x.kind !== TagKind.TagBuiltin))
+const builtin = computed(() => listed.value.filter((x) => !x.pinned && x.kind === TagKind.TagBuiltin))
 const aiError = computed(() => lib.progress?.ai.error ?? '')
 const understanding = computed(() => lib.progress?.embedding ?? 0)
 
@@ -122,6 +124,23 @@ async function remove(tag: Tag) {
         {{ error || things.error || t('settings.aiError', { error: aiError }) }}
       </p>
 
+      <template v-if="pinned.length">
+        <h2>{{ t('things.pinnedHeading') }}</h2>
+        <div class="cards">
+          <ThingCard
+            v-for="x in pinned"
+            :key="x.id"
+            :tag="x"
+            :icon="x.kind === TagKind.TagBuiltin ? 'things' : 'tag'"
+            :deletable="x.kind !== TagKind.TagBuiltin"
+            :rename="rename"
+            @pin="pin(x)"
+            @block="blockTag(x)"
+            @remove="remove(x)"
+          />
+        </div>
+      </template>
+
       <template v-if="mine.length">
         <h2>{{ t('things.yours') }}</h2>
         <div class="cards">
@@ -154,7 +173,7 @@ async function remove(tag: Tag) {
       </div>
 
       <EmptyState
-        v-else-if="things.loaded && !mine.length"
+        v-else-if="things.loaded && !mine.length && !pinned.length"
         class="empty"
         icon="things"
         :title="t('things.empty')"

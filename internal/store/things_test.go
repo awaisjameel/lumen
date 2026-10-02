@@ -461,3 +461,61 @@ func TestUpgradeFromV18KeepsEventNamesAndBuiltinIdentity(t *testing.T) {
 		t.Fatalf("a Thing the user made has the vocabulary name %q", *vocab)
 	}
 }
+
+func TestANewBuiltinNamedLikeAUserLabelLeavesTheLabelAndItsPromptsAlone(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	id, err := st.CreateTag(ctx, "Cats", core.TagLabel, []string{"my own cat"})
+	check(t, err)
+	syncOne(t, st, label("Cats"))
+	if got := autoTag(t, st, id); got.Builtin || got.VocabName != "" || !slices.Equal(got.Prompts, []string{"my own cat"}) {
+		t.Fatalf("the user's label = %+v, want it untouched", got)
+	}
+	added := thingNamed(t, st, "Cats (built-in)")
+	if added.ID == id || added.Kind != core.TagBuiltin {
+		t.Fatalf("the new built-in = %+v", added)
+	}
+}
+
+func TestVocabularyRespellingOfARenamedBuiltinUpdatesItInPlace(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	syncOne(t, st, label("Wild Cats"))
+	id, _, err := st.TagByName(ctx, "Wild Cats")
+	check(t, err)
+	check(t, st.RenameTag(ctx, id, "Kitties"))
+	syncOne(t, st, VocabLabel{Name: "Wild cats", Prompts: []string{"a lynx"}})
+	got := autoTag(t, st, id)
+	if got.Name != "Kitties" || got.VocabName != "Wild cats" || !slices.Equal(got.Prompts, []string{"a lynx"}) {
+		t.Fatalf("renamed built-in after a respelling = %+v", got)
+	}
+	if names := thingNames(t, st); !slices.Equal(names, []string{"Kitties"}) {
+		t.Fatalf("Things = %v, want the one", names)
+	}
+}
+
+// Where a run holds two names, it shows the one on its earliest named photo,
+// as it did before event tags, whatever the tags' ids say.
+func TestAnEventShowsTheNameOfItsEarliestNamedPhotoAfterTheUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "library.db")
+	ctx := context.Background()
+	st, err := Open(path)
+	check(t, err)
+	f := newEventFixture(t, st)
+	first := f.add(0)
+	earlier, later := f.add(48), f.add(49)
+	check(t, st.Close())
+	st, err = Open(path)
+	check(t, err)
+	downgradeToV18(t, st)
+	for id, name := range map[int64]string{first: "Repeated", earlier: "Earlier", later: "Repeated"} {
+		check(t, errOf(st.w.ExecContext(ctx, "INSERT INTO event_names (anchor_asset_id, name) VALUES (?, ?)", id, name)))
+	}
+	check(t, st.Close())
+	st, err = Open(path)
+	check(t, err)
+	defer st.Close()
+	events, err := st.Events(ctx, core.EventGapDefault)
+	check(t, err)
+	if len(events) != 2 || events[0].Name != "Earlier" || events[1].Name != "Repeated" {
+		t.Fatalf("events = %+v, want the day 3 event to show Earlier", events)
+	}
+}

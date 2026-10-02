@@ -109,3 +109,14 @@ it('keeps the editor open and says why when a name is refused', async () => {
   expect(w.find('form.rename').exists()).toBe(true)
   expect(w.get('.page-error[role="alert"]').text()).toBe('A Thing already has that name.')
 })
+
+it('lists pinned Things first, built-in or not, and the rest in their sections', async () => {
+  const mineTag: Tag = { ...dogs, id: 1, name: 'Mine', kind: TagKind.TagLabel, original: '' }
+  const pinnedBuiltin: Tag = { ...dogs, id: 2, name: 'Birds', original: '', pinned: true }
+  const pinnedMine: Tag = { ...mineTag, id: 3, name: 'Pinned mine', pinned: true }
+  const plainBuiltin: Tag = { ...dogs, id: 4, name: 'Cars', original: '' }
+  // The engine sends pinned Things first, the newest pin first.
+  const w = await mountWith([pinnedBuiltin, pinnedMine, mineTag, plainBuiltin])
+  expect(w.findAll('.card-name').map((n) => n.text())).toEqual(['Birds', 'Pinned mine', 'Mine', 'Cars'])
+  expect(w.findAll('h2').map((h) => h.text())).toEqual(['Pinned', 'Made by you', 'Things'])
+})

@@ -50,7 +50,7 @@ type eventTagRef struct {
 // eventTagRefs returns the name and pin tags of every photo that holds one.
 func eventTagRefs(ctx context.Context, tx *sql.Tx) (map[int64][]eventTagRef, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT m.asset_id, t.id, t.kind, COALESCE(t.name, ''), t.created_at
-		FROM event_members m JOIN event_tags t ON t.id = m.tag_id WHERE t.kind IN ('name', 'pin')`)
+		FROM event_members m JOIN event_tags t ON t.id = m.tag_id WHERE t.kind IN ('name', 'pin') ORDER BY t.id`)
 	if err != nil {
 		return nil, err
 	}

@@ -100,7 +100,7 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int) ([]core.Event, e
 	split := eventSplitter{gap: int64(gapHours) * 3600}
 	var current core.Event
 	var placeCounts map[int64]int
-	var nameTag, pinnedAt int64 // the name tag shown (the lowest id) and the newest pin held
+	var pinnedAt int64 // the newest pin the event holds
 	var customName string
 	var pins []int64 // pinnedAt of each event in out
 	finish := func() {
@@ -129,13 +129,16 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int) ([]core.Event, e
 			finish()
 			current = core.Event{ID: a.id, FirstID: a.id, StartAt: a.at}
 			placeCounts = map[int64]int{}
-			nameTag, pinnedAt, customName = 0, 0, ""
+			pinnedAt, customName = 0, ""
 		}
+		// The event shows the name of its earliest photo that has one (the
+		// lowest tag id if that photo holds several).
+		named := customName != ""
 		for _, ref := range tagged[a.id] {
 			switch ref.kind {
 			case eventTagName:
-				if nameTag == 0 || ref.id < nameTag {
-					nameTag, customName = ref.id, ref.name
+				if !named {
+					customName, named = ref.name, true
 				}
 			case eventTagPin:
 				pinnedAt = max(pinnedAt, ref.createdAt)

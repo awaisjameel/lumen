@@ -355,6 +355,7 @@ const en = {
   'things.pinNamed': 'Pin “{name}”',
   'things.unpinNamed': 'Unpin “{name}”',
   'things.pinned': 'Pinned',
+  'things.pinnedHeading': 'Pinned',
   'things.rename': 'Rename',
   'things.renameNamed': 'Rename “{name}”',
   'things.name': 'Thing name',

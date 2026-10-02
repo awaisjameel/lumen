@@ -60,9 +60,9 @@ func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 		if err != nil {
 			return err
 		}
-		listed := make(map[string]bool, len(labels))
+		listed := make(map[string]bool, len(labels)) // by core.Fold: a respelling is the same label
 		for _, l := range labels {
-			listed[l.Name] = true
+			listed[core.Fold(l.Name)] = true
 		}
 		// hidden, which lists and suggestions read, is exactly is_sink since
 		// blocking replaced the user's hiding (migration 0014).
@@ -84,7 +84,7 @@ func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 		byName := map[string]*tagRow{}
 		for i := range known {
 			if known[i].vocab != "" {
-				byVocab[known[i].vocab] = &known[i]
+				byVocab[core.Fold(known[i].vocab)] = &known[i]
 			}
 			byName[core.Fold(known[i].name)] = &known[i]
 		}
@@ -95,22 +95,28 @@ func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 				return err
 			}
 			names = append(names, l.Name)
-			switch row, clash := byVocab[l.Name], byName[core.Fold(l.Name)]; {
+			switch row, clash := byVocab[core.Fold(l.Name)], byName[core.Fold(l.Name)]; {
 			case row != nil:
-				_, err = update.ExecContext(ctx, row.id, string(p), l.Exclusive, l.Sink, row.name, l.Name)
+				// The built-in follows the vocabulary's spelling; its name does
+				// too unless the user renamed it.
+				name := row.name
+				if row.name == row.vocab {
+					name = l.Name
+				}
+				_, err = update.ExecContext(ctx, row.id, string(p), l.Exclusive, l.Sink, name, l.Name)
 			case clash != nil && clash.mayAdopt(listed):
 				// The user's own Thing of that name (or a built-in whose name
 				// only the vocabulary's spelling of changed) becomes the built-in.
 				_, err = update.ExecContext(ctx, clash.id, string(p), l.Exclusive, l.Sink, l.Name, l.Name)
 				clash.name, clash.vocab = l.Name, l.Name
-				byVocab[l.Name] = clash
+				byVocab[core.Fold(l.Name)] = clash
 			default:
 				name := l.Name
 				if clash != nil {
 					name = freeBuiltinName(l.Name, byName)
 				}
 				_, err = insert.ExecContext(ctx, name, l.Name, string(p), l.Exclusive, now, l.Sink)
-				byName[core.Fold(name)] = &tagRow{name: name, vocab: l.Name}
+				byName[core.Fold(name)] = &tagRow{name: name, vocab: l.Name, kind: core.TagBuiltin}
 			}
 			if err != nil {
 				return err
@@ -141,21 +147,23 @@ func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 type tagRow struct {
 	id          int64
 	name, vocab string // vocab is "" for the user's own Thing
+	kind        core.TagKind
 }
 
 func tagRows(ctx context.Context, tx *sql.Tx) ([]tagRow, error) {
 	return queryAll(ctx, tx, func(r *sql.Rows) (t tagRow, err error) {
-		err = r.Scan(&t.id, &t.name, &t.vocab)
+		err = r.Scan(&t.id, &t.name, &t.vocab, &t.kind)
 		return t, err
-	}, "SELECT id, name, COALESCE(vocab_name, '') FROM tags")
+	}, "SELECT id, name, COALESCE(vocab_name, ''), kind FROM tags")
 }
 
 // mayAdopt reports whether a label named like this tag takes it over: the
-// tag is the user's own, or a built-in the user never renamed that the
+// tag is a Thing the user made without prompts of its own (a label's
+// prompts are theirs, and are kept), or a built-in the user never renamed that the
 // vocabulary no longer lists under that spelling. A renamed built-in is the
 // user's choice, and stays.
 func (t *tagRow) mayAdopt(listed map[string]bool) bool {
-	return t.vocab == "" || (t.name == t.vocab && !listed[t.vocab])
+	return (t.vocab == "" && t.kind != core.TagLabel) || (t.name == t.vocab && !listed[core.Fold(t.vocab)])
 }
 
 // freeBuiltinName is name with " (built-in)" after it, numbered if even that
