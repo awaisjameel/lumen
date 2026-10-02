@@ -5,7 +5,6 @@ package index
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"maps"
 	"os"
@@ -80,6 +79,9 @@ type Indexer struct {
 	wakeVideo chan struct{}
 	wakeFS    chan struct{}
 
+	scanTurn   chan struct{} // holds a token while a scan runs or HoldScans is in force: one at a time
+	onScanTurn func()        // a test's hook, called when a scan has its turn; nil otherwise
+
 	encoder *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
 	ocr     *model[textReader]       // PP-OCRv5's detector and recogniser, while their stage has work
@@ -130,6 +132,7 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 	ix := &Indexer{
 		store: st, paths: paths, cache: cache, search: m.Search, people: m.People, events: ev,
 		scanWake:  make(chan struct{}, 1),
+		scanTurn:  make(chan struct{}, 1),
 		wakeMeta:  make(chan struct{}, 1),
 		wakeThum:  make(chan struct{}, 1),
 		wakeEmbed: make(chan struct{}, 1),
@@ -417,13 +420,21 @@ func (ix *Indexer) run(fn func()) {
 
 // HoldScans waits for a running scan to finish and keeps new ones from
 // starting until release is called: organising moves files the scanner must
-// not see half-moved. Changes the watchers report meanwhile are scanned after
-// release. Phase 5 unit U10 builds it.
+// not see half-moved. Changes the watchers report meanwhile are queued as
+// usual and scanned after release, when the database already matches the
+// disk. A scan and a hold take turns, so a second hold waits for the first.
+// release may be called more than once.
 func (ix *Indexer) HoldScans(ctx context.Context) (release func(), err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return nil, errors.ErrUnsupported
+	select {
+	case ix.scanTurn <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	var once sync.Once
+	return func() { once.Do(func() { <-ix.scanTurn }) }, nil
 }
 
 // RescanAll queues a scan of every enabled source and restarts the watchers.
@@ -615,6 +626,16 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 			continue // removed since it was queued
 		}
 
+		// A hold (organising moves files) has the turn until it lets go; the
+		// request waits, and the changes made meanwhile are found as usual.
+		select {
+		case ix.scanTurn <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		if ix.onScanTurn != nil {
+			ix.onScanTurn()
+		}
 		ix.mu.Lock()
 		ix.scanning = true
 		ix.mu.Unlock()
@@ -625,6 +646,7 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 			Videos:   videos,
 			SkipDirs: ix.skipDirs(),
 		})
+		<-ix.scanTurn
 		switch {
 		case ctx.Err() != nil:
 			return

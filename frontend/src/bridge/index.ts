@@ -14,6 +14,8 @@ import {
   DuplicateKind,
   Filter,
   Kind,
+  OrganiseMoveState,
+  OrganiseRunState,
   Playback,
   TagKind,
   TagSource,
@@ -23,6 +25,7 @@ import type {
   Block,
   BlockChange,
   CoveredItem as RawCoveredItem,
+  OrganiseMove,
   OrganisePlan as RawOrganisePlan,
   OrganiseProgress,
   OrganiseRun,
@@ -58,6 +61,8 @@ export {
   DuplicateKind,
   Filter,
   Kind,
+  OrganiseMoveState,
+  OrganiseRunState,
   Playback,
   TagKind,
   TagSource,
@@ -74,6 +79,9 @@ export type {
   GridItem,
   Person,
   Event,
+  OrganiseMove,
+  OrganiseProgress,
+  OrganiseRun,
   Place,
   Progress,
   Settings,
@@ -125,6 +133,25 @@ export const PIN_COOLDOWN_SECONDS = 30 // services.pinCooldown: the wait after t
 export const THUMB_CACHE_DEFAULT_MB = 2048 // core.ThumbCacheDefaultMB
 export const THUMB_CACHE_MIN_MB = 256 // core.ThumbCacheMinMB
 export const THUMB_CACHE_MAX_MB = 102400 // core.ThumbCacheMaxMB
+export const ORGANISE_DEFAULT_TEMPLATE = '{Year}/{Month}/{Event}/{Name}' // fileops.DefaultTemplate
+/** The tokens an organise scheme may hold, in the order the editor offers them (fileops.Tokens). */
+export const ORGANISE_TOKENS = ['Year', 'Month', 'MonthName', 'Day', 'Event', 'Place', 'Camera', 'Name', 'Ext'] as const
+/** What a token stands for when a photo has no value for it (fileops.FallbackEvent, FallbackPlace, FallbackCamera). */
+export const ORGANISE_FALLBACKS = { Event: 'Unknown event', Place: 'Unknown place', Camera: 'Unknown camera' } as const
+/**
+ * Why a file is left out of an organise run (fileops.Reason*): a move's error
+ * is one of these, or else a message from Windows.
+ */
+export const OrganiseReason = {
+  Missing: 'missing',
+  NotVisible: 'not_visible',
+  BlockedFolder: 'blocked_folder',
+  Changed: 'changed',
+  Taken: 'taken',
+  TooLong: 'too_long',
+  NotAFolder: 'not_a_folder',
+} as const
+export type OrganiseReason = (typeof OrganiseReason)[keyof typeof OrganiseReason]
 /** The pattern attribute of a PIN field: PIN_MIN_LEN to PIN_MAX_LEN digits. */
 export const PIN_PATTERN = `[0-9]{${PIN_MIN_LEN},${PIN_MAX_LEN}}`
 export type ThumbSize = typeof THUMB_SMALL | typeof THUMB_LARGE
@@ -162,6 +189,9 @@ export const ErrorCode = {
   InvalidBlock: 'invalid_block',
   DeleteFailed: 'delete_failed',
   XMPOff: 'xmp_off',
+  InvalidTemplate: 'invalid_template',
+  OrganiseBusy: 'organise_busy',
+  OrganiseState: 'organise_state',
   SigninFailed: 'signin_failed',
   SigninUnavailable: 'signin_unavailable',
 } as const

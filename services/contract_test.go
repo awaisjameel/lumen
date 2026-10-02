@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
 
 	"lumen/internal/core"
+	"lumen/internal/fileops"
 	"lumen/internal/search"
 	"lumen/internal/store"
 )
@@ -81,6 +83,37 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		if !inEngine[code] {
 			t.Errorf("the bridge's error code %q is not one the engine sends", code)
 		}
+	}
+
+	// The organise scheme's default, tokens, fallbacks and the reasons a file is
+	// left out are spelt out in the bridge for the editor and the preview.
+	quoted := func(pattern string) []string {
+		t.Helper()
+		m := regexp.MustCompile(pattern).FindStringSubmatch(bridge)
+		if m == nil {
+			t.Fatalf("the bridge has nothing matching %s", pattern)
+		}
+		var out []string
+		for _, q := range regexp.MustCompile(`'([^']*)'`).FindAllStringSubmatch(m[1], -1) {
+			out = append(out, q[1])
+		}
+		return out
+	}
+	if got := quoted(`export const ORGANISE_DEFAULT_TEMPLATE = ('[^']*')`); len(got) != 1 || got[0] != fileops.DefaultTemplate {
+		t.Errorf("bridge ORGANISE_DEFAULT_TEMPLATE = %v, engine has %q", got, fileops.DefaultTemplate)
+	}
+	if got := quoted(`(?s)export const ORGANISE_TOKENS = \[(.*?)\] as const`); !slices.Equal(got, fileops.Tokens()) {
+		t.Errorf("bridge ORGANISE_TOKENS = %v, engine has %v", got, fileops.Tokens())
+	}
+	if got := quoted(`(?s)export const ORGANISE_FALLBACKS = \{(.*?)\} as const`); !slices.Equal(got,
+		[]string{fileops.FallbackEvent, fileops.FallbackPlace, fileops.FallbackCamera}) {
+		t.Errorf("bridge ORGANISE_FALLBACKS = %v, engine has event, place and camera fallbacks", got)
+	}
+	reasons := quoted(`(?s)export const OrganiseReason = \{(.*?)\} as const`)
+	wantReasons := []string{fileops.ReasonMissing, fileops.ReasonNotVisible, fileops.ReasonBlockedFolder, fileops.ReasonChanged,
+		fileops.ReasonTaken, fileops.ReasonTooLong, fileops.ReasonNotAFolder}
+	if !slices.Equal(reasons, wantReasons) {
+		t.Errorf("bridge OrganiseReason = %v, engine has %v", reasons, wantReasons)
 	}
 
 	for _, event := range []string{EventProgress, EventLibraryChanged, EventOrganiseProgress} {

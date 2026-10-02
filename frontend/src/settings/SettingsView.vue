@@ -193,6 +193,7 @@ onBeforeUnmount(saveConfidence)
             <button class="btn" @click="run(engine.rescan)">
               <Icon name="refresh" :size="16" />{{ t('settings.rescan') }}
             </button>
+            <RouterLink to="/settings/organise" class="btn">{{ t('organise.link') }}</RouterLink>
           </div>
         </section>
 

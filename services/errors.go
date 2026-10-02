@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"lumen/internal/fileops"
 	"lumen/internal/index"
 	"lumen/internal/search"
 	"lumen/internal/signin"
@@ -45,6 +46,10 @@ const (
 	CodeInvalidBlock    ErrorCode = "invalid_block"    // that can't be blocked
 	CodeDeleteFailed    ErrorCode = "delete_failed"    // the Recycle Bin could not be used
 	CodeXMPOff          ErrorCode = "xmp_off"          // XMP sidecars were asked for while the setting is off
+
+	CodeInvalidTemplate ErrorCode = "invalid_template" // the folder scheme to organise by cannot be used
+	CodeOrganiseBusy    ErrorCode = "organise_busy"    // files are already being moved
+	CodeOrganiseState   ErrorCode = "organise_state"   // that run cannot be started or undone now
 
 	CodeSigninFailed ErrorCode = "signin_failed"      // the Windows sign-in was cancelled, or wrong
 	CodeNoSignin     ErrorCode = "signin_unavailable" // this PC has no way to check a Windows sign-in
@@ -90,6 +95,9 @@ var errorCodes = []struct {
 	{store.ErrInvalidBlock, CodeInvalidBlock},
 	{ErrDeleteFailed, CodeDeleteFailed},
 	{index.ErrXMPOff, CodeXMPOff},
+	{fileops.ErrInvalidTemplate, CodeInvalidTemplate},
+	{ErrOrganiseBusy, CodeOrganiseBusy},
+	{ErrOrganiseState, CodeOrganiseState},
 	{signin.ErrNotVerified, CodeSigninFailed},
 	{signin.ErrUnavailable, CodeNoSignin},
 }

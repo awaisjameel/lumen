@@ -140,8 +140,9 @@ type OrganisePlan struct {
 	RunID    int64          `json:"runId"`
 	Template string         `json:"template"`
 	Moves    []OrganiseMove `json:"moves"`
-	Renamed  int            `json:"renamed"` // moves whose name changed for a collision
-	InPlace  int            `json:"inPlace"` // files already where the template puts them
+	Renamed  int            `json:"renamed"`  // moves whose name changed for a collision
+	InPlace  int            `json:"inPlace"`  // files already where the template puts them
+	Sidecars int            `json:"sidecars"` // moves that take an XMP sidecar (IMG_1.jpg.xmp) along
 }
 
 // OrganiseRun is a run of moves, as the list of past runs shows it.

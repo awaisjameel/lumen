@@ -76,6 +76,8 @@ type LibraryService struct {
 	// verify is the Windows sign-in of ResetBlockPIN; nil means signin.Verify.
 	// A test sets it to answer for the dialog it cannot show.
 	verify func(ctx context.Context, owner uintptr, reason string) error
+
+	organise organiser // the organise-on-disk run in progress (organise.go); the zero value works
 }
 
 // NewLibraryService returns the library service. gate is the Blocked

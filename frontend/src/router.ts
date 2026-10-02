@@ -10,6 +10,7 @@ import AlbumsView from './albums/AlbumsView.vue'
 import DuplicatesView from './duplicates/DuplicatesView.vue'
 import PlacesView from './places/PlacesView.vue'
 import EventsView from './events/EventsView.vue'
+import OrganiseView from './organise/OrganiseView.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -43,6 +44,7 @@ export const router = createRouter({
     { path: '/search', name: 'search', component: LibraryView },
     { path: '/settings', name: 'settings', component: SettingsView },
     { path: '/settings/blocked', name: 'blocked', component: BlockedView },
+    { path: '/settings/organise', name: 'organise', component: OrganiseView },
     { path: '/:rest(.*)*', redirect: '/' },
   ],
 })

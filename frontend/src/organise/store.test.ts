@@ -1,0 +1,283 @@
+import { beforeEach, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { flushPromises } from '@vue/test-utils'
+import {
+  DateSource,
+  engine,
+  ErrorCode,
+  Filter,
+  Kind,
+  onOrganiseProgress,
+  OrganiseMoveState,
+  OrganiseRunState,
+} from '../bridge'
+import type * as Bridge from '../bridge'
+import type { AssetDetail, Event, OrganiseMove, OrganisePlan, OrganiseProgress, OrganiseRun, Place } from '../bridge'
+import { useOrganise } from './store'
+
+vi.mock('../bridge', async (importOriginal) => ({
+  ...(await importOriginal<typeof Bridge>()),
+  onOrganiseProgress: vi.fn(() => () => undefined),
+  engine: {
+    planOrganise: vi.fn(),
+    startOrganise: vi.fn(),
+    undoOrganise: vi.fn(),
+    organiseRuns: vi.fn(),
+    sources: vi.fn(),
+    timeline: vi.fn(),
+    days: vi.fn(),
+    asset: vi.fn(),
+    event: vi.fn(),
+    place: vi.fn(),
+  },
+}))
+
+let emit: (p: OrganiseProgress) => void = () => undefined
+
+const move = (seq: number, state: OrganiseMoveState, error?: string): OrganiseMove => ({
+  seq,
+  assetId: seq,
+  from: `D:\\Photos\\${seq}.jpg`,
+  to: `D:\\Photos\\2024\\${seq}.jpg`,
+  state,
+  renamed: false,
+  ...(error ? { error } : {}),
+})
+
+const plan = (moves: OrganiseMove[]): OrganisePlan => ({
+  runId: 7,
+  template: '{Year}/{Name}',
+  moves,
+  renamed: 0,
+  inPlace: 3,
+})
+
+const run = (id: number, state: OrganiseRunState, moved: number, total: number): OrganiseRun => ({
+  id,
+  template: '{Year}/{Name}',
+  createdAt: 1_790_000_000,
+  state,
+  moved,
+  total,
+})
+
+const detail = (placeId: number, camera = ''): AssetDetail => ({
+  id: 11,
+  camera,
+  kind: Kind.KindPhoto,
+  takenAt: 1_722_868_200,
+  dateFrom: DateSource.DateFromFile,
+  width: 100,
+  height: 100,
+  lat: null,
+  lon: null,
+  placeId,
+  favourite: false,
+  paths: ['D:\\Photos\\IMG_1.jpg'],
+  size: 100,
+  ext: '.jpg',
+  webNative: true,
+  video: null,
+})
+
+const event = (name: string): Event => ({
+  id: 11,
+  name,
+  startAt: 0,
+  endAt: 0,
+  count: 1,
+  cover: 11,
+  coverThumb: 1,
+  placeId: 0,
+  pinned: false,
+})
+
+const place = (name: string): Place => ({
+  id: 2,
+  name,
+  region: '',
+  country: '',
+  lat: 0,
+  lon: 0,
+  count: 1,
+  cover: 11,
+  coverThumb: 1,
+})
+
+/** The library has one photo on one day. */
+function onePhoto() {
+  vi.mocked(engine.timeline).mockResolvedValue([{ day: '2024-08-05', count: 1 }])
+  vi.mocked(engine.days).mockResolvedValue([{ day: '2024-08-05', items: [{ id: 11, w: 1, h: 1, t: 1 }] }])
+}
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+  vi.clearAllMocks()
+  vi.mocked(onOrganiseProgress).mockImplementation((cb) => {
+    emit = cb
+    return () => undefined
+  })
+  vi.mocked(engine.organiseRuns).mockReset().mockResolvedValue([])
+  vi.mocked(engine.planOrganise).mockReset()
+  vi.mocked(engine.startOrganise).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.undoOrganise).mockReset().mockResolvedValue(undefined)
+})
+
+it('previews the scheme for the chosen folder and counts what would move and what would stay', async () => {
+  vi.mocked(engine.planOrganise).mockResolvedValue(
+    plan([
+      move(1, OrganiseMoveState.MovePlanned),
+      move(2, OrganiseMoveState.MovePlanned),
+      move(3, OrganiseMoveState.MoveSkipped, 'missing'),
+    ]),
+  )
+  const organise = useOrganise()
+  organise.template = '{Year}/{Name}'
+  organise.sourceId = 4
+  await organise.preview()
+  expect(engine.planOrganise).toHaveBeenCalledWith('{Year}/{Name}', 4)
+  expect(organise.toMove).toBe(2)
+  expect(organise.skipped).toBe(1)
+  expect(organise.error).toBe('')
+  expect(organise.planning).toBe(false)
+})
+
+it('says why a scheme was refused and keeps no preview', async () => {
+  const organise = useOrganise()
+  vi.mocked(engine.planOrganise).mockResolvedValueOnce(plan([move(1, OrganiseMoveState.MovePlanned)]))
+  await organise.preview()
+  vi.mocked(engine.planOrganise).mockRejectedValueOnce(
+    new Error('invalid folder scheme', { cause: { code: ErrorCode.InvalidTemplate } }),
+  )
+  await organise.preview()
+  expect(organise.plan).toBeNull()
+  expect(organise.error).toContain('folder scheme can’t be used')
+})
+
+it('forgets a preview when asked, as the scheme it belongs to changes', async () => {
+  vi.mocked(engine.planOrganise).mockResolvedValue(plan([move(1, OrganiseMoveState.MovePlanned)]))
+  const organise = useOrganise()
+  await organise.preview()
+  organise.discardPlan()
+  expect(organise.plan).toBeNull()
+  expect(organise.toMove).toBe(0)
+})
+
+it('starts the previewed run, shows it moving, and refreshes the past runs', async () => {
+  vi.mocked(engine.planOrganise).mockResolvedValue(
+    plan([move(1, OrganiseMoveState.MovePlanned), move(2, OrganiseMoveState.MoveSkipped, 'taken')]),
+  )
+  vi.mocked(engine.organiseRuns).mockResolvedValue([run(7, OrganiseRunState.OrganiseRunning, 0, 2)])
+  const organise = useOrganise()
+  await organise.preview()
+  await organise.start()
+  expect(engine.startOrganise).toHaveBeenCalledWith(7)
+  expect(organise.plan).toBeNull()
+  expect(organise.progress).toEqual({ runId: 7, state: OrganiseRunState.OrganiseRunning, done: 0, total: 1 })
+  expect(organise.busy).toBe(true)
+  expect(organise.lastAction).toBe('move')
+  expect(organise.runs).toHaveLength(1)
+})
+
+it('keeps the preview and says why when the engine refuses to start', async () => {
+  vi.mocked(engine.planOrganise).mockResolvedValue(plan([move(1, OrganiseMoveState.MovePlanned)]))
+  vi.mocked(engine.startOrganise).mockRejectedValue(new Error('busy', { cause: { code: ErrorCode.OrganiseBusy } }))
+  const organise = useOrganise()
+  await organise.preview()
+  await organise.start()
+  expect(organise.error).toContain('already moving files')
+  expect(organise.plan).not.toBeNull()
+  expect(organise.progress).toBeNull()
+})
+
+it('does nothing when there is no preview to start', async () => {
+  const organise = useOrganise()
+  await organise.start()
+  expect(engine.startOrganise).not.toHaveBeenCalled()
+})
+
+it('follows the engine’s progress events and reloads the runs once a run ends', async () => {
+  const organise = useOrganise()
+  vi.mocked(engine.organiseRuns).mockResolvedValue([run(7, OrganiseRunState.OrganiseDone, 5, 5)])
+  emit({ runId: 7, state: OrganiseRunState.OrganiseRunning, done: 2, total: 5 })
+  expect(organise.progress?.done).toBe(2)
+  expect(organise.busy).toBe(true)
+  expect(engine.organiseRuns).not.toHaveBeenCalled()
+
+  emit({ runId: 7, state: OrganiseRunState.OrganiseDone, done: 5, total: 5 })
+  await flushPromises()
+  expect(organise.busy).toBe(false)
+  expect(engine.organiseRuns).toHaveBeenCalledTimes(1)
+  expect(organise.runs[0]?.state).toBe(OrganiseRunState.OrganiseDone)
+})
+
+it('is busy while any listed run is still moving files, even before an event arrives', async () => {
+  vi.mocked(engine.organiseRuns).mockResolvedValue([run(3, OrganiseRunState.OrganiseUndoing, 4, 9)])
+  const organise = useOrganise()
+  await organise.loadRuns()
+  expect(organise.busy).toBe(true)
+})
+
+it('resumes a stopped run for what is left, and undoes a run for what it moved', async () => {
+  const organise = useOrganise()
+  await organise.resume(run(5, OrganiseRunState.OrganiseFailed, 2, 6))
+  expect(engine.startOrganise).toHaveBeenCalledWith(5)
+  expect(organise.progress).toEqual({ runId: 5, state: OrganiseRunState.OrganiseRunning, done: 0, total: 4 })
+
+  await organise.undo(run(5, OrganiseRunState.OrganiseDone, 6, 6))
+  expect(engine.undoOrganise).toHaveBeenCalledWith(5)
+  expect(organise.progress).toEqual({ runId: 5, state: OrganiseRunState.OrganiseUndoing, done: 0, total: 6 })
+  expect(organise.lastAction).toBe('undo')
+})
+
+it('reports a refused undo in its own error', async () => {
+  vi.mocked(engine.undoOrganise).mockRejectedValue(new Error('state', { cause: { code: ErrorCode.OrganiseState } }))
+  const organise = useOrganise()
+  await organise.undo(run(5, OrganiseRunState.OrganiseUndone, 0, 6))
+  expect(organise.error).toContain('can’t be started or undone')
+  expect(organise.progress).toBeNull()
+})
+
+it('takes its example from the newest photo, with its event and place by name', async () => {
+  onePhoto()
+  vi.mocked(engine.asset).mockResolvedValue(detail(2, 'Pixel 8'))
+  vi.mocked(engine.event).mockResolvedValue(event('Beach day'))
+  vi.mocked(engine.place).mockResolvedValue(place('Karachi'))
+  const organise = useOrganise()
+  await organise.loadExample()
+  expect(engine.timeline).toHaveBeenCalledWith({ filter: Filter.FilterAll })
+  expect(organise.example).toEqual({
+    takenAt: 1_722_868_200,
+    event: 'Beach day',
+    place: 'Karachi',
+    camera: 'Pixel 8',
+    path: 'D:\\Photos\\IMG_1.jpg',
+  })
+})
+
+it('reads a blocked place or event as none in the example', async () => {
+  onePhoto()
+  vi.mocked(engine.asset).mockResolvedValue(detail(2))
+  vi.mocked(engine.event).mockRejectedValue(new Error('not found'))
+  vi.mocked(engine.place).mockRejectedValue(new Error('not found'))
+  const organise = useOrganise()
+  await organise.loadExample()
+  expect(organise.example).toMatchObject({ event: '', place: '' })
+})
+
+it('has no example for an empty library', async () => {
+  vi.mocked(engine.timeline).mockResolvedValue([])
+  const organise = useOrganise()
+  await organise.loadExample()
+  expect(organise.example).toBeNull()
+})
+
+it('lists only enabled folders to choose from', async () => {
+  vi.mocked(engine.sources).mockResolvedValue([
+    { id: 1, path: 'D:\\A', enabled: true },
+    { id: 2, path: 'D:\\B', enabled: false },
+  ])
+  const organise = useOrganise()
+  await organise.loadSources()
+  expect(organise.sources.map((s) => s.id)).toEqual([1])
+})
