@@ -350,6 +350,21 @@ const en = {
   'error.invalidBlock': 'That can’t be blocked.',
 
   // Things and Events: rename and pin.
+  'things.pin': 'Pin',
+  'things.unpin': 'Unpin',
+  'things.pinNamed': 'Pin “{name}”',
+  'things.unpinNamed': 'Unpin “{name}”',
+  'things.pinned': 'Pinned',
+  'things.rename': 'Rename',
+  'things.renameNamed': 'Rename “{name}”',
+  'things.name': 'Thing name',
+  'things.save': 'Save',
+  'things.resetName': 'Reset name',
+  'events.pin': 'Pin',
+  'events.unpin': 'Unpin',
+  'events.pinNamed': 'Pin {name}',
+  'events.unpinNamed': 'Unpin {name}',
+  'events.pinned': 'Pinned',
 
   // Trash.
 

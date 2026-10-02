@@ -24,6 +24,20 @@ watch(list, (events) => {
   if (editing.value !== null && !events.some((event) => event.id === editing.value)) void rename.close(false)
 })
 
+async function togglePin(event: Event) {
+  if (busy.value) return
+  busy.value = true
+  actionError.value = ''
+  try {
+    await engine.setEventPinned(event.id, !event.pinned)
+    await load()
+  } catch (e) {
+    actionError.value = errorText(e)
+  } finally {
+    busy.value = false
+  }
+}
+
 function edit(event: Event) {
   if (!busy.value) void rename.open(event.id, event.name)
 }
@@ -92,7 +106,7 @@ async function save(id: number, value: string) {
             </button>
           </form>
           <button
-            v-else
+            v-if="editing !== event.id"
             :ref="rename.triggerRef(event.id)"
             class="icon-btn"
             :disabled="busy"
@@ -100,6 +114,27 @@ async function save(id: number, value: string) {
             @click="edit(event)"
           >
             <Icon name="pencil" :size="16" />
+          </button>
+          <span
+            v-if="event.pinned && editing !== event.id"
+            class="pin-badge"
+            role="img"
+            :aria-label="t('events.pinned')"
+          >
+            <Icon name="pin" :size="16" />
+          </span>
+          <button
+            v-if="editing !== event.id"
+            class="icon-btn"
+            :disabled="busy"
+            :title="event.pinned ? t('events.unpin') : t('events.pin')"
+            :aria-label="
+              event.pinned ? t('events.unpinNamed', { name: event.name }) : t('events.pinNamed', { name: event.name })
+            "
+            :aria-pressed="event.pinned"
+            @click="togglePin(event)"
+          >
+            <Icon name="pin" :size="16" />
           </button>
         </GroupCard>
       </div>
@@ -114,6 +149,12 @@ async function save(id: number, value: string) {
 </template>
 
 <style scoped>
+.pin-badge {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+
 .rename {
   display: flex;
   flex: 0 0 100%;

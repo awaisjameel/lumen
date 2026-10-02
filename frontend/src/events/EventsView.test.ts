@@ -9,7 +9,7 @@ import EventsView from './EventsView.vue'
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
-  engine: { events: vi.fn(), setEventName: vi.fn() },
+  engine: { events: vi.fn(), setEventName: vi.fn(), setEventPinned: vi.fn() },
 }))
 
 const trip: Event = {
@@ -30,6 +30,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.mocked(engine.events).mockReset().mockResolvedValue([trip])
   vi.mocked(engine.setEventName).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setEventPinned).mockReset().mockResolvedValue(undefined)
 })
 afterEach(() => {
   wrapper?.unmount()
@@ -120,4 +121,27 @@ it('discards a rename draft when its event disappears and later returns', async 
   expect(w.find('form.rename').exists()).toBe(false)
   await w.get('button.icon-btn').trigger('click')
   expect(w.get<HTMLInputElement>('form.rename input').element.value).toBe(trip.name)
+})
+
+it('pins an event, shows the pin and unpins it again', async () => {
+  const w = await mounted()
+  expect(w.find('.pin-badge').exists()).toBe(false)
+  vi.mocked(engine.events).mockResolvedValue([{ ...trip, pinned: true }])
+  await w.get(`button[aria-label="Pin ${trip.name}"]`).trigger('click')
+  await flushPromises()
+  expect(engine.setEventPinned).toHaveBeenCalledWith(7, true)
+  expect(w.get('.pin-badge').attributes('aria-label')).toBe('Pinned')
+  vi.mocked(engine.events).mockResolvedValue([trip])
+  await w.get(`button[aria-label="Unpin ${trip.name}"]`).trigger('click')
+  await flushPromises()
+  expect(engine.setEventPinned).toHaveBeenLastCalledWith(7, false)
+  expect(w.find('.pin-badge').exists()).toBe(false)
+})
+
+it('says why a pin failed', async () => {
+  vi.mocked(engine.setEventPinned).mockRejectedValue(new Error('disk full'))
+  const w = await mounted()
+  await w.get(`button[aria-label="Pin ${trip.name}"]`).trigger('click')
+  await flushPromises()
+  expect(w.get('[role="alert"]').text()).toContain('disk full')
 })

@@ -4,18 +4,18 @@
 // those across the library straight away. User labels can be deleted.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { BlockKind, engine, MAX_NAME_LEN, TagKind, thumbUrl } from '../bridge'
+import { BlockKind, engine, MAX_NAME_LEN, TagKind } from '../bridge'
 import type { Tag } from '../bridge'
 import { confirm } from '../shared/confirm'
 import { block } from '../shared/block'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import EmptyState from '../shared/EmptyState.vue'
-import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
 import { nameTooLong, trimName } from '../shared/names'
 import { useLibrary } from '../library/store'
 import SearchBox from '../search/SearchBox.vue'
+import ThingCard from './ThingCard.vue'
 import { useThings } from './store'
 
 const router = useRouter()
@@ -67,6 +67,21 @@ async function act(fn: () => Promise<void>) {
   }
 }
 
+const pin = (tag: Tag) => void act(() => engine.setThingPinned(tag.id, !tag.pinned))
+
+/** Saves a Thing's new name; false (with the reason shown) if it was refused. */
+async function rename(id: number, name: string): Promise<boolean> {
+  error.value = ''
+  try {
+    await engine.renameThing(id, name)
+    await things.load()
+    return true
+  } catch (e) {
+    error.value = errorText(e)
+    return false
+  }
+}
+
 const blockTag = (tag: Tag) => void block(BlockKind.BlockTag, tag.id, tag.name)
 
 async function remove(tag: Tag) {
@@ -110,69 +125,32 @@ async function remove(tag: Tag) {
       <template v-if="mine.length">
         <h2>{{ t('things.yours') }}</h2>
         <div class="cards">
-          <div v-for="x in mine" :key="x.id" class="card">
-            <RouterLink :to="{ name: 'thing', params: { id: x.id } }" class="card-cover" :aria-label="x.name">
-              <img
-                v-if="x.cover && x.coverThumb"
-                :src="thumbUrl(x.cover, x.coverThumb)"
-                alt=""
-                loading="lazy"
-                decoding="async"
-                draggable="false"
-              />
-              <Icon v-else name="tag" :size="32" />
-            </RouterLink>
-            <div class="card-meta">
-              <span class="card-name">{{ x.name }}</span>
-              <span class="card-count">{{ x.count ? t('status.items', { n: x.count }) : t('things.noPhotos') }}</span>
-            </div>
-            <button
-              class="icon-btn card-act block-act"
-              :title="t('blocked.block')"
-              :aria-label="t('blocked.confirmTitle', { name: x.name })"
-              @click="blockTag(x)"
-            >
-              <Icon name="eye-off" :size="16" />
-            </button>
-            <button
-              class="icon-btn card-act"
-              :title="t('things.delete')"
-              :aria-label="t('things.deleteNamed', { name: x.name })"
-              @click="remove(x)"
-            >
-              <Icon name="trash" :size="16" />
-            </button>
-          </div>
+          <ThingCard
+            v-for="x in mine"
+            :key="x.id"
+            :tag="x"
+            icon="tag"
+            deletable
+            :rename="rename"
+            @pin="pin(x)"
+            @block="blockTag(x)"
+            @remove="remove(x)"
+          />
         </div>
       </template>
 
       <h2 v-if="mine.length && builtin.length">{{ t('nav.things') }}</h2>
       <div v-if="builtin.length" class="cards">
-        <div v-for="x in builtin" :key="x.id" class="card">
-          <RouterLink :to="{ name: 'thing', params: { id: x.id } }" class="card-cover" :aria-label="x.name">
-            <img
-              v-if="x.cover && x.coverThumb"
-              :src="thumbUrl(x.cover, x.coverThumb)"
-              alt=""
-              loading="lazy"
-              decoding="async"
-              draggable="false"
-            />
-            <Icon v-else name="things" :size="32" />
-          </RouterLink>
-          <div class="card-meta">
-            <span class="card-name">{{ x.name }}</span>
-            <span class="card-count">{{ t('status.items', { n: x.count }) }}</span>
-          </div>
-          <button
-            class="icon-btn card-act"
-            :title="t('blocked.block')"
-            :aria-label="t('blocked.confirmTitle', { name: x.name })"
-            @click="blockTag(x)"
-          >
-            <Icon name="eye-off" :size="16" />
-          </button>
-        </div>
+        <ThingCard
+          v-for="x in builtin"
+          :key="x.id"
+          :tag="x"
+          icon="things"
+          :deletable="false"
+          :rename="rename"
+          @pin="pin(x)"
+          @block="blockTag(x)"
+        />
       </div>
 
       <EmptyState
@@ -203,8 +181,5 @@ h2 {
 }
 .empty {
   margin-top: 36px;
-}
-.block-act {
-  right: 42px;
 }
 </style>
