@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -130,7 +132,14 @@ func TestClusterDataReadsCorrectionsFromItsFacesSnapshot(t *testing.T) {
 
 func TestReopenKeepsSchemaVersion(t *testing.T) {
 	names, _ := fs.Glob(migrationFS, "migrations/*.sql")
-	latest := len(names) // migrations are numbered 1..n
+	latest := 0 // the highest number: a number reserved for later work leaves a gap
+	for _, name := range names {
+		n, err := strconv.Atoi(strings.SplitN(filepath.Base(name), "_", 2)[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		latest = max(latest, n)
+	}
 	path := filepath.Join(t.TempDir(), "library.db")
 	for range 2 { // the second open must find nothing to migrate
 		st, err := Open(path)
