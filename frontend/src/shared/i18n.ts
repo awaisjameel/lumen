@@ -370,6 +370,11 @@ const en = {
   // Trash.
 
   // Thumbnail cache.
+  'settings.cache': 'Thumbnail cache',
+  'settings.cacheHint':
+    'Small previews Lumen keeps so browsing stays quick. Past the size below, the ones you haven’t looked at for longest are removed, and made again when you need them.',
+  'settings.cacheLimit': 'Keep at most (GB)',
+  'settings.cacheUsed': 'In use now: {size}',
 
   // Text in photos (OCR).
 

@@ -83,6 +83,7 @@ export const useLibrary = defineStore('library', () => {
   let confidenceSave: LatestSave<number> | null = null
   let videosSave: LatestSave<boolean> | null = null
   let batterySave: LatestSave<boolean> | null = null
+  let thumbCacheSave: LatestSave<number> | null = null
   const settingFailed = (e: unknown) => (settingsError.value = errorText(e))
 
   function saveVideos(on: boolean) {
@@ -114,6 +115,16 @@ export const useLibrary = defineStore('library', () => {
     settings.value.eventGapHours = hours
     settingsError.value = ''
     return eventGapSave(hours)
+  }
+
+  function saveThumbCacheMB(mb: number) {
+    thumbCacheSave ??= latestSave(engine.setThumbCacheMB, settings.value.thumbCacheMB, {
+      rollback: (value) => (settings.value.thumbCacheMB = value),
+      failed: settingFailed,
+    })
+    settings.value.thumbCacheMB = mb
+    settingsError.value = ''
+    return thumbCacheSave(mb)
   }
 
   function confidenceQueue() {
@@ -584,6 +595,7 @@ export const useLibrary = defineStore('library', () => {
     saveVideos,
     saveAIOnBattery,
     saveEventGap,
+    saveThumbCacheMB,
     intendTagConfidence,
     saveTagConfidence,
     progress,

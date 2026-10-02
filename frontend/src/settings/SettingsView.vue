@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, toRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
 import {
   BlockKind,
   Device,
@@ -9,12 +9,16 @@ import {
   EVENT_GAP_MIN,
   TAG_CONFIDENCE_MAX,
   TAG_CONFIDENCE_MIN,
+  THUMB_CACHE_DEFAULT_MB,
+  THUMB_CACHE_MAX_MB,
+  THUMB_CACHE_MIN_MB,
 } from '../bridge'
 import type { Source } from '../bridge'
 import { useLibrary } from '../library/store'
 import { block } from '../shared/block'
 import { confirm } from '../shared/confirm'
-import { errorText } from '../shared/errors'
+import { errorText, logError } from '../shared/errors'
+import { bytes } from '../shared/format'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { theme } from '../shared/theme'
@@ -76,6 +80,38 @@ function setEventGap(e: Event) {
   e.target.value = String(value)
   return lib.saveEventGap(value)
 }
+
+// The cap is shown in GB and kept in MB, which is what the engine holds it in.
+const MB_PER_GB = 1024
+const cacheCapGB = computed(() => Number((lib.settings.thumbCacheMB / MB_PER_GB).toFixed(2)))
+function setCacheCap(e: Event) {
+  if (!(e.target instanceof HTMLInputElement)) return
+  const parsed = e.target.valueAsNumber
+  const mb = Math.min(
+    THUMB_CACHE_MAX_MB,
+    Math.max(THUMB_CACHE_MIN_MB, Number.isFinite(parsed) ? Math.round(parsed * MB_PER_GB) : THUMB_CACHE_DEFAULT_MB),
+  )
+  e.target.value = String(Number((mb / MB_PER_GB).toFixed(2)))
+  return lib.saveThumbCacheMB(mb)
+}
+
+// How much the cache holds now. It grows while photos are indexed and shrinks
+// when the cap is passed, so it is read again while the page is open.
+const CACHE_SIZE_POLL_MS = 5000
+const cacheBytes = ref<number | null>(null)
+async function loadCacheSize() {
+  try {
+    cacheBytes.value = await engine.thumbCacheBytes()
+  } catch (e) {
+    logError(e)
+  }
+}
+let cacheTimer = 0
+onMounted(() => {
+  void loadCacheSize()
+  cacheTimer = window.setInterval(() => void loadCacheSize(), CACHE_SIZE_POLL_MS)
+})
+onBeforeUnmount(() => clearInterval(cacheTimer))
 
 const themes: Theme[] = ['system', 'light', 'dark']
 
@@ -187,6 +223,7 @@ onBeforeUnmount(saveConfidence)
               <small class="muted">{{ t('settings.aiOnBatteryHint') }}</small>
             </span>
           </label>
+          <!-- Lead: mount the OCR toggle component (unit u4) here. -->
           <details class="advanced">
             <summary>{{ t('settings.advanced') }}</summary>
             <label class="event-gap">
@@ -212,6 +249,26 @@ onBeforeUnmount(saveConfidence)
               </div>
             </div>
           </details>
+        </section>
+
+        <section>
+          <h2>{{ t('settings.cache') }}</h2>
+          <p class="muted hint">{{ t('settings.cacheHint') }}</p>
+          <label class="cache-cap">
+            {{ t('settings.cacheLimit') }}
+            <input
+              type="number"
+              :min="THUMB_CACHE_MIN_MB / MB_PER_GB"
+              :max="THUMB_CACHE_MAX_MB / MB_PER_GB"
+              step="0.25"
+              class="field"
+              :value="cacheCapGB"
+              @change="setCacheCap"
+            />
+          </label>
+          <p v-if="cacheBytes !== null" class="cache-used muted">
+            {{ t('settings.cacheUsed', { size: bytes(cacheBytes) }) }}
+          </p>
         </section>
 
         <section>
@@ -252,6 +309,22 @@ onBeforeUnmount(saveConfidence)
 
 .event-gap input {
   width: 80px;
+}
+
+.cache-cap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+
+.cache-cap input {
+  width: 80px;
+}
+
+.cache-used {
+  margin: 0;
 }
 
 .content {
