@@ -889,7 +889,7 @@ func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 	ix.mu.Lock()
 	p := core.Progress{
 		Scanning: ix.scanning, Paused: ix.paused,
-		OnBattery: (ix.search != nil || ix.people != nil) && ix.onBattery && !ix.aiOnBattery,
+		OnBattery: ix.onBattery && !ix.aiOnBattery, // narrowed below to the AI that is there
 		AI:        core.AI{Device: ix.aiDevice, Error: ix.aiError, FacesError: ix.facesError},
 	}
 	ix.mu.Unlock()
@@ -906,6 +906,7 @@ func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 		if on, err := ix.store.Bool(ctx, core.SettingOCR, false); err == nil && on {
 			p.OCR = pending[core.StageOCR]
 		}
+		p.OnBattery = p.OnBattery && (ix.search != nil || ix.people != nil || p.OCR > 0)
 	} else if ctx.Err() == nil {
 		slog.Error("count jobs", "err", err)
 	}

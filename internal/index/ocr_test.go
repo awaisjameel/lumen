@@ -346,3 +346,94 @@ func TestJoinLinesPutsOneLineOnEachRow(t *testing.T) {
 		t.Errorf("joinLines(nil) = %q", got)
 	}
 }
+
+// ocrIndexerLibrary is a store with the Screenshots Thing and photos named
+// by the test, each with metadata and thumbnail done.
+func ocrIndexerLibrary(t *testing.T, names ...string) (*store.Store, core.Paths, []store.JobItem, int64) {
+	t.Helper()
+	ctx := t.Context()
+	paths := core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.SyncVocabulary(ctx, []store.VocabLabel{{Name: "Screenshots", Prompts: []string{"a screenshot"}, Exclusive: true}}); err != nil {
+		t.Fatal(err)
+	}
+	shots, _, err := st.TagByName(ctx, "Screenshots")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var items []store.IngestItem
+	for i, name := range names {
+		items = append(items, store.IngestItem{SourceID: src.ID, Path: `C:\Photos\` + name + ".png", Size: 1, Hash: []byte(name), Kind: core.KindPhoto, Ext: ".png", TakenAt: int64(10 * (i + 1))})
+	}
+	if _, err := st.Ingest(ctx, items); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 10) // the newest first
+	if err != nil || len(jobs) != len(names) {
+		t.Fatalf("jobs = %v, %v", jobs, err)
+	}
+	for _, j := range jobs {
+		if err := st.SaveMetadata(ctx, "m", []store.MetadataResult{{AssetID: j.AssetID, Orientation: 1}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SaveThumbnails(ctx, "t", []store.ThumbResult{{AssetID: j.AssetID}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return st, paths, jobs, shots
+}
+
+func TestProgressSaysOCRWaitsForMainsPowerEvenWithoutOtherAI(t *testing.T) {
+	ctx := t.Context()
+	st, paths, jobs, shots := ocrIndexerLibrary(t, "a")
+	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	ix.onBattery = true
+	if p := ix.Progress(ctx); p.OnBattery {
+		t.Fatal("no AI is waiting, yet progress says it waits for mains power")
+	}
+	if err := st.TagAsset(ctx, jobs[0].AssetID, shots); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveEmbeddings(ctx, "m", "e", []store.EmbedResult{{AssetID: jobs[0].AssetID, Vec: []int8{1}, Scale: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetOCR(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if p := ix.Progress(ctx); !p.OnBattery || p.OCR != 1 {
+		t.Fatalf("progress with OCR waiting on battery = %+v, want OnBattery and one photo", p)
+	}
+}
+
+func TestFetchSkipsPhotosThatStoppedBeingScreenshotsAndFindsTheNext(t *testing.T) {
+	ctx := t.Context()
+	st, paths, jobs, shots := ocrIndexerLibrary(t, "old", "new")
+	newest, older := jobs[0].AssetID, jobs[1].AssetID
+	for _, id := range []int64{newest, older} {
+		if err := st.TagAsset(ctx, id, shots); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SaveEmbeddings(ctx, "m", "e", []store.EmbedResult{{AssetID: newest, Vec: []int8{1}, Scale: 1}, {AssetID: older, Vec: []int8{1}, Scale: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetOCR(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UntagAsset(ctx, newest, shots); err != nil { // the user says it is not one
+		t.Fatal(err)
+	}
+	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	got, err := ix.fetchOCR(ctx, 1)
+	if err != nil || len(got) != 1 || got[0].AssetID != older {
+		t.Fatalf("fetch = %+v, %v; want the older photo, after the rejected one was dropped", got, err)
+	}
+}

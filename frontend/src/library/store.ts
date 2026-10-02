@@ -84,6 +84,7 @@ export const useLibrary = defineStore('library', () => {
   let videosSave: LatestSave<boolean> | null = null
   let batterySave: LatestSave<boolean> | null = null
   let thumbCacheSave: LatestSave<number> | null = null
+  let ocrSave: LatestSave<boolean> | null = null
   const settingFailed = (e: unknown) => (settingsError.value = errorText(e))
 
   function saveVideos(on: boolean) {
@@ -104,6 +105,16 @@ export const useLibrary = defineStore('library', () => {
     settings.value.aiOnBattery = on
     settingsError.value = ''
     return batterySave(on)
+  }
+
+  function saveOCR(on: boolean) {
+    ocrSave ??= latestSave(engine.setOCR, settings.value.ocr, {
+      rollback: (value) => (settings.value.ocr = value),
+      failed: settingFailed,
+    })
+    settings.value.ocr = on
+    settingsError.value = ''
+    return ocrSave(on)
   }
 
   function saveEventGap(hours: number) {
@@ -594,6 +605,7 @@ export const useLibrary = defineStore('library', () => {
     settingsError,
     saveVideos,
     saveAIOnBattery,
+    saveOCR,
     saveEventGap,
     saveThumbCacheMB,
     intendTagConfidence,

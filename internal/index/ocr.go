@@ -79,7 +79,29 @@ func (ix *Indexer) fetchOCR(ctx context.Context, n int) ([]store.JobItem, error)
 	if err != nil || !on {
 		return nil, err
 	}
-	return ix.fetch(ctx, core.StageOCR, n)
+	for {
+		items, err := ix.fetch(ctx, core.StageOCR, n)
+		if err != nil || len(items) == 0 {
+			return nil, err
+		}
+		// A queued photo may have stopped being a screenshot or a document
+		// since: those jobs are dropped, and the next ones fetched.
+		if kept, err := ix.store.KeepEligibleOCR(ctx, items); err != nil || len(kept) > 0 {
+			return kept, err
+		}
+	}
+}
+
+// QueueOCR queues the photos that have just become screenshots or documents
+// (the user changed the tag confidence, or tagged a photo), and wakes the
+// stage. It does nothing while reading text is off.
+func (ix *Indexer) QueueOCR(ctx context.Context) error {
+	n, err := ix.store.QueueOCR(ctx)
+	if n > 0 {
+		nudge(ix.wakeOCR)
+		ix.stale.Store(true)
+	}
+	return err
 }
 
 // doOCR reads the text of a batch of photos.

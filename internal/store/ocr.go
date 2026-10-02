@@ -38,16 +38,22 @@ func ocrEligible(asset string) string {
 // SetOCR turns reading text on or off. Turning it on queues every eligible
 // photo that has no OCR job yet (a finished one stands, unless its version
 // is out of date, which RequeueVersions handles); turning it off removes the
-// jobs still to do. Text already read stays, and stays searchable.
-//
-// The setting and the queue change in two steps, so a failure between them
-// leaves the setting saved: the caller reports it, and the indexer tops the
-// queue up at the next start.
+// jobs still to do. Text already read stays, and stays searchable. The
+// setting and the queue change in one transaction, so a failure leaves
+// neither; the settings cache follows only once it has committed.
 func (s *Store) SetOCR(ctx context.Context, on bool) error {
-	if err := s.SetBool(ctx, core.SettingOCR, on); err != nil {
-		return err
+	value := "0"
+	if on {
+		value = "1"
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+			core.SettingOCR, value); err != nil {
+			return err
+		}
 		if !on {
 			_, err := tx.ExecContext(ctx, "DELETE FROM asset_jobs WHERE stage = ? AND status IN "+unfinished, core.StageOCR)
 			return err
@@ -55,6 +61,58 @@ func (s *Store) SetOCR(ctx context.Context, on bool) error {
 		_, err := enqueueOCR(ctx, tx, nil)
 		return err
 	})
+	if err == nil {
+		s.settings.Store(core.SettingOCR, value)
+	}
+	return err
+}
+
+// KeepEligibleOCR returns the fetched OCR jobs among items whose photos are
+// still worth reading, and removes the others: a photo re-embedded as nature,
+// whose Screenshots tag the user rejected, or that a raised tag confidence no
+// longer counts has nothing to read for. The job goes rather than ending
+// skipped, so the photo is queued again if it becomes eligible again.
+func (s *Store) KeepEligibleOCR(ctx context.Context, items []JobItem) ([]JobItem, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	ids := make([]int64, len(items))
+	for i, it := range items {
+		ids[i] = it.AssetID
+	}
+	list, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	dropped := map[int64]bool{}
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `DELETE FROM asset_jobs WHERE stage = ?1 AND status = 'pending'
+			AND asset_id IN (SELECT value FROM json_each(?2))
+			AND NOT EXISTS (SELECT 1 FROM assets a WHERE a.id = asset_jobs.asset_id AND `+ocrEligible("a")+`)
+			RETURNING asset_id`, core.StageOCR, string(list))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			dropped[id] = true
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	kept := make([]JobItem, 0, len(items))
+	for _, it := range items {
+		if !dropped[it.AssetID] {
+			kept = append(kept, it)
+		}
+	}
+	return kept, nil
 }
 
 // QueueOCR queues the eligible photos that have no OCR job while reading
@@ -189,14 +247,38 @@ func (s *Store) SaveOCR(ctx context.Context, version string, rs []OCRResult) err
 // being typed), newest first. Matching goes through visible, so text
 // of a trashed, hidden or blocked photo is never returned.
 func (s *Store) TextMatches(ctx context.Context, query string, limit int) ([]int64, error) {
+	return s.textMatches(ctx, query, limit, nil)
+}
+
+// TextMatchesAmong is TextMatches among the assets in among only (a named
+// person's photos): they are chosen before the limit, so an older photo of
+// them is not lost behind newer matches of other photos.
+func (s *Store) TextMatchesAmong(ctx context.Context, query string, limit int, among []int64) ([]int64, error) {
+	if len(among) == 0 {
+		return []int64{}, nil
+	}
+	return s.textMatches(ctx, query, limit, among)
+}
+
+func (s *Store) textMatches(ctx context.Context, query string, limit int, among []int64) ([]int64, error) {
 	match := textQuery(query)
 	if match == "" || limit <= 0 {
 		return []int64{}, nil
 	}
 	// The matching documents are looked up by id, rather than the assets
 	// walked for a match.
-	return queryAll(ctx, s.r, scanID, `SELECT a.id FROM (SELECT docid FROM ocr_fts WHERE ocr_fts MATCH ?) m
-		CROSS JOIN assets a ON a.id = m.docid WHERE `+visibleA+` ORDER BY a.taken_at DESC, a.id DESC LIMIT ?`, match, limit)
+	q := `SELECT a.id FROM (SELECT docid FROM ocr_fts WHERE ocr_fts MATCH ?) m
+		CROSS JOIN assets a ON a.id = m.docid WHERE ` + visibleA
+	args := []any{match}
+	if among != nil {
+		list, err := json.Marshal(among)
+		if err != nil {
+			return nil, err
+		}
+		q += " AND a.id IN (SELECT value FROM json_each(?))"
+		args = append(args, string(list))
+	}
+	return queryAll(ctx, s.r, scanID, q+" ORDER BY a.taken_at DESC, a.id DESC LIMIT ?", append(args, limit)...)
 }
 
 // textQuery is an FTS4 query for photos whose text holds every word of

@@ -368,7 +368,11 @@ func (s *LibraryService) SetAIOnBattery(ctx context.Context, on bool) error {
 // scores cover the whole range, so this takes effect at once.
 func (s *LibraryService) SetTagConfidence(ctx context.Context, v float64) error {
 	v = min(max(v, core.TagConfidenceMin), core.TagConfidenceMax)
-	return s.store.SetFloat(ctx, core.SettingTagConfidence, v)
+	if err := s.store.SetFloat(ctx, core.SettingTagConfidence, v); err != nil {
+		return err
+	}
+	// A lower confidence can make more photos screenshots or documents.
+	return s.ix.QueueOCR(ctx)
 }
 
 // SetVideos turns video indexing on or off, then rescans so the change applies.

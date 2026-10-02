@@ -673,3 +673,75 @@ func BenchmarkTextMatches(b *testing.B) {
 		})
 	}
 }
+
+func TestTurningOCROnFailsWholeWhenTheQueueCannotBeWritten(t *testing.T) {
+	l := newOCRLibrary(t)
+	st, ctx := l.st, t.Context()
+	shot := l.photo(t, "shot")
+	l.tag(t, shot, l.shots, 0.5)
+	check(t, errOf(st.w.ExecContext(ctx, `CREATE TRIGGER ocr_queue_fails BEFORE INSERT ON asset_jobs
+		WHEN NEW.stage = 'ocr' BEGIN SELECT RAISE(ABORT, 'disk full'); END`)))
+	if err := st.SetOCR(ctx, true); err == nil {
+		t.Fatal("SetOCR succeeded though the queue could not be written")
+	}
+	if on, err := st.Bool(ctx, core.SettingOCR, false); err != nil || on {
+		t.Fatalf("setting after a failed SetOCR = %v, %v; want it still off", on, err)
+	}
+	var stored int
+	check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM settings WHERE key = ?", core.SettingOCR).Scan(&stored))
+	if stored != 0 {
+		t.Fatal("the setting reached the database though the queue did not")
+	}
+}
+
+func TestQueuedPhotosThatAreNoLongerScreenshotsAreDroppedWhenFetched(t *testing.T) {
+	l := newOCRLibrary(t)
+	st, ctx := l.st, t.Context()
+	kept, reEmbedded, rejected, raised := l.photo(t, "kept"), l.photo(t, "nature-now"), l.photo(t, "rejected"), l.photo(t, "raised")
+	l.tag(t, kept, l.shots, 0.9)
+	l.tag(t, reEmbedded, l.shots, 0.9)
+	l.tag(t, rejected, l.docs, 0.9)
+	l.tag(t, raised, l.docs, 0.05)
+	check(t, st.SetOCR(ctx, true))
+	if len(ocrJobIDs(t, st)) != 4 {
+		t.Fatalf("fixture: %v", ocrJobs(t, st))
+	}
+	check(t, errOf(st.w.ExecContext(ctx, "DELETE FROM asset_tags WHERE asset_id = ?", reEmbedded)))
+	l.tag(t, reEmbedded, l.nature, 0.9)
+	check(t, errOf(st.w.ExecContext(ctx, "UPDATE asset_tags SET source = 'rejected' WHERE asset_id = ?", rejected)))
+	check(t, st.SetFloat(ctx, core.SettingTagConfidence, 0.2)) // above the raised photo's score of 0.05
+	jobs, err := st.PendingJobs(ctx, core.StageOCR, nil, 10)
+	check(t, err)
+	got, err := st.KeepEligibleOCR(ctx, jobs)
+	check(t, err)
+	if len(got) != 1 || got[0].AssetID != kept {
+		t.Fatalf("eligible jobs = %+v, want only the photo that is still a screenshot", got)
+	}
+	if ids := ocrJobIDs(t, st); !slices.Equal(ids, []int64{kept}) {
+		t.Fatalf("jobs left = %v, want only %d", ids, kept)
+	}
+	// A dropped photo is queued again when it becomes eligible again.
+	check(t, st.SetFloat(ctx, core.SettingTagConfidence, 0.01))
+	if n, err := st.QueueOCR(ctx); err != nil || n != 1 {
+		t.Fatalf("QueueOCR queued %d, %v; want the photo above the lowered confidence", n, err)
+	}
+}
+
+func TestTextMatchesAmongChoosesPhotosBeforeTheLimit(t *testing.T) {
+	l := newOCRLibrary(t)
+	st := l.st
+	var ids []int64
+	for _, name := range []string{"old1", "old2", "new1", "new2", "new3"} {
+		id := l.photo(t, name)
+		saveText(t, st, id, "boarding pass")
+		ids = append(ids, id)
+	}
+	got, err := st.TextMatchesAmong(t.Context(), "boarding", 2, ids[:2])
+	check(t, err)
+	if want := []int64{ids[1], ids[0]}; !slices.Equal(got, want) {
+		t.Fatalf("matches among the two oldest = %v, want %v (newer photos of others must not take the slots)", got, want)
+	}
+	if got, err := st.TextMatchesAmong(t.Context(), "boarding", 2, nil); err != nil || len(got) != 0 {
+		t.Fatalf("matches among nobody = %v, %v", got, err)
+	}
+}

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 
 	"lumen/internal/core"
@@ -19,13 +20,9 @@ var ErrNoAI = errors.New("the on-device AI isn't available")
 // suggestions is how many matches the search box suggests of each kind.
 const suggestions = 6
 
-// How many photos whose text matches a search it returns, and how many it
-// reads before keeping only a person's: the same cap as the semantic
-// results, so merging them keeps the total bounded.
-const (
-	textHitLimit = 1000
-	textScanMax  = 10 * textHitLimit
-)
+// How many photos whose text matches a search it returns: the same cap as
+// the semantic results, so merging them keeps the total bounded.
+const textHitLimit = 1000
 
 // semanticSearch is what Search needs of the search engine, which tests
 // replace with a fake.
@@ -236,7 +233,12 @@ func (s *SearchService) TagAsset(ctx context.Context, assetID int64, name string
 	if err != nil {
 		return err
 	}
-	return s.store.TagAsset(ctx, assetID, id)
+	if err := s.store.TagAsset(ctx, assetID, id); err != nil {
+		return err
+	}
+	// A photo the user calls a screenshot is one to read, if that is on.
+	_, err = s.store.QueueOCR(ctx)
+	return err
 }
 
 // UntagAsset takes a tag off a photo. The AI won't put it back.
@@ -251,20 +253,12 @@ func tagConfidence(ctx context.Context, st *store.Store) (float64, error) {
 }
 
 // textHits returns the photos whose text holds every word of query, newest
-// first, among theirs if it is not nil.
+// first, among theirs if it is not nil (chosen before the limit).
 func (s *SearchService) textHits(ctx context.Context, query string, theirs map[int64]bool) ([]int64, error) {
-	limit := textHitLimit
-	if theirs != nil {
-		limit = textScanMax // most of what is read may be somebody else's
+	if theirs == nil {
+		return s.store.TextMatches(ctx, query, textHitLimit)
 	}
-	ids, err := s.store.TextMatches(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
-	if theirs != nil {
-		ids = slices.DeleteFunc(ids, func(id int64) bool { return !theirs[id] })
-	}
-	return ids[:min(len(ids), textHitLimit)], nil
+	return s.store.TextMatchesAmong(ctx, query, textHitLimit, slices.Collect(maps.Keys(theirs)))
 }
 
 // mergeHits lists the photos found by their text, then those found by their

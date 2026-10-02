@@ -56,3 +56,23 @@ it('puts the box back and says why when the newest save fails', async () => {
   expect(lib.settings.ocr).toBe(false)
   expect(lib.settingsError).toContain('the models are missing')
 })
+
+it('keeps saves in order when Settings is closed and opened again', async () => {
+  const lib = useLibrary()
+  let finishFirst: () => void = () => {
+    throw new Error('the first save has not started')
+  }
+  vi.mocked(engine.setOCR)
+    .mockReturnValueOnce(new Promise<void>((resolve) => (finishFirst = resolve)))
+    .mockResolvedValueOnce(undefined)
+  const first = mount(OcrSetting)
+  await first.get('input').setValue(true)
+  first.unmount()
+  const next = mount(OcrSetting)
+  await next.get('input').setValue(false)
+  expect(engine.setOCR).toHaveBeenCalledExactlyOnceWith(true) // the newer click waits for the older save
+  finishFirst()
+  await flushPromises()
+  expect(engine.setOCR).toHaveBeenNthCalledWith(2, false)
+  expect(lib.settings.ocr).toBe(false)
+})

@@ -533,3 +533,68 @@ func TestTurningTextReadingOnAndOffThroughTheLibraryService(t *testing.T) {
 		t.Fatalf("SetOCR with a cancelled context: %v", err)
 	}
 }
+
+
+// screenshotLibrary is a text library whose photos are indexed except for
+// their text, with a Screenshots Thing.
+func screenshotLibrary(t *testing.T) (lib *textLibrary, screenshots int64) {
+	t.Helper()
+	l := newTextLibrary(t)
+	ctx := t.Context()
+	if err := l.st.SyncVocabulary(ctx, []store.VocabLabel{{Name: "Screenshots", Prompts: []string{"a screenshot"}, Exclusive: true}}); err != nil {
+		t.Fatal(err)
+	}
+	shots, _, err := l.st.TagByName(ctx, "Screenshots")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := sql.Open("sqlite3", l.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if _, err := w.ExecContext(ctx, "UPDATE asset_jobs SET status = 'done' WHERE stage IN ('metadata', 'thumbnail', 'embedding')"); err != nil {
+		t.Fatal(err)
+	}
+	return l, shots
+}
+
+func TestTaggingAPhotoAScreenshotQueuesItsTextWhileOCRIsOn(t *testing.T) {
+	l, _ := screenshotLibrary(t)
+	ctx := t.Context()
+	if err := l.st.SetOCR(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.svc.TagAsset(ctx, l.a, "Screenshots"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := l.svc.Search(ctx, "invoice")
+	if err != nil || r.Pending != 1 {
+		t.Fatalf("pending after tagging a screenshot = %d, %v; want its text queued", r.Pending, err)
+	}
+}
+
+func TestLoweringTheTagConfidenceQueuesPhotosThatBecomeScreenshots(t *testing.T) {
+	l, shots := screenshotLibrary(t)
+	ctx := t.Context()
+	if err := l.st.ReplaceAITags(ctx, []store.AssetTagSet{{AssetID: l.a, Tags: []store.TagScore{{TagID: shots, Score: 0.05}}}}); err != nil {
+		t.Fatal(err)
+	}
+	ix := index.New(l.st, core.PathsIn(t.TempDir()), nil, index.Models{}, &quietEvents{})
+	lib := NewLibraryService(l.st, ix)
+	if err := lib.SetTagConfidence(ctx, 0.2); err != nil {
+		t.Fatal(err)
+	}
+	if err := lib.SetOCR(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := l.st.CountPending(ctx, core.StageOCR); err != nil || n != 0 {
+		t.Fatalf("pending with the photo below the confidence = %d, %v", n, err)
+	}
+	if err := lib.SetTagConfidence(ctx, 0.01); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := l.st.CountPending(ctx, core.StageOCR); err != nil || n != 1 {
+		t.Fatalf("pending after lowering the confidence = %d, %v; want the photo queued", n, err)
+	}
+}

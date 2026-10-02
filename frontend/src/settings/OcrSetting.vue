@@ -1,27 +1,14 @@
 <script setup lang="ts">
-// The "Find text in screenshots and documents" toggle. Off by default.
-import { toRef } from 'vue'
-import { engine } from '../bridge'
+// The "Find text in screenshots and documents" toggle. Off by default. Its
+// saves are queued in the library store, so they stay in order across
+// remounts.
 import { useLibrary } from '../library/store'
-import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
-import { latestSave } from '../shared/latestSave'
 
 const lib = useLibrary()
-const error = toRef(lib, 'settingsError')
-
-// Clicks come faster than saves: one save at a time, the newest value last,
-// and only the newest failing puts the box back.
-const save = latestSave(engine.setOCR, lib.settings.ocr, {
-  rollback: (value) => (lib.settings.ocr = value),
-  failed: (e) => (error.value = errorText(e)),
-})
 
 function toggle(e: Event) {
-  if (!(e.target instanceof HTMLInputElement)) return
-  lib.settings.ocr = e.target.checked
-  error.value = ''
-  void save(e.target.checked)
+  if (e.target instanceof HTMLInputElement) void lib.saveOCR(e.target.checked)
 }
 </script>
 
