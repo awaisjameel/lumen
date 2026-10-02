@@ -425,6 +425,26 @@ const en = {
   // Blocked: covered photos.
 
   // Duplicates: best copy.
+  'duplicates.bestHint':
+    'Lumen suggests the copy to keep: the sharpest, most complete original. Choose another if you prefer. Nothing changes until you review and confirm.',
+  'duplicates.keep': 'Keep',
+  'duplicates.keepNamed': 'Keep “{name}”',
+  'duplicates.suggested': 'Suggested',
+  'duplicates.review': 'Review…',
+  'duplicates.reviewNamed': 'Review the copies of “{name}”',
+  'duplicates.reviewTitle': 'Review these copies',
+  'duplicates.reviewKeeps': 'Lumen keeps',
+  'duplicates.reviewTrash': {
+    one: 'This photo moves to Lumen’s Trash. Its file stays on your disk, and you can restore it from the Trash.',
+    other:
+      'These {n} photos move to Lumen’s Trash. Their files stay on your disk, and you can restore them from the Trash.',
+  },
+  'duplicates.reviewRecycle': {
+    one: 'This file moves to the Windows Recycle Bin. You can still restore it from there.',
+    other: 'These {n} files move to the Windows Recycle Bin. You can still restore them from there.',
+  },
+  'duplicates.reviewOkTrash': 'Move to Trash',
+  'duplicates.reviewOkRecycle': 'Move to Recycle Bin',
 
   // Organise on disk.
 

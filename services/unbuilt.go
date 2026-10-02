@@ -39,13 +39,6 @@ func (s *LibraryService) TrashCovered(ctx context.Context, ids []int64) error {
 	return unbuilt(ctx)
 }
 
-// DeleteCopies moves every file of the asset assetID except keep to the
-// Windows Recycle Bin: the extra files of exact copies. Phase 5 unit U9.
-func (s *LibraryService) DeleteCopies(ctx context.Context, assetID int64, keep string) (core.DiskDeletion, error) {
-	_, _ = assetID, keep
-	return core.DiskDeletion{}, unbuilt(ctx)
-}
-
 // PlanOrganise previews where template would move the files of the source
 // sourceID (0: every source), and saves the preview as a planned run.
 // Phase 5 unit U10.

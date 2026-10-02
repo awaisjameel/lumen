@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"math/bits"
 	"slices"
+	"time"
 
 	"lumen/internal/core"
 )
@@ -42,15 +43,16 @@ func (s *Store) DuplicateGroups(ctx context.Context) ([]core.DuplicateGroup, err
 
 func duplicateGroups(ctx context.Context, tx *sql.Tx) ([]core.DuplicateGroup, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT a.id, COALESCE(a.phash, 0), COALESCE(a.width, 0), COALESCE(a.height, 0),
-		a.thumb_version, a.taken_at,
+		a.thumb_version, a.taken_at, a.ext, a.camera IS NOT NULL, a.date_from = ?, a.lat IS NOT NULL AND a.lon IS NOT NULL, a.added_at,
 		a.kind = ? AND a.phash IS NOT NULL AND a.thumb_version > 0 AND a.width > 0 AND a.height > 0 AS hashed,
 		count(*) AS copies
 		FROM assets a JOIN files f ON f.asset_id = a.id
-		WHERE `+visibleA+` GROUP BY a.id HAVING copies > 1 OR hashed`, core.KindPhoto)
+		WHERE `+visibleA+` GROUP BY a.id HAVING copies > 1 OR hashed`, core.DateFromEXIF, core.KindPhoto)
 	candidates, err := collect(rows, err, func(r *sql.Rows) (c duplicateCandidate, err error) {
 		var hash int64 // SQLite integers are signed; the bits are what matter
-		err = r.Scan(&c.ID, &hash, &c.Width, &c.Height, &c.Thumb, &c.TakenAt, &c.hashed, &c.copies)
-		c.hash, c.Paths = uint64(hash), []string{}
+		err = r.Scan(&c.ID, &hash, &c.Width, &c.Height, &c.Thumb, &c.TakenAt, &c.Ext, &c.Camera, &c.ExifDate, &c.GPS, &c.AddedAt,
+			&c.hashed, &c.copies)
+		c.hash, c.Paths, c.Mtimes = uint64(hash), []string{}, []int64{}
 		return c, err
 	})
 	if err != nil {
@@ -60,10 +62,15 @@ func duplicateGroups(ctx context.Context, tx *sql.Tx) ([]core.DuplicateGroup, er
 	if err != nil {
 		return nil, err
 	}
-	return groups, duplicatePaths(ctx, tx, groups)
+	if err := duplicatePaths(ctx, tx, groups); err != nil {
+		return nil, err
+	}
+	markBest(groups) // after the paths: the rule reads each item's files
+	return groups, nil
 }
 
-// duplicatePaths fills in each grouped asset's file paths and file size.
+// duplicatePaths fills in each grouped asset's file paths, their modified
+// times (in Unix seconds, one per path) and file size.
 func duplicatePaths(ctx context.Context, tx *sql.Tx, groups []core.DuplicateGroup) error {
 	ids := []int64{}
 	for _, g := range groups {
@@ -78,21 +85,22 @@ func duplicatePaths(ctx context.Context, tx *sql.Tx, groups []core.DuplicateGrou
 	if err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT asset_id, path, size FROM files
+	rows, err := tx.QueryContext(ctx, `SELECT asset_id, path, size, mtime FROM files
 		WHERE asset_id IN (SELECT value FROM json_each(?)) ORDER BY asset_id, path`, string(list))
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	type copies struct {
-		paths []string
-		size  int64
+		paths  []string
+		mtimes []int64
+		size   int64
 	}
 	files := make(map[int64]*copies, len(ids))
 	for rows.Next() {
-		var id, size int64
+		var id, size, mtime int64
 		var path string
-		if err := rows.Scan(&id, &path, &size); err != nil {
+		if err := rows.Scan(&id, &path, &size, &mtime); err != nil {
 			return err
 		}
 		c := files[id]
@@ -101,6 +109,7 @@ func duplicatePaths(ctx context.Context, tx *sql.Tx, groups []core.DuplicateGrou
 			files[id] = c
 		}
 		c.paths = append(c.paths, path)
+		c.mtimes = append(c.mtimes, mtime/int64(time.Second)) // the column holds nanoseconds
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -109,7 +118,7 @@ func duplicatePaths(ctx context.Context, tx *sql.Tx, groups []core.DuplicateGrou
 		for i := range groups[g].Items {
 			it := &groups[g].Items[i]
 			if c := files[it.ID]; c != nil {
-				it.Paths, it.Size = c.paths, c.size
+				it.Paths, it.Mtimes, it.Size = c.paths, c.mtimes, c.size
 			}
 		}
 	}
