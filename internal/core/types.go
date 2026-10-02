@@ -237,8 +237,11 @@ const (
 )
 
 // FaceLookalikeMin is the cosine similarity at which a face counts as a
-// look-alike of a blocked face. Placeholder: U7 measures it on the face corpus.
-const FaceLookalikeMin = 0.5
+// look-alike of a blocked face. On the face corpus (about 27 people, 920 faces) it
+// covers 97.1% of the same person's other faces and 1.2% of other people's;
+// the highest value that still covers 95% is 0.43, and decision 7 leans to
+// hiding more. TestFaceLookalikeThresholdOnTheFaceCorpus asserts both rates.
+const FaceLookalikeMin = 0.4
 
 // BlockMode chooses whether only the label or also its covered media vanish.
 type BlockMode string

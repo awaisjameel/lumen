@@ -4,7 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { AlbumKind, BlockKind, DateSource, engine, Kind, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Block from '../shared/block'
-import type { AssetDetail, Changes } from '../bridge'
+import type { AssetDetail, Changes, Face } from '../bridge'
 import { emptyRule } from '../albums/store'
 import { block } from '../shared/block'
 import { useLibrary } from './store'
@@ -247,4 +247,49 @@ it('preserves the drive-root separator when blocking a root-level file folder', 
   await flushPromises()
   await wrapper.get('.path button').trigger('click')
   expect(block).toHaveBeenCalledWith(BlockKind.BlockFolder, 0, 'C:\\', false, 'C:\\')
+})
+
+const faceOf = (id: number, name: string): Face => ({
+  id,
+  assetId: 1,
+  thumb: 0,
+  assetW: 400,
+  assetH: 300,
+  video: false,
+  frame: 0,
+  x: 0.1,
+  y: 0.1,
+  w: 0.2,
+  h: 0.2,
+  person: name ? 5 : 0,
+  name,
+  byUser: false,
+})
+
+it('offers to block each face, named or not, and shows the faces left afterwards', async () => {
+  vi.mocked(engine.assetFaces)
+    .mockResolvedValueOnce([faceOf(11, 'Ali'), faceOf(12, '')])
+    .mockResolvedValueOnce([faceOf(12, '')])
+  vi.mocked(block).mockResolvedValueOnce(true)
+  wrapper = mount(DetailsPanel, { props: { sel: { day: 'results', id: 1 } } })
+  await flushPromises()
+  const buttons = wrapper.findAll('.block-face')
+  expect(buttons.map((b) => b.text())).toEqual(['Block this face…', 'Block this face…'])
+  await buttons[0]?.trigger('click')
+  await flushPromises()
+  expect(block).toHaveBeenCalledWith(BlockKind.BlockFace, 11, 'Ali')
+  expect(wrapper.findAll('.faces li')).toHaveLength(1) // the blocked face has left the list
+  await wrapper.get('.block-face').trigger('click')
+  expect(block).toHaveBeenLastCalledWith(BlockKind.BlockFace, 12, 'this face')
+})
+
+it('leaves the faces as they were when the face block is cancelled', async () => {
+  vi.mocked(engine.assetFaces).mockResolvedValue([faceOf(11, 'Ali')])
+  vi.mocked(block).mockResolvedValueOnce(false)
+  wrapper = mount(DetailsPanel, { props: { sel: { day: 'results', id: 1 } } })
+  await flushPromises()
+  const asked = vi.mocked(engine.assetFaces).mock.calls.length
+  await wrapper.get('.block-face').trigger('click')
+  await flushPromises()
+  expect(vi.mocked(engine.assetFaces).mock.calls).toHaveLength(asked)
 })

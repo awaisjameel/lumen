@@ -421,6 +421,13 @@ const en = {
   // Event blocks.
 
   // Face blocks.
+  'blocked.blockFace': 'Block this face…',
+  'blocked.thisFace': 'this face',
+  'blocked.faceScope': 'Which faces?',
+  'blocked.faceOnly': 'Only this face',
+  'blocked.faceLookalikes': 'This face and look-alikes',
+  'blocked.faceLookalikesHint':
+    'Look-alikes are other faces that look like this one, in your photos now and in photos you add later.',
 
   // Blocked: covered photos.
   'blocked.kindFace': 'Faces',

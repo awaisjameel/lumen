@@ -18,13 +18,6 @@ func unbuilt(ctx context.Context) error {
 	return errors.ErrUnsupported
 }
 
-// BlockFace blocks one face, and with lookalikes the faces like it too, in
-// existing and future photos. Phase 5 unit U7.
-func (s *LibraryService) BlockFace(ctx context.Context, faceID int64, mode core.BlockMode, lookalikes bool) (core.BlockChange, error) {
-	_, _, _ = faceID, mode, lookalikes
-	return core.BlockChange{}, unbuilt(ctx)
-}
-
 // PlanOrganise previews where template would move the files of the source
 // sourceID (0: every source), and saves the preview as a planned run.
 // Phase 5 unit U10.

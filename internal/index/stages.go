@@ -221,6 +221,9 @@ func (ix *Indexer) fetch(ctx context.Context, stage core.Stage, n int) ([]store.
 				return items, err
 			}
 		}
+		if items, err := ix.faceBlockJobs(ctx, n); err != nil || len(items) > 0 {
+			return items, err
+		}
 	}
 	ix.mu.Lock()
 	focus := ix.focus

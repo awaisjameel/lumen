@@ -247,6 +247,10 @@ async function blockPerson(face: Face) {
     await loadExtras(props.sel?.id)
 }
 
+async function blockFace(face: Face) {
+  if (await block(BlockKind.BlockFace, face.id, face.name || t('blocked.thisFace'))) await loadExtras(props.sel?.id)
+}
+
 async function blockPlace() {
   const id = detail.value?.placeId
   if (id && (await block(BlockKind.BlockPlace, id, placeName.value || t('details.location'))))
@@ -461,6 +465,7 @@ function showInFolder(id: number) {
               </button>
             </template>
             <PersonPicker v-else class="who" :placeholder="t('details.whoIsThis')" @pick="(n) => nameFace(f, n)" />
+            <button class="btn btn-subtle block-face" @click="blockFace(f)">{{ t('blocked.blockFace') }}</button>
           </li>
         </ul>
       </section>
@@ -661,8 +666,16 @@ p {
 
 .faces li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.block-face {
+  /* On a line of its own, under the name: past the 36px face and its gap. */
+  flex: 0 0 calc(100% - 46px);
+  margin-left: 46px;
+  justify-content: flex-start;
 }
 
 .who {

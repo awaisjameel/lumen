@@ -56,7 +56,9 @@ func (s *Store) WithFaces(ctx context.Context, ids []int64) (map[int64]bool, err
 // SaveFaces stores a batch of face results made by model and closes their
 // jobs at the stage's version. A photo seen again (by a newer model) keeps
 // who is in it: each new face takes over the old face at the same spot, with
-// its person and the user's corrections.
+// its person and the user's corrections. Face blocks follow in the same
+// transaction (see saveFaceBlocks), so a new photo of a blocked face is hidden
+// by the commit that saves it.
 func (s *Store) SaveFaces(ctx context.Context, model, version string, rs []FaceResult) error {
 	return s.SaveFaceVersions(ctx, model, StageVersion{Photo: version, Video: version}, rs)
 }
@@ -96,6 +98,7 @@ func (s *Store) SaveFaceVersions(ctx context.Context, model string, version Stag
 		}
 		defer job.Close()
 
+		var saved []savedFaces
 		for _, r := range rs {
 			if r.Err == "" && !r.Skipped && !r.Unchanged {
 				rows, err := old.QueryContext(ctx, r.AssetID)
@@ -107,17 +110,24 @@ func (s *Store) SaveFaceVersions(ctx context.Context, model string, version Stag
 					return err
 				}
 				took := matchFaces(before, r.Faces)
+				ids := make([]int64, len(r.Faces))
 				for i, f := range r.Faces {
 					var err error
 					if id := took[i]; id != 0 {
+						ids[i] = id
 						_, err = upd.ExecContext(ctx, f.Frame, f.X, f.Y, f.W, f.H, f.Score, f.Sharpness, f.Yaw, model, float32Bytes(f.Vec), id)
 					} else {
-						_, err = ins.ExecContext(ctx, r.AssetID, f.Frame, f.X, f.Y, f.W, f.H, f.Score, f.Sharpness, f.Yaw, model, float32Bytes(f.Vec))
+						var res sql.Result
+						res, err = ins.ExecContext(ctx, r.AssetID, f.Frame, f.X, f.Y, f.W, f.H, f.Score, f.Sharpness, f.Yaw, model, float32Bytes(f.Vec))
+						if err == nil {
+							ids[i], err = res.LastInsertId()
+						}
 					}
 					if err != nil {
 						return err
 					}
 				}
+				saved = append(saved, savedFaces{asset: r.AssetID, faces: r.Faces, ids: ids})
 				for _, b := range before {
 					if !slices.Contains(took, b.id) {
 						if _, err := del.ExecContext(ctx, b.id); err != nil {
@@ -129,6 +139,9 @@ func (s *Store) SaveFaceVersions(ctx context.Context, model string, version Stag
 			if err := execJob(ctx, job, r.AssetID, core.StageFaces, version.Photo, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
+		}
+		if err := saveFaceBlocks(ctx, tx, model, saved); err != nil {
+			return err
 		}
 		return dropEmptyPeople(ctx, tx)
 	})
