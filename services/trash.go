@@ -152,8 +152,8 @@ func (s *LibraryService) recycleFiles(ctx context.Context, files []store.Trashed
 	return result, nil
 }
 
-// viewsChanged tells every view: the Trash changes which assets, Things and
-// people are shown.
+// viewsChanged tells every view: a block or the Trash changes which assets,
+// Things and people are shown.
 func (s *LibraryService) viewsChanged() {
 	if s.ix != nil {
 		s.ix.LibraryChanged(core.Changes{Assets: true, Tags: true, People: true})

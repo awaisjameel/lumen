@@ -181,7 +181,7 @@ func (s *LibraryService) SetBlock(ctx context.Context, kind core.BlockKind, targ
 		} else if id == s.blocked.lastID {
 			s.blocked.lastID = 0
 		}
-		s.blocksChanged()
+		s.viewsChanged()
 	}
 	return core.BlockChange{ID: id, Created: created}, err
 }
@@ -197,7 +197,7 @@ func (s *LibraryService) UndoBlock(ctx context.Context, id int64) error {
 		return err
 	}
 	s.blocked.lastID = 0
-	s.blocksChanged()
+	s.viewsChanged()
 	return nil
 }
 
@@ -211,14 +211,6 @@ func (s *LibraryService) RemoveBlock(ctx context.Context, id int64) error {
 	if err := s.store.RemoveBlock(ctx, id); err != nil {
 		return err
 	}
-	s.blocksChanged()
+	s.viewsChanged()
 	return nil
-}
-
-// blocksChanged tells every view: a block changes which assets, Things and
-// people are shown.
-func (s *LibraryService) blocksChanged() {
-	if s.ix != nil {
-		s.ix.LibraryChanged(core.Changes{Assets: true, Tags: true, People: true})
-	}
 }
