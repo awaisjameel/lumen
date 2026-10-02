@@ -10,6 +10,7 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 - Scanner: parallel content hashing (xxh3-128), date guess from file names, skip hidden/system folders
 - Recursive folder watching (`ReadDirectoryChangesW`) with debounced rescans, plus a reconcile scan on startup
 - Durable job queue in SQLite (`asset_jobs`): metadata, thumbnails, then the AI, newest first, **on-screen days first**; resumes after a crash; changing a stage's version re-runs only that stage
+- The sidebar status says what indexing is doing; hovering it lists what is at work now and what comes next, and which files couldn't be read and why (damaged, too slow to read, locked by another app)
 - EXIF (date, size, orientation, camera, GPS) via imagemeta, with goexif as a fallback for JPEG/TIFF
 - Thumbnails (256 and 1024 px) plus a 64-bit perceptual hash, served at `/media/thumb/{id}/{size}`
 - Virtualized, day-grouped grid with a timeline scrubber, keyboard navigation, zoom
@@ -39,18 +40,24 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 - Indexing makes a poster and a 4×4 hover preview sprite. SigLIP 2 and face recognition share one streaming frame-sampling pass (about one per five seconds, at most 24), with independent photo/video versions and stage retries. Search results jump to the best matching moment.
 - The viewer plays supported files directly and converts other codecs to H.264/AAC while playing. Seeking a converted video starts a new stream at that point; converted copies are not kept on disk. Video streams from a small server on 127.0.0.1 (a random secret in every path), because the app's own origin hands WebView2 a response only once it is complete.
 
-**Phase 5 (organization) is underway:**
+**Phase 5 (organization) is working:**
 
-- Manual albums collect photos and videos without moving files. Membership follows an asset when its file is renamed or moved; the Details panel lets you add or remove the selected item.
-- Smart albums save a rule for media kind, favourites, inclusive capture dates, a Thing, and a person. They update from current library metadata and tags. Albums have live counts, covers, rename/edit, and deletion.
-- Duplicates review virtualizes exact file copies and likely similar photos using the existing perceptual hashes. It only suggests matches and opens their folder; files are never changed automatically.
-- Places groups GPS-tagged media by nearby city using a bundled, offline GeoNames index. Existing libraries are resolved in the background after an upgrade. Places show live visible counts and open filtered timelines.
-- Events groups visible media after a configurable time gap (12 hours by default) or a location jump over 100 km. Events open filtered timelines and regroup as the library changes. Renames follow current members through later splits or removal of the oldest member; reset restores automatic names for the current group.
-- Blocking has started: people, Things, places, albums, photos/videos and folders can be blocked. Labels can be hidden alone or with their covered photos; photos and folders always hide media. The shared visibility rule feeds grids, search, counts, covers and media URLs. Settings has a PIN-protected Blocked list with mode changes and unblocking; a new block offers brief Undo. Earlier hidden people and user-hidden Things become photo blocks on upgrade; the internal sink Thing does not.
+- **Albums**: manual albums collect photos and videos without moving files. Membership follows an asset when its file is renamed or moved; the Details panel adds or removes the selected item. Smart albums save a rule for media kind, favourites, inclusive capture dates, a Thing and a person, and update as the library changes. Albums have live counts, covers, rename/edit and deletion.
+- **Places** groups GPS-tagged media by nearby city using a bundled, offline GeoNames index. Existing libraries are resolved in the background after an upgrade. Places show live visible counts and open filtered timelines.
+- **Events** groups visible media after a configurable time gap (12 hours by default) or a location jump over 100 km, and regroups as the library changes. What the user says about an event (its name, a pin, a block) follows its photos: a split keeps it on both halves, and photos that join take it on. Reset restores the automatic name.
+- **Pins and renames**: Things and Events can be pinned (pinned first, newest pin first, kept across restarts). Things can be renamed; a renamed built-in keeps its AI prompts and matches and goes by the new name everywhere, search included, and "Reset name" restores the original.
+- **Blocking** covers people, single faces (optionally with their look-alikes), Things, places, events, albums, photos/videos and folders. A label can be hidden alone or with the photos it covers; photos and folders always hide media. One visibility rule feeds grids, search, counts, covers, media URLs and the video server. Search reports exact blocked person, Thing, place and album names, with whole-word Unicode matching and longer-name precedence.
+- **Settings → Blocked** is PIN-protected: attempts are rate-limited, and it locks after 10 idle minutes or when the user leaves it. It lists every block with mode changes and unblocking (a new block offers a brief Undo), and opens each block's covered photos in the Viewer. A forgotten PIN is reset through Windows sign-in: Windows Hello when it is set up, otherwise the account password. Hidden people and user-hidden Things from earlier versions became photo blocks on upgrade.
+- **Trash**: "Move to Trash" in the Viewer and Details panel needs no confirmation and offers Undo. Trash restores items, or deletes them from disk to the Windows Recycle Bin after a confirmation; nothing is ever emptied automatically. A recycled file's asset keeps its names, tags and albums in case the file comes back.
+- **Duplicates** lists exact copies and likely similar photos (from the perceptual hashes) and pre-selects the best copy: highest resolution, then the original camera file and format, file size, metadata, and age. Nothing happens until the user confirms: similar photos go to Trash, and extra files of exact copies go to the Recycle Bin.
+- **Text in images** (off by default): Lumen reads the text in photos the AI sorts as screenshots or documents (PP-OCRv5, English, on the CPU) into SQLite full-text search. Photos whose text has every word of a query come first in search, then the semantic results.
+- **Organise on disk** (Settings → Organise files on disk) moves files into a folder scheme built from a template (`{Year} {Month} {MonthName} {Day} {Event} {Place} {Camera} {Name} {Ext}`, default `{Year}/{Month}/{Event}/{Name}`), each file within its own source folder. A preview lists every move, skip and renamed collision first. Nothing is ever overwritten: a name collision gets ` (2)`, ` (3)`… Each move is journalled, so a run survives a crash and can be resumed or undone, and scans wait while files move. Blocked, trashed and missing files are left alone, and blocked names never become folder names.
+- **XMP sidecars** (off by default): a background pass writes `IMG_1.jpg.xmp` beside each photo with its Things, its named people and their face regions, and a 5-star rating for favourites. Lumen rewrites only sidecars it wrote and never touches an original. Blocked labels, and blocked, hidden or trashed photos, are never exported.
+- **Thumbnail cache cap**: thumbnails and video previews stay under a cap (2 GB by default, set in Settings). The least recently viewed are removed first, and a removed thumbnail is rebuilt the next time it is shown.
 
-Search reports exact blocked person, Thing, place and album names, with whole-word Unicode matching and longer-name precedence.
+Design and decisions for the last part of Phase 5 are in [docs/phase5-design-2026-10-01.md](docs/phase5-design-2026-10-01.md); the original blocking scope is in [the blocking note](docs/blocking-phase5-2026-09-30.md).
 
-Still to finish in Phase 5: face and event blocks, browsing covered photos from Blocked, forgotten-PIN recovery through Windows sign-in, renaming and pinning Things and pinning Events, then organise-on-disk with dry run and undo and XMP sidecar export. Trash, with the Duplicates review pre-selecting the best copy for it (never deleting without confirmation), the 2 GB cache cap and OCR also remain future work. Pausing indexing for full-screen apps, and an "index only when idle" setting, are deferred to Phase 6's performance pass; indexing pauses on battery and by hand today, and always runs below normal priority on at most half the CPU. See [the blocking implementation note](docs/blocking-phase5-2026-09-30.md) for current coverage and acceptance limits.
+**Phase 6 (polish and ship v1) is next:** the installer (see `task package` below), onboarding and empty states, crash logs kept locally, a performance pass against the plan's targets on low-end hardware, then a beta with real users' libraries. Pausing indexing for full-screen apps, and an "index only when idle" setting, are part of the performance pass. Today indexing pauses by hand, and the AI stages pause on battery (a setting allows them). Indexing always runs below normal priority on the share of the CPU set in Settings.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
@@ -68,7 +75,7 @@ Then, once, from Git Bash:
 scripts/deps.sh   # ~1.2 GB of downloads, pinned and checked, into deps/ (git-ignored)
 ```
 
-It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2, the YuNet and SFace face models and the linters (into `deps/tools/`), then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8, which takes it from 565 to 369 MB while agreeing with the original at cosine ≥ 0.9996, and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`. Nothing is ever downloaded at run time.
+It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2, the YuNet and SFace face models, the PP-OCRv5 text detector and English recogniser, and the linters (into `deps/tools/`), then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8, which takes it from 565 to 369 MB while agreeing with the original at cosine ≥ 0.9996, and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`. Nothing is ever downloaded at run time.
 
 Check with `wails3 doctor`.
 
@@ -95,7 +102,7 @@ Editors do the same on save: `.editorconfig` sets line endings and indentation, 
 wails3 dev                    # run with hot reload
 wails3 build                  # production build -> bin/Lumen.exe
 source scripts/env.sh         # before go test / vet / run: puts deps/runtime (libvips) on PATH
-go test -race ./internal/... ./services/... # engine and HTTP service tests (AI tests use deps/runtime)
+go test -race -timeout 900s . ./internal/... ./services/... # wiring, engine and service tests (AI tests use deps/runtime)
 scripts/lint.sh               # every formatter, linter and type check (--fix applies fixes first)
 cd frontend && npm run check  # the frontend's alone: vue-tsc, ESLint, Prettier (lint:fix and format fix)
 npm run test                 # Vitest: async store, viewer and settings regressions
@@ -103,7 +110,7 @@ npm run test                 # Vitest: async store, viewer and settings regressi
 
 Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates, which only build for their own platforms.
 
-`task package` (the Wails template's NSIS installer) is not usable yet: the installer does not carry `deps/runtime`. The installer is Phase 6. The template's Docker and server tasks are left out of `Taskfile.yml`: Lumen needs cgo with the Windows libvips.
+`task package` (the Wails template's NSIS installer) is not usable yet: the installer does not carry `deps/runtime`. The installer is the first part of Phase 6. The template's Docker and server tasks are left out of `Taskfile.yml`: Lumen needs cgo with the Windows libvips.
 
 Before moving between implementation phases, also regenerate the bindings with
 `wails3 generate bindings -f '-tags production' -clean=true -ts -i` (as the build does), check `git diff -- frontend/bindings`, and run
@@ -135,17 +142,22 @@ internal/ai          ONNX Runtime sessions, SigLIP 2 image/text encoders, tokeni
 internal/search      in-memory int8 vector index, search, Things vocabulary and tagging
 internal/people      face clustering (incremental, constrained by the user's corrections), names in searches
 internal/places      offline reverse geocoding: the bundled GeoNames cities (cities.tsv.gz)
-internal/index       background pipeline: scan loop, stage workers, model loading, battery, events
+internal/index       background pipeline: scan loop, stage workers (OCR, XMP export, cache eviction too), model loading, CPU budget, battery, events
+internal/fileops     every change to files in the user's folders: Recycle Bin, organise plans and journalled moves, sidecars
+internal/signin      Windows sign-in check for a forgotten PIN (Windows Hello, or the account password)
+internal/xmp         the XMP sidecar packet (pure Go)
 internal/parallel    the worker pool loops run on
 internal/testenv     finds deps/runtime for tests, skipping cleanly without it
-services/            Wails services (Library, Search, People, Media), the loopback video server, error codes
+services/            Wails services (Library, Search, People, Media), the block gate, the loopback video server, error codes
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/{library,search,things,people,onboarding,settings,shared}   UI by feature
 frontend/src/albums  manual and smart album browser and rule editor
 frontend/src/{places,events}   GPS places and automatic event groups
-frontend/src/duplicates  exact-copy and similar-photo review (read-only)
+frontend/src/duplicates  exact-copy and similar-photo review, best copy pre-selected
+frontend/src/trash   Trash actions and Undo
+frontend/src/organise  the organise-on-disk template, preview, progress and undo
 scripts/             deps.sh (native dependencies), prepare_models.py, env.sh, lint.sh, build_places.py
-docs/                audits (dated records), the blocking note, GeoNames provenance
+docs/                audits (dated records), the blocking note, the Phase 5 design, GeoNames provenance
 spikes/              Phase 0 experiments (own Go module; models in spikes/.cache)
 ```
 
@@ -164,7 +176,7 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **Search is an in-memory int8 scan**, not sqlite-vec: SQLite stores the vectors, a flat int8 copy in memory is searched (Phase 0: 17 ms at 300k vs 351 ms). No vector extension is loaded.
 - **Search results are ordered by relevance**, not by date: SigLIP's probabilities vary too much between queries for a fixed cut-off to work, and a relevance order keeps weak matches at the end.
 - **libvips is the static "web" build** (one 18 MB DLL, no ImageMagick), called through Lumen's own small cgo wrapper (`internal/media/vips`, one C function per job) rather than govips: BMP goes through Go, HEIC through WIC or FFmpeg (libvips reads its colour profile).
-- **Events are grouped when read**, not stored in an `events` table: consecutive visible media split by the time gap or a 100 km jump, cached until something they depend on changes. User names live in `event_names`, keyed by the event's member assets.
+- **Events are grouped when read**, not stored in an `events` table: consecutive visible media split by the time gap or a 100 km jump, cached until something they depend on changes. What the user sets on an event (name, pin, block) is an event tag whose members are the event's photos, kept equal to the event as it regroups (`store/eventtags.go`).
 - **Large files are hash-sampled**: files over 64 MB (mostly videos) hash size plus three 4 MB windows instead of every byte.
 - **Folder watching** uses `ReadDirectoryChangesW` directly (fsnotify has no recursive watch on Windows yet).
 - **One writer connection** instead of a writer goroutine: SQLite writes serialise on it, and callers batch hundreds of rows per transaction.
@@ -176,4 +188,6 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **Videos stream from a loopback server**, not the app's asset handler: on Windows, Wails buffers each response until it is complete, which would hold a whole conversion in memory before playback started.
 - **Names and paths compare with Unicode case folding** (`core.Fold`, also the SQL function `fold()`), not SQLite's `NOCASE`, which folds only A–Z: "Émile" and "émile" are one person, as Windows treats "ÉTÉ" and "été" as one folder.
 - **AI models ship beside `Lumen.exe`** (`models\` in the runtime folder), read-only from the installer, rather than in the per-user app-data folder; the database and thumbnail cache are in `%LOCALAPPDATA%\Lumen`.
+- **Text in images is in v1**, not "Later", and only for photos the AI sorts as screenshots or documents. It is searched with SQLite FTS4, which go-sqlite3 includes by default; FTS5 would need a build tag on every build and test.
+- **Removing files goes to the Windows Recycle Bin**, never a permanent delete, and only after the user confirms. Duplicates pre-select the best copy (the plan's "quality/best-shot picking" for copies), but nothing moves until the user confirms.
 - **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). Trim it when packaging the installer (Phase 6), after the video decoder and encoder set is finalized.
