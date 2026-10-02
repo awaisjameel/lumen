@@ -80,6 +80,7 @@ export type {
   Source,
   Tag,
   View,
+  XMPExport,
 }
 
 // Go sends an empty list as null; the generated types say so. These are the

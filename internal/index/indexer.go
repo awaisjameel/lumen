@@ -83,6 +83,7 @@ type Indexer struct {
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
 	ocr     *model[textReader]       // PP-OCRv5's detector and recogniser, while their stage has work
 	pixels  decoded                  // photos the thumbnail stage decoded for the faces stage
+	xmp     xmpState                 // the XMP sidecar pass's lock and wake-up
 
 	videoEmbedRetry stageBackoff // used only by the video coordinator
 	videoFaceRetry  stageBackoff
@@ -375,6 +376,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	ix.run(func() { ix.reportLoop(ctx) })
 	ix.run(func() { ix.powerLoop(ctx) })
 	ix.run(func() { ix.thumbCacheLoop(ctx) })
+	ix.run(func() { ix.xmpLoop(ctx) })
 	ix.run(func() { ix.fsLoop(ctx, ix.flushFSChanges) })
 }
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
 import OcrSetting from './OcrSetting.vue'
+import XmpSetting from './XmpSetting.vue'
 import {
   BlockKind,
   Device,
@@ -250,6 +251,11 @@ onBeforeUnmount(saveConfidence)
               </div>
             </div>
           </details>
+        </section>
+
+        <section>
+          <h2>{{ t('settings.xmpTitle') }}</h2>
+          <XmpSetting />
         </section>
 
         <section>
