@@ -156,7 +156,7 @@ func (ix *Indexer) processVideos(ctx context.Context, items []store.JobItem, sam
 		defer done()
 	}
 	var rs videoResults
-	batch := &modelBatch{enc: enc}
+	batch := &modelBatch{enc: enc, cpu: ix.encoderSlots(enc)}
 	var videos []*videoEmbedding
 	generation := uint64(0)
 	if enc != nil {
@@ -178,7 +178,14 @@ func (ix *Indexer) processVideos(ctx context.Context, items []store.JobItem, sam
 		if v == nil && r == nil {
 			continue
 		}
-		faceErr = ix.analyseVideo(ctx, j, sample, batch, v, faces, r, faceErr)
+		// FFmpeg decodes the frames; the models run in between, on the
+		// slots already taken (see cpuBudget).
+		vctx, release, err := ix.cpu.acquire(ctx, media.DecodeThreads)
+		if err != nil {
+			return nil, err
+		}
+		faceErr = ix.analyseVideo(vctx, j, sample, batch, v, faces, r, faceErr)
+		release()
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

@@ -401,6 +401,26 @@ func TestThumbCacheCapSettingIsStoredClampedAndReachesTheCache(t *testing.T) {
 	check(t, NewLibraryService(l.st, nil, nil).SetThumbCacheMB(ctx, 512))
 }
 
+func TestCPUThreadsSettingShowsTheMachineAndIsStoredClamped(t *testing.T) {
+	ctx := t.Context()
+	l := newShownLibrary(t, 1)
+	ix := index.New(l.st, core.PathsIn(t.TempDir()), l.cache, index.Models{}, quietEvents{})
+	s := NewLibraryService(l.st, ix, nil)
+	got, err := s.Settings(ctx)
+	if err != nil || got.CPUThreads != core.DefaultCPUThreads() || got.DefaultCPUThreads != core.DefaultCPUThreads() ||
+		got.MaxCPUThreads != core.MaxCPUThreads() {
+		t.Fatalf("settings = %+v (%v), want the default of the machine's threads", got, err)
+	}
+	for _, tc := range []struct{ set, want int }{{1, 1}, {0, 1}, {1 << 20, core.MaxCPUThreads()}} {
+		check(t, s.SetCPUThreads(ctx, tc.set))
+		if got, err := s.Settings(ctx); err != nil || got.CPUThreads != tc.want {
+			t.Errorf("set %d: settings show %d (%v), want %d", tc.set, got.CPUThreads, err, tc.want)
+		}
+	}
+	// Without an indexer (as in these tests) the setting is still stored.
+	check(t, NewLibraryService(l.st, nil, nil).SetCPUThreads(ctx, 2))
+}
+
 func TestThumbCacheBytesIsTheCachesRunningTotal(t *testing.T) {
 	l := newShownLibrary(t, 2)
 	want := int64(2 * (len("small thumbnail") + len("large thumbnail") + len("sprite")))

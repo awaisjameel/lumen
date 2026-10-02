@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -122,6 +123,44 @@ func TestVideoFrameTimesAreRelativeToPlaybackStart(t *testing.T) {
 			}
 			if len(frames) != 3 || frames[0].At != 0 || frames[1].At != 2000 || frames[2].At != 4000 {
 				t.Fatalf("offset video frame times: %v", frameTimes(frames))
+			}
+		})
+	}
+}
+
+func TestLongVideosAreSampledBySeekingToEachPoint(t *testing.T) {
+	ffmpeg := testenv.File(t, "ffmpeg", "ffmpeg.exe")
+	ffprobe := testenv.File(t, "ffmpeg", "ffprobe.exe")
+	d := Decoders{FFmpeg: ffmpeg, FFprobe: ffprobe}
+	for _, tc := range []struct {
+		name      string
+		seconds   string
+		keyframes string // frames between keyframes, at 5 a second
+		format    string
+		want      []int64
+	}{
+		// Three points 66.7 s apart: seeking in an indexed file takes the
+		// keyframe at or before each (a pass over the keyframes would take
+		// 70 s and 140 s).
+		{"keyframes every 10 s", "200", "50", "matroska", []int64{0, 60_000, 130_000}},
+		// Every seek finds the one keyframe: the rest are decoded in full.
+		// MPEG-TS starts its clock at 1.4 s, which the times leave out.
+		{"one keyframe", "100", "600", "mpegts", []int64{0, 33_400, 66_800}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "long")
+			cmd := exec.CommandContext(t.Context(), ffmpeg, "-v", "error", "-f", "lavfi", "-i",
+				"testsrc2=size=64x48:rate=5", "-t", tc.seconds, "-c:v", "mpeg4", "-g", tc.keyframes, "-f", tc.format, path)
+			hideWindow(cmd)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("make long sample: %v: %s", err, out)
+			}
+			var frames []Frame
+			if err := d.Frames(t.Context(), path, 3, 64, func(f Frame) error { frames = append(frames, f); return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if got := frameTimes(frames); !slices.Equal(got, tc.want) {
+				t.Fatalf("frame times %v, want %v", got, tc.want)
 			}
 		})
 	}

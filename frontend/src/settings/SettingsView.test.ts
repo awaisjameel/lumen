@@ -15,6 +15,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     setAIOnBattery: vi.fn<() => Promise<void>>(),
     setEventGapHours: vi.fn<(hours: number) => Promise<void>>(),
     setThumbCacheMB: vi.fn<(mb: number) => Promise<void>>(),
+    setCPUThreads: vi.fn<(n: number) => Promise<void>>(),
     thumbCacheBytes: vi.fn<() => Promise<number>>(),
   },
 }))
@@ -26,6 +27,7 @@ beforeEach(() => {
   vi.mocked(engine.setVideos).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setAIOnBattery).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setThumbCacheMB).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setCPUThreads).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.thumbCacheBytes).mockReset().mockResolvedValue(0)
 })
 afterEach(() => vi.useRealTimers())
@@ -373,6 +375,53 @@ it('saves the newest cache cap after an older one, and ignores the older failure
   expect(engine.setThumbCacheMB).toHaveBeenNthCalledWith(2, 5120)
   expect(lib.settings.thumbCacheMB).toBe(5120)
   expect(wrapper.text()).not.toContain('older cap failed')
+  wrapper.unmount()
+})
+
+// The library store as the engine's settings leave it on a 20-thread machine.
+function threadsLibrary() {
+  setActivePinia(createPinia())
+  const lib = useLibrary()
+  Object.assign(lib.settings, { cpuThreads: 10, maxCPUThreads: 20, defaultCPUThreads: 10 })
+  return lib
+}
+
+it('shows no thread setting until the machine’s threads are known', () => {
+  setActivePinia(createPinia())
+  const wrapper = mount(SettingsView)
+  expect(wrapper.find('#cpu-threads').exists()).toBe(false)
+  wrapper.unmount()
+})
+
+it('shows the indexing threads out of the machine’s, following the slider, and saves them when let go', async () => {
+  const lib = threadsLibrary()
+  const wrapper = mount(SettingsView)
+  const slider = wrapper.get<HTMLInputElement>('#cpu-threads')
+  expect(slider.attributes('max')).toBe('20')
+  expect(wrapper.text()).toContain(t('settings.threads', { n: 10, max: 20 }))
+  expect(wrapper.text()).toContain(t('settings.threadsHint', { n: 10 }))
+  slider.element.value = '16'
+  await slider.trigger('input')
+  expect(wrapper.text()).toContain(t('settings.threads', { n: 16, max: 20 }))
+  expect(engine.setCPUThreads).not.toHaveBeenCalled()
+  await slider.trigger('change')
+  await flushPromises()
+  expect(engine.setCPUThreads).toHaveBeenCalledExactlyOnceWith(16)
+  expect(lib.settings.cpuThreads).toBe(16)
+  wrapper.unmount()
+})
+
+it('puts the indexing threads back and says why when the engine refuses them', async () => {
+  const lib = threadsLibrary()
+  vi.mocked(engine.setCPUThreads).mockRejectedValueOnce(new Error('settings are locked'))
+  const wrapper = mount(SettingsView)
+  const slider = wrapper.get<HTMLInputElement>('#cpu-threads')
+  slider.element.value = '4'
+  await slider.trigger('change')
+  await flushPromises()
+  expect(lib.settings.cpuThreads).toBe(10)
+  expect(wrapper.text()).toContain(t('settings.threads', { n: 10, max: 20 }))
+  expect(wrapper.text()).toContain('settings are locked')
   wrapper.unmount()
 })
 

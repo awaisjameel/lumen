@@ -842,6 +842,15 @@ export interface Settings {
     "thumbCacheMB": number;
     "ocr": boolean;
     "xmp": boolean;
+
+    /**
+     * CPUThreads is how many CPU threads indexing may keep busy: 1 to
+     * MaxCPUThreads, DefaultCPUThreads unless the user chose. The machine's
+     * two come with it, for the setting's range and its hint.
+     */
+    "cpuThreads": number;
+    "maxCPUThreads": number;
+    "defaultCPUThreads": number;
 }
 
 /**

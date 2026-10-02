@@ -288,6 +288,8 @@ export const engine = {
   setTagConfidence: (v: number): Promise<void> => LibraryService.SetTagConfidence(v),
   setEventGapHours: (hours: number): Promise<void> => LibraryService.SetEventGapHours(hours),
   setThumbCacheMB: (mb: number): Promise<void> => LibraryService.SetThumbCacheMB(mb),
+  /** How many CPU threads indexing may keep busy; the engine holds it to the machine's. */
+  setCPUThreads: (n: number): Promise<void> => LibraryService.SetCPUThreads(n),
   thumbCacheBytes: (): Promise<number> => MediaService.ThumbCacheBytes(),
   setOCR: (on: boolean): Promise<void> => LibraryService.SetOCR(on),
   setXMP: (on: boolean): Promise<void> => LibraryService.SetXMP(on),

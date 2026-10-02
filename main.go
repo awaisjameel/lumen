@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	windowevents "github.com/wailsapp/wails/v3/pkg/events"
 
 	"lumen/internal/ai"
 	"lumen/internal/core"
@@ -56,6 +57,7 @@ func run() error {
 		return err
 	}
 	setupLogging(paths)
+	lowerPriority()
 
 	// The application comes first: a second copy of Lumen must hand over to
 	// the running one before it touches the database (two would fight over
@@ -117,7 +119,7 @@ func run() error {
 		app.RegisterService(svc)
 	}
 
-	window.Store(app.Window.NewWithOptions(application.WebviewWindowOptions{
+	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "Lumen",
 		Width:            1280,
 		Height:           820,
@@ -126,7 +128,11 @@ func run() error {
 		BackgroundColour: application.NewRGB(17, 17, 19),
 		URL:              "/",
 		Windows:          application.WindowsWindow{BackdropType: application.Mica},
-	}))
+	})
+	// The window's WebView2 processes started below normal with Lumen; once
+	// the page runs, they are back at normal (see raiseWebView).
+	w.OnWindowEvent(windowevents.Common.WindowRuntimeReady, func(*application.WindowEvent) { go raiseWebView() })
+	window.Store(w)
 
 	return app.Run()
 }

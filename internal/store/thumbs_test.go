@@ -171,6 +171,33 @@ func TestThumbCacheCapIsHeldToItsRange(t *testing.T) {
 	}
 }
 
+func TestCPUThreadsAreHeldToTheMachines(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	if n, err := st.CPUThreads(ctx); err != nil || n != core.DefaultCPUThreads() {
+		t.Fatalf("default threads = %d (%v), want %d", n, err, core.DefaultCPUThreads())
+	}
+	most := core.MaxCPUThreads()
+	for _, tc := range []struct{ set, want int }{
+		{1, 1},
+		{most, most},
+		{0, 1},
+		{most * 4, most},
+	} {
+		stored, err := st.SetCPUThreads(ctx, tc.set)
+		check(t, err)
+		got, err := st.CPUThreads(ctx)
+		check(t, err)
+		if stored != tc.want || got != tc.want {
+			t.Errorf("set %d: stored %d, read %d, want %d", tc.set, stored, got, tc.want)
+		}
+	}
+	// A library from a bigger machine runs on this one's threads.
+	check(t, st.SetInt(ctx, core.SettingCPUThreads, most+8))
+	if n, _ := st.CPUThreads(ctx); n != most {
+		t.Errorf("a bigger machine's choice reads as %d, want %d", n, most)
+	}
+}
+
 func TestThumbCandidateQueriesUseTheirIndexes(t *testing.T) {
 	st := openTest(t)
 	seedThumbed(t, st, 100)

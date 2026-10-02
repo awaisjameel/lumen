@@ -31,7 +31,9 @@ func (d Decoders) ConvertMP4(ctx context.Context, path string, at int64) (run fu
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
 		"-frag_duration", "1000000", "-f", "mp4", "-")
 	return func(out io.Writer) error {
-		if err := runTool(ctx, d.FFmpeg, out, args...); err != nil {
+		// Someone is watching: this runs at normal priority, with all the
+		// threads FFmpeg wants, unlike the index's decoding.
+		if err := runToolAs(ctx, foreground, d.FFmpeg, out, args...); err != nil {
 			return fmt.Errorf("convert video: %w", err)
 		}
 		return nil

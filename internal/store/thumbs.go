@@ -25,6 +25,24 @@ func (s *Store) SetThumbCacheMB(ctx context.Context, mb int) (int, error) {
 	return mb, s.SetInt(ctx, core.SettingThumbCacheMB, mb)
 }
 
+// CPUThreads is how many CPU threads indexing may keep busy: the user's
+// choice, held to what this machine has (a library moved from a bigger one
+// keeps working), or core.DefaultCPUThreads if they made none.
+func (s *Store) CPUThreads(ctx context.Context) (int, error) {
+	n, err := s.Int(ctx, core.SettingCPUThreads, 0)
+	if n < 1 {
+		return core.DefaultCPUThreads(), err
+	}
+	return min(n, core.MaxCPUThreads()), err
+}
+
+// SetCPUThreads stores how many CPU threads indexing may keep busy, held to
+// 1..core.MaxCPUThreads, and returns the value stored.
+func (s *Store) SetCPUThreads(ctx context.Context, n int) (int, error) {
+	n = min(max(n, 1), core.MaxCPUThreads())
+	return n, s.SetInt(ctx, core.SettingCPUThreads, n)
+}
+
 // TouchThumbs records when assets' thumbnails were last shown (asset id to
 // unix seconds), in one statement. A later time wins over an earlier one, and
 // an asset deleted since it was shown is left out, so the batch never fails

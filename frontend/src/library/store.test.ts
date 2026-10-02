@@ -82,6 +82,9 @@ beforeEach(() => {
     thumbCacheMB: 2048,
     ocr: false,
     xmp: false,
+    cpuThreads: 10,
+    maxCPUThreads: 20,
+    defaultCPUThreads: 10,
   })
   vi.mocked(engine.progress).mockReset().mockResolvedValue(progress)
   vi.mocked(startMedia).mockReset().mockResolvedValue(undefined)

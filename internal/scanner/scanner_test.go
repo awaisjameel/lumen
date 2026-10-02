@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"lumen/internal/core"
 	"lumen/internal/store"
 )
 
@@ -120,5 +121,54 @@ func TestFingerprintIdentifiesContent(t *testing.T) {
 	h2 := sum(write("big2.mp4", big))
 	if bytes.Equal(h1, h2) {
 		t.Fatal("sampled hash missed a change in the middle window")
+	}
+}
+
+func TestTypeScriptModulesAreNotVideos(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	packets := func(size, sync int) []byte {
+		b := make([]byte, 3*size)
+		for i := range 3 {
+			b[i*size+sync] = 0x47
+		}
+		return b
+	}
+	root := t.TempDir()
+	files := map[string][]byte{
+		"clip.mts":          packets(188, 0), // MPEG-TS
+		"camera.MTS":        packets(192, 4), // AVCHD: a time code before each packet
+		"film.m2ts":         packets(192, 4),
+		"film.mp4":          []byte("not sniffed"),
+		"index.d.mts":       []byte("export declare function f(): void;\n"),
+		"types.mts":         bytes.Repeat([]byte("export {};\n"), 100),
+		"truncated.m2ts":    packets(188, 0)[:200],
+		"not-a-video.jpg.x": []byte("ignored"),
+	}
+	for name, b := range files {
+		if err := os.WriteFile(filepath.Join(root, name), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	src, err := st.AddSource(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An older scan took a module for a video: the next one forgets it.
+	if _, err := st.Ingest(t.Context(), []store.IngestItem{{SourceID: src.ID, Path: filepath.Join(root, "index.d.mts"),
+		Size: 1, Hash: []byte("0123456789abcdef"), Kind: core.KindVideo, Ext: ".mts"}}); err != nil {
+		t.Fatal(err)
+	}
+	s := Scanner{Store: st, HashWorkers: 2}
+	res, err := s.Scan(t.Context(), src, "", Options{Videos: true})
+	if err != nil || res.Seen != 4 || res.Removed != 1 {
+		t.Fatalf("scan: %+v, %v; want the 4 videos seen and the module forgotten", res, err)
 	}
 }

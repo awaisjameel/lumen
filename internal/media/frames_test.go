@@ -65,7 +65,7 @@ func TestFrameCancellationDropsBufferedFrames(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	calls := 0
-	got, err := readFrames(ctx, bytes.NewReader(bytes.Repeat(ppm, 2)), log, func(Frame) error {
+	got, err := readFrames(ctx, bytes.NewReader(bytes.Repeat(ppm, 2)), log, 0, func(Frame) error {
 		calls++
 		cancel()
 		return nil

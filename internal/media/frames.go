@@ -40,10 +40,11 @@ const (
 
 // Frames decodes up to n frames spread evenly over a video, upright, each at
 // most side on its long edge (never enlarged), and hands them to fn one at
-// a time, in order. Only keyframes are decoded, which makes it fast, so each
-// frame is the first keyframe at or after its point in the video. A video
-// with a single keyframe (some screen recorders write one) is decoded in
-// full instead.
+// a time, in order. Only keyframes are decoded, which makes it fast: each
+// frame is the first keyframe at or after its point in the video, or, in a
+// long video (see seekSeconds), the one a seek to its point lands on (the
+// last at or before it, in a file with an index). A video with a single
+// keyframe (some screen recorders write one) is decoded in full instead.
 func (d Decoders) Frames(ctx context.Context, path string, n, side int, fn func(Frame) error) error {
 	_, err := d.frames(ctx, path, n, side, fn)
 	if err != nil {
@@ -51,6 +52,14 @@ func (d Decoders) Frames(ctx context.Context, path string, n, side int, fn func(
 	}
 	return nil
 }
+
+// seekSeconds is how long a video must be, per frame wanted, before seeking
+// to each frame costs less than one pass over its keyframes. A pass decodes
+// every keyframe, about 3 ms of CPU per second of a 1080p film (18 s for one
+// of 100 minutes, and each video is sampled twice: thumbnails and the AI); a
+// seek costs about 0.13 s, mostly starting FFmpeg. Seeking took that film's
+// 24 frames with a sixth of the CPU.
+const seekSeconds = 30
 
 // frames is Frames, also returning what ffprobe said about the video.
 func (d Decoders) frames(ctx context.Context, path string, n, side int, fn func(Frame) error) (videoInfo, error) {
@@ -65,6 +74,17 @@ func (d Decoders) frames(ctx context.Context, path string, n, side int, fn func(
 	if v.Duration > 0 {
 		every = float64(v.Duration) / 1000 / float64(max(n, 1))
 	}
+	if n > 1 && every >= seekSeconds {
+		got, err := d.seekSamples(ctx, path, v, side, n, every, fn)
+		switch {
+		case err != nil || got > 1:
+			return v, err
+		case got == 1: // a single keyframe: the rest are decoded in full
+			_, err = d.samplePass(ctx, path, v, side, every, false, true, fn)
+			return v, err
+		}
+		// Nothing came of seeking (a file without an index): read it through.
+	}
 	got, err := d.samplePass(ctx, path, v, side, every, true, false, fn)
 	if err == nil && v.Duration > 0 && (got == 0 || (got == 1 && n > 1)) {
 		_, err = d.samplePass(ctx, path, v, side, every, false, got == 1, fn)
@@ -74,7 +94,9 @@ func (d Decoders) frames(ctx context.Context, path string, n, side int, fn func(
 
 // VideoFramesVersion versions how Frames samples a video (SampleCount, the
 // passes below): both AI stages' versions end with it, so a change re-runs
-// them for videos.
+// them for videos. Seeking in long videos left it as it was: a keyframe a
+// few seconds earlier is as good a sample, and re-running every film costs
+// far more than it would change.
 const VideoFramesVersion = "+video-frames-3"
 
 // samplePass runs ffmpeg once, selecting a frame every `every` seconds:
@@ -99,12 +121,53 @@ func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	return d.sample(ctx, append(args, "-i", path), sel, 0, v, side, 0, fn)
+}
+
+// seekSamples hands fn n frames of a long video, one FFmpeg run each: every
+// run seeks to its point and decodes the keyframe it lands on, so only n
+// keyframes are decoded, however long the video. A keyframe two points share
+// is handed over once. It returns how many frames it handed to fn.
+func (d Decoders) seekSamples(ctx context.Context, path string, v videoInfo, side, n int, every float64,
+	fn func(Frame) error) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, framesTimeout)
+	defer cancel()
+	got, last := 0, int64(-1)
+	for k := range n {
+		at := float64(k) * every
+		_, err := d.sample(ctx, []string{"-skip_frame", "nokey", "-ss", strconv.FormatFloat(at, 'f', 3, 64), "-noaccurate_seek", "-i", path},
+			"isnan(prev_selected_t)", 1, v, side, at, func(f Frame) error {
+				if f.At <= last {
+					return nil
+				}
+				last = f.At
+				got++
+				return fn(f)
+			})
+		if err != nil {
+			return got, err
+		}
+	}
+	return got, nil
+}
+
+// sample runs ffmpeg on input (its options and -i), keeping the frames sel
+// selects, at most limit of them if limit > 0 (FFmpeg then stops reading),
+// and hands them to fn. After a seek, ffmpeg times frames from the seek
+// point: offset (seconds) is where that is in the video.
+func (d Decoders) sample(ctx context.Context, input []string, sel string, limit int, v videoInfo, side int, offset float64,
+	fn func(Frame) error) (int, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	// "level" tags each log line with its severity, so the frame times
 	// (showinfo, at info level) and errors can be told apart.
-	args = append([]string{"-v", "level+info", "-nostats", "-hide_banner", "-nostdin"}, args...)
-	args = append(args, "-i", path, "-map", "0:V:0", "-an", "-sn", "-dn",
-		"-vf", "select='"+sel+"',showinfo,"+fitFilter(v, side, false),
-		"-fps_mode", "passthrough", "-f", "image2pipe", "-c:v", "ppm", "-pix_fmt", "rgb24", "-")
+	args := append([]string{"-v", "level+info", "-nostats", "-hide_banner", "-nostdin"}, decodeArgs()...)
+	args = append(append(args, input...), "-map", "0:V:0", "-an", "-sn", "-dn",
+		"-vf", "select='"+sel+"',showinfo,"+fitFilter(v, side, false), "-fps_mode", "passthrough")
+	if limit > 0 {
+		args = append(args, "-frames:v", strconv.Itoa(limit))
+	}
+	args = append(args, "-f", "image2pipe", "-c:v", "ppm", "-pix_fmt", "rgb24", "-")
 
 	cmd := exec.CommandContext(ctx, d.FFmpeg, args...)
 	hideWindow(cmd)
@@ -120,7 +183,7 @@ func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side
 		return 0, fmt.Errorf("ffmpeg: %w", err)
 	}
 	log := readLog(stderr)
-	got, err := readFrames(ctx, stdout, log, fn)
+	got, err := readFrames(ctx, stdout, log, offset, fn)
 	if err != nil {
 		cancel() // stop ffmpeg; its output is no longer read
 	}
@@ -133,8 +196,8 @@ func (d Decoders) samplePass(ctx context.Context, path string, v videoInfo, side
 }
 
 // readFrames reads the PPM frames ffmpeg writes, pairing each with its time
-// from the log, and hands them to fn.
-func readFrames(ctx context.Context, r io.Reader, log *ffmpegLog, fn func(Frame) error) (int, error) {
+// from the log (plus offset seconds), and hands them to fn.
+func readFrames(ctx context.Context, r io.Reader, log *ffmpegLog, offset float64, fn func(Frame) error) (int, error) {
 	br := bufio.NewReaderSize(r, 1<<20)
 	for n := 0; ; n++ {
 		if err := ctx.Err(); err != nil {
@@ -155,7 +218,7 @@ func readFrames(ctx context.Context, r io.Reader, log *ffmpegLog, fn func(Frame)
 			return n, err
 		}
 		// FFmpeg offsets input timestamps to the playback start before filtering.
-		at := max(0, int64(math.Round(t*1000)))
+		at := max(0, int64(math.Round((offset+t)*1000)))
 		if err := fn(Frame{At: at, Image: Image{Pix: pix, W: w, H: h}}); err != nil {
 			return n, err
 		}

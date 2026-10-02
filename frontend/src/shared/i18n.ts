@@ -288,6 +288,11 @@ const en = {
     'Off by default because indexing videos takes more time. All processing stays on this computer.',
   'settings.indexing': 'Background work',
   'settings.pause': 'Pause indexing',
+  'settings.threads': 'Processor threads for indexing: {n} of {max}',
+  'settings.threadsHint':
+    'Half by default ({n}). More threads index faster; fewer leave more for your other programs. Lumen always gives way to them, and a change applies at once.',
+  'settings.threadsFewer': 'Lighter',
+  'settings.threadsMore': 'Faster',
   'settings.ai': 'Search, Things and People',
   'settings.aiHint':
     'Lumen understands your photos on this computer, so you can search them by what’s in them and who is in them. Nothing is uploaded.',

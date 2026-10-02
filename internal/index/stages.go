@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"runtime"
 	"slices"
 	"sync/atomic"
 	"time"
@@ -271,10 +270,10 @@ func (ix *Indexer) doMetadata(ctx context.Context, j store.JobItem) (r store.Met
 	return r
 }
 
-// thumbnailWorkers is how many files the thumbnail stage decodes at once:
-// half the CPU's threads (libvips runs one per file), at least 6 where there
-// are more, leaving one for the UI. Six on 20 threads left most of them idle.
-var thumbnailWorkers = max(1, min(runtime.NumCPU()-1, max(6, runtime.NumCPU()/2)))
+// thumbnailWorkers is how many files the thumbnail stage may decode at once:
+// as many as the CPU budget can grow to (libvips runs one thread per file).
+// Those over the budget, which the stage shares with the others, wait.
+var thumbnailWorkers = core.MaxCPUThreads()
 
 // doThumbnails makes a batch's thumbnails. Photos the faces stage will want
 // next are decoded at faceSide and kept for it (see decoded), with the
@@ -282,8 +281,22 @@ var thumbnailWorkers = max(1, min(runtime.NumCPU()-1, max(6, runtime.NumCPU()/2)
 func (ix *Indexer) doThumbnails(ctx context.Context, items []store.JobItem) ([]store.ThumbResult, error) {
 	keep := ix.keepForFaces(ctx, items)
 	return eachItem(thumbnailWorkers, func(ctx context.Context, j store.JobItem) store.ThumbResult {
+		ctx, release, err := ix.cpu.acquire(ctx, decodeSlots(j.Kind))
+		if err != nil {
+			return store.ThumbResult{AssetID: j.AssetID, Err: err.Error()} // cancelled: not saved
+		}
+		defer release()
 		return ix.doThumbnail(ctx, j, keep[j.AssetID])
 	})(ctx, items)
+}
+
+// decodeSlots is the CPU budget one file's decoding takes: a photo's libvips
+// runs one thread, a video's FFmpeg media.DecodeThreads.
+func decodeSlots(kind core.Kind) int {
+	if kind == core.KindVideo {
+		return media.DecodeThreads
+	}
+	return 1
 }
 
 // keepForFaces returns the photos of items whose faces are still to find,
@@ -413,6 +426,11 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 		if j.Kind != core.KindPhoto {
 			return
 		}
+		ctx, release, err := ix.cpu.acquire(ctx, 1)
+		if err != nil {
+			return // cancelled: nothing is saved
+		}
+		defer release()
 		orig := media.Original{Path: j.Path, Kind: j.Kind, Orientation: j.Orientation}
 		px, err := modelInput(ctx, ix.cache, j.AssetID, orig, side, media.ModelInput)
 		switch {
@@ -429,7 +447,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 		return nil, ctx.Err()
 	}
 
-	b := &modelBatch{enc: enc}
+	b := &modelBatch{enc: enc, cpu: ix.encoderSlots(enc)}
 	for i, in := range inputs {
 		if in == nil {
 			continue
@@ -453,6 +471,22 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 	return results, nil
 }
 
+// encoderSlots is how a run of the image model takes the CPU budget: not at
+// all on the GPU, and on the CPU the threads its runs keep busy (half the
+// machine's, see ai.OpenImageEncoder). The device is checked at each run: a model that fails on the GPU
+// moves to the CPU.
+func (ix *Indexer) encoderSlots(enc *ai.ImageEncoder) func(context.Context) (context.Context, func(), error) {
+	if enc == nil {
+		return nil
+	}
+	return func(ctx context.Context) (context.Context, func(), error) {
+		if enc.Device() == ai.GPU {
+			return ctx, func() {}, nil
+		}
+		return ix.cpu.acquire(ctx, core.DefaultCPUThreads())
+	}
+}
+
 // errNoVector is the per-file error for an input the image model made no
 // usable vector of.
 const errNoVector = "the image model gave no usable result"
@@ -467,7 +501,10 @@ type imageEncoder interface {
 // the model whenever a full batch is waiting, handing each vector to the
 // input's owner. At most one batch of inputs is held at a time.
 type modelBatch struct {
-	enc    imageEncoder
+	enc imageEncoder
+	// cpu, if set, takes the CPU budget for a run of the model (see
+	// encoderSlots); nil when it runs on the GPU.
+	cpu    func(context.Context) (context.Context, func(), error)
 	inputs [][]byte
 	owners []func(vec []float32) // vec is nil where the model made no usable one
 	err    error                 // the model failed: the stage can't run
@@ -494,7 +531,15 @@ func (b *modelBatch) flush(ctx context.Context) error {
 	if b.err != nil || len(b.inputs) == 0 {
 		return b.err
 	}
+	release := func() {}
+	if b.cpu != nil {
+		var err error
+		if _, release, err = b.cpu(ctx); err != nil {
+			return err
+		}
+	}
 	vecs, err := b.enc.Encode(b.inputs)
+	release()
 	if err != nil {
 		b.err = fmt.Errorf("embed image batch: %w", err)
 		return b.err
@@ -606,8 +651,14 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 			}
 			return modelError{err}
 		}
+		// The face models take the GPU when it is free and run on the CPU
+		// otherwise, a short run on faceThreads; decoding is one thread.
+		ctx, release, err := ix.cpu.acquire(ctx, 1)
+		if err != nil {
+			return // cancelled: nothing is saved
+		}
+		defer release()
 		im, ok := ix.pixels.take(j.AssetID, j.Orientation)
-		var err error
 		if !ok {
 			im, err = ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, faceSide)
 		}

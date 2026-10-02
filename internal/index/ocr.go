@@ -3,7 +3,6 @@ package index
 import (
 	"context"
 	"errors"
-	"runtime"
 	"strings"
 	"sync/atomic"
 
@@ -38,10 +37,9 @@ const (
 )
 
 // ocrThreads is the CPU threads of each OCR model run: a quarter of the
-// machine's, at least two. The text models are background work that has no
-// GPU to wait for, and the UI, the decoder and the other stages need the
-// rest.
-var ocrThreads = max(2, runtime.NumCPU()/4)
+// default CPU budget, at least two. The text models are background work that
+// has no GPU to wait for, and the decoder and the other stages need the rest.
+var ocrThreads = max(2, core.DefaultCPUThreads()/4)
 
 // textReader reads the text in an image: *ai.OCR, or a test's.
 type textReader interface {
@@ -118,6 +116,11 @@ func (ix *Indexer) doOCR(ctx context.Context, items []store.JobItem) ([]store.OC
 		r := &results[i]
 		r.AssetID = j.AssetID
 		defer recoverInto(&r.Err, j.Path)
+		ctx, release, err := ix.cpu.acquire(ctx, ocrThreads)
+		if err != nil {
+			return // cancelled: nothing is saved
+		}
+		defer release()
 		im, err := ix.cache.Decoder.Decode(ctx, j.Path, j.Kind, j.Orientation, ocrSide)
 		switch {
 		case errors.Is(err, media.ErrUnsupported):
