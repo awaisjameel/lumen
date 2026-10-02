@@ -377,6 +377,11 @@ const en = {
   'settings.cacheUsed': 'In use now: {size}',
 
   // Text in photos (OCR).
+  'settings.ocr': 'Find text in screenshots and documents',
+  'settings.ocrHint':
+    'Off by default. Lumen reads the words in photos it takes for screenshots or documents, so you can search for them. It works on the processor, only on those photos, and waits for mains power like the rest of the AI.',
+  'status.reading': 'Reading text in your photos… {left} left',
+  'status.readingPhase': 'Reading text in your photos',
 
   // Forgotten PIN.
 } as const satisfies Record<string, Message>
