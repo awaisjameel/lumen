@@ -191,6 +191,22 @@ func (s *LibraryService) UndoBlock(ctx context.Context, id int64) error {
 	return nil
 }
 
+// SetBlockMode changes what the block blockID hides: its label only, or its
+// photos too. It needs the PIN unlock, as RemoveBlock does, and takes the
+// block's own id, which is not always what SetBlock's target means.
+func (s *LibraryService) SetBlockMode(ctx context.Context, blockID int64, mode core.BlockMode) error {
+	s.blocked.Lock()
+	defer s.blocked.Unlock()
+	if !s.unlockedNow() {
+		return ErrBlockLocked
+	}
+	if err := s.store.SetBlockMode(ctx, blockID, mode); err != nil {
+		return err
+	}
+	s.viewsChanged()
+	return nil
+}
+
 // RemoveBlock restores the current view of a blocked item.
 func (s *LibraryService) RemoveBlock(ctx context.Context, id int64) error {
 	s.blocked.Lock()
@@ -199,6 +215,34 @@ func (s *LibraryService) RemoveBlock(ctx context.Context, id int64) error {
 		return ErrBlockLocked
 	}
 	if err := s.store.RemoveBlock(ctx, id); err != nil {
+		return err
+	}
+	s.viewsChanged()
+	return nil
+}
+
+// BlockedItems lists the photos the block blockID covers, for the Blocked
+// screen's browser; it needs the PIN unlock. The lock is held while the list
+// is read, so nothing is handed out after the screen has locked.
+func (s *LibraryService) BlockedItems(ctx context.Context, blockID int64) ([]core.CoveredItem, error) {
+	s.blocked.Lock()
+	defer s.blocked.Unlock()
+	if !s.unlockedNow() {
+		return nil, ErrBlockLocked
+	}
+	return s.store.BlockCoverage(ctx, blockID)
+}
+
+// TrashCovered moves photos a block covers to the Trash, from the Blocked
+// screen's browser; it needs the PIN unlock. Like TrashAssets, it leaves the
+// files where they are.
+func (s *LibraryService) TrashCovered(ctx context.Context, ids []int64) error {
+	s.blocked.Lock()
+	defer s.blocked.Unlock()
+	if !s.unlockedNow() {
+		return ErrBlockLocked
+	}
+	if err := s.store.TrashAssets(ctx, ids); err != nil {
 		return err
 	}
 	s.viewsChanged()

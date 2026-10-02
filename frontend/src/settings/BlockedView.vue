@@ -16,6 +16,8 @@ import { confirm } from '../shared/confirm'
 import { errorText, reportError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import PinFields from '../shared/PinFields.vue'
+import CoveredBrowser from './CoveredBrowser.vue'
+import { useCoveredPhotos } from './covered'
 
 const configured = ref(true)
 const unlocked = ref(false)
@@ -32,9 +34,17 @@ let active = true
 let idleTimer = 0
 let sessionRevision = 0
 
+// The browser's photos are as private as the list: it closes, with the
+// Viewer, whenever the screen relocks or is left.
+const covered = useCoveredPhotos({
+  used: () => used(sessionRevision),
+  failed: (e) => failed(e),
+})
+
 function relock() {
   clearTimeout(idleTimer)
   sessionRevision++
+  covered.close()
   blocks.value = []
   unlocked.value = false
   pin.value = ''
@@ -87,6 +97,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   active = false
+  covered.close()
   sessionRevision++
   clearTimeout(idleTimer)
   void engine.lockBlocks().catch(reportError)
@@ -167,7 +178,7 @@ async function changeMode(item: Block) {
   const revision = sessionRevision
   try {
     const next = item.mode === BlockMode.BlockPhotos ? BlockMode.BlockLabel : BlockMode.BlockPhotos
-    await engine.setBlock(item.kind, item.targetId, item.path, next)
+    await engine.setBlockMode(item.id, next)
     used(revision)
     await reload(revision)
   } catch (e) {
@@ -213,6 +224,10 @@ function kindName(kind: BlockKind): string {
       return t('settings.folders')
     case BlockKind.BlockAlbum:
       return t('nav.albums')
+    case BlockKind.BlockEvent:
+      return t('nav.events')
+    case BlockKind.BlockFace:
+      return t('blocked.kindFace')
   }
   return kind
 }
@@ -248,6 +263,7 @@ function kindName(kind: BlockKind): string {
           </button>
         </div>
       </form>
+      <CoveredBrowser v-else-if="covered.block" :covered="covered" />
       <template v-else>
         <p class="muted">{{ t('blocked.privacy') }}</p>
         <ul v-if="blocks.length" class="list">
@@ -267,6 +283,7 @@ function kindName(kind: BlockKind): string {
             >
               {{ t('blocked.switchMode') }}
             </button>
+            <button class="btn" :disabled="busy" @click="covered.open(item)">{{ t('covered.show') }}</button>
             <button class="btn" :disabled="busy" @click="unblock(item)">{{ t('blocked.unblock') }}</button>
           </li>
         </ul>

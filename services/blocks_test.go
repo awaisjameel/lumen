@@ -484,3 +484,200 @@ func TestSignInFailuresHaveTheirOwnCodes(t *testing.T) {
 		}
 	}
 }
+
+// coveredLibrary is three photos, two of them covered by a folder block, in a
+// library whose PIN is 123456 and whose Blocked screen is locked.
+func coveredLibrary(t *testing.T) (s *LibraryService, st *store.Store, block int64) {
+	t.Helper()
+	ctx := t.Context()
+	st, err := store.Open(filepath.Join(t.TempDir(), "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, path := range []string{`C:\Photos\private\a.jpg`, `C:\Photos\private\b.jpg`, `C:\Photos\open\c.jpg`} {
+		if _, err := st.Ingest(ctx, []store.IngestItem{{SourceID: src.ID, Path: path, Size: 1,
+			Hash: []byte(path), Kind: core.KindPhoto, Ext: ".jpg", TakenAt: int64(100 + i)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s = NewLibraryService(st, nil, nil)
+	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	change, err := s.SetBlock(ctx, core.BlockFolder, 0, `C:\Photos\private`, core.BlockPhotos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, st, change.ID
+}
+
+func TestBlockedItemsAndTrashCoveredNeedThePINUnlock(t *testing.T) {
+	ctx := t.Context()
+	s, st, block := coveredLibrary(t)
+	if _, err := s.BlockedItems(ctx, block); !errors.Is(err, ErrBlockLocked) {
+		t.Fatalf("BlockedItems before the PIN: %v", err)
+	}
+	if err := s.TrashCovered(ctx, []int64{1}); !errors.Is(err, ErrBlockLocked) {
+		t.Fatalf("TrashCovered before the PIN: %v", err)
+	}
+	if n, _ := st.TrashCount(ctx); n != 0 {
+		t.Fatalf("a locked TrashCovered trashed %d photos", n)
+	}
+	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.BlockedItems(ctx, block)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("BlockedItems unlocked = %+v, %v; want the two private photos", items, err)
+	}
+	s.LockBlocks() // leaving the screen
+	if _, err := s.BlockedItems(ctx, block); !errors.Is(err, ErrBlockLocked) {
+		t.Fatalf("BlockedItems after leaving the screen: %v", err)
+	}
+	if err := s.TrashCovered(ctx, []int64{1}); !errors.Is(err, ErrBlockLocked) {
+		t.Fatalf("TrashCovered after leaving the screen: %v", err)
+	}
+	if n, _ := st.TrashCount(ctx); n != 0 {
+		t.Fatalf("a locked TrashCovered trashed %d photos", n)
+	}
+}
+
+func TestLockedBlockedItemsAnswerWithTheCodeTheScreenRelocksOn(t *testing.T) {
+	s, _, block := coveredLibrary(t)
+	_, err := s.BlockedItems(t.Context(), block)
+	if got := codeOf(t, err); got != CodeBlocksLocked {
+		t.Fatalf("locked BlockedItems has code %q, want %q", got, CodeBlocksLocked)
+	}
+	err = s.TrashCovered(t.Context(), []int64{1})
+	if got := codeOf(t, err); got != CodeBlocksLocked {
+		t.Fatalf("locked TrashCovered has code %q, want %q", got, CodeBlocksLocked)
+	}
+}
+
+func TestBrowsingCoveredPhotosKeepsTheUnlockOpenUntilTheIdleTimeout(t *testing.T) {
+	ctx := t.Context()
+	s, _, block := coveredLibrary(t)
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		now = now.Add(blockUnlockIdle - time.Second)
+		if _, err := s.BlockedItems(ctx, block); err != nil {
+			t.Fatalf("BlockedItems did not count as a use: %v", err)
+		}
+	}
+	now = now.Add(blockUnlockIdle + time.Second)
+	if _, err := s.BlockedItems(ctx, block); !errors.Is(err, ErrBlockLocked) {
+		t.Fatalf("BlockedItems after the idle timeout: %v", err)
+	}
+}
+
+func TestTrashCoveredMovesThePhotosToTheTrashAndOutOfTheBrowser(t *testing.T) {
+	ctx := t.Context()
+	s, st, block := coveredLibrary(t)
+	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.BlockedItems(ctx, block)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("BlockedItems = %+v, %v", items, err)
+	}
+	if err := s.TrashCovered(ctx, []int64{items[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := st.TrashCount(ctx); n != 1 {
+		t.Fatalf("Trash holds %d photos, want 1", n)
+	}
+	left, err := s.BlockedItems(ctx, block)
+	if err != nil || len(left) != 1 || left[0].ID != items[1].ID {
+		t.Fatalf("browser after trashing = %+v, %v; want only the other photo", left, err)
+	}
+	// A photo that does not exist fails the whole call and trashes nothing.
+	if err := s.TrashCovered(ctx, []int64{items[1].ID, 999}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("TrashCovered with an unknown photo: %v", err)
+	}
+	if n, _ := st.TrashCount(ctx); n != 1 {
+		t.Fatalf("Trash holds %d photos after a refused call, want 1", n)
+	}
+}
+
+func TestBlockedItemsOfAnUnknownBlockIsNotFound(t *testing.T) {
+	ctx := t.Context()
+	s, _, _ := coveredLibrary(t)
+	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BlockedItems(ctx, 999); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unknown block: %v", err)
+	}
+}
+
+func TestACoveredPhotosDetailsAreAvailableOnlyWhileUnlocked(t *testing.T) {
+	ctx := t.Context()
+	s, _, block := coveredLibrary(t)
+	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.BlockedItems(ctx, block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := items[0].ID
+	if d, err := s.Asset(ctx, id); err != nil || d.ID != id {
+		t.Fatalf("Asset unlocked = %+v, %v", d, err)
+	}
+	s.LockBlocks()
+	if _, err := s.Asset(ctx, id); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Asset after leaving the screen: %v", err)
+	}
+}
+
+func TestSetBlockModeNeedsThePINUnlockAndChangesWhatIsShown(t *testing.T) {
+	ctx := t.Context()
+	s, st, _ := coveredLibrary(t) // its folder block is always a photo block: a tag block takes the mode
+	tag, err := st.CreateTag(ctx, "Receipts", core.TagManual, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TagAsset(ctx, 3, tag); err != nil { // the photo outside the folder
+		t.Fatal(err)
+	}
+	change, err := s.SetBlock(ctx, core.BlockTag, tag, "", core.BlockLabel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := change.ID
+	err = s.SetBlockMode(ctx, block, core.BlockPhotos)
+	if !errors.Is(err, ErrBlockLocked) {
+		t.Fatalf("SetBlockMode before the PIN: %v", err)
+	}
+	if got := codeOf(t, err); got != CodeBlocksLocked {
+		t.Fatalf("a locked mode switch has code %q, want %q", got, CodeBlocksLocked)
+	}
+	if n, _ := st.CountVisible(ctx); n != 1 {
+		t.Fatalf("%d photos visible, want 1: the locked call must not have changed the block", n)
+	}
+	if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetBlockMode(ctx, block, core.BlockPhotos); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := st.CountVisible(ctx); n != 0 {
+		t.Fatalf("%d photos visible after hiding the tagged photo too, want 0", n)
+	}
+	if err := s.SetBlockMode(ctx, 999, core.BlockPhotos); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("an unknown block: %v", err)
+	}
+	s.LockBlocks()
+	if err := s.SetBlockMode(ctx, block, core.BlockPhotos); !errors.Is(err, ErrBlockLocked) {
+		t.Fatalf("SetBlockMode after leaving the screen: %v", err)
+	}
+}

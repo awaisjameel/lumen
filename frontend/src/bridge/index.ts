@@ -295,6 +295,8 @@ export const engine = {
   blocks: async (): Promise<Block[]> => (await LibraryService.Blocks()) ?? [],
   setBlock: (kind: BlockKind, targetID: number, path: string, mode: BlockMode): Promise<BlockChange> =>
     LibraryService.SetBlock(kind, targetID, path, mode),
+  /** Changes what a block hides, by the block's own id (SetBlock's target is not that for events and faces). */
+  setBlockMode: (blockID: number, mode: BlockMode): Promise<void> => LibraryService.SetBlockMode(blockID, mode),
   removeBlock: (id: number): Promise<void> => LibraryService.RemoveBlock(id),
   undoBlock: (id: number): Promise<void> => LibraryService.UndoBlock(id),
   /** Blocks one face, and with lookalikes the faces like it too. */

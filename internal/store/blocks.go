@@ -26,20 +26,26 @@ func labelBlocked(kind core.BlockKind, id string) string {
 // placeBlocked is labelBlocked for places.
 func placeBlocked(id string) string { return labelBlocked(core.BlockPlace, id) }
 
+// blockName is the name a block is listed under, an SQL expression over the
+// blocks row alias b: the live name of what it targets, so a renamed person
+// or album shows its new name, else the name stored with the block.
+func blockName(b string) string {
+	return `COALESCE(CASE ` + b + `.kind
+			WHEN 'asset' THEN (SELECT path FROM files WHERE asset_id = ` + b + `.target_id ORDER BY id LIMIT 1)
+			WHEN 'person' THEN (SELECT COALESCE(name, 'Unnamed person') FROM people WHERE id = ` + b + `.target_id)
+			WHEN 'tag' THEN (SELECT name FROM tags WHERE id = ` + b + `.target_id)
+			WHEN 'place' THEN (SELECT name FROM places WHERE id = ` + b + `.target_id)
+			WHEN 'album' THEN (SELECT name FROM albums WHERE id = ` + b + `.target_id)
+		END, ` + b + `.name)`
+}
+
 // Blocks lists the user's visibility rules. This is private UI data and is
 // deliberately not joined into the ordinary People/Things views.
 func (s *Store) Blocks(ctx context.Context) ([]core.Block, error) {
 	return queryAll(ctx, s.r, func(r *sql.Rows) (b core.Block, err error) {
 		err = r.Scan(&b.ID, &b.Kind, &b.TargetID, &b.Path, &b.Mode, &b.Name)
 		return b, err
-	}, `SELECT b.id, b.kind, COALESCE(b.target_id, 0), COALESCE(b.path, ''), b.mode,
-		COALESCE(CASE b.kind
-			WHEN 'asset' THEN (SELECT path FROM files WHERE asset_id = b.target_id ORDER BY id LIMIT 1)
-			WHEN 'person' THEN (SELECT COALESCE(name, 'Unnamed person') FROM people WHERE id = b.target_id)
-			WHEN 'tag' THEN (SELECT name FROM tags WHERE id = b.target_id)
-			WHEN 'place' THEN (SELECT name FROM places WHERE id = b.target_id)
-			WHEN 'album' THEN (SELECT name FROM albums WHERE id = b.target_id)
-		END, b.name)
+	}, `SELECT b.id, b.kind, COALESCE(b.target_id, 0), COALESCE(b.path, ''), b.mode, `+blockName("b")+`
 		FROM blocks b ORDER BY b.created_at DESC, b.id DESC`)
 }
 
@@ -160,6 +166,36 @@ func (s *Store) setBlock(ctx context.Context, kind core.BlockKind, targetID int6
 		return 0, false, err
 	}
 	return id, created, nil
+}
+
+// SetBlockMode changes what the block blockID hides, by the block's own id:
+// every kind's target is read by SetBlock as something else (an event's is a
+// tag of its own, a face's a face_blocks row), so a mode switch must not go
+// through it. Setting the mode a block has changes nothing, and so moves no
+// revision. Photos and folders are always blocked with their photos.
+func (s *Store) SetBlockMode(ctx context.Context, blockID int64, mode core.BlockMode) error {
+	if mode != core.BlockLabel && mode != core.BlockPhotos {
+		return ErrInvalidBlock
+	}
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		var kind core.BlockKind
+		var current core.BlockMode
+		err := tx.QueryRowContext(ctx, "SELECT kind, mode FROM blocks WHERE id = ?", blockID).Scan(&kind, &current)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if (kind == core.BlockAsset || kind == core.BlockFolder) && mode != core.BlockPhotos {
+			return ErrInvalidBlock
+		}
+		if current == mode {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE blocks SET mode = ? WHERE id = ?", mode, blockID)
+		return err
+	})
 }
 
 // RemoveBlock restores an item's ordinary visibility without touching media.

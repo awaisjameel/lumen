@@ -423,6 +423,17 @@ const en = {
   // Face blocks.
 
   // Blocked: covered photos.
+  'blocked.kindFace': 'Faces',
+  'covered.show': 'Show photos',
+  'covered.title': 'Photos covered by “{name}”',
+  'covered.back': 'Back to blocks',
+  'covered.count': { one: '1 photo', other: '{n} photos' },
+  'covered.loading': 'Loading photos…',
+  'covered.empty': 'This block covers no photos at the moment.',
+  'covered.stillShown': 'This block hides only its label, so these photos are still shown in your library.',
+  'covered.hiddenBy': 'Also hidden by {names}',
+  'covered.openPhoto': 'Open photo',
+  'covered.openVideo': 'Open video',
 
   // Duplicates: best copy.
   'duplicates.bestHint':

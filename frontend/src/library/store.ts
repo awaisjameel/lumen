@@ -17,6 +17,7 @@ import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { latestSave } from '../shared/latestSave'
 import type { LatestSave } from '../shared/latestSave'
+import { deleteFromDisk } from '../trash/actions'
 import { showTrashUndo } from '../trash/undo'
 
 const ZOOM_KEY = 'lumen.zoom'
@@ -728,3 +729,82 @@ export const useLibrary = defineStore('library', () => {
     restoreAssets,
   }
 })
+
+type Library = ReturnType<typeof useLibrary>
+
+/** What the Viewer's bar offers besides browsing; an action that is absent is not offered. */
+export interface ViewerActions {
+  favourite?: () => void
+  moveToTrash?: () => void
+  restore?: () => void
+  deleteFromDisk?: () => void
+  /** Whether the details panel, and the key that toggles it, are offered. */
+  details: boolean
+}
+
+/**
+ * Where the Viewer's photos come from: the library grid (and the Trash, which
+ * is the grid showing trashed photos) or the Blocked screen's browser. The
+ * Viewer asks its source for the photo shown and the one beside it, and for
+ * what it may do with it, so it knows nothing of days or blocks.
+ */
+export interface ViewerSource {
+  /** The id of the photo shown, even before its item has loaded. */
+  readonly id: number | null
+  /** The photo shown, or null while it is not in the source's items. */
+  readonly item: GridItem | null
+  /** The photo as the library grid addresses it, for the details panel; null for a source without one. */
+  readonly sel: Sel | null
+  /** Moves to the next (1) or previous (-1) photo, if there is one. */
+  step: (dir: 1 | -1) => Promise<void>
+  /** Closes the Viewer. */
+  close: () => void
+  readonly actions: ViewerActions
+}
+
+/**
+ * The library grid as a Viewer source. It reads the store at each call, so a
+ * change of scope or an item reloaded in place is seen as it happens.
+ */
+export function libraryViewerSource(lib: Library): ViewerSource {
+  return {
+    get id() {
+      return lib.viewer?.id ?? null
+    },
+    get item() {
+      return lib.viewerItem
+    },
+    get sel() {
+      return lib.viewer
+    },
+    async step(dir) {
+      const from = lib.viewer
+      if (!from) return
+      const next = await lib.neighbour(from, dir)
+      if (next && lib.viewer === from) lib.viewer = next // not if the viewer was closed or moved meanwhile
+    },
+    close() {
+      lib.viewer = null
+    },
+    get actions() {
+      // The Trash's photos can be restored or deleted from disk, not edited.
+      return lib.inTrash
+        ? {
+            restore: () => {
+              if (lib.viewer) void lib.restoreFromTrash(lib.viewer)
+            },
+            deleteFromDisk: () => {
+              if (lib.viewer) void deleteFromDisk(lib, lib.viewer)
+            },
+            details: true,
+          }
+        : {
+            favourite: () => void lib.toggleFavourite(lib.viewer),
+            moveToTrash: () => {
+              if (lib.viewer) void lib.moveToTrash(lib.viewer)
+            },
+            details: true,
+          }
+    },
+  }
+}

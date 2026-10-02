@@ -25,20 +25,6 @@ func (s *LibraryService) BlockFace(ctx context.Context, faceID int64, mode core.
 	return core.BlockChange{}, unbuilt(ctx)
 }
 
-// BlockedItems lists the photos the block blockID covers, for the Blocked
-// screen's browser; it needs the PIN unlock. Phase 5 unit U8.
-func (s *LibraryService) BlockedItems(ctx context.Context, blockID int64) ([]core.CoveredItem, error) {
-	_ = blockID
-	return nil, unbuilt(ctx)
-}
-
-// TrashCovered moves photos a block covers to the Trash, from the Blocked
-// screen's browser; it needs the PIN unlock. Phase 5 unit U8.
-func (s *LibraryService) TrashCovered(ctx context.Context, ids []int64) error {
-	_ = ids
-	return unbuilt(ctx)
-}
-
 // PlanOrganise previews where template would move the files of the source
 // sourceID (0: every source), and saves the preview as a planned run.
 // Phase 5 unit U10.

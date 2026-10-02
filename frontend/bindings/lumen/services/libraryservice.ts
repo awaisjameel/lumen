@@ -292,6 +292,15 @@ export function SetBlock(kind: core$0.BlockKind, targetID: number, path: string,
 }
 
 /**
+ * SetBlockMode changes what the block blockID hides: its label only, or its
+ * photos too. It needs the PIN unlock, as RemoveBlock does, and takes the
+ * block's own id, which is not always what SetBlock's target means.
+ */
+export function SetBlockMode(blockID: number, mode: core$0.BlockMode): $CancellablePromise<void> {
+    return $Call.ByID(2909120951, blockID, mode);
+}
+
+/**
  * SetEventGapHours sets the quiet period that splits detected events.
  */
 export function SetEventGapHours(hours: number): $CancellablePromise<void> {

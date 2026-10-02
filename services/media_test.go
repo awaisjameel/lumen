@@ -439,3 +439,177 @@ func TestAThumbnailEvictedWhileBeingServedIsRebuiltInsteadOfAnswering404(t *test
 		t.Fatalf("status %d, body %q, want the rebuilt thumbnail", rec.Code, rec.Body.String())
 	}
 }
+
+// coveredMedia is a library of three assets, each with cached pictures, served
+// by a MediaService and a Streamer that share one gate: a photo and a video
+// that an asset block covers, and a photo nothing covers. No FFmpeg is needed: the pictures are in the cache already and
+// the converter is a fake.
+type coveredMedia struct {
+	st                      *store.Store
+	gate                    *BlockGate
+	m                       *MediaService
+	stream                  *Streamer
+	photo, video, openPhoto int64
+}
+
+// fixedConversion is a converter whose output is a few bytes.
+type fixedConversion struct{}
+
+func (fixedConversion) ConvertMP4(context.Context, string, int64) (func(io.Writer) error, error) {
+	return func(w io.Writer) error { _, err := w.Write([]byte("converted")); return err }, nil
+}
+
+func newCoveredMedia(t *testing.T) *coveredMedia {
+	t.Helper()
+	ctx := t.Context()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	src, err := st.AddSource(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &coveredMedia{st: st, gate: &BlockGate{}}
+	files := []struct {
+		name string
+		kind core.Kind
+		ext  string
+		id   *int64
+	}{
+		{"covered", core.KindPhoto, ".jpg", &c.photo},
+		{"covered", core.KindVideo, ".mp4", &c.video},
+		{"open", core.KindPhoto, ".jpg", &c.openPhoto},
+	}
+	cache := media.NewCache(filepath.Join(dir, "thumbs"), &fakeDecoder{})
+	var meta []store.MetadataResult
+	var thumbs []store.ThumbResult
+	for i, f := range files {
+		path := filepath.Join(dir, fmt.Sprintf("%d%s", i, f.ext))
+		if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Ingest(ctx, []store.IngestItem{{SourceID: src.ID, Path: path, Size: 10, MTime: 1,
+			Hash: []byte(path), Kind: f.kind, Ext: f.ext, TakenAt: 1_700_000_000, DateFrom: core.DateFromFile}}); err != nil {
+			t.Fatal(err)
+		}
+		id := int64(i + 1)
+		*f.id = id
+		m := store.MetadataResult{AssetID: id, Width: 4, Height: 3, Orientation: 1}
+		if f.kind == core.KindVideo {
+			m.VideoCodec, m.Duration = "h264", 2000
+		}
+		meta = append(meta, m)
+		thumbs = append(thumbs, store.ThumbResult{AssetID: id})
+		if err := cache.Write(id, media.Thumbs{Small: []byte("small"), Large: []byte("large"), Sprite: []byte("sprite")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A frame of the video, in the cache as a request would have left it.
+	frame := cache.FramePath(c.video, 1000)
+	if err := os.MkdirAll(filepath.Dir(frame), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(frame, []byte("frame"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveMetadata(ctx, "v", meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveThumbnails(ctx, "v", thumbs); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{c.photo, c.video} {
+		if _, err := st.SetBlock(ctx, core.BlockAsset, id, "", core.BlockPhotos); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.stream, err = NewStreamer(st, media.Decoders{}, c.gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.stream.decoder = fixedConversion{}
+	t.Cleanup(func() { _ = c.stream.Close() })
+	c.m = NewMediaService(st, cache, c.stream, c.gate)
+	return c
+}
+
+// get answers a request to the media service.
+func (c *coveredMedia) get(t *testing.T, url string) int {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	c.m.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody))
+	return rec.Code
+}
+
+// stream answers a request to the video server.
+func (c *coveredMedia) streamed(t *testing.T, path string) int {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	c.stream.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, c.stream.Base()+path, http.NoBody))
+	return rec.Code
+}
+
+func TestCoveredMediaIsServedOnEveryRouteOnlyWhileTheGateIsUnlocked(t *testing.T) {
+	c := newCoveredMedia(t)
+	routes := []struct {
+		name, path string
+		streamed   bool // served by the video server, not the media service
+	}{
+		{"photo thumbnail", fmt.Sprintf("/thumb/%d/256?v=1", c.photo), false},
+		{"large photo thumbnail", fmt.Sprintf("/thumb/%d/1024?v=1", c.photo), false},
+		{"photo original", fmt.Sprintf("/original/%d", c.photo), false},
+		{"video thumbnail", fmt.Sprintf("/thumb/%d/256?v=1", c.video), false},
+		{"video sprite", fmt.Sprintf("/sprite/%d?v=1", c.video), false},
+		{"video frame", fmt.Sprintf("/frame/%d/1000", c.video), false},
+		{"video file", fmt.Sprintf("/video/%d", c.video), true},
+		{"converted video", fmt.Sprintf("/play/%d?at=0", c.video), true},
+	}
+	for _, r := range routes {
+		t.Run(r.name, func(t *testing.T) {
+			status := func() int {
+				if r.streamed {
+					return c.streamed(t, r.path)
+				}
+				return c.get(t, r.path)
+			}
+			if got := status(); got != http.StatusNotFound {
+				t.Fatalf("locked: status %d, want 404", got)
+			}
+			c.gate.open(time.Now())
+			if got := status(); got != http.StatusOK {
+				t.Fatalf("unlocked: status %d, want 200", got)
+			}
+			c.gate.close()
+			if got := status(); got != http.StatusNotFound {
+				t.Fatalf("locked again: status %d, want 404 at once", got)
+			}
+		})
+	}
+}
+
+func TestUncoveredMediaIsServedWhetherTheGateIsLockedOrNot(t *testing.T) {
+	c := newCoveredMedia(t)
+	for _, unlocked := range []bool{false, true} {
+		if unlocked {
+			c.gate.open(time.Now())
+		}
+		for _, url := range []string{fmt.Sprintf("/thumb/%d/256?v=1", c.openPhoto), fmt.Sprintf("/original/%d", c.openPhoto)} {
+			if got := c.get(t, url); got != http.StatusOK {
+				t.Errorf("%s with unlocked = %v: status %d, want 200", url, unlocked, got)
+			}
+		}
+	}
+}
+
+func TestMediaServiceWithoutAGateNeverServesCoveredMedia(t *testing.T) {
+	c := newCoveredMedia(t)
+	m := NewMediaService(c.st, c.m.cache, nil, nil) // no gate given: it is one that stays locked
+	rec := httptest.NewRecorder()
+	m.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/thumb/%d/256?v=1", c.photo), http.NoBody))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status %d, want 404", rec.Code)
+	}
+}
