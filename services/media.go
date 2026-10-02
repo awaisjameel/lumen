@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wailsapp/wails/v3/pkg/application"
+
 	"lumen/internal/core"
 	"lumen/internal/media"
 	"lumen/internal/store"
@@ -28,11 +30,26 @@ type MediaService struct {
 	store  *store.Store
 	cache  *media.Cache
 	stream *Streamer
+	views  viewFlusher // saves which thumbnails were shown, for the cache's size cap
 }
 
 // NewMediaService returns the media service. stream may be nil (no videos).
 func NewMediaService(st *store.Store, cache *media.Cache, stream *Streamer) *MediaService {
-	return &MediaService{store: st, cache: cache, stream: stream}
+	return &MediaService{store: st, cache: cache, stream: stream,
+		views: viewFlusher{cache: cache, sink: st, every: viewFlushEvery}}
+}
+
+// ServiceStartup starts saving thumbnail views (Wails calls it once the app runs).
+func (m *MediaService) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+	m.views.start(ctx)
+	return nil
+}
+
+// ServiceShutdown saves the views still in memory. Wails stops services in
+// reverse order, so this runs before the database closes.
+func (m *MediaService) ServiceShutdown() error {
+	m.views.stop()
+	return nil
 }
 
 // VideoBase is where videos stream from: the Streamer's address, which the
@@ -104,6 +121,7 @@ func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int
 			return
 		}
 	}
+	m.cache.Viewed(id)
 	serveCached(w, r, m.cache.Path(id, size))
 }
 
@@ -122,6 +140,7 @@ func (m *MediaService) serveSprite(w http.ResponseWriter, r *http.Request, id in
 			return
 		}
 	}
+	m.cache.Viewed(id)
 	serveCached(w, r, path)
 }
 

@@ -10,9 +10,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"lumen/internal/core"
+	"lumen/internal/index"
 	"lumen/internal/media"
 	"lumen/internal/store"
 	"lumen/internal/testenv"
@@ -168,5 +174,250 @@ func TestVideoMediaRoutes(t *testing.T) {
 	}
 	if r := get(fmt.Sprintf("%s/video/%d", base, id), "bytes=0-15", ""); r.status != http.StatusPartialContent {
 		t.Errorf("unblocked video: status %d, want 206", r.status)
+	}
+}
+
+// fakeDecoder makes thumbnails of fixed bytes, counting how often it is asked.
+type fakeDecoder struct {
+	media.Decoder
+	calls atomic.Int32
+}
+
+func (d *fakeDecoder) Thumbnail(context.Context, string, core.Kind, int) (media.Thumbs, error) {
+	d.calls.Add(1)
+	return media.Thumbs{Small: []byte("small thumbnail"), Large: []byte("large thumbnail, rebuilt")}, nil
+}
+
+// shownLibrary is n photos with a cached thumbnail pair each, served by a
+// MediaService whose view flusher writes through a counting sink.
+type shownLibrary struct {
+	st    *store.Store
+	cache *media.Cache
+	dec   *fakeDecoder
+	m     *MediaService
+	sink  *countingSink
+	ids   []int64
+}
+
+// countingSink counts the calls that reach the database.
+type countingSink struct {
+	media.ViewSink
+	calls atomic.Int32
+	mu    sync.Mutex // guards last
+	last  map[int64]int64
+}
+
+func (s *countingSink) TouchThumbs(ctx context.Context, views map[int64]int64) error {
+	s.calls.Add(1)
+	s.mu.Lock()
+	s.last = views
+	s.mu.Unlock()
+	return s.ViewSink.TouchThumbs(ctx, views)
+}
+
+// batch is the views of the latest call.
+func (s *countingSink) batch() map[int64]int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.last
+}
+
+func newShownLibrary(t *testing.T, n int) *shownLibrary {
+	t.Helper()
+	ctx := t.Context()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	src, err := st.AddSource(ctx, filepath.Join(dir, "photos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := make([]store.IngestItem, n)
+	for i := range items {
+		path := filepath.Join(dir, "photos", fmt.Sprintf("%d.jpg", i+1))
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("original"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		items[i] = store.IngestItem{SourceID: src.ID, Path: path, Size: 8, MTime: 1, Hash: []byte(path),
+			Kind: core.KindPhoto, Ext: ".jpg", TakenAt: 1_700_000_000, DateFrom: core.DateFromFile}
+	}
+	if _, err := st.Ingest(ctx, items); err != nil {
+		t.Fatal(err)
+	}
+	dec := &fakeDecoder{}
+	cache := media.NewCache(filepath.Join(dir, "thumbs"), dec)
+	lib := &shownLibrary{st: st, cache: cache, dec: dec}
+	var meta []store.MetadataResult
+	var thumbs []store.ThumbResult
+	for id := int64(1); id <= int64(n); id++ {
+		lib.ids = append(lib.ids, id)
+		meta = append(meta, store.MetadataResult{AssetID: id, Width: 4, Height: 3, Orientation: 1})
+		thumbs = append(thumbs, store.ThumbResult{AssetID: id})
+		if err := cache.Write(id, media.Thumbs{Small: []byte("small thumbnail"), Large: []byte("large thumbnail"),
+			Sprite: []byte("sprite")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SaveMetadata(ctx, "v", meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveThumbnails(ctx, "v", thumbs); err != nil {
+		t.Fatal(err)
+	}
+	lib.sink = &countingSink{ViewSink: st}
+	lib.m = NewMediaService(st, cache, nil)
+	lib.m.views.sink = lib.sink
+	return lib
+}
+
+func (l *shownLibrary) get(t *testing.T, url string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	l.m.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody))
+	return rec
+}
+
+func TestEvictedThumbnailIsRebuiltOnItsNextRequest(t *testing.T) {
+	l := newShownLibrary(t, 1)
+	if rec := l.get(t, "/thumb/1/1024?v=1"); rec.Code != http.StatusOK || rec.Body.String() != "large thumbnail" {
+		t.Fatalf("cached: status %d, body %q", rec.Code, rec.Body.String())
+	}
+	if l.dec.calls.Load() != 0 {
+		t.Fatal("a cached thumbnail was decoded")
+	}
+	l.cache.ViewsSaved(l.cache.PendingViews()) // the database has heard of the view: now evictable
+	if freed, err := l.cache.Evict(t.Context(), []int64{1}); err != nil || freed == 0 {
+		t.Fatalf("evict: freed %d, %v", freed, err)
+	}
+	before := l.cache.Bytes()
+	rec := l.get(t, "/thumb/1/1024?v=1")
+	if rec.Code != http.StatusOK || rec.Body.String() != "large thumbnail, rebuilt" {
+		t.Fatalf("after eviction: status %d, body %q", rec.Code, rec.Body.String())
+	}
+	if l.dec.calls.Load() != 1 {
+		t.Fatalf("%d rebuilds, want 1", l.dec.calls.Load())
+	}
+	if l.m.ThumbCacheBytes() <= before {
+		t.Fatalf("the rebuilt thumbnails were not counted: %d bytes, was %d", l.m.ThumbCacheBytes(), before)
+	}
+}
+
+func TestManyThumbnailRequestsMakeOneDatabaseWrite(t *testing.T) {
+	l := newShownLibrary(t, 20)
+	for range 5 { // the grid scrolls over the same photos again and again
+		for _, id := range l.ids {
+			if rec := l.get(t, fmt.Sprintf("/thumb/%d/256?v=1", id)); rec.Code != http.StatusOK {
+				t.Fatalf("thumbnail %d: status %d", id, rec.Code)
+			}
+		}
+	}
+	if rec := l.get(t, "/sprite/3?v=1"); rec.Code != http.StatusOK {
+		t.Fatalf("sprite: status %d", rec.Code)
+	}
+	if n := l.sink.calls.Load(); n != 0 {
+		t.Fatalf("%d database writes while 101 requests were served, want none", n)
+	}
+	if got := len(l.cache.PendingViews()); got != 20 {
+		t.Fatalf("%d assets waiting to be saved, want 20", got)
+	}
+
+	l.m.views.flush(t.Context())
+	if n := l.sink.calls.Load(); n != 1 {
+		t.Fatalf("%d database writes for the flush, want 1", n)
+	}
+	if got := len(l.sink.batch()); got != 20 {
+		t.Fatalf("the one write held %d assets, want 20", got)
+	}
+	if got := len(l.cache.PendingViews()); got != 0 {
+		t.Fatalf("%d views still waiting after the write", got)
+	}
+	l.m.views.flush(t.Context())
+	if n := l.sink.calls.Load(); n != 1 {
+		t.Fatalf("an empty flush wrote again (%d calls)", n)
+	}
+}
+
+func TestViewsAreSavedOnATimerWithoutRewritingWhenNothingWasShown(t *testing.T) {
+	l := newShownLibrary(t, 3)
+	l.m.views.every = 10 * time.Millisecond
+	check(t, l.m.ServiceStartup(t.Context(), application.ServiceOptions{}))
+	defer func() { check(t, l.m.ServiceShutdown()) }()
+	if rec := l.get(t, "/thumb/1/256?v=1"); rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for l.sink.calls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(60 * time.Millisecond) // several more ticks, with nothing shown
+	if n := l.sink.calls.Load(); n != 1 {
+		t.Fatalf("%d writes, want 1", n)
+	}
+}
+
+func TestShutdownSavesTheViewsStillInMemory(t *testing.T) {
+	l := newShownLibrary(t, 3)
+	check(t, l.m.ServiceStartup(t.Context(), application.ServiceOptions{})) // the 30 s timer never fires here
+	if rec := l.get(t, "/thumb/2/256?v=1"); rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if n := l.sink.calls.Load(); n != 0 {
+		t.Fatalf("%d writes before shutdown, want none", n)
+	}
+	check(t, l.m.ServiceShutdown())
+	if n := l.sink.calls.Load(); n != 1 {
+		t.Fatalf("shutdown made %d writes, want 1", n)
+	}
+	if got := l.sink.batch(); len(got) != 1 || got[2] == 0 {
+		t.Fatalf("shutdown saved %v, want asset 2's view", got)
+	}
+}
+
+func TestThumbCacheCapSettingIsStoredClampedAndReachesTheCache(t *testing.T) {
+	ctx := t.Context()
+	l := newShownLibrary(t, 1)
+	ix := index.New(l.st, core.PathsIn(t.TempDir()), l.cache, index.Models{}, quietEvents{})
+	s := NewLibraryService(l.st, ix)
+	if got, err := s.Settings(ctx); err != nil || got.ThumbCacheMB != 2048 {
+		t.Fatalf("default cap = %d MB (%v), want 2048", got.ThumbCacheMB, err)
+	}
+	for _, tc := range []struct{ set, want int }{{4096, 4096}, {10, core.ThumbCacheMinMB}, {1 << 30, core.ThumbCacheMaxMB}} {
+		check(t, s.SetThumbCacheMB(ctx, tc.set))
+		got, err := s.Settings(ctx)
+		if err != nil || got.ThumbCacheMB != tc.want {
+			t.Errorf("set %d: settings show %d MB (%v), want %d", tc.set, got.ThumbCacheMB, err, tc.want)
+		}
+		if l.cache.Cap() != int64(tc.want)<<20 {
+			t.Errorf("set %d: cache cap = %d bytes, want %d MB", tc.set, l.cache.Cap(), tc.want)
+		}
+	}
+	// Without an indexer (as in these tests) the setting is still stored.
+	check(t, NewLibraryService(l.st, nil).SetThumbCacheMB(ctx, 512))
+}
+
+func TestThumbCacheBytesIsTheCachesRunningTotal(t *testing.T) {
+	l := newShownLibrary(t, 2)
+	want := int64(2 * (len("small thumbnail") + len("large thumbnail") + len("sprite")))
+	if got := l.m.ThumbCacheBytes(); got != want {
+		t.Fatalf("ThumbCacheBytes = %d, want %d", got, want)
+	}
+}
+
+// quietEvents is an indexer's event sink that ignores everything.
+type quietEvents struct{}
+
+func (quietEvents) Progress(core.Progress)      {}
+func (quietEvents) LibraryChanged(core.Changes) {}
+
+func check(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }

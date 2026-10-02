@@ -351,6 +351,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	}
 	ix.run(func() { ix.reportLoop(ctx) })
 	ix.run(func() { ix.powerLoop(ctx) })
+	ix.run(func() { ix.thumbCacheLoop(ctx) })
 	ix.run(func() { ix.fsLoop(ctx, ix.flushFSChanges) })
 }
 
