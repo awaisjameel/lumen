@@ -5,6 +5,7 @@ package signin
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -87,16 +88,23 @@ func TestTheCompletionHandlerAnswersTheInterfacesWindowsAsksFor(t *testing.T) {
 
 // fakeOp is an IAsyncOperation written in Go, so that await can be tested
 // without Windows Hello. Like the real one it calls the completion handler
-// from another thread, or at once if it is already done.
+// from another thread, or at once if it is already done, holds a reference to
+// the handler from put_Completed, and lets that go when the operation itself
+// is released.
 type fakeOp struct {
-	vtbl    *[9]uintptr
-	info    fakeInfo
-	mu      sync.Mutex
-	handler unsafe.Pointer // guarded by mu
-	when    func(op *fakeOp)
-	result  int32
-	failure uintptr // GetResults' HRESULT
-	stopped atomic.Bool
+	vtbl *[9]uintptr
+	info fakeInfo
+	refs atomic.Int32
+	mu   sync.Mutex
+	// handler is the address Windows was given, held as a number: the garbage
+	// collector cannot see through it, any more than through the real
+	// operation's native pointer.
+	handler  uintptr // guarded by mu
+	when     func(op *fakeOp)
+	result   int32
+	failure  uintptr // GetResults' HRESULT
+	stopped  atomic.Bool
+	stubborn bool // Cancel is noted but the operation never reports back
 }
 
 type fakeInfo struct {
@@ -104,21 +112,43 @@ type fakeInfo struct {
 	op   *fakeOp
 }
 
+// handlerObject is the handler as a pointer, only for as long as a call
+// needs it.
+func (o *fakeOp) handlerObject() unsafe.Pointer {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return *(*unsafe.Pointer)(unsafe.Pointer(&o.handler))
+}
+
 // complete tells the handler the operation has ended.
 func (o *fakeOp) complete() {
-	o.mu.Lock()
-	h := o.handler
-	o.mu.Unlock()
-	vcall(h, 3, uintptr(unsafe.Pointer(o)), 1)
+	vcall(o.handlerObject(), 3, uintptr(unsafe.Pointer(o)), 1)
 }
 
 var fakeVtables = sync.OnceValues(func() (*[9]uintptr, *[11]uintptr) {
 	ok := func(...unsafe.Pointer) uintptr { return 0 }
-	addRef := syscall.NewCallback(func(unsafe.Pointer) uintptr { return 2 })
-	rel := syscall.NewCallback(func(unsafe.Pointer) uintptr { return 1 })
+	addRef := syscall.NewCallback(func(this unsafe.Pointer) uintptr { return uintptr(uint32((*fakeOp)(this).refs.Add(1))) })
+	rel := syscall.NewCallback(func(this unsafe.Pointer) uintptr {
+		o := (*fakeOp)(this)
+		n := o.refs.Add(-1)
+		if n == 0 {
+			if h := o.handlerObject(); h != nil {
+				vcall(h, slotRelease) // as a real operation does when it goes
+			}
+		}
+		return uintptr(uint32(n))
+	})
+	// The info interface counts on the operation it belongs to.
+	infoAddRef := syscall.NewCallback(func(this unsafe.Pointer) uintptr {
+		return uintptr(uint32((*fakeInfo)(this).op.refs.Add(1)))
+	})
+	infoRelease := syscall.NewCallback(func(this unsafe.Pointer) uintptr {
+		return vcall(unsafe.Pointer((*fakeInfo)(this).op), slotRelease)
+	})
 	op := &[9]uintptr{
 		syscall.NewCallback(func(this, riid, out unsafe.Pointer) uintptr {
 			o := (*fakeOp)(this)
+			o.refs.Add(1)
 			if *(*windows.GUID)(riid) == iidIAsyncInfo {
 				*(*unsafe.Pointer)(out) = unsafe.Pointer(&o.info)
 				return 0
@@ -134,7 +164,7 @@ var fakeVtables = sync.OnceValues(func() (*[9]uintptr, *[11]uintptr) {
 			o := (*fakeOp)(this)
 			vcall(handler, 1) // AddRef, as a real operation does
 			o.mu.Lock()
-			o.handler = handler
+			o.handler = uintptr(handler)
 			o.mu.Unlock()
 			o.when(o)
 			return 0
@@ -148,7 +178,7 @@ var fakeVtables = sync.OnceValues(func() (*[9]uintptr, *[11]uintptr) {
 	}
 	info := &[11]uintptr{
 		syscall.NewCallback(func(this, _, out unsafe.Pointer) uintptr { *(*unsafe.Pointer)(out) = this; return 0 }),
-		addRef, rel,
+		infoAddRef, infoRelease,
 		syscall.NewCallback(func(unsafe.Pointer) uintptr { return ok() }),
 		syscall.NewCallback(func(unsafe.Pointer) uintptr { return ok() }),
 		syscall.NewCallback(func(unsafe.Pointer) uintptr { return ok() }),
@@ -158,7 +188,9 @@ var fakeVtables = sync.OnceValues(func() (*[9]uintptr, *[11]uintptr) {
 		syscall.NewCallback(func(this unsafe.Pointer) uintptr { // Cancel
 			o := (*fakeInfo)(this).op
 			o.stopped.Store(true)
-			go o.complete()
+			if !o.stubborn {
+				go o.complete()
+			}
 			return 0
 		}),
 		syscall.NewCallback(func(unsafe.Pointer) uintptr { return ok() }), // Close
@@ -169,6 +201,7 @@ var fakeVtables = sync.OnceValues(func() (*[9]uintptr, *[11]uintptr) {
 func newFakeOp(when func(*fakeOp)) *fakeOp {
 	opTable, infoTable := fakeVtables()
 	o := onHeap(&fakeOp{vtbl: opTable, when: when})
+	o.refs.Store(1)
 	o.info = fakeInfo{vtbl: infoTable, op: o}
 	return o
 }
@@ -188,6 +221,7 @@ func TestAwaitReturnsWhenTheOperationCompletes(t *testing.T) {
 			if hr := vcall(unsafe.Pointer(o), slotGetResults, uintptr(unsafe.Pointer(&got))); hr != 0 || got != 6 {
 				t.Fatalf("result %d, %#x", got, hr)
 			}
+			release(unsafe.Pointer(o))
 		})
 	}
 }
@@ -207,6 +241,100 @@ func TestAwaitCancelsTheOperationWhenTheContextEnds(t *testing.T) {
 	if took := time.Since(start); took > 3*time.Second {
 		t.Fatalf("await took %v to notice the context", took)
 	}
+	release(unsafe.Pointer(o))
+}
+
+// liveHandler finds the registered handler at addr, if there is one. The
+// handler is found by its address because that is all Windows holds.
+func liveHandler(addr uintptr) *handler {
+	live.Lock()
+	defer live.Unlock()
+	for h := range live.handlers {
+		if uintptr(unsafe.Pointer(h)) == addr {
+			return h
+		}
+	}
+	return nil
+}
+
+// watchCollection reports, on the returned channel, when the garbage
+// collector frees the handler at addr. It drops its own reference at once,
+// so that only live (or nothing) is keeping the handler.
+func watchCollection(t *testing.T, addr uintptr) <-chan struct{} {
+	t.Helper()
+	h := liveHandler(addr)
+	if h == nil {
+		t.Fatal("the handler is not registered while the operation holds it")
+	}
+	freed := make(chan struct{})
+	runtime.SetFinalizer(h, func(*handler) { close(freed) })
+	return freed
+}
+
+// collectedWithin runs the collector until freed closes or d passes.
+func collectedWithin(freed <-chan struct{}, d time.Duration) bool {
+	deadline := time.After(d)
+	for {
+		runtime.GC()
+		select {
+		case <-freed:
+			return true
+		case <-deadline:
+			return false
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestTheCompletionHandlerSurvivesTheCollectorUntilTheOperationIsReleased(t *testing.T) {
+	o := newFakeOp(func(o *fakeOp) { o.complete() })
+	if err := awaitSoon(t.Context(), t, o); err != nil {
+		t.Fatalf("await: %v", err)
+	}
+	// await is over, and only the operation (native memory, as far as the
+	// collector can tell) refers to the handler, as it does between await and
+	// the caller's Release.
+	o.mu.Lock()
+	addr := o.handler
+	o.mu.Unlock()
+	freed := watchCollection(t, addr)
+	if collectedWithin(freed, 300*time.Millisecond) {
+		t.Fatal("the handler was freed while the operation still held it")
+	}
+	if h := liveHandler(addr); h == nil || h.refs.Load() != 1 {
+		t.Fatal("the handler should be live with just the operation's reference")
+	}
+
+	release(unsafe.Pointer(o)) // the operation lets go of the handler
+	if liveHandler(addr) != nil {
+		t.Fatal("the handler is still registered after its last reference went")
+	}
+	if !collectedWithin(freed, 5*time.Second) {
+		t.Fatal("the handler was never freed after its last reference went")
+	}
+}
+
+func TestACancelledOperationThatNeverReportsBackKeepsItsHandler(t *testing.T) {
+	o := newFakeOp(func(*fakeOp) {})
+	o.stubborn = true
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if err := awaitSoon(ctx, t, o); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("await: %v, want the context's error", err)
+	}
+	o.mu.Lock()
+	addr := o.handler
+	o.mu.Unlock()
+	freed := watchCollection(t, addr)
+	if collectedWithin(freed, 300*time.Millisecond) {
+		t.Fatal("the handler was freed while Windows could still call it")
+	}
+	// It reports back late, as the Hello dialog does when it goes away.
+	o.complete()
+	release(unsafe.Pointer(o))
+	if !collectedWithin(freed, 5*time.Second) {
+		t.Fatal("the handler was never freed after the operation let go")
+	}
 }
 
 func TestOperationResultReportsAFailedOperation(t *testing.T) {
@@ -219,22 +347,31 @@ func TestOperationResultReportsAFailedOperation(t *testing.T) {
 	}
 }
 
-func TestACredentialBufferGivesBackTheUserAndPassword(t *testing.T) {
-	user, _ := windows.UTF16PtrFromString(`LUMENTEST\someone`)
-	password, _ := windows.UTF16PtrFromString("not-a-real-password")
+// packCredentials builds an authentication buffer the way the sign-in
+// dialog's providers do, with flags as CredPackAuthenticationBufferW takes
+// them.
+func packCredentials(t *testing.T, flags uintptr, userName, password string) []byte {
+	t.Helper()
+	user, _ := windows.UTF16PtrFromString(userName)
+	secret, _ := windows.UTF16PtrFromString(password)
 	proc := windows.NewLazySystemDLL("credui.dll").NewProc("CredPackAuthenticationBufferW")
 	var size uint32
-	_, _, _ = proc.Call(0, uintptr(unsafe.Pointer(user)), uintptr(unsafe.Pointer(password)), 0, uintptr(unsafe.Pointer(&size)))
+	_, _, _ = proc.Call(flags, uintptr(unsafe.Pointer(user)), uintptr(unsafe.Pointer(secret)), 0, uintptr(unsafe.Pointer(&size)))
 	if size == 0 {
 		t.Fatal("no size for the packed credentials")
 	}
 	packed := make([]byte, size)
-	if ok, _, err := proc.Call(0, uintptr(unsafe.Pointer(user)), uintptr(unsafe.Pointer(password)),
+	if ok, _, err := proc.Call(flags, uintptr(unsafe.Pointer(user)), uintptr(unsafe.Pointer(secret)),
 		uintptr(unsafe.Pointer(&packed[0])), uintptr(unsafe.Pointer(&size))); ok == 0 {
 		t.Fatalf("pack: %v", err)
 	}
+	return packed
+}
 
-	cred, err := unpackCredentials(unsafe.Pointer(&packed[0]), size)
+func TestACredentialBufferGivesBackTheUserAndPassword(t *testing.T) {
+	packed := packCredentials(t, 0, `LUMENTEST\someone`, "not-a-real-password")
+
+	cred, err := unpackCredentials(unsafe.Pointer(&packed[0]), uint32(len(packed)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,6 +389,18 @@ func TestACredentialBufferGivesBackTheUserAndPassword(t *testing.T) {
 	}
 }
 
+func TestAProtectedCredentialBufferGivesBackThePlainPassword(t *testing.T) {
+	packed := packCredentials(t, credPackProtectedCredentials, `LUMENTEST\someone`, "not-a-real-password")
+
+	cred, err := unpackCredentials(unsafe.Pointer(&packed[0]), uint32(len(packed)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wipe(cred.password)
+	if got := windows.UTF16ToString(cred.password); got != "not-a-real-password" {
+		t.Fatalf("password = %q, want the plain password LogonUserW can check", got)
+	}
+}
 func TestUnreadableCredentialsAreNotAVerifiedUser(t *testing.T) {
 	junk := []byte("this is not an authentication buffer")
 	if _, err := unpackCredentials(unsafe.Pointer(&junk[0]), uint32(len(junk))); !errors.Is(err, ErrNotVerified) {

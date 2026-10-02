@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -159,13 +158,50 @@ func initCOM() (func(), error) {
 // handler is a COM object implementing IAsyncOperationCompletedHandler<T> for
 // one operation: when the operation ends it signals event. COM reads the
 // first word as the vtable, so vtbl must stay first. The Go heap does not
-// move objects, and await keeps the struct reachable for as long as Windows
-// may call it.
+// move objects, but a pointer held only by Windows does not keep one alive:
+// the handler is in live from creation until its last reference is released.
 type handler struct {
 	vtbl  *[4]uintptr
 	iid   windows.GUID // IAsyncOperationCompletedHandler<T> for this T
 	refs  atomic.Int32
 	event windows.Handle
+}
+
+// live holds every handler that has references left, so the garbage
+// collector cannot free one that Windows may still call. A handler leaves
+// when its count reaches zero, which for a real operation is when the
+// operation itself is released, after await has returned; a cancelled
+// operation that never reports back keeps its handler until it is released.
+// It is native-library state: COM's view of the handler outlives any Go
+// scope.
+var live struct {
+	sync.Mutex
+	handlers map[*handler]struct{} // guarded by the mutex
+}
+
+// newHandler makes a handler holding one reference, which belongs to the
+// caller, and registers it in live.
+func newHandler(iid windows.GUID, event windows.Handle) *handler {
+	h := &handler{vtbl: handlerVtbl(), iid: iid, event: event}
+	h.refs.Store(1)
+	live.Lock()
+	defer live.Unlock()
+	if live.handlers == nil {
+		live.handlers = make(map[*handler]struct{})
+	}
+	live.handlers[h] = struct{}{}
+	return h
+}
+
+// unref drops one reference and, at the last one, lets go of the handler.
+func (h *handler) unref() int32 {
+	n := h.refs.Add(-1)
+	if n == 0 {
+		live.Lock()
+		delete(live.handlers, h)
+		live.Unlock()
+	}
+	return n
 }
 
 // handlerVtbl is built once: syscall.NewCallback allocations are never
@@ -195,24 +231,13 @@ func handlerQueryInterface(this, riid, out unsafe.Pointer) uintptr {
 
 func handlerAddRef(this unsafe.Pointer) uintptr { return uintptr(uint32((*handler)(this).refs.Add(1))) }
 
-func handlerRelease(this unsafe.Pointer) uintptr {
-	return uintptr(uint32((*handler)(this).refs.Add(-1)))
-}
+func handlerRelease(this unsafe.Pointer) uintptr { return uintptr(uint32((*handler)(this).unref())) }
 
 // handlerInvoke runs when the operation ends, however it ends (completed,
 // cancelled or failed): GetResults reports which, so the status is not read.
 func handlerInvoke(this, _ unsafe.Pointer, _ uintptr) uintptr {
 	_ = windows.SetEvent((*handler)(this).event)
 	return 0
-}
-
-// abandoned keeps handlers that Windows may still call alive for the rest of
-// the process, for an operation that never reported back after being
-// cancelled. A few dozen bytes is the price of never freeing memory COM may
-// still use.
-var abandoned struct {
-	sync.Mutex
-	handlers []*handler // guarded by the mutex
 }
 
 // waitHandles blocks until one of handles is signalled (its index), or the
@@ -271,8 +296,10 @@ func await(ctx context.Context, op unsafe.Pointer, handlerIID windows.GUID) erro
 		_ = windows.CloseHandle(done)
 		return fmt.Errorf("create event: %w", err)
 	}
-	h := &handler{vtbl: handlerVtbl(), iid: handlerIID, event: done}
-	h.refs.Store(1)
+	h := newHandler(handlerIID, done)
+	// Our reference goes on every path. The operation holds its own until it
+	// is released, which keeps h in live for as long as Windows may call it.
+	defer h.unref()
 	if err := hrCheck("watch the operation", vcall(op, slotPutCompleted, uintptr(unsafe.Pointer(h)))); err != nil {
 		_ = windows.CloseHandle(done)
 		_ = windows.CloseHandle(stopped)
@@ -294,7 +321,6 @@ func await(ctx context.Context, op unsafe.Pointer, handlerIID windows.GUID) erro
 	i, err := waitHandles([]windows.Handle{done, stopped}, infinite)
 	if err == nil && i == 0 {
 		_ = windows.CloseHandle(done)
-		runtime.KeepAlive(h)
 		return nil
 	}
 	if err == nil {
@@ -303,14 +329,10 @@ func await(ctx context.Context, op unsafe.Pointer, handlerIID windows.GUID) erro
 	cancelOperation(op)
 	if j, werr := waitHandles([]windows.Handle{done}, cancelSettleMS); werr == nil && j == 0 {
 		_ = windows.CloseHandle(done)
-		runtime.KeepAlive(h)
 		return err
 	}
-	// Windows has not reported back yet, so it may still signal done and call h
-	// later: both are kept.
-	abandoned.Lock()
-	abandoned.handlers = append(abandoned.handlers, h)
-	abandoned.Unlock()
+	// Windows has not reported back yet, so it may still signal done: that
+	// handle stays open. The operation's reference keeps h in live.
 	return err
 }
 

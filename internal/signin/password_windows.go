@@ -30,6 +30,11 @@ const (
 	logon32LogonInteractive       = 2
 	logon32ProviderDefault        = 0
 
+	// credPackProtectedCredentials: the buffer may hold a password protected
+	// for this logon session, as the sign-in dialog returns one, and unpacking
+	// decrypts it. A buffer that was not protected unpacks the same.
+	credPackProtectedCredentials = 0x1
+
 	errorInsufficientBuffer = 122
 	errorCancelled          = 1223
 	errorLogonFailure       = 1326 // a wrong user name or password
@@ -133,7 +138,7 @@ func promptCredentials(owner uintptr, reason string, authError uint32) (credenti
 func unpackCredentials(buf unsafe.Pointer, size uint32) (credentials, error) {
 	var userLen, domainLen, passwordLen uint32
 	// The first call, with no room, says how much room is needed.
-	ok, _, err := procCredUnPackAuthenticationBufferW.Call(0, uintptr(buf), uintptr(size), 0, uintptr(unsafe.Pointer(&userLen)),
+	ok, _, err := procCredUnPackAuthenticationBufferW.Call(credPackProtectedCredentials, uintptr(buf), uintptr(size), 0, uintptr(unsafe.Pointer(&userLen)),
 		0, uintptr(unsafe.Pointer(&domainLen)), 0, uintptr(unsafe.Pointer(&passwordLen)))
 	if ok != 0 || !errors.Is(err, syscall.Errno(errorInsufficientBuffer)) {
 		return credentials{}, fmt.Errorf("read the credentials: %w", errors.Join(ErrNotVerified, err))
@@ -141,7 +146,7 @@ func unpackCredentials(buf unsafe.Pointer, size uint32) (credentials, error) {
 	user := make([]uint16, max(userLen, 1))
 	domain := make([]uint16, max(domainLen, 1))
 	password := make([]uint16, max(passwordLen, 1))
-	ok, _, err = procCredUnPackAuthenticationBufferW.Call(0, uintptr(buf), uintptr(size),
+	ok, _, err = procCredUnPackAuthenticationBufferW.Call(credPackProtectedCredentials, uintptr(buf), uintptr(size),
 		uintptr(unsafe.Pointer(&user[0])), uintptr(unsafe.Pointer(&userLen)),
 		uintptr(unsafe.Pointer(&domain[0])), uintptr(unsafe.Pointer(&domainLen)),
 		uintptr(unsafe.Pointer(&password[0])), uintptr(unsafe.Pointer(&passwordLen)))
