@@ -339,12 +339,9 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 	if err != nil {
 		return core.Settings{}, err
 	}
-	cacheMB, err := s.store.Int(ctx, core.SettingThumbCacheMB, core.ThumbCacheDefaultMB)
+	cacheMB, err := s.store.ThumbCacheMB(ctx)
 	if err != nil {
 		return core.Settings{}, err
-	}
-	if cacheMB < core.ThumbCacheMinMB || cacheMB > core.ThumbCacheMaxMB {
-		cacheMB = core.ThumbCacheDefaultMB
 	}
 	ocr, err := s.store.Bool(ctx, core.SettingOCR, false)
 	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf, EventGapHours: gap,
