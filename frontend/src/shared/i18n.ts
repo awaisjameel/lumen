@@ -18,6 +18,7 @@ const en = {
   'nav.events': 'Events',
   'nav.albums': 'Albums',
   'nav.duplicates': 'Duplicates',
+  'nav.trash': 'Trash',
   'nav.settings': 'Settings',
 
   'blocked.title': 'Blocked',
@@ -32,7 +33,7 @@ const en = {
   'blocked.labelPhotos': 'Label and photos',
   'blocked.photosOnly': 'This hides the photo or folder and its media.',
   'blocked.createPINHint':
-    'Create a {pinMin}–{pinMax} digit PIN to protect the Blocked screen. Keep it safe: PIN reset is not available yet.',
+    'Create a {pinMin}–{pinMax} digit PIN to protect the Blocked screen. If you forget it, you can choose a new one by signing in to Windows.',
   'blocked.enterPINHint': 'Enter your PIN to open the Blocked screen.',
   'blocked.newPIN': 'New PIN',
   'blocked.confirmPIN': 'Confirm PIN',
@@ -347,6 +348,224 @@ const en = {
   'error.blocksLocked': 'Enter your PIN on the Blocked screen first.',
   'error.undoExpired': 'It’s too late to undo that block. Unblock it on the Blocked screen instead.',
   'error.invalidBlock': 'That can’t be blocked.',
+  'error.deleteFailed': 'Lumen couldn’t use the Recycle Bin, so it left the remaining files where they are.',
+
+  // Things and Events: rename and pin.
+  'things.pin': 'Pin',
+  'things.unpin': 'Unpin',
+  'things.pinNamed': 'Pin “{name}”',
+  'things.unpinNamed': 'Unpin “{name}”',
+  'things.pinned': 'Pinned',
+  'things.pinnedHeading': 'Pinned',
+  'things.rename': 'Rename',
+  'things.renameNamed': 'Rename “{name}”',
+  'things.name': 'Thing name',
+  'things.save': 'Save',
+  'things.resetName': 'Reset name',
+  'events.pin': 'Pin',
+  'events.unpin': 'Unpin',
+  'events.pinNamed': 'Pin {name}',
+  'events.unpinNamed': 'Unpin {name}',
+  'events.pinned': 'Pinned',
+
+  // Trash.
+  'trash.move': 'Move to Trash',
+  'trash.moved': { one: 'Moved 1 item to the Trash.', other: 'Moved {n} items to the Trash.' },
+  'trash.undo': 'Undo',
+  'trash.restore': 'Restore',
+  'trash.restoreAll': 'Restore all',
+  'trash.deleteFromDisk': 'Delete from disk…',
+  'trash.deleteAll': 'Delete all from disk…',
+  'trash.summary': {
+    one: '1 item is in the Trash. Nothing is removed from your disk until you delete it from here.',
+    other: '{n} items are in the Trash. Nothing is removed from your disk until you delete them from here.',
+  },
+  'trash.confirmTitle': 'Delete from disk?',
+  'trash.confirmFiles': {
+    one: '1 file will be moved to the Windows Recycle Bin. You can still restore it from there.',
+    other: '{n} files will be moved to the Windows Recycle Bin. You can still restore them from there.',
+  },
+  'trash.confirmOk': 'Move to Recycle Bin',
+  'trash.kept': {
+    one: '1 file couldn’t be moved to the Recycle Bin, so it was left where it is.',
+    other: '{n} files couldn’t be moved to the Recycle Bin, so they were left where they are.',
+  },
+  'trash.empty': 'The Trash is empty',
+  'trash.emptyHint':
+    'Photos and videos you move to the Trash wait here until you restore them or delete them from disk.',
+
+  // Thumbnail cache.
+  'settings.cache': 'Thumbnail cache',
+  'settings.cacheHint':
+    'Small previews Lumen keeps so browsing stays quick. Past the size below, the ones you haven’t looked at for longest are removed, and made again when you need them.',
+  'settings.cacheLimit': 'Keep at most (GB)',
+  'settings.cacheUsed': 'In use now: {size}',
+
+  // Text in photos (OCR).
+  'settings.ocr': 'Find text in screenshots and documents',
+  'settings.ocrHint':
+    'Off by default. Lumen reads the words in photos it takes for screenshots or documents, so you can search for them. It works on the processor, only on those photos, and waits for mains power like the rest of the AI.',
+  'status.reading': 'Reading text in your photos… {left} left',
+  'status.readingPhase': 'Reading text in your photos',
+
+  // Forgotten PIN.
+  'blocked.forgotPIN': 'Forgot PIN?',
+  'blocked.resetHint':
+    'Choose a new PIN. Windows will then ask you to sign in, with Windows Hello or your PC password, to confirm it is you. Your blocks are kept.',
+  'blocked.reset': 'Reset with Windows sign-in',
+  'blocked.resetCancel': 'Cancel',
+  'blocked.pinChanged': 'Your PIN was changed. Enter the new PIN to open the Blocked screen.',
+  'error.signinFailed': 'Windows could not confirm it is you, so the PIN was not changed.',
+  'error.signinUnavailable': 'This PC has no Windows sign-in that Lumen can use, so the PIN cannot be reset.',
+
+  // Event blocks.
+  'blocked.blockEvent': 'Block this event',
+
+  // Face blocks.
+  'blocked.blockFace': 'Block this face…',
+  'blocked.thisFace': 'this face',
+  'blocked.faceScope': 'Which faces?',
+  'blocked.faceOnly': 'Only this face',
+  'blocked.faceLookalikes': 'This face and look-alikes',
+  'blocked.faceLookalikesHint':
+    'Look-alikes are other faces that look like this one, in your photos now and in photos you add later.',
+
+  // Blocked: covered photos.
+  'blocked.kindFace': 'Faces',
+  'covered.show': 'Show photos',
+  'covered.title': 'Photos covered by “{name}”',
+  'covered.back': 'Back to blocks',
+  'covered.count': { one: '1 photo', other: '{n} photos' },
+  'covered.loading': 'Loading photos…',
+  'covered.empty': 'This block covers no photos at the moment.',
+  'covered.stillShown': 'This block hides only its label, so these photos are still shown in your library.',
+  'covered.hiddenBy': 'Also hidden by {names}',
+  'covered.openPhoto': 'Open photo',
+  'covered.openVideo': 'Open video',
+  'covered.trashTitle': 'Move to Trash?',
+  'covered.trashText': 'Photos in the Trash can be seen without your PIN until you delete them from disk.',
+
+  // Duplicates: best copy.
+  'duplicates.bestHint':
+    'Lumen suggests the copy to keep: the sharpest, most complete original. Choose another if you prefer. Nothing changes until you review and confirm.',
+  'duplicates.keep': 'Keep',
+  'duplicates.keepNamed': 'Keep “{name}”',
+  'duplicates.suggested': 'Suggested',
+  'duplicates.review': 'Review…',
+  'duplicates.reviewNamed': 'Review the copies of “{name}”',
+  'duplicates.reviewTitle': 'Review these copies',
+  'duplicates.reviewKeeps': 'Lumen keeps',
+  'duplicates.reviewTrash': {
+    one: 'This photo moves to Lumen’s Trash. Its file stays on your disk, and you can restore it from the Trash.',
+    other:
+      'These {n} photos move to Lumen’s Trash. Their files stay on your disk, and you can restore them from the Trash.',
+  },
+  'duplicates.reviewRecycle': {
+    one: 'This file moves to the Windows Recycle Bin. You can still restore it from there.',
+    other: 'These {n} files move to the Windows Recycle Bin. You can still restore them from there.',
+  },
+  'duplicates.reviewOkTrash': 'Move to Trash',
+  'duplicates.reviewOkRecycle': 'Move to Recycle Bin',
+
+  // Organise on disk.
+  'organise.link': 'Organise files on disk…',
+  'organise.title': 'Organise files on disk',
+  'organise.back': 'Back to Settings',
+  'organise.intro':
+    'Move your photos into folders by date, event, place or camera. Each file stays inside the folder it is in now, nothing is ever overwritten, and you can undo a whole run afterwards.',
+  'organise.scheme': 'Folder scheme',
+  'organise.schemeHint': 'A slash starts a new folder. Each file keeps its own extension, so leave it out.',
+  'organise.tokens': 'Add to the scheme',
+  'organise.token.Year': 'The year, like 2024',
+  'organise.token.Month': 'The month as two digits, like 08',
+  'organise.token.MonthName': 'The month’s name, like August',
+  'organise.token.Day': 'The day as two digits, like 05',
+  'organise.token.Event': 'The name of the event the photo is in',
+  'organise.token.Place': 'The nearest city, if the photo has a location',
+  'organise.token.Camera': 'The camera model',
+  'organise.token.Name': 'The file’s own name without its extension',
+  'organise.token.Ext': 'The file’s extension in lower case, like jpg',
+  'organise.example': 'For example: {path}',
+  'organise.exampleNone': 'Add some photos to see an example.',
+  'organise.unknownToken': '“{token}” is not one of the tokens above.',
+  'organise.source': 'Which photos',
+  'organise.allSources': 'Every folder in the library',
+  'organise.preview': 'Preview the moves',
+  'organise.previewing': 'Working out where each file would go…',
+  'organise.willMove': { one: '1 file will move.', other: '{n} files will move.' },
+  'organise.inPlace': {
+    one: '1 file is already where the scheme puts it.',
+    other: '{n} files are already where the scheme puts them.',
+  },
+  'organise.renamed': {
+    one: '1 file gets a number added to its name because another file has the same name there.',
+    other: '{n} files get a number added to their names because other files have the same names there.',
+  },
+  'organise.skipped': { one: '1 file will be left where it is.', other: '{n} files will be left where they are.' },
+  'organise.nothing': 'Nothing needs to move: every file is already where the scheme puts it.',
+  'organise.moves': 'Planned moves',
+  'organise.movesTo': 'moves to',
+  'organise.renamedTag': 'Renamed',
+  'organise.reason.missing': 'The file is not there any more.',
+  'organise.reason.not_visible': 'The photo is hidden, blocked or in the Trash.',
+  'organise.reason.blocked_folder': 'The new folder is blocked.',
+  'organise.reason.changed': 'The file has changed since it was last scanned.',
+  'organise.reason.taken': 'Something else is already at the new place.',
+  'organise.reason.too_long': 'The new path would be too long for Windows.',
+  'organise.reason.not_a_folder': 'A file, link or hidden folder is where the folder would go.',
+  'organise.reason.sidecar_taken':
+    'The photo moves, but its .xmp sidecar stays because something is already at its new name.',
+  'organise.sidecars': {
+    one: '1 sidecar file (.xmp) will move with its photo.',
+    other: '{n} sidecar files (.xmp) will move with their photos.',
+  },
+  'organise.runKept': {
+    one: '1 sidecar stayed behind',
+    other: '{n} sidecars stayed behind',
+  },
+  'organise.move': { one: 'Move 1 file…', other: 'Move {n} files…' },
+  'organise.confirmTitle': { one: 'Move 1 file?', other: 'Move {n} files?' },
+  'organise.confirmText':
+    'Each file stays inside its own folder and nothing is overwritten. Lumen pauses scanning while it moves them, and you can undo the whole run afterwards.',
+  'organise.confirmOk': 'Move files',
+  'organise.moving': 'Moving files: {done} of {total}',
+  'organise.puttingBack': 'Putting files back: {done} of {total}',
+  'organise.finished.done': 'Finished. Your files are in their new folders.',
+  'organise.finished.undone': 'Every file is back where it was.',
+  'organise.finished.undoneSome':
+    'Some files could not go back because something else is at their old place. Undo again once the way is clear.',
+  'organise.finished.failed': 'The run stopped part-way. You can resume it or undo it below.',
+  'organise.runs': 'Past runs',
+  'organise.noRuns': 'No files have been organised yet.',
+  'organise.runMoved': '{moved} of {total} files moved',
+  'organise.runState.running': 'Moving…',
+  'organise.runState.done': 'Done',
+  'organise.runState.undoing': 'Putting back…',
+  'organise.runState.undone': 'Undone',
+  'organise.runState.failed': 'Stopped part-way',
+  'organise.runState.planned': 'Previewed',
+  'organise.resume': 'Resume',
+  'organise.undo': 'Undo',
+  'organise.undoTitle': 'Put the files back?',
+  'organise.undoText':
+    'Lumen moves each file of this run back to where it was. It never replaces a file that has appeared there since, and removes only the folders it made, if they are empty.',
+  'organise.undoOk': 'Put files back',
+  'error.invalidTemplate':
+    'That folder scheme can’t be used. Use the tokens above, and leave out “..”, a leading slash and characters Windows doesn’t allow in names.',
+  'error.organiseBusy': 'Lumen is already moving files. Wait for it to finish.',
+  'error.organiseState': 'That run can’t be started or undone from where it is now.',
+
+  // XMP sidecars.
+  'error.xmpOff': 'XMP sidecar files are turned off. Turn them on in Settings first.',
+  'settings.xmpTitle': 'Sidecar files',
+  'settings.xmp': 'Write XMP sidecar files beside my photos',
+  'settings.xmpHint':
+    'Off by default. Lumen saves each photo’s Things, the people you have named in it and a favourite mark in a small file next to it (IMG_1.jpg.xmp), for other programs to read. It never changes your photos, never replaces a file another program made, and leaves out anything you have blocked.',
+  'settings.xmpExport': 'Export now',
+  'settings.xmpExporting': 'Exporting…',
+  'settings.xmpResult': 'Wrote {written}, {unchanged} already up to date, {skipped} left alone.',
+  'settings.xmpSkippedHint':
+    'Left alone means another program made the file, it was edited after Lumen wrote it, or Lumen couldn’t write it (a read-only folder or a locked file).',
 } as const satisfies Record<string, Message>
 
 export type MessageKey = keyof typeof en

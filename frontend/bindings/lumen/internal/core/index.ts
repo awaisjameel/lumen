@@ -10,6 +10,8 @@ export {
     DuplicateKind,
     Filter,
     Kind,
+    OrganiseMoveState,
+    OrganiseRunState,
     Playback,
     TagKind,
     TagSource
@@ -23,14 +25,21 @@ export type {
     AssetTag,
     Block,
     BlockChange,
+    BlockRef,
     Changes,
+    CoveredItem,
     DayBucket,
     DayItems,
+    DiskDeletion,
     DuplicateGroup,
     DuplicateItem,
     Event,
     Face,
     GridItem,
+    OrganiseMove,
+    OrganisePlan,
+    OrganiseProgress,
+    OrganiseRun,
     Person,
     Place,
     Progress,
@@ -39,5 +48,6 @@ export type {
     Source,
     Tag,
     Video,
-    View
+    View,
+    XMPExport
 } from "./models.js";

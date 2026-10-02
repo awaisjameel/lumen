@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 
+	"lumen/internal/fileops"
+	"lumen/internal/index"
 	"lumen/internal/search"
+	"lumen/internal/signin"
 	"lumen/internal/store"
 )
 
@@ -41,6 +44,15 @@ const (
 	CodeBlocksLocked    ErrorCode = "blocks_locked"    // the Blocked list needs the PIN first
 	CodeUndoExpired     ErrorCode = "undo_expired"     // too late to undo that block
 	CodeInvalidBlock    ErrorCode = "invalid_block"    // that can't be blocked
+	CodeDeleteFailed    ErrorCode = "delete_failed"    // the Recycle Bin could not be used
+	CodeXMPOff          ErrorCode = "xmp_off"          // XMP sidecars were asked for while the setting is off
+
+	CodeInvalidTemplate ErrorCode = "invalid_template" // the folder scheme to organise by cannot be used
+	CodeOrganiseBusy    ErrorCode = "organise_busy"    // files are already being moved
+	CodeOrganiseState   ErrorCode = "organise_state"   // that run cannot be started or undone now
+
+	CodeSigninFailed ErrorCode = "signin_failed"      // the Windows sign-in was cancelled, or wrong
+	CodeNoSignin     ErrorCode = "signin_unavailable" // this PC has no way to check a Windows sign-in
 )
 
 // ErrFolderNotFound means a folder to add does not exist (or is a file).
@@ -81,6 +93,13 @@ var errorCodes = []struct {
 	{store.ErrBlockChangeLocked, CodeBlocksLocked},
 	{ErrBlockUndoExpired, CodeUndoExpired},
 	{store.ErrInvalidBlock, CodeInvalidBlock},
+	{ErrDeleteFailed, CodeDeleteFailed},
+	{index.ErrXMPOff, CodeXMPOff},
+	{fileops.ErrInvalidTemplate, CodeInvalidTemplate},
+	{ErrOrganiseBusy, CodeOrganiseBusy},
+	{ErrOrganiseState, CodeOrganiseState},
+	{signin.ErrNotVerified, CodeSigninFailed},
+	{signin.ErrUnavailable, CodeNoSignin},
 }
 
 // Failure is what a failed call gives the UI besides its message (the

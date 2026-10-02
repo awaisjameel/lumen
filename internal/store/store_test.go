@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -66,7 +68,7 @@ func TestAssetDetailReadsPathsFromItsMetadataSnapshot(t *testing.T) {
 		}, false)
 	}))
 	check(t, conn.Close())
-	detail, err := st.AssetDetail(ctx, id)
+	detail, err := st.AssetDetail(ctx, id, false)
 	check(t, err)
 	check(t, changeErr)
 	if detail.TakenAt != before.TakenAt || len(detail.Paths) != 1 || detail.Paths[0] != before.Path {
@@ -128,9 +130,27 @@ func TestClusterDataReadsCorrectionsFromItsFacesSnapshot(t *testing.T) {
 	}
 }
 
+// latestMigration is the schema version a fully migrated store has: the
+// highest migration number (a number reserved for later work leaves a gap).
+func latestMigration(t *testing.T) int {
+	t.Helper()
+	names, err := fs.Glob(migrationFS, "migrations/*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := 0
+	for _, name := range names {
+		n, err := strconv.Atoi(strings.SplitN(filepath.Base(name), "_", 2)[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		latest = max(latest, n)
+	}
+	return latest
+}
+
 func TestReopenKeepsSchemaVersion(t *testing.T) {
-	names, _ := fs.Glob(migrationFS, "migrations/*.sql")
-	latest := len(names) // migrations are numbered 1..n
+	latest := latestMigration(t)
 	path := filepath.Join(t.TempDir(), "library.db")
 	for range 2 { // the second open must find nothing to migrate
 		st, err := Open(path)

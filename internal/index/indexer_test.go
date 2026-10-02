@@ -280,7 +280,7 @@ func TestIndexerEndToEnd(t *testing.T) {
 	trip, _ := st.DayItems(ctx, "2024-01-01", "2024-01-01", core.View{}, core.TagConfidenceDefault)
 	var dupPaths int
 	for _, it := range trip[0].Items {
-		d, _ := st.AssetDetail(ctx, it.ID)
+		d, _ := st.AssetDetail(ctx, it.ID, false)
 		dupPaths = max(dupPaths, len(d.Paths))
 	}
 	if dupPaths != 2 {
@@ -317,4 +317,199 @@ func waitIdle(t *testing.T, ix *Indexer, total int) {
 		}
 	}
 	t.Fatalf("indexer did not settle: %+v (want total %d)", p, total)
+}
+
+// eventually polls cond until it holds or a few seconds pass.
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestHoldScansWaitsForARunningScanAndKeepsNewOnesFromStartingUntilReleased(t *testing.T) {
+	photos, paths := t.TempDir(), core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := t.Context()
+	src, err := st.AddSource(ctx, photos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeJPEG(t, filepath.Join(photos, "first.jpg"), 40, 30, color.RGBA{R: 1})
+
+	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	var scans atomic.Int32
+	started, letGo := make(chan struct{}), make(chan struct{})
+	ix.onScanTurn = func() {
+		if scans.Add(1) == 1 {
+			close(started)
+			<-letGo // the first scan is "running" until the test says so
+		}
+	}
+	loopCtx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { ix.scanLoop(loopCtx); close(done) }()
+	defer func() { stop(); <-done }()
+
+	known := func() int {
+		files, err := st.KnownFiles(ctx, src.ID, "")
+		if err != nil {
+			t.Error(err)
+		}
+		return len(files)
+	}
+
+	ix.queueScan(scanRequest{sourceID: src.ID})
+	<-started
+
+	held := make(chan func(), 1)
+	go func() {
+		release, err := ix.HoldScans(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		held <- release
+	}()
+	select {
+	case <-held:
+		t.Fatal("a hold was given while a scan was running")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(letGo)
+	var release func()
+	select {
+	case release = <-held:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the hold did not start after the scan finished")
+	}
+	if known() != 1 {
+		t.Fatalf("the running scan did not finish before the hold: %d files known", known())
+	}
+
+	// A change found while held is queued, and is not scanned until release.
+	writeJPEG(t, filepath.Join(photos, "second.jpg"), 40, 30, color.RGBA{R: 2})
+	ix.queueScan(scanRequest{sourceID: src.ID})
+	time.Sleep(300 * time.Millisecond)
+	if scans.Load() != 1 || known() != 1 {
+		t.Fatalf("a scan started during the hold: %d scans, %d files known", scans.Load(), known())
+	}
+
+	release()
+	release() // letting go twice is harmless
+	eventually(t, "the queued scan after release", func() bool { return known() == 2 })
+}
+
+func TestHoldScansGivesUpWhenItsContextEnds(t *testing.T) {
+	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	release, err := ix.HoldScans(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := ix.HoldScans(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a hold that cannot start returned %v, want the deadline error", err)
+	}
+	cancelled, stop := context.WithCancel(t.Context())
+	stop()
+	other := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	if _, err := other.HoldScans(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a hold with an ended context returned %v, want the cancellation", err)
+	}
+}
+
+func TestAScanWaitingForAHoldReadsWhatToScanOnlyAfterTheHoldEnds(t *testing.T) {
+	photos, paths := t.TempDir(), core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := t.Context()
+	src, err := st.AddSource(ctx, photos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeJPEG(t, filepath.Join(photos, "first.jpg"), 40, 30, color.RGBA{R: 1})
+
+	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	var scans atomic.Int32
+	ix.onScanTurn = func() { scans.Add(1) }
+	loopCtx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { ix.scanLoop(loopCtx); close(done) }()
+	defer func() { stop(); <-done }()
+
+	release, err := ix.HoldScans(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix.queueScan(scanRequest{sourceID: src.ID})
+	eventually(t, "the loop to take the request and wait for the hold", func() bool { return ix.pendingScans() == 0 })
+	time.Sleep(200 * time.Millisecond) // long enough for it to have read anything it was going to read
+	// While the hold lasts the source is removed: it must not be scanned as
+	// it was when the request was taken.
+	if err := st.RemoveSource(ctx, src.ID); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	time.Sleep(300 * time.Millisecond)
+	if n := scans.Load(); n != 0 {
+		t.Fatalf("a removed source was scanned (%d scans)", n)
+	}
+	if files, err := st.OrganiseSnapshot(ctx, 0, core.EventGapDefault); err != nil || len(files.Files) != 0 {
+		t.Fatalf("library files after the removed source: %+v, %v", files.Files, err)
+	}
+
+	// And the loop is still serving: a source added now is scanned.
+	again, err := st.AddSource(ctx, photos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix.queueScan(scanRequest{sourceID: again.ID})
+	eventually(t, "a scan of the new source", func() bool { return scans.Load() == 1 })
+}
+
+func TestWorkRegisteredBeforeTheFirstScanRunsBeforeAnyScanStarts(t *testing.T) {
+	photos, paths := t.TempDir(), core.PathsIn(t.TempDir())
+	if err := paths.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.AddSource(t.Context(), photos); err != nil {
+		t.Fatal(err)
+	}
+	writeJPEG(t, filepath.Join(photos, "first.jpg"), 40, 30, color.RGBA{R: 1})
+
+	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{})
+	var settled, scannedTooSoon atomic.Bool
+	ix.BeforeFirstScan(func(context.Context) {
+		time.Sleep(300 * time.Millisecond) // long enough for a scan to start if it could
+		settled.Store(true)
+	})
+	ix.onScanTurn = func() {
+		if !settled.Load() {
+			scannedTooSoon.Store(true)
+		}
+	}
+	ix.Start(t.Context())
+	defer ix.Stop()
+	eventually(t, "the first scan", func() bool { return ix.Progress(t.Context()).Total == 1 })
+	if scannedTooSoon.Load() {
+		t.Fatal("a scan started before the registered work finished")
+	}
 }

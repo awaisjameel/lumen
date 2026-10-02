@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
 	"runtime"
 	"slices"
 	"sync/atomic"
@@ -219,6 +221,9 @@ func (ix *Indexer) fetch(ctx context.Context, stage core.Stage, n int) ([]store.
 				return items, err
 			}
 		}
+		if items, err := ix.faceBlockJobs(ctx, n); err != nil || len(items) > 0 {
+			return items, err
+		}
 	}
 	ix.mu.Lock()
 	focus := ix.focus
@@ -355,6 +360,35 @@ func (ix *Indexer) thumbnailForFaces(ctx context.Context, j store.JobItem) (medi
 // the thumbnail) prepared at once.
 const embedWorkers = 4
 
+// modelInput is the image model's input for an asset: its 1024 px thumbnail,
+// made if missing, cut to side. The thumbnail cache's size cap may evict the
+// file between making it and reading it (the asset looked finished when it
+// was chosen, then a retried job made it wanted again). Rechecking the job
+// under the cache's lock would put a database call under a file lock, so the
+// reader recovers instead: a read that finds the file gone makes it again and
+// reads once more. read is media.ModelInput; tests replace it.
+func modelInput(ctx context.Context, cache *media.Cache, id int64, orig media.Original, side int,
+	read func(path string, side int) ([]byte, error)) ([]byte, error) {
+	path := cache.Path(id, core.ThumbLarge)
+	var err error
+	for attempt := range 2 {
+		if err = cache.Ensure(ctx, id, core.ThumbLarge, orig); err != nil {
+			if errors.Is(err, media.ErrUnsupported) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("thumbnail: %w", err)
+		}
+		var px []byte
+		if px, err = read(path, side); err == nil {
+			return px, nil
+		}
+		if _, serr := os.Stat(path); attempt == 1 || !errors.Is(serr, fs.ErrNotExist) {
+			break
+		}
+	}
+	return nil, err
+}
+
 // doEmbeddings embeds and tags photos from their upright 1024 px thumbnails,
 // rebuilt first if missing. The video coordinator batches sampled frames separately.
 func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]store.EmbedResult, error) {
@@ -380,16 +414,12 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 			return
 		}
 		orig := media.Original{Path: j.Path, Kind: j.Kind, Orientation: j.Orientation}
-		switch err := ix.cache.Ensure(ctx, j.AssetID, core.ThumbLarge, orig); {
+		px, err := modelInput(ctx, ix.cache, j.AssetID, orig, side, media.ModelInput)
+		switch {
 		case errors.Is(err, media.ErrUnsupported):
 			r.Skipped = true
 			return
 		case err != nil:
-			r.Err = "thumbnail: " + err.Error()
-			return
-		}
-		px, err := media.ModelInput(ix.cache.Path(j.AssetID, core.ThumbLarge), side)
-		if err != nil {
 			r.Err = err.Error()
 			return
 		}

@@ -26,13 +26,15 @@ import (
 
 // Events the UI can subscribe to.
 const (
-	EventProgress       = "index:progress"
-	EventLibraryChanged = "library:changed"
+	EventProgress         = "index:progress"
+	EventLibraryChanged   = "library:changed"
+	EventOrganiseProgress = "organise:progress" // a run moving or undoing files
 )
 
 func init() {
 	application.RegisterEvent[core.Progress](EventProgress)
 	application.RegisterEvent[core.Changes](EventLibraryChanged)
+	application.RegisterEvent[core.OrganiseProgress](EventOrganiseProgress)
 }
 
 // Emitter forwards indexer events to the UI (it implements index.Events).
@@ -58,20 +60,39 @@ type LibraryService struct {
 	store   *store.Store
 	ix      *index.Indexer
 	now     func() time.Time // the clock: time.Now, or a test's
-	blocked struct {         // the PIN, rate limiting and Undo; guarded by its mutex
+	recycle recycler         // moves files to the Recycle Bin; nil means fileops.Recycle (a test's fake otherwise)
+	gate    *BlockGate       // whether the Blocked screen is unlocked, shared with media serving
+	// recycling serialises every move of files to the Recycle Bin, from its
+	// validation to the removal of the rows: two requests must not each see
+	// the other's files as the copies still to keep.
+	recycling sync.Mutex
+	blocked   struct { // PIN tries and Undo; guarded by its mutex
 		sync.Mutex
-		unlocked bool
-		usedAt   time.Time // the unlocked list's last use (see blockUnlockIdle)
 		failures int
 		retryAt  time.Time
 		lastID   int64
 		lastAt   time.Time
 	}
+	// verify is the Windows sign-in of ResetBlockPIN; nil means signin.Verify.
+	// A test sets it to answer for the dialog it cannot show.
+	verify func(ctx context.Context, owner uintptr, reason string) error
+
+	organise organiser // the organise-on-disk run in progress (organise.go); the zero value works
 }
 
-// NewLibraryService returns the library service.
-func NewLibraryService(st *store.Store, ix *index.Indexer) *LibraryService {
-	return &LibraryService{store: st, ix: ix, now: time.Now}
+// NewLibraryService returns the library service. gate is the Blocked
+// screen's lock it shares with media serving; nil gives it one of its own.
+func NewLibraryService(st *store.Store, ix *index.Indexer, gate *BlockGate) *LibraryService {
+	if gate == nil {
+		gate = &BlockGate{}
+	}
+	s := &LibraryService{store: st, ix: ix, now: time.Now, gate: gate}
+	if ix != nil {
+		// Files an interrupted organise run left half-moved are settled
+		// before the first scan could find them so.
+		ix.BeforeFirstScan(s.settleOrganise)
+	}
+	return s
 }
 
 // Sources lists the folders in the library.
@@ -198,7 +219,13 @@ func (s *LibraryService) Focus(from, to string) { s.ix.SetFocus(from, to) }
 
 // Asset returns the details for one asset.
 func (s *LibraryService) Asset(ctx context.Context, id int64) (core.AssetDetail, error) {
-	return s.store.AssetDetail(ctx, id)
+	d, err := s.store.AssetDetail(ctx, id, false)
+	if errors.Is(err, store.ErrNotFound) && s.unlockedNow() {
+		// Only a photo the open Blocked screen shows is asked of the gate, so
+		// looking at ordinary photos is no use of it.
+		return s.store.AssetDetail(ctx, id, true)
+	}
+	return d, err
 }
 
 // DuplicateGroups returns exact file copies and likely similar photos for review.
@@ -287,7 +314,10 @@ func (s *LibraryService) SetAlbumItem(ctx context.Context, assetID, albumID int6
 // ShowInFolder opens Explorer with one of the asset's files selected: path,
 // which must be one of them, or "" for the first that is there.
 func (s *LibraryService) ShowInFolder(ctx context.Context, id int64, path string) error {
-	f, err := s.store.AssetFile(ctx, id)
+	f, err := s.store.AssetFile(ctx, id, false)
+	if errors.Is(err, store.ErrNotFound) && s.unlockedNow() {
+		f, err = s.store.AssetFile(ctx, id, true)
+	}
 	if err != nil {
 		return err
 	}
@@ -336,13 +366,26 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 		return core.Settings{}, err
 	}
 	gap, err := s.store.EventGapHours(ctx)
-	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf, EventGapHours: gap}, err
+	if err != nil {
+		return core.Settings{}, err
+	}
+	cacheMB, err := s.store.ThumbCacheMB(ctx)
+	if err != nil {
+		return core.Settings{}, err
+	}
+	ocr, err := s.store.Bool(ctx, core.SettingOCR, false)
+	if err != nil {
+		return core.Settings{}, err
+	}
+	xmp, err := s.store.Bool(ctx, core.SettingXMP, false)
+	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf, EventGapHours: gap,
+		ThumbCacheMB: cacheMB, OCR: ocr, XMP: xmp}, err
 }
 
 // SetEventGapHours sets the quiet period that splits detected events.
 func (s *LibraryService) SetEventGapHours(ctx context.Context, hours int) error {
 	hours = min(max(hours, core.EventGapMin), core.EventGapMax)
-	return s.store.SetInt(ctx, core.SettingEventGapHours, hours)
+	return s.store.SetEventGapHours(ctx, hours)
 }
 
 // SetAIOnBattery lets the AI keep working on battery power (it waits for
@@ -359,7 +402,11 @@ func (s *LibraryService) SetAIOnBattery(ctx context.Context, on bool) error {
 // scores cover the whole range, so this takes effect at once.
 func (s *LibraryService) SetTagConfidence(ctx context.Context, v float64) error {
 	v = min(max(v, core.TagConfidenceMin), core.TagConfidenceMax)
-	return s.store.SetFloat(ctx, core.SettingTagConfidence, v)
+	if err := s.store.SetFloat(ctx, core.SettingTagConfidence, v); err != nil {
+		return err
+	}
+	// A lower confidence can make more photos screenshots or documents.
+	return s.ix.QueueOCR(ctx)
 }
 
 // SetVideos turns video indexing on or off, then rescans so the change applies.

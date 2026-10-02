@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { engine } from '../bridge'
+import { engine, THUMB_CACHE_DEFAULT_MB, THUMB_CACHE_MAX_MB, THUMB_CACHE_MIN_MB } from '../bridge'
 import type * as Bridge from '../bridge'
 import { useLibrary } from '../library/store'
+import { t } from '../shared/i18n'
 import SettingsView from './SettingsView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -13,6 +14,8 @@ vi.mock('../bridge', async (importOriginal) => ({
     setVideos: vi.fn<() => Promise<void>>(),
     setAIOnBattery: vi.fn<() => Promise<void>>(),
     setEventGapHours: vi.fn<(hours: number) => Promise<void>>(),
+    setThumbCacheMB: vi.fn<(mb: number) => Promise<void>>(),
+    thumbCacheBytes: vi.fn<() => Promise<number>>(),
   },
 }))
 
@@ -22,8 +25,19 @@ beforeEach(() => {
   vi.mocked(engine.setEventGapHours).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setVideos).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setAIOnBattery).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setThumbCacheMB).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.thumbCacheBytes).mockReset().mockResolvedValue(0)
 })
 afterEach(() => vi.useRealTimers())
+
+// The battery toggle, found by its label: other checkboxes (the OCR toggle)
+// follow it in the AI section.
+function batteryBox(wrapper: ReturnType<typeof mount>) {
+  return wrapper
+    .findAll('label')
+    .find((label) => label.text().includes(t('settings.aiOnBattery')))
+    ?.find('input[type="checkbox"]')
+}
 
 it.each(['videos', 'aiOnBattery'] as const)(
   'serializes %s saves across remounts and ignores an older failure',
@@ -41,15 +55,15 @@ it.each(['videos', 'aiOnBattery'] as const)(
         }),
       )
       .mockResolvedValueOnce()
-    const selector = key === 'videos' ? '.toggle input' : 'input[type="checkbox"]'
+    const selector = '.toggle input'
     const first = mount(SettingsView)
-    const firstBox = key === 'videos' ? first.get(selector) : first.findAll(selector).at(-1)
+    const firstBox = key === 'videos' ? first.get(selector) : batteryBox(first)
     if (!firstBox) throw new Error('missing settings checkbox')
     await firstBox.setValue(true)
     first.unmount()
     const next = mount(SettingsView)
     try {
-      const nextBox = key === 'videos' ? next.get(selector) : next.findAll(selector).at(-1)
+      const nextBox = key === 'videos' ? next.get(selector) : batteryBox(next)
       if (!nextBox) throw new Error('missing settings checkbox')
       await nextBox.setValue(false)
       expect(save).toHaveBeenCalledExactlyOnceWith(true)
@@ -288,4 +302,93 @@ it.each([
   expect(input.element.value).toBe(String(expected))
   expect(engine.setEventGapHours).toHaveBeenCalledExactlyOnceWith(expected)
   wrapper.unmount()
+})
+
+it('shows the thumbnail cache cap in GB, 2 GB by default, and how much is in use', async () => {
+  setActivePinia(createPinia())
+  vi.mocked(engine.thumbCacheBytes).mockResolvedValue(1.5 * 1024 ** 3)
+  const wrapper = mount(SettingsView)
+  await flushPromises()
+  expect(wrapper.get<HTMLInputElement>('.cache-cap input').element.value).toBe('2')
+  expect(wrapper.get('.cache-used').text()).toContain('1.5')
+  expect(wrapper.get('.cache-used').text()).toContain('GB')
+  wrapper.unmount()
+})
+
+it('saves a new cache cap in MB through the library store', async () => {
+  setActivePinia(createPinia())
+  const lib = useLibrary()
+  const wrapper = mount(SettingsView)
+  await wrapper.get('.cache-cap input').setValue('4.5')
+  await flushPromises()
+  expect(engine.setThumbCacheMB).toHaveBeenCalledExactlyOnceWith(4608)
+  expect(lib.settings.thumbCacheMB).toBe(4608)
+  wrapper.unmount()
+})
+
+it.each([
+  ['', THUMB_CACHE_DEFAULT_MB, '2'],
+  ['0.1', THUMB_CACHE_MIN_MB, '0.25'],
+  ['500', THUMB_CACHE_MAX_MB, '100'],
+] as const)('holds the cache cap typed as %s to its range', async (entered, expectedMB, shown) => {
+  setActivePinia(createPinia())
+  const lib = useLibrary()
+  const wrapper = mount(SettingsView)
+  const input = wrapper.get<HTMLInputElement>('.cache-cap input')
+  await input.setValue(entered)
+  await flushPromises()
+  expect(lib.settings.thumbCacheMB).toBe(expectedMB)
+  expect(input.element.value).toBe(shown)
+  wrapper.unmount()
+})
+
+it('puts the cache cap back and says why when the engine refuses it', async () => {
+  setActivePinia(createPinia())
+  const lib = useLibrary()
+  vi.mocked(engine.setThumbCacheMB).mockRejectedValueOnce(new Error('settings are locked'))
+  const wrapper = mount(SettingsView)
+  const input = wrapper.get<HTMLInputElement>('.cache-cap input')
+  await input.setValue('8')
+  await flushPromises()
+  expect(lib.settings.thumbCacheMB).toBe(THUMB_CACHE_DEFAULT_MB)
+  expect(input.element.value).toBe('2')
+  expect(wrapper.text()).toContain('settings are locked')
+  wrapper.unmount()
+})
+
+it('saves the newest cache cap after an older one, and ignores the older failure', async () => {
+  setActivePinia(createPinia())
+  const lib = useLibrary()
+  let fail!: (reason: Error) => void
+  vi.mocked(engine.setThumbCacheMB)
+    .mockReturnValueOnce(new Promise((_resolve, reject) => (fail = reject)))
+    .mockResolvedValueOnce()
+  const wrapper = mount(SettingsView)
+  const input = wrapper.get<HTMLInputElement>('.cache-cap input')
+  await input.setValue('3')
+  await input.setValue('5')
+  expect(engine.setThumbCacheMB).toHaveBeenCalledExactlyOnceWith(3072)
+  fail(new Error('older cap failed'))
+  await flushPromises()
+  expect(engine.setThumbCacheMB).toHaveBeenNthCalledWith(2, 5120)
+  expect(lib.settings.thumbCacheMB).toBe(5120)
+  expect(wrapper.text()).not.toContain('older cap failed')
+  wrapper.unmount()
+})
+
+it('reads the cache size again while the page is open, and stops after it closes', async () => {
+  vi.useFakeTimers()
+  setActivePinia(createPinia())
+  vi.mocked(engine.thumbCacheBytes)
+    .mockResolvedValueOnce(1024 ** 3)
+    .mockResolvedValue(2 * 1024 ** 3)
+  const wrapper = mount(SettingsView)
+  await flushPromises()
+  expect(wrapper.get('.cache-used').text()).toContain('1')
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(wrapper.get('.cache-used').text()).toContain('2')
+  wrapper.unmount()
+  const calls = vi.mocked(engine.thumbCacheBytes).mock.calls.length
+  await vi.advanceTimersByTimeAsync(20000)
+  expect(vi.mocked(engine.thumbCacheBytes)).toHaveBeenCalledTimes(calls)
 })

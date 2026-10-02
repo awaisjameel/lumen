@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { engine, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
+import { BlockKind, engine, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event } from '../bridge'
+import { blockRequest, showBlocksChanged } from '../shared/block'
 import EventsView from './EventsView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
-  engine: { events: vi.fn(), setEventName: vi.fn() },
+  engine: { events: vi.fn(), setEventName: vi.fn(), setEventPinned: vi.fn() },
 }))
 
 const trip: Event = {
@@ -21,6 +22,7 @@ const trip: Event = {
   cover: 0,
   coverThumb: 0,
   placeId: 0,
+  pinned: false,
 }
 let wrapper: ReturnType<typeof mount> | undefined
 
@@ -29,8 +31,11 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.mocked(engine.events).mockReset().mockResolvedValue([trip])
   vi.mocked(engine.setEventName).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setEventPinned).mockReset().mockResolvedValue(undefined)
 })
 afterEach(() => {
+  blockRequest.value?.answer(false)
+  blockRequest.value = null
   wrapper?.unmount()
   vi.useRealTimers()
 })
@@ -119,4 +124,62 @@ it('discards a rename draft when its event disappears and later returns', async 
   expect(w.find('form.rename').exists()).toBe(false)
   await w.get('button.icon-btn').trigger('click')
   expect(w.get<HTMLInputElement>('form.rename input').element.value).toBe(trip.name)
+})
+
+it('pins an event, shows the pin and unpins it again', async () => {
+  const w = await mounted()
+  expect(w.find('.pin-badge').exists()).toBe(false)
+  vi.mocked(engine.events).mockResolvedValue([{ ...trip, pinned: true }])
+  await w.get(`button[aria-label="Pin ${trip.name}"]`).trigger('click')
+  await flushPromises()
+  expect(engine.setEventPinned).toHaveBeenCalledWith(7, true)
+  expect(w.get('.pin-badge').attributes('aria-label')).toBe('Pinned')
+  vi.mocked(engine.events).mockResolvedValue([trip])
+  await w.get(`button[aria-label="Unpin ${trip.name}"]`).trigger('click')
+  await flushPromises()
+  expect(engine.setEventPinned).toHaveBeenLastCalledWith(7, false)
+  expect(w.find('.pin-badge').exists()).toBe(false)
+})
+
+it('says why a pin failed', async () => {
+  vi.mocked(engine.setEventPinned).mockRejectedValue(new Error('disk full'))
+  const w = await mounted()
+  await w.get(`button[aria-label="Pin ${trip.name}"]`).trigger('click')
+  await flushPromises()
+  expect(w.get('[role="alert"]').text()).toContain('disk full')
+})
+
+it('offers to block an event through the shared block flow', async () => {
+  const w = await mounted()
+  expect(blockRequest.value).toBeNull()
+  await w.get(`button[aria-label="Block “${trip.name}”?"]`).trigger('click')
+  expect(blockRequest.value).toMatchObject({
+    kind: BlockKind.BlockEvent,
+    targetID: trip.id,
+    name: trip.name,
+    labelOnly: true,
+    photosAllowed: true,
+  })
+})
+
+it('drops a blocked event from the list and shows it again when the block is undone', async () => {
+  const w = await mounted()
+  expect(w.findAll('.group-card')).toHaveLength(1)
+  vi.mocked(engine.events).mockResolvedValue([])
+  await showBlocksChanged() // what the block dialog does once the block is saved
+  await flushPromises()
+  expect(w.findAll('.group-card')).toHaveLength(0)
+  vi.mocked(engine.events).mockResolvedValue([trip])
+  await showBlocksChanged() // and what Undo, or unblocking, does
+  await flushPromises()
+  expect(w.findAll('.group-card')).toHaveLength(1)
+})
+
+it('stops reloading for block changes once the view is gone', async () => {
+  const w = await mounted()
+  expect(engine.events).toHaveBeenCalledTimes(1)
+  w.unmount()
+  await showBlocksChanged()
+  await flushPromises()
+  expect(engine.events).toHaveBeenCalledTimes(1)
 })

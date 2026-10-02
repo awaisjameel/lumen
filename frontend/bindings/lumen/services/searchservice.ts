@@ -46,14 +46,32 @@ export function PrepareSearch(): $CancellablePromise<void> {
 }
 
 /**
+ * RenameThing gives a Thing a new name, which the search box matches from
+ * then on. An empty name gives a renamed built-in back its own.
+ */
+export function RenameThing(id: number, name: string): $CancellablePromise<void> {
+    return $Call.ByID(805205134, id, name);
+}
+
+/**
  * Search finds photos matching a description, best match first. Named
  * people in it narrow the search to photos of all of them ("Ali at the
- * beach"); names alone give their photos, newest first. Without the AI,
- * the description can't be searched (the result says so): named people's
- * photos are still found.
+ * beach"); names alone give their photos, newest first. Photos whose text
+ * (read from screenshots and documents, when the user has that on) holds
+ * every word of the description come first, newest first, then the photos
+ * the description matches by meaning. Without the AI, the description can't
+ * be searched by meaning (the result says so): named people's photos and
+ * text are still found.
  */
 export function Search(query: string): $CancellablePromise<core$0.SearchResult> {
     return $Call.ByID(3154275024, query);
+}
+
+/**
+ * SetThingPinned pins or unpins a Thing: pinned Things sort first.
+ */
+export function SetThingPinned(id: number, pinned: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3941087826, id, pinned);
 }
 
 /**

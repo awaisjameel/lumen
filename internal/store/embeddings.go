@@ -75,6 +75,7 @@ func (s *Store) SaveEmbeddingVersions(ctx context.Context, model string, version
 			return err
 		}
 		defer job.Close()
+		var tagged []int64 // photos whose tags changed: some may now be screenshots or documents
 		for _, r := range rs {
 			if r.Err == "" && !r.Skipped {
 				if _, err := emb.ExecContext(ctx, r.AssetID, model, r.Scale, int8Bytes(r.Vec)); err != nil {
@@ -91,12 +92,14 @@ func (s *Store) SaveEmbeddingVersions(ctx context.Context, model string, version
 				if err := tags.set(ctx, r.AssetID, r.Tags); err != nil {
 					return err
 				}
+				tagged = append(tagged, r.AssetID)
 			}
 			if err := execJob(ctx, job, r.AssetID, core.StageEmbedding, version.Photo, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {
 				return err
 			}
 		}
-		return nil
+		// After the jobs are closed, so a new OCR job is not held back by one.
+		return queueOCR(ctx, tx, tagged)
 	})
 }
 
@@ -141,12 +144,14 @@ func (s *Store) ReplaceAITags(ctx context.Context, sets []AssetTagSet) error {
 				return err
 			}
 			defer tags.close()
+			chunkIDs := make([]int64, 0, chunk)
 			for _, set := range sets[lo:min(lo+chunk, len(sets))] {
 				if err := tags.set(ctx, set.AssetID, set.Tags); err != nil {
 					return err
 				}
+				chunkIDs = append(chunkIDs, set.AssetID)
 			}
-			return nil
+			return queueOCR(ctx, tx, chunkIDs)
 		})
 		if err != nil {
 			return err

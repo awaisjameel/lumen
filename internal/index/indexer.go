@@ -16,6 +16,7 @@ import (
 
 	"lumen/internal/ai"
 	"lumen/internal/core"
+	"lumen/internal/fileops"
 	"lumen/internal/media"
 	"lumen/internal/people"
 	"lumen/internal/scanner"
@@ -74,12 +75,19 @@ type Indexer struct {
 	wakeThum  chan struct{}
 	wakeEmbed chan struct{}
 	wakeFaces chan struct{}
+	wakeOCR   chan struct{}
 	wakeVideo chan struct{}
 	wakeFS    chan struct{}
 
+	scanTurn   chan struct{}           // holds a token while a scan runs or HoldScans is in force: one at a time
+	onScanTurn func()                  // a test's hook, called when a scan has its turn; nil otherwise
+	before     []func(context.Context) // run before the first scan (BeforeFirstScan); guarded by mu
+
 	encoder *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
+	ocr     *model[textReader]       // PP-OCRv5's detector and recogniser, while their stage has work
 	pixels  decoded                  // photos the thumbnail stage decoded for the faces stage
+	xmp     xmpState                 // the XMP sidecar pass's lock and wake-up
 
 	videoEmbedRetry stageBackoff // used only by the video coordinator
 	videoFaceRetry  stageBackoff
@@ -125,10 +133,12 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 	ix := &Indexer{
 		store: st, paths: paths, cache: cache, search: m.Search, people: m.People, events: ev,
 		scanWake:  make(chan struct{}, 1),
+		scanTurn:  make(chan struct{}, 1),
 		wakeMeta:  make(chan struct{}, 1),
 		wakeThum:  make(chan struct{}, 1),
 		wakeEmbed: make(chan struct{}, 1),
 		wakeFaces: make(chan struct{}, 1),
+		wakeOCR:   make(chan struct{}, 1),
 		wakeVideo: make(chan struct{}, 1),
 		wakeFS:    make(chan struct{}, 1),
 		resume:    make(chan struct{}),
@@ -182,6 +192,7 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 			},
 		}
 	}
+	ix.ocr = ix.openOCR()
 	ix.version = ix.versions()
 	return ix
 }
@@ -233,6 +244,8 @@ func (ix *Indexer) versions() map[core.Stage]store.StageVersion {
 	v := map[core.Stage]store.StageVersion{
 		core.StageMetadata:  {Photo: metadata, Video: metadata},
 		core.StageThumbnail: {Photo: thumbnail, Video: thumbnail},
+		// Text is only read from photos, but a stage's version has both.
+		core.StageOCR: {Photo: ai.OCRVersion, Video: ai.OCRVersion},
 	}
 	if ix.search != nil {
 		photo := ix.search.Model().Version
@@ -286,6 +299,18 @@ func (ix *Indexer) Start(ctx context.Context) {
 			slog.Info("re-running stages after an upgrade", "jobs", n)
 			ix.wakeStages()
 		}
+		// Photos that became screenshots or documents while nothing was
+		// watching (a changed tag confidence, a tag the user added) still get
+		// their text read.
+		if n, err := ix.store.QueueOCR(ctx); err != nil {
+			slog.Error("queue text reading", "err", err)
+		} else if n > 0 {
+			slog.Info("queued photos for text reading", "photos", n)
+			nudge(ix.wakeOCR)
+		}
+		for _, before := range ix.beforeScan() {
+			before(ctx)
+		}
 		ix.RescanAll() // opening watchers can take seconds for a network share
 		ix.scanLoop(ctx)
 	})
@@ -315,6 +340,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 		ix.run(func() {
 			runStage(ctx, ix, stage[store.EmbedResult]{
 				name: core.StageEmbedding, batch: embeddingBatch, wake: ix.wakeEmbed, model: ix.encoder,
+				next:    []chan struct{}{ix.wakeOCR}, // the tags may make a photo a screenshot
 				changes: core.Changes{Tags: true},
 				process: ix.doEmbeddings,
 				save:    ix.saveEmbeddings,
@@ -335,6 +361,12 @@ func (ix *Indexer) Start(ctx context.Context) {
 		})
 		ix.run(func() { ix.people.Run(ctx, func() { ix.markChanged(core.Changes{People: true}) }) })
 	}
+	ix.run(func() {
+		runStage(ctx, ix, stage[store.OCRResult]{
+			name: core.StageOCR, batch: ocrBatch, wake: ix.wakeOCR, model: ix.ocr,
+			fetch: ix.fetchOCR, process: ix.doOCR, save: ix.saveOCR,
+		})
+	})
 	if ix.search != nil || ix.people != nil {
 		ix.run(func() {
 			name := core.StageEmbedding
@@ -351,12 +383,14 @@ func (ix *Indexer) Start(ctx context.Context) {
 	}
 	ix.run(func() { ix.reportLoop(ctx) })
 	ix.run(func() { ix.powerLoop(ctx) })
+	ix.run(func() { ix.thumbCacheLoop(ctx) })
+	ix.run(func() { ix.xmpLoop(ctx) })
 	ix.run(func() { ix.fsLoop(ctx, ix.flushFSChanges) })
 }
 
 // wakeStages nudges every stage to look for work.
 func (ix *Indexer) wakeStages() {
-	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed, ix.wakeFaces, ix.wakeVideo} {
+	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed, ix.wakeFaces, ix.wakeOCR, ix.wakeVideo} {
 		nudge(ch)
 	}
 }
@@ -380,11 +414,63 @@ func (ix *Indexer) Stop() {
 	if ix.faces != nil {
 		ix.faces.release()
 	}
+	ix.ocr.release()
 }
 
 func (ix *Indexer) run(fn func()) {
 	ix.wg.Add(1)
 	go func() { defer ix.wg.Done(); fn() }()
+}
+
+// HoldScans waits for a running scan to finish and keeps new ones from
+// starting until release is called: organising moves files the scanner must
+// not see half-moved. Changes the watchers report meanwhile are queued as
+// usual and scanned after release, when the database already matches the
+// disk. A scan and a hold take turns, so a second hold waits for the first.
+// release may be called more than once.
+func (ix *Indexer) HoldScans(ctx context.Context) (release func(), err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case ix.scanTurn <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	var once sync.Once
+	return func() { once.Do(func() { <-ix.scanTurn }) }, nil
+}
+
+// BeforeFirstScan registers work that must be done before the indexer scans
+// anything after it starts: settling the files an interrupted organise run
+// left in doubt, which a scan would otherwise find half-moved. It runs on the
+// indexer's own goroutine, in the order registered, and delays the first scan
+// until it returns. Register before Start.
+func (ix *Indexer) BeforeFirstScan(fn func(ctx context.Context)) {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	ix.before = append(ix.before, fn)
+}
+
+func (ix *Indexer) beforeScan() []func(context.Context) {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	return slices.Clone(ix.before)
+}
+
+// RetryFailedOf puts the failed jobs of the assets back in the queue and wakes
+// the stages: organising moves files under a stage that has read their path,
+// and the job it fails then is nothing to do with the file.
+func (ix *Indexer) RetryFailedOf(ctx context.Context, assetIDs []int64) {
+	n, err := ix.store.RetryFailedOf(ctx, assetIDs)
+	switch {
+	case err != nil:
+		if ctx.Err() == nil {
+			slog.Error("retry jobs of moved files", "err", err)
+		}
+	case n > 0:
+		ix.wakeStages()
+	}
 }
 
 // RescanAll queues a scan of every enabled source and restarts the watchers.
@@ -562,20 +648,34 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 		if !ok {
 			return
 		}
+		// A hold (organising moves files) has the turn until it lets go; the
+		// request waits, and the changes made meanwhile are found as usual.
+		select {
+		case ix.scanTurn <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		// What to scan is read with the turn in hand: a source removed, or a
+		// setting changed, during a long hold must not be scanned as it was.
 		src, videos, err := ix.scanSettings(ctx, req)
 		switch {
 		case ctx.Err() != nil:
+			<-ix.scanTurn
 			return
 		case err != nil:
+			<-ix.scanTurn
 			// Scanning with a wrong guess (videos off) would drop every video.
 			slog.Error("can't read what to scan; retrying", "err", err)
 			ix.queueScan(req)
 			sleep(ctx, retryDelay)
 			continue
 		case src.ID == 0:
+			<-ix.scanTurn
 			continue // removed since it was queued
 		}
-
+		if ix.onScanTurn != nil {
+			ix.onScanTurn()
+		}
 		ix.mu.Lock()
 		ix.scanning = true
 		ix.mu.Unlock()
@@ -586,6 +686,7 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 			Videos:   videos,
 			SkipDirs: ix.skipDirs(),
 		})
+		<-ix.scanTurn
 		switch {
 		case ctx.Err() != nil:
 			return
@@ -687,6 +788,11 @@ func (ix *Indexer) watchLoop(ctx context.Context, src core.Source) {
 // quiet for a moment, so copying 500 photos in causes one scan, not 500.
 func (ix *Indexer) onFSChange(path string) {
 	if core.IsWithin(path, ix.paths.DataDir) {
+		return
+	}
+	if fileops.IsSidecarTemp(path) {
+		// Lumen's own sidecar on its way into place: it is made, then renamed
+		// away, and the vanished name would look like a deleted folder.
 		return
 	}
 	if ext := filepath.Ext(path); ext != "" && core.KindOf(path) == "" {
@@ -865,7 +971,7 @@ func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 	ix.mu.Lock()
 	p := core.Progress{
 		Scanning: ix.scanning, Paused: ix.paused,
-		OnBattery: (ix.search != nil || ix.people != nil) && ix.onBattery && !ix.aiOnBattery,
+		OnBattery: ix.onBattery && !ix.aiOnBattery, // narrowed below to the AI that is there
 		AI:        core.AI{Device: ix.aiDevice, Error: ix.aiError, FacesError: ix.facesError},
 	}
 	ix.mu.Unlock()
@@ -877,6 +983,12 @@ func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 		if ix.people != nil {
 			p.Faces = pending[core.StageFaces]
 		}
+		// Only while it is on: what an upgrade queued while it was off waits
+		// for the user to turn it on.
+		if on, err := ix.store.Bool(ctx, core.SettingOCR, false); err == nil && on {
+			p.OCR = pending[core.StageOCR]
+		}
+		p.OnBattery = p.OnBattery && (ix.search != nil || ix.people != nil || p.OCR > 0)
 	} else if ctx.Err() == nil {
 		slog.Error("count jobs", "err", err)
 	}

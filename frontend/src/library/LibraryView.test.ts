@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { engine, onLibraryChanged } from '../bridge'
+import { engine, Filter, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event } from '../bridge'
 import LibraryView from './LibraryView.vue'
@@ -26,6 +26,7 @@ const event = (id: number, name: string): Event => ({
   cover: 0,
   coverThumb: 0,
   placeId: 0,
+  pinned: false,
 })
 
 beforeEach(() => {
@@ -99,4 +100,24 @@ it('does not start a queued title read after unmount', async () => {
   resolve(event(1, 'Late event'))
   await flushPromises()
   expect(engine.event).toHaveBeenCalledOnce()
+})
+
+it('shows the empty Trash with its own message and no toolbar', async () => {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/trash', name: 'trash', component: LibraryView, meta: { filter: Filter.FilterTrash } }],
+  })
+  await router.push('/trash')
+  const wrapper = mount(LibraryView, {
+    global: { plugins: [createPinia(), router], stubs: { SearchBox: true } },
+  })
+  await flushPromises()
+  expect(wrapper.get('h1').text()).toBe('Trash')
+  expect(wrapper.text()).toContain('The Trash is empty')
+  expect(wrapper.text()).not.toContain('Restore all')
+  expect(engine.timeline).toHaveBeenCalledWith(
+    expect.objectContaining({ filter: Filter.FilterTrash }),
+    expect.anything(),
+  )
+  wrapper.unmount()
 })

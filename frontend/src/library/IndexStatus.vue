@@ -9,12 +9,14 @@ import { useLibrary } from './store'
 const lib = useLibrary()
 const p = computed(() => lib.progress)
 
-// Two phases: preparing (metadata, then thumbnails: browsable) and then
-// understanding (the AI, side by side: what's in the photos, and who).
+// Three phases: preparing (metadata, then thumbnails: browsable), then
+// understanding (the AI, side by side: what's in the photos, and who), then
+// reading (the text in screenshots and documents, when the user has that on).
 // Each shows how much is left.
 const preparing = computed(() => (p.value ? Math.max(p.value.metadata, p.value.thumbnail) : 0))
 const understanding = computed(() => (p.value ? Math.max(p.value.embedding, p.value.faces) : 0))
-const left = computed(() => preparing.value || understanding.value)
+const reading = computed(() => p.value?.ocr ?? 0)
+const left = computed(() => preparing.value || understanding.value || reading.value)
 const busy = computed(() => !!p.value && (p.value.scanning || left.value > 0))
 const fraction = computed(() => {
   const v = p.value
@@ -30,6 +32,8 @@ const label = computed(() => {
   if (preparing.value) return t('status.preparing', { left: preparing.value })
   if (understanding.value && v.onBattery) return t('status.battery', { left: understanding.value })
   if (understanding.value) return t('status.understanding', { left: understanding.value })
+  if (reading.value && v.onBattery) return t('status.battery', { left: reading.value })
+  if (reading.value) return t('status.reading', { left: reading.value })
   return t('status.upToDate')
 })
 
@@ -40,6 +44,7 @@ const phase = computed(() => {
   if (v.paused && left.value) return t('status.pausedPhase')
   if (v.scanning || preparing.value) return t('status.preparingPhase')
   if (understanding.value) return v.onBattery ? t('status.batteryPhase') : t('status.understandingPhase')
+  if (reading.value) return v.onBattery ? t('status.batteryPhase') : t('status.readingPhase')
   return t('status.upToDate')
 })
 

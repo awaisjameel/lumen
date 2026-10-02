@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { engine, MAX_NAME_LEN } from '../bridge'
+import { onBeforeUnmount, ref, watch } from 'vue'
+import { BlockKind, engine, MAX_NAME_LEN } from '../bridge'
 import type { Event } from '../bridge'
+import { block, onBlocksChanged } from '../shared/block'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
@@ -13,16 +14,37 @@ import GroupCard from '../shared/GroupCard.vue'
 import Icon from '../shared/Icon.vue'
 import SearchBox from '../search/SearchBox.vue'
 
-const { list, loaded, error, load } = useList(engine.events)
+const { list, loaded, error, load, invalidate } = useList(engine.events)
 const rename = useRename<number>()
 const { editing, draft } = rename
 const busy = ref(false)
 const actionError = ref('') // a rename's; the list's own reloads don't clear it
 useLiveReload(load, (c) => c.assets || c.thumbs)
+// A block, its Undo or its removal on the Blocked screen changes which events
+// there are, whoever made it.
+onBeforeUnmount(onBlocksChanged(invalidate))
 
 watch(list, (events) => {
   if (editing.value !== null && !events.some((event) => event.id === editing.value)) void rename.close(false)
 })
+
+async function togglePin(event: Event) {
+  if (busy.value) return
+  busy.value = true
+  actionError.value = ''
+  try {
+    await engine.setEventPinned(event.id, !event.pinned)
+    await load()
+  } catch (e) {
+    actionError.value = errorText(e)
+  } finally {
+    busy.value = false
+  }
+}
+
+function blockEvent(event: Event) {
+  void block(BlockKind.BlockEvent, event.id, event.name)
+}
 
 function edit(event: Event) {
   if (!busy.value) void rename.open(event.id, event.name)
@@ -92,7 +114,7 @@ async function save(id: number, value: string) {
             </button>
           </form>
           <button
-            v-else
+            v-if="editing !== event.id"
             :ref="rename.triggerRef(event.id)"
             class="icon-btn"
             :disabled="busy"
@@ -100,6 +122,37 @@ async function save(id: number, value: string) {
             @click="edit(event)"
           >
             <Icon name="pencil" :size="16" />
+          </button>
+          <span
+            v-if="event.pinned && editing !== event.id"
+            class="pin-badge"
+            role="img"
+            :aria-label="t('events.pinned')"
+          >
+            <Icon name="pin" :size="16" />
+          </span>
+          <button
+            v-if="editing !== event.id"
+            class="icon-btn"
+            :disabled="busy"
+            :title="event.pinned ? t('events.unpin') : t('events.pin')"
+            :aria-label="
+              event.pinned ? t('events.unpinNamed', { name: event.name }) : t('events.pinNamed', { name: event.name })
+            "
+            :aria-pressed="event.pinned"
+            @click="togglePin(event)"
+          >
+            <Icon name="pin" :size="16" />
+          </button>
+          <button
+            v-if="editing !== event.id"
+            class="icon-btn"
+            :disabled="busy"
+            :title="t('blocked.block')"
+            :aria-label="t('blocked.confirmTitle', { name: event.name })"
+            @click="blockEvent(event)"
+          >
+            <Icon name="eye-off" :size="16" />
           </button>
         </GroupCard>
       </div>
@@ -114,6 +167,12 @@ async function save(id: number, value: string) {
 </template>
 
 <style scoped>
+.pin-badge {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+
 .rename {
   display: flex;
   flex: 0 0 100%;

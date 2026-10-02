@@ -4,18 +4,18 @@
 // those across the library straight away. User labels can be deleted.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { BlockKind, engine, MAX_NAME_LEN, TagKind, thumbUrl } from '../bridge'
+import { BlockKind, engine, MAX_NAME_LEN, TagKind } from '../bridge'
 import type { Tag } from '../bridge'
 import { confirm } from '../shared/confirm'
 import { block } from '../shared/block'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import EmptyState from '../shared/EmptyState.vue'
-import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
 import { nameTooLong, trimName } from '../shared/names'
 import { useLibrary } from '../library/store'
 import SearchBox from '../search/SearchBox.vue'
+import ThingCard from './ThingCard.vue'
 import { useThings } from './store'
 
 const router = useRouter()
@@ -30,8 +30,10 @@ onBeforeUnmount(() => (active = false))
 
 // Built-ins without photos and the internal sink kind never show.
 const listed = computed(() => things.list.filter((x) => x.kind !== TagKind.TagBuiltin || x.count > 0))
-const mine = computed(() => listed.value.filter((x) => x.kind !== TagKind.TagBuiltin))
-const builtin = computed(() => listed.value.filter((x) => x.kind === TagKind.TagBuiltin))
+// Pinned Things come first whoever made them (the engine sends them newest pin first).
+const pinned = computed(() => listed.value.filter((x) => x.pinned))
+const mine = computed(() => listed.value.filter((x) => !x.pinned && x.kind !== TagKind.TagBuiltin))
+const builtin = computed(() => listed.value.filter((x) => !x.pinned && x.kind === TagKind.TagBuiltin))
 const aiError = computed(() => lib.progress?.ai.error ?? '')
 const understanding = computed(() => lib.progress?.embedding ?? 0)
 
@@ -64,6 +66,21 @@ async function act(fn: () => Promise<void>) {
     await things.load()
   } catch (e) {
     error.value = errorText(e)
+  }
+}
+
+const pin = (tag: Tag) => void act(() => engine.setThingPinned(tag.id, !tag.pinned))
+
+/** Saves a Thing's new name; false (with the reason shown) if it was refused. */
+async function rename(id: number, name: string): Promise<boolean> {
+  error.value = ''
+  try {
+    await engine.renameThing(id, name)
+    await things.load()
+    return true
+  } catch (e) {
+    error.value = errorText(e)
+    return false
   }
 }
 
@@ -107,76 +124,56 @@ async function remove(tag: Tag) {
         {{ error || things.error || t('settings.aiError', { error: aiError }) }}
       </p>
 
+      <template v-if="pinned.length">
+        <h2>{{ t('things.pinnedHeading') }}</h2>
+        <div class="cards">
+          <ThingCard
+            v-for="x in pinned"
+            :key="x.id"
+            :tag="x"
+            :icon="x.kind === TagKind.TagBuiltin ? 'things' : 'tag'"
+            :deletable="x.kind !== TagKind.TagBuiltin"
+            :rename="rename"
+            @pin="pin(x)"
+            @block="blockTag(x)"
+            @remove="remove(x)"
+          />
+        </div>
+      </template>
+
       <template v-if="mine.length">
         <h2>{{ t('things.yours') }}</h2>
         <div class="cards">
-          <div v-for="x in mine" :key="x.id" class="card">
-            <RouterLink :to="{ name: 'thing', params: { id: x.id } }" class="card-cover" :aria-label="x.name">
-              <img
-                v-if="x.cover && x.coverThumb"
-                :src="thumbUrl(x.cover, x.coverThumb)"
-                alt=""
-                loading="lazy"
-                decoding="async"
-                draggable="false"
-              />
-              <Icon v-else name="tag" :size="32" />
-            </RouterLink>
-            <div class="card-meta">
-              <span class="card-name">{{ x.name }}</span>
-              <span class="card-count">{{ x.count ? t('status.items', { n: x.count }) : t('things.noPhotos') }}</span>
-            </div>
-            <button
-              class="icon-btn card-act block-act"
-              :title="t('blocked.block')"
-              :aria-label="t('blocked.confirmTitle', { name: x.name })"
-              @click="blockTag(x)"
-            >
-              <Icon name="eye-off" :size="16" />
-            </button>
-            <button
-              class="icon-btn card-act"
-              :title="t('things.delete')"
-              :aria-label="t('things.deleteNamed', { name: x.name })"
-              @click="remove(x)"
-            >
-              <Icon name="trash" :size="16" />
-            </button>
-          </div>
+          <ThingCard
+            v-for="x in mine"
+            :key="x.id"
+            :tag="x"
+            icon="tag"
+            deletable
+            :rename="rename"
+            @pin="pin(x)"
+            @block="blockTag(x)"
+            @remove="remove(x)"
+          />
         </div>
       </template>
 
       <h2 v-if="mine.length && builtin.length">{{ t('nav.things') }}</h2>
       <div v-if="builtin.length" class="cards">
-        <div v-for="x in builtin" :key="x.id" class="card">
-          <RouterLink :to="{ name: 'thing', params: { id: x.id } }" class="card-cover" :aria-label="x.name">
-            <img
-              v-if="x.cover && x.coverThumb"
-              :src="thumbUrl(x.cover, x.coverThumb)"
-              alt=""
-              loading="lazy"
-              decoding="async"
-              draggable="false"
-            />
-            <Icon v-else name="things" :size="32" />
-          </RouterLink>
-          <div class="card-meta">
-            <span class="card-name">{{ x.name }}</span>
-            <span class="card-count">{{ t('status.items', { n: x.count }) }}</span>
-          </div>
-          <button
-            class="icon-btn card-act"
-            :title="t('blocked.block')"
-            :aria-label="t('blocked.confirmTitle', { name: x.name })"
-            @click="blockTag(x)"
-          >
-            <Icon name="eye-off" :size="16" />
-          </button>
-        </div>
+        <ThingCard
+          v-for="x in builtin"
+          :key="x.id"
+          :tag="x"
+          icon="things"
+          :deletable="false"
+          :rename="rename"
+          @pin="pin(x)"
+          @block="blockTag(x)"
+        />
       </div>
 
       <EmptyState
-        v-else-if="things.loaded && !mine.length"
+        v-else-if="things.loaded && !mine.length && !pinned.length"
         class="empty"
         icon="things"
         :title="t('things.empty')"
@@ -203,8 +200,5 @@ h2 {
 }
 .empty {
   margin-top: 36px;
-}
-.block-act {
-  right: 42px;
 }
 </style>

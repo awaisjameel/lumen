@@ -96,6 +96,10 @@ func (p Paths) SigLIP() string { return p.runtimeFile("models", "siglip2") }
 // is no runtime folder).
 func (p Paths) Faces() string { return p.runtimeFile("models", "faces") }
 
+// OCR is the folder holding the text models, PP-OCRv5's detector and
+// English recogniser ("" if there is no runtime folder).
+func (p Paths) OCR() string { return p.runtimeFile("models", "ocr") }
+
 // runtimeFile is a path inside the runtime folder, "" without one: a
 // relative path would be looked for wherever Lumen was started.
 func (p Paths) runtimeFile(parts ...string) string {

@@ -33,6 +33,7 @@ import (
 // user's files through it.
 type Streamer struct {
 	store   *store.Store
+	gate    *BlockGate // the Blocked screen's lock: covered videos play only while it is open
 	decoder videoConverter
 	srv     *http.Server
 	ln      net.Listener
@@ -50,7 +51,10 @@ type videoConverter interface {
 }
 
 // NewStreamer starts listening on a free loopback port. Serve it with Run.
-func NewStreamer(st *store.Store, d media.Decoders) (*Streamer, error) {
+func NewStreamer(st *store.Store, d media.Decoders, gate *BlockGate) (*Streamer, error) {
+	if gate == nil {
+		gate = &BlockGate{}
+	}
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return nil, err
@@ -60,7 +64,7 @@ func NewStreamer(st *store.Store, d media.Decoders) (*Streamer, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Streamer{store: st, decoder: d, ln: ln, secret: hex.EncodeToString(b[:]), cancel: cancel}
+	s := &Streamer{store: st, gate: gate, decoder: d, ln: ln, secret: hex.EncodeToString(b[:]), cancel: cancel}
 	s.srv = &http.Server{
 		Handler:           s,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -131,12 +135,34 @@ func (s *Streamer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// admitted looks the video up and admits the request (see admit): the
+// asset's file and the first path that can be read now, and the admission
+// whose request and writer answer it. It answers a request it refuses.
+func (s *Streamer) admitted(w http.ResponseWriter, r *http.Request, id int64) (f store.MediaFile, path string, adm admission, ok bool) {
+	adm, ok = admit(w, r, s.gate, id, func(ctx context.Context, unlocked bool) (err error) {
+		f, err = s.store.AssetFile(ctx, id, unlocked)
+		return err
+	})
+	if !ok {
+		return f, "", adm, false
+	}
+	path, ok = readablePath(f)
+	if !ok {
+		adm.release()
+		http.Error(w, "the file is not available", http.StatusNotFound)
+		return f, "", adm, false
+	}
+	return f, path, adm, true
+}
+
 // serveVideo serves a video file the WebView plays as it is.
 func (s *Streamer) serveVideo(w http.ResponseWriter, r *http.Request, id int64) {
-	f, path, ok := assetFile(r.Context(), s.store, id, w)
+	f, path, adm, ok := s.admitted(w, r, id)
 	if !ok {
 		return
 	}
+	defer adm.release()
+	r, w = adm.r, adm.w
 	if f.Kind != core.KindVideo || core.PlaybackOf(f.Ext, f.VideoCodec, f.AudioCodec) == core.PlayConvert {
 		http.NotFound(w, r)
 		return
@@ -152,10 +178,12 @@ func (s *Streamer) servePlay(w http.ResponseWriter, r *http.Request, id int64) {
 		http.Error(w, "invalid time", http.StatusBadRequest)
 		return
 	}
-	f, path, ok := assetFile(r.Context(), s.store, id, w)
+	f, path, adm, ok := s.admitted(w, r, id)
 	if !ok {
 		return
 	}
+	defer adm.release()
+	r, w = adm.r, adm.w
 	if f.Kind != core.KindVideo {
 		http.NotFound(w, r)
 		return

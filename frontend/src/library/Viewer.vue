@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // Full-window viewer. Shows the 1024px preview instantly, then swaps in the
-// original when the WebView can display it (JPEG, PNG, WebP, AVIF).
+// original when the WebView can display it (JPEG, PNG, WebP, AVIF). Its
+// photos, the one beside each and what may be done with it come from a
+// source: the library grid unless one is given (the Blocked screen's browser).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { engine, originalUrl, Playback, playUrl, THUMB_LARGE, thumbUrl, videosAvailable, videoUrl } from '../bridge'
 import type { AssetDetail } from '../bridge'
@@ -9,10 +11,15 @@ import { dateTime, duration } from '../shared/format'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { isTyping, ownsArrows } from '../shared/keys'
-import { useLibrary } from './store'
+import { libraryViewerSource, useLibrary } from './store'
+import type { ViewerSource } from './store'
 import DetailsPanel from './DetailsPanel.vue'
 
+const props = defineProps<{ source?: ViewerSource }>()
 const lib = useLibrary()
+const src = computed(() => props.source ?? libraryViewerSource(lib))
+const item = computed(() => src.value.item)
+const actions = computed(() => src.value.actions)
 const detail = ref<AssetDetail | null>(null)
 const originalReady = ref(false)
 const root = ref<HTMLElement | null>(null)
@@ -30,13 +37,13 @@ const videoSrc = computed(() => {
 })
 
 watch(
-  () => lib.viewer?.id,
+  () => src.value.id,
   async (id, _old, onCleanup) => {
     const request = ++detailRequest
     onCleanup(() => detailRequest++)
     originalReady.value = false
     detail.value = null
-    videoStart.value = lib.viewerItem?.at ?? 0
+    videoStart.value = item.value?.at ?? 0
     videoPosition.value = videoStart.value
     videoFailed.value = false
     if (!id) return
@@ -52,15 +59,12 @@ watch(
   { immediate: true },
 )
 
-async function go(dir: 1 | -1) {
-  const from = lib.viewer
-  if (!from) return
-  const next = await lib.neighbour(from, dir)
-  if (next && lib.viewer === from) lib.viewer = next
+function go(dir: 1 | -1) {
+  void src.value.step(dir)
 }
 
 function close() {
-  lib.viewer = null
+  src.value.close()
 }
 
 function videoReady() {
@@ -73,6 +77,7 @@ function videoReady() {
 let seeking = false
 
 function videoTime() {
+  src.value.touch?.()
   if (video.value && !seeking)
     videoPosition.value = (converting.value ? videoStart.value : 0) + video.value.currentTime * 1000
 }
@@ -121,17 +126,19 @@ function onKey(e: KeyboardEvent) {
       close()
       break
     case 'ArrowLeft':
-      void go(-1)
+      go(-1)
       break
     case 'ArrowRight':
-      void go(1)
+      go(1)
       break
     case 'f':
     case 'F':
-      void lib.toggleFavourite(lib.viewer)
+      if (!actions.value.favourite) return // a trashed photo can't be edited
+      actions.value.favourite()
       break
     case 'i':
     case 'I':
+      if (!actions.value.details) return
       lib.showDetails = !lib.showDetails
       break
     default:
@@ -179,16 +186,31 @@ onBeforeUnmount(() => {
           </button>
           <span class="date">{{ detail ? dateTime(detail.takenAt) : '' }}</span>
           <div class="spacer" />
-          <button
-            class="icon-btn"
-            :aria-pressed="!!lib.viewerItem?.f"
-            :title="t('common.withKey', { label: t('details.favourite'), key: 'F' })"
-            :aria-label="t('details.favourite')"
-            @click="lib.toggleFavourite(lib.viewer)"
-          >
-            <Icon :name="lib.viewerItem?.f ? 'heart-filled' : 'heart'" />
+          <button v-if="actions.restore" class="text-btn" @click="actions.restore">{{ t('trash.restore') }}</button>
+          <button v-if="actions.deleteFromDisk" class="text-btn" @click="actions.deleteFromDisk">
+            {{ t('trash.deleteFromDisk') }}
           </button>
           <button
+            v-if="actions.favourite"
+            class="icon-btn"
+            :aria-pressed="!!item?.f"
+            :title="t('common.withKey', { label: t('details.favourite'), key: 'F' })"
+            :aria-label="t('details.favourite')"
+            @click="actions.favourite"
+          >
+            <Icon :name="item?.f ? 'heart-filled' : 'heart'" />
+          </button>
+          <button
+            v-if="actions.moveToTrash"
+            class="icon-btn"
+            :title="t('trash.move')"
+            :aria-label="t('trash.move')"
+            @click="actions.moveToTrash"
+          >
+            <Icon name="trash" />
+          </button>
+          <button
+            v-if="actions.details"
             class="icon-btn"
             :aria-pressed="lib.showDetails"
             :title="t('common.withKey', { label: t('library.info'), key: 'I' })"
@@ -199,13 +221,13 @@ onBeforeUnmount(() => {
           </button>
         </header>
 
-        <div v-if="lib.viewerItem" class="media" @dblclick="onMediaDoubleClick">
+        <div v-if="item" class="media" @dblclick="onMediaDoubleClick">
           <video
-            v-if="detail?.video && detail.id === lib.viewerItem.id && videosAvailable()"
+            v-if="detail?.video && detail.id === item.id && videosAvailable()"
             ref="video"
             :key="videoSrc"
             :src="videoSrc"
-            :poster="lib.viewerItem.t ? thumbUrl(detail.id, lib.viewerItem.t, THUMB_LARGE) : undefined"
+            :poster="item.t ? thumbUrl(detail.id, item.t, THUMB_LARGE) : undefined"
             controls
             autoplay
             @loadedmetadata="videoReady"
@@ -218,16 +240,16 @@ onBeforeUnmount(() => {
           <p v-else-if="videoFailed" class="video-error" role="alert">{{ t('viewer.videoFailed') }}</p>
           <template v-else-if="!detail?.video">
             <img
-              v-if="lib.viewerItem.t"
+              v-if="item.t"
               v-show="!originalReady"
-              :key="'p' + lib.viewerItem.id"
+              :key="'p' + item.id"
               class="preview"
-              :src="thumbUrl(lib.viewerItem.id, lib.viewerItem.t, THUMB_LARGE)"
+              :src="thumbUrl(item.id, item.t, THUMB_LARGE)"
               alt=""
               draggable="false"
             />
             <img
-              v-if="detail?.webNative && detail.id === lib.viewerItem.id"
+              v-if="detail?.webNative && detail.id === item.id"
               v-show="originalReady"
               :key="'o' + detail.id"
               class="original"
@@ -236,7 +258,7 @@ onBeforeUnmount(() => {
               draggable="false"
               @load="originalReady = true"
             />
-            <div v-if="!lib.viewerItem.t && !detail?.webNative" class="none">
+            <div v-if="!item.t && !detail?.webNative" class="none">
               <Icon name="image-off" :size="40" />
               <p>{{ t('viewer.noPreview') }}</p>
             </div>
@@ -264,7 +286,7 @@ onBeforeUnmount(() => {
           <Icon name="chevron-right" :size="28" />
         </button>
       </div>
-      <DetailsPanel v-if="lib.showDetails" :sel="lib.viewer" class="panel" />
+      <DetailsPanel v-if="lib.showDetails && actions.details" :sel="src.sel" class="panel" />
     </div>
   </Teleport>
 </template>
@@ -303,6 +325,18 @@ onBeforeUnmount(() => {
 .bar .icon-btn:hover {
   background: var(--viewer-control);
   color: var(--viewer-text);
+}
+.bar .text-btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--viewer-control);
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--viewer-text);
+  cursor: pointer;
+}
+.bar .text-btn:hover {
+  background: var(--viewer-control);
 }
 .date {
   font-size: 13px;

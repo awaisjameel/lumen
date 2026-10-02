@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,54 +34,106 @@ type VocabLabel struct {
 type AutoTag struct {
 	ID        int64
 	Name      string
-	Builtin   bool // from Lumen's vocabulary (else a label the user made)
+	VocabName string // a built-in's name in the vocabulary, which Name differs from once the user renames it; "" for a user's label
+	Builtin   bool   // from Lumen's vocabulary (else a label the user made)
 	Prompts   []string
 	Exclusive bool
 	Model     string    // model version that made Vecs; "" = not embedded yet
 	Vecs      []float32 // len(Prompts) x dim, unit vectors
 }
 
-// SyncVocabulary makes the built-in tags match labels. New labels are added,
-// changed ones are updated (their embeddings dropped, so they are redone and
-// the library re-tagged), and built-ins no longer listed are removed, unless
-// the user tagged photos with them, in which case they become the user's own.
-// Blocked built-ins keep their prompts and matches until unblocked: retiring
-// one must never remove the user's block or reveal its photos.
+// SyncVocabulary makes the built-in tags match labels. A built-in is found by
+// its vocabulary name, so one the user renamed keeps its identity. New labels
+// are added, changed ones are updated (their embeddings dropped, so they are
+// redone and the library re-tagged), and built-ins no longer listed are
+// removed, unless the user tagged photos with them, in which case they become
+// the user's own. Built-ins the user blocked, renamed or pinned keep their
+// prompts and matches until the user lets them go: retiring one must never
+// remove the user's block, reveal its photos or take back a choice.
+//
+// A new label named like one of the user's Things (a renamed built-in) is
+// added as "<name> (built-in)", and the user's Thing is left as it is.
 func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := time.Now().Unix()
-		// hidden, which lists and suggestions read, is exactly is_sink since
-		// blocking replaced the user's hiding (migration 0014).
-		up, err := tx.PrepareContext(ctx, `INSERT INTO tags (name, kind, prompts, exclusive, hidden, created_at, is_sink)
-			VALUES (?1, 'builtin', ?2, ?3, ?5, ?4, ?5)
-			ON CONFLICT (name) DO UPDATE SET kind = 'builtin', prompts = ?2, exclusive = ?3,
-				is_sink = ?5, hidden = ?5,
-				model = CASE WHEN prompts IS ?2 AND exclusive = ?3 THEN model END,
-				vecs = CASE WHEN prompts IS ?2 AND exclusive = ?3 THEN vecs END`)
+		known, err := tagRows(ctx, tx)
 		if err != nil {
 			return err
 		}
-		defer up.Close()
+		listed := make(map[string]bool, len(labels)) // by core.Fold: a respelling is the same label
+		for _, l := range labels {
+			listed[core.Fold(l.Name)] = true
+		}
+		// hidden, which lists and suggestions read, is exactly is_sink since
+		// blocking replaced the user's hiding (migration 0014).
+		update, err := tx.PrepareContext(ctx, `UPDATE tags SET kind = 'builtin', prompts = ?2, exclusive = ?3,
+			is_sink = ?4, hidden = ?4, name = ?5, vocab_name = ?6,
+			model = CASE WHEN prompts IS ?2 AND exclusive = ?3 THEN model END,
+			vecs = CASE WHEN prompts IS ?2 AND exclusive = ?3 THEN vecs END WHERE id = ?1`)
+		if err != nil {
+			return err
+		}
+		defer update.Close()
+		insert, err := tx.PrepareContext(ctx, `INSERT INTO tags (name, vocab_name, kind, prompts, exclusive, hidden, created_at, is_sink)
+			VALUES (?1, ?2, 'builtin', ?3, ?4, ?6, ?5, ?6)`)
+		if err != nil {
+			return err
+		}
+		defer insert.Close()
+		byVocab := map[string]*tagRow{}
+		byName := map[string]*tagRow{}
+		for i := range known {
+			if known[i].vocab != "" {
+				byVocab[core.Fold(known[i].vocab)] = &known[i]
+			}
+			byName[core.Fold(known[i].name)] = &known[i]
+		}
 		names := make([]any, 0, len(labels))
 		for _, l := range labels {
 			p, err := json.Marshal(l.Prompts)
 			if err != nil {
 				return err
 			}
-			if _, err := up.ExecContext(ctx, l.Name, string(p), l.Exclusive, now, l.Sink); err != nil {
+			names = append(names, l.Name)
+			switch row, clash := byVocab[core.Fold(l.Name)], byName[core.Fold(l.Name)]; {
+			case row != nil:
+				// The built-in follows the vocabulary's spelling; its name does
+				// too unless the user renamed it.
+				name := row.name
+				if row.name == row.vocab {
+					name = l.Name
+				}
+				_, err = update.ExecContext(ctx, row.id, string(p), l.Exclusive, l.Sink, name, l.Name)
+			case clash != nil && clash.mayAdopt(listed):
+				// The user's own Thing of that name (or a built-in whose name
+				// only the vocabulary's spelling of changed) becomes the built-in.
+				_, err = update.ExecContext(ctx, clash.id, string(p), l.Exclusive, l.Sink, l.Name, l.Name)
+				clash.name, clash.vocab = l.Name, l.Name
+				byVocab[core.Fold(l.Name)] = clash
+			default:
+				name := l.Name
+				if clash != nil {
+					name = freeBuiltinName(l.Name, byName)
+				}
+				_, err = insert.ExecContext(ctx, name, l.Name, string(p), l.Exclusive, now, l.Sink)
+				byName[core.Fold(name)] = &tagRow{name: name, vocab: l.Name, kind: core.TagBuiltin}
+			}
+			if err != nil {
 				return err
 			}
-			names = append(names, l.Name)
 		}
 		list, err := json.Marshal(names)
 		if err != nil {
 			return err
 		}
-		stale := `kind = 'builtin' AND name NOT IN (SELECT value FROM json_each(?)) AND NOT ` + labelBlocked(core.BlockTag, "tags.id")
+		// A built-in goes only if the vocabulary dropped it and the user left it
+		// as it came: not blocked, renamed or pinned.
+		stale := `kind = 'builtin' AND vocab_name NOT IN (SELECT value FROM json_each(?)) AND name = vocab_name
+			AND pinned_at IS NULL AND NOT ` + labelBlocked(core.BlockTag, "tags.id")
 		if _, err := tx.ExecContext(ctx, `DELETE FROM asset_tags WHERE source = 'ai' AND tag_id IN (SELECT id FROM tags WHERE `+stale+`)`, list); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE tags SET kind = 'manual', prompts = NULL, exclusive = 0, model = NULL, vecs = NULL
+		if _, err := tx.ExecContext(ctx, `UPDATE tags SET kind = 'manual', vocab_name = NULL, prompts = NULL, exclusive = 0, model = NULL, vecs = NULL
 			WHERE `+stale+` AND (EXISTS (SELECT 1 FROM asset_tags x WHERE x.tag_id = tags.id AND x.source = 'user')
 			OR EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND `+ruleTag+` = tags.id))`, list); err != nil {
 			return err
@@ -90,6 +143,39 @@ func (s *Store) SyncVocabulary(ctx context.Context, labels []VocabLabel) error {
 	})
 }
 
+// tagRow is the part of a tag SyncVocabulary needs to place a label.
+type tagRow struct {
+	id          int64
+	name, vocab string // vocab is "" for the user's own Thing
+	kind        core.TagKind
+}
+
+func tagRows(ctx context.Context, tx *sql.Tx) ([]tagRow, error) {
+	return queryAll(ctx, tx, func(r *sql.Rows) (t tagRow, err error) {
+		err = r.Scan(&t.id, &t.name, &t.vocab, &t.kind)
+		return t, err
+	}, "SELECT id, name, COALESCE(vocab_name, ''), kind FROM tags")
+}
+
+// mayAdopt reports whether a label named like this tag takes it over: the
+// tag is a Thing the user made without prompts of its own (a label's
+// prompts are theirs, and are kept), or a built-in the user never renamed that the
+// vocabulary no longer lists under that spelling. A renamed built-in is the
+// user's choice, and stays.
+func (t *tagRow) mayAdopt(listed map[string]bool) bool {
+	return (t.vocab == "" && t.kind != core.TagLabel) || (t.name == t.vocab && !listed[core.Fold(t.vocab)])
+}
+
+// freeBuiltinName is name with " (built-in)" after it, numbered if even that
+// is taken, for a built-in whose own name is the user's.
+func freeBuiltinName(name string, taken map[string]*tagRow) string {
+	candidate := name + " (built-in)"
+	for n := 2; taken[core.Fold(candidate)] != nil; n++ {
+		candidate = name + " (built-in " + strconv.Itoa(n) + ")"
+	}
+	return candidate
+}
+
 // AutoTags returns every tag the AI applies (built-in and user labels,
 // blocked ones included: a block hides the label, and in photo mode its
 // photos, but the AI keeps applying it so the block covers new photos).
@@ -97,7 +183,7 @@ func (s *Store) AutoTags(ctx context.Context) ([]AutoTag, error) {
 	return queryAll(ctx, s.r, func(r *sql.Rows) (t AutoTag, err error) {
 		var prompts string
 		var vecs []byte
-		if err := r.Scan(&t.ID, &t.Name, &t.Builtin, &prompts, &t.Exclusive, &t.Model, &vecs); err != nil {
+		if err := r.Scan(&t.ID, &t.Name, &t.VocabName, &t.Builtin, &prompts, &t.Exclusive, &t.Model, &vecs); err != nil {
 			return t, err
 		}
 		if err := json.Unmarshal([]byte(prompts), &t.Prompts); err != nil {
@@ -105,7 +191,7 @@ func (s *Store) AutoTags(ctx context.Context) ([]AutoTag, error) {
 		}
 		t.Vecs = bytesFloat32(vecs)
 		return t, nil
-	}, `SELECT id, name, kind = 'builtin', prompts, exclusive, COALESCE(model, ''), vecs
+	}, `SELECT id, name, COALESCE(vocab_name, ''), kind = 'builtin', prompts, exclusive, COALESCE(model, ''), vecs
 		FROM tags WHERE kind IN ('builtin', 'label') ORDER BY id`)
 }
 
@@ -143,20 +229,21 @@ type AssetScore struct {
 }
 
 // Things lists every tag with how many visible assets carry it (AI tags
-// counting from minScore up) and the best one to show on its card. Most
-// used first.
+// counting from minScore up) and the best one to show on its card. Pinned
+// ones come first, the newest pin first; the rest, most used first.
 func (s *Store) Things(ctx context.Context, minScore float64) ([]core.Tag, error) {
 	var out []core.Tag
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
 		out, err = queryAll(ctx, tx, func(r *sql.Rows) (t core.Tag, err error) {
-			err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Count)
+			err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Count, &t.Pinned, &t.Original)
 			return t, err
-		}, `SELECT t.id, t.name, t.kind, count(a.id)
+		}, `SELECT t.id, t.name, t.kind, count(a.id), t.pinned_at IS NOT NULL,
+				CASE WHEN t.vocab_name IS NOT NULL AND t.vocab_name != t.name THEN t.vocab_name ELSE '' END
 			FROM tags t
 			LEFT JOIN asset_tags x ON x.tag_id = t.id AND `+tagApplies+`
 			LEFT JOIN assets a ON a.id = x.asset_id AND `+visibleA+`
 			WHERE t.hidden = 0 AND NOT `+labelBlocked(core.BlockTag, "t.id")+`
-			GROUP BY t.id ORDER BY count(a.id) DESC, t.name`, minScore)
+			GROUP BY t.id ORDER BY t.pinned_at IS NOT NULL DESC, t.pinned_at DESC, count(a.id) DESC, t.name`, minScore)
 		if err != nil {
 			return err
 		}
@@ -290,6 +377,60 @@ func (s *Store) DeleteTag(ctx context.Context, id int64) error {
 		}
 		return affected(tx.ExecContext(ctx, "DELETE FROM tags WHERE id = ?", id))
 	})
+}
+
+// RenameTag gives a Thing a new name, which search matches from then on (the
+// old one no longer matches). A built-in keeps its identity and prompts: the
+// AI looks for the same thing under the new name. An empty name gives a
+// built-in the vocabulary's own name back; for a Thing the user made it is
+// ErrInvalidName. A name another Thing has is ErrTagExists, and one a blocked
+// Thing has is ErrBlockedName, so renaming never reveals a blocked name.
+func (s *Store) RenameTag(ctx context.Context, id int64, name string) error {
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		var vocab string
+		switch err := tx.QueryRowContext(ctx, "SELECT COALESCE(vocab_name, '') FROM tags WHERE id = ?", id).Scan(&vocab); {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrNotFound
+		case err != nil:
+			return err
+		}
+		clean := strings.TrimSpace(name)
+		if clean == "" {
+			clean = vocab
+		}
+		clean, err := cleanName(clean)
+		if err != nil {
+			return err
+		}
+		var other int64
+		var blocked bool
+		switch err := tx.QueryRowContext(ctx, "SELECT id, "+labelBlocked(core.BlockTag, "tags.id")+" FROM tags WHERE "+foldName+" = ? AND id != ?",
+			core.Fold(clean), id).Scan(&other, &blocked); {
+		case err == nil && blocked:
+			return ErrBlockedName
+		case err == nil:
+			return ErrTagExists
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		return affected(tx.ExecContext(ctx, "UPDATE tags SET name = ? WHERE id = ?", clean, id))
+	})
+	if isUnique(err) {
+		return ErrTagExists
+	}
+	return err
+}
+
+// SetTagPinned pins or unpins a Thing. Pinning one that is pinned keeps its
+// place; a new pin is the newest.
+func (s *Store) SetTagPinned(ctx context.Context, id int64, pinned bool) error {
+	if !pinned {
+		return affected(s.w.ExecContext(ctx, "UPDATE tags SET pinned_at = NULL WHERE id = ?", id))
+	}
+	// A second after the newest pin at the least, so pins made within one
+	// second still order by when they were made.
+	return affected(s.w.ExecContext(ctx, `UPDATE tags SET pinned_at = COALESCE(pinned_at,
+		MAX(?, COALESCE((SELECT MAX(pinned_at) FROM tags), 0) + 1)) WHERE id = ?`, time.Now().Unix(), id))
 }
 
 // AssetTags returns the tags on one asset: the user's, then the AI's from

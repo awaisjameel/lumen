@@ -16,6 +16,8 @@ import { confirm } from '../shared/confirm'
 import { errorText, reportError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import PinFields from '../shared/PinFields.vue'
+import CoveredBrowser from './CoveredBrowser.vue'
+import { useCoveredPhotos } from './covered'
 
 const configured = ref(true)
 const unlocked = ref(false)
@@ -24,14 +26,25 @@ const confirmPIN = ref('')
 const blocks = ref<Block[]>([])
 const error = ref('')
 const busy = ref(false)
+const resetting = ref(false) // the forgotten-PIN form is open
+const changed = ref(false) // the PIN was just reset: say so above the unlock form
 const unlockForm = ref<HTMLFormElement | null>(null)
+const resetForm = ref<HTMLFormElement | null>(null)
 let active = true
 let idleTimer = 0
 let sessionRevision = 0
 
+// The browser's photos are as private as the list: it closes, with the
+// Viewer, whenever the screen relocks or is left.
+const covered = useCoveredPhotos({
+  used: () => used(sessionRevision),
+  failed: (e) => failed(e),
+})
+
 function relock() {
   clearTimeout(idleTimer)
   sessionRevision++
+  covered.close()
   blocks.value = []
   unlocked.value = false
   pin.value = ''
@@ -41,10 +54,34 @@ function relock() {
   })
 }
 
+// Left unused for too long: the screen locks, and so does the engine, which
+// otherwise goes on serving the covered photos until its own timeout.
+function expire() {
+  void engine.lockBlocks().catch(reportError)
+  relock()
+}
+
 function used(revision: number) {
   if (!isActive() || revision !== sessionRevision) return
   clearTimeout(idleTimer)
-  idleTimer = window.setTimeout(relock, BLOCK_UNLOCK_IDLE_MINUTES * 60 * 1000)
+  idleTimer = window.setTimeout(expire, BLOCK_UNLOCK_IDLE_MINUTES * 60 * 1000)
+}
+
+function openReset() {
+  resetting.value = true
+  changed.value = false
+  error.value = ''
+  pin.value = ''
+  confirmPIN.value = ''
+  void nextTick(() => resetForm.value?.querySelector('input')?.focus())
+}
+
+function closeReset() {
+  resetting.value = false
+  error.value = ''
+  pin.value = ''
+  confirmPIN.value = ''
+  void nextTick(() => unlockForm.value?.querySelector('input')?.focus())
 }
 
 function failed(e: unknown) {
@@ -67,6 +104,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   active = false
+  covered.close()
   sessionRevision++
   clearTimeout(idleTimer)
   void engine.lockBlocks().catch(reportError)
@@ -76,6 +114,7 @@ async function unlock() {
   if (busy.value) return
   busy.value = true
   error.value = ''
+  changed.value = false
   const revision = ++sessionRevision
   try {
     if (!configured.value) {
@@ -104,6 +143,31 @@ async function unlock() {
   }
 }
 
+// reset replaces a forgotten PIN: the engine has the user sign in to Windows
+// first, and the list stays locked, so the new PIN is entered to open it.
+async function reset() {
+  if (busy.value) return
+  error.value = ''
+  if (pin.value !== confirmPIN.value) {
+    error.value = t('blocked.pinMismatch')
+    return
+  }
+  busy.value = true
+  try {
+    await engine.resetBlockPIN(pin.value)
+    if (!isActive()) return
+    resetting.value = false
+    changed.value = true
+    pin.value = ''
+    confirmPIN.value = ''
+    void nextTick(() => unlockForm.value?.querySelector('input')?.focus())
+  } catch (e) {
+    failed(e)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function reload(revision: number) {
   await showBlocksChanged()
   if (!isActive() || revision !== sessionRevision) return
@@ -121,7 +185,7 @@ async function changeMode(item: Block) {
   const revision = sessionRevision
   try {
     const next = item.mode === BlockMode.BlockPhotos ? BlockMode.BlockLabel : BlockMode.BlockPhotos
-    await engine.setBlock(item.kind, item.targetId, item.path, next)
+    await engine.setBlockMode(item.id, next)
     used(revision)
     await reload(revision)
   } catch (e) {
@@ -167,6 +231,10 @@ function kindName(kind: BlockKind): string {
       return t('settings.folders')
     case BlockKind.BlockAlbum:
       return t('nav.albums')
+    case BlockKind.BlockEvent:
+      return t('nav.events')
+    case BlockKind.BlockFace:
+      return t('blocked.kindFace')
   }
   return kind
 }
@@ -180,12 +248,29 @@ function kindName(kind: BlockKind): string {
     <div class="page-body">
       <RouterLink to="/settings" class="btn btn-subtle">{{ t('blocked.back') }}</RouterLink>
       <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-      <form v-if="!unlocked" ref="unlockForm" class="unlock" @submit.prevent="unlock">
+      <form v-if="!unlocked && !resetting" ref="unlockForm" class="unlock" @submit.prevent="unlock">
+        <p v-if="changed" role="status">{{ t('blocked.pinChanged') }}</p>
         <p v-if="configured">{{ t('blocked.enterPINHint') }}</p>
         <p v-else>{{ t('blocked.createPINHint', { pinMin: PIN_MIN_LEN, pinMax: PIN_MAX_LEN }) }}</p>
         <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" :creating="!configured" />
-        <button class="btn btn-primary" :disabled="busy">{{ t('blocked.unlock') }}</button>
+        <div class="actions">
+          <button class="btn btn-primary" :disabled="busy">{{ t('blocked.unlock') }}</button>
+          <button v-if="configured" type="button" class="btn btn-subtle" :disabled="busy" @click="openReset">
+            {{ t('blocked.forgotPIN') }}
+          </button>
+        </div>
       </form>
+      <form v-else-if="resetting" ref="resetForm" class="unlock" @submit.prevent="reset">
+        <p>{{ t('blocked.resetHint') }}</p>
+        <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" creating />
+        <div class="actions">
+          <button class="btn btn-primary" :disabled="busy">{{ t('blocked.reset') }}</button>
+          <button type="button" class="btn btn-subtle" :disabled="busy" @click="closeReset">
+            {{ t('blocked.resetCancel') }}
+          </button>
+        </div>
+      </form>
+      <CoveredBrowser v-else-if="covered.block" :covered="covered" />
       <template v-else>
         <p class="muted">{{ t('blocked.privacy') }}</p>
         <ul v-if="blocks.length" class="list">
@@ -205,6 +290,7 @@ function kindName(kind: BlockKind): string {
             >
               {{ t('blocked.switchMode') }}
             </button>
+            <button class="btn" :disabled="busy" @click="covered.open(item)">{{ t('covered.show') }}</button>
             <button class="btn" :disabled="busy" @click="unblock(item)">{{ t('blocked.unblock') }}</button>
           </li>
         </ul>
@@ -225,6 +311,12 @@ function kindName(kind: BlockKind): string {
 
 .unlock :deep(.field) {
   width: 100%;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .list {

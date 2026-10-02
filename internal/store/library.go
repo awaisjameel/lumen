@@ -97,6 +97,10 @@ func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float64) (whe
 			args = append(args, target.id)
 		}
 	}
+	if v.Event != 0 {
+		// The event is a run of photos, so its block is the one holding them.
+		where += " AND NOT " + eventBlocked("assets")
+	}
 	return where, args, nil
 }
 
@@ -133,6 +137,8 @@ func (s *Store) viewFilterSQL(ctx context.Context, v core.View, minScore float64
 	}
 	switch v.Filter {
 	case core.FilterAll:
+	case core.FilterTrash:
+		f.trash = true
 	case core.FilterFavourites:
 		f.favourites = true
 	case core.FilterVideos:
@@ -153,13 +159,17 @@ type assetFilter struct {
 	place      int64  // near this city
 	event      *core.Event
 	album      int64 // in this manual album
+	trash      bool  // the Trash's assets instead of the visible ones
 }
 
 // where is the filter as a WHERE clause for the assets table, with only
-// bound values. It starts with visible, so the grid's queries use the
-// assets_timeline index.
+// bound values. It starts with visible (or trashed), so the grid's queries
+// use the assets_timeline (or assets_trash) index.
 func (f assetFilter) where(minScore float64) (where string, args []any) {
 	where, args = visible, []any{}
+	if f.trash {
+		where = trashed
+	}
 	if f.kind != "" {
 		where += " AND kind = ?"
 		args = append(args, f.kind)
@@ -180,7 +190,7 @@ func (f assetFilter) where(minScore float64) (where string, args []any) {
 		args = append(args, f.tag, minScore)
 	}
 	if f.person != 0 {
-		where += " AND id IN (SELECT asset_id FROM faces WHERE person_id = ?)"
+		where += " AND id IN (SELECT f.asset_id FROM faces f WHERE f.person_id = ? AND " + faceShown + ")"
 		args = append(args, f.person)
 	}
 	if f.place != 0 {
@@ -188,11 +198,9 @@ func (f assetFilter) where(minScore float64) (where string, args []any) {
 		args = append(args, f.place)
 	}
 	if f.event != nil {
-		e := f.event
-		where += " AND taken_at >= ? AND taken_at <= ?"
-		where += " AND (taken_at > ? OR (taken_at = ? AND id >= ?))"
-		where += " AND (taken_at < ? OR (taken_at = ? AND id <= ?))"
-		args = append(args, e.StartAt, e.EndAt, e.StartAt, e.StartAt, e.FirstID, e.EndAt, e.EndAt, e.LastID)
+		bounds, boundArgs := eventBounds(f.event)
+		where += " AND " + bounds
+		args = append(args, boundArgs...)
 	}
 	if f.album != 0 {
 		where += " AND id IN (SELECT asset_id FROM album_items WHERE album_id = ?)"
@@ -287,16 +295,16 @@ func (s *Store) GridItems(ctx context.Context, ids []int64) ([]core.GridItem, er
 }
 
 // AssetDetail returns everything the details panel shows for one asset.
-func (s *Store) AssetDetail(ctx context.Context, id int64) (core.AssetDetail, error) {
+func (s *Store) AssetDetail(ctx context.Context, id int64, unlocked bool) (core.AssetDetail, error) {
 	var d core.AssetDetail
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
-		d, err = assetDetail(ctx, tx, id)
+		d, err = assetDetail(ctx, tx, id, unlocked)
 		return err
 	})
 	return d, err
 }
 
-func assetDetail(ctx context.Context, q querier, id int64) (core.AssetDetail, error) {
+func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.AssetDetail, error) {
 	var d core.AssetDetail
 	var w, h sql.NullInt64
 	var camera sql.NullString
@@ -306,7 +314,7 @@ func assetDetail(ctx context.Context, q querier, id int64) (core.AssetDetail, er
 	err := q.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
 		CASE WHEN `+placeBlocked("assets.place_id")+` THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
 		duration_ms, video_codec, audio_codec
-		FROM assets WHERE id = ? AND `+visible, id).
+		FROM assets WHERE id = ? AND `+servableOf(unlocked), id).
 		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.PlaceID, &d.Favourite,
 			&duration, &videoCodec, &audioCodec)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -354,12 +362,12 @@ type MediaFile struct {
 
 // AssetFile returns what serving an asset needs, with every file it is in:
 // if one copy is on a drive that is not plugged in, another may be.
-func (s *Store) AssetFile(ctx context.Context, id int64) (MediaFile, error) {
+func (s *Store) AssetFile(ctx context.Context, id int64, unlocked bool) (MediaFile, error) {
 	var m MediaFile
 	err := s.read(ctx, func(tx *sql.Tx) error {
 		err := tx.QueryRowContext(ctx, `SELECT ext, kind, orientation, thumb_version,
 			COALESCE(video_codec, ''), COALESCE(audio_codec, ''), COALESCE(duration_ms, 0)
-			FROM assets WHERE id = ? AND `+visible, id).
+			FROM assets WHERE id = ? AND `+servableOf(unlocked), id).
 			Scan(&m.Ext, &m.Kind, &m.Orientation, &m.ThumbVersion, &m.VideoCodec, &m.AudioCodec, &m.Duration)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
@@ -391,10 +399,28 @@ func (s *Store) CountVisible(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// AssetVisible checks the same browse predicate used by grid queries. Media
+// trashed is what the Trash view shows: trashed, still on disk and not
+// hidden, blocks ignored (a blocked photo is in the Trash like any other). It
+// is spelled as the assets_trash partial index (migration 0020) spells it, so
+// SQLite can use that index.
+const trashed = "trashed_at IS NOT NULL AND missing_since IS NULL AND hidden = 0"
+
+// servableOf is what the media handler, the details panel and Explorer
+// accept: visible, or in the Trash, since the Trash's photos open in the
+// Viewer, and while the Blocked screen is unlocked also the photos blocks
+// cover, which its browser shows.
+func servableOf(unlocked bool) string {
+	if unlocked {
+		return "(" + baseVisibleOf("") + " OR (" + trashed + "))"
+	}
+	return "(" + visible + " OR (" + trashed + "))"
+}
+
+// AssetVisible checks the servable predicate: the browse predicate used by
+// grid queries, the Trash's, or while unlocked the Blocked screen's. Media
 // handlers call this before serving even a cached thumbnail or video sprite.
-func (s *Store) AssetVisible(ctx context.Context, id int64) (bool, error) {
+func (s *Store) AssetVisible(ctx context.Context, id int64, unlocked bool) (bool, error) {
 	var ok bool
-	err := s.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM assets WHERE id = ? AND "+visible+")", id).Scan(&ok)
+	err := s.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM assets WHERE id = ? AND "+servableOf(unlocked)+")", id).Scan(&ok)
 	return ok, err
 }

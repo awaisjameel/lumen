@@ -5,7 +5,10 @@ import (
 	"errors"
 	"time"
 
+	"github.com/wailsapp/wails/v3/pkg/application"
+
 	"lumen/internal/core"
+	"lumen/internal/signin"
 	"lumen/internal/store"
 )
 
@@ -32,17 +35,7 @@ const (
 )
 
 // unlockedNow reports whether the list is unlocked, and counts this as a use.
-// Call with s.blocked held.
-func (s *LibraryService) unlockedNow() bool {
-	now := s.now()
-	if s.blocked.unlocked && now.Sub(s.blocked.usedAt) > blockUnlockIdle {
-		s.blocked.unlocked = false
-	}
-	if s.blocked.unlocked {
-		s.blocked.usedAt = now
-	}
-	return s.blocked.unlocked
-}
+func (s *LibraryService) unlockedNow() bool { return s.gate.unlockedAt(s.now()) }
 
 // BlockPINConfigured reports whether the first block must establish a PIN.
 func (s *LibraryService) BlockPINConfigured(ctx context.Context) (bool, error) {
@@ -74,15 +67,76 @@ func (s *LibraryService) UnlockBlocks(ctx context.Context, pin string) error {
 		}
 		return store.ErrInvalidPIN
 	}
-	s.blocked.unlocked, s.blocked.usedAt = true, s.now()
+	s.gate.open(s.now())
 	s.blocked.failures = 0
 	return nil
+}
+
+// resetReason is what the Windows sign-in prompt says it is for.
+const resetReason = "Sign in to choose a new PIN for Lumen's Blocked screen."
+
+// ResetBlockPIN replaces a forgotten PIN after the user signs in to Windows
+// (Windows Hello, or the PC's password). Blocks are kept, and the list
+// stays locked until the new PIN unlocks it.
+//
+// The PIN's format is checked before Windows is asked, so nobody signs in for
+// a PIN that would be refused. The attempt counter and cooldown are left as
+// they are: a reset is no way round them, and a failed sign-in is not a wrong
+// PIN, so it adds nothing to them either. The prompt can take as long as the
+// user does, so the lock on the Blocked state is not held while it is open.
+func (s *LibraryService) ResetBlockPIN(ctx context.Context, pin string) error {
+	if !store.ValidPIN(pin) {
+		return store.ErrInvalidPIN
+	}
+	configured, err := s.store.HasBlockPIN(ctx)
+	if err != nil {
+		return err
+	}
+	if !configured {
+		return store.ErrNotFound
+	}
+	verify := s.verify
+	if verify == nil {
+		verify = signin.Verify
+	}
+	if err := verify(ctx, lumenWindow(), resetReason); err != nil {
+		return err
+	}
+	s.blocked.Lock()
+	defer s.blocked.Unlock()
+	if err := s.store.ReplaceBlockPIN(ctx, pin); err != nil {
+		return err
+	}
+	s.gate.close()
+	return nil
+}
+
+// lumenWindow is the native handle of Lumen's window, which the Windows
+// sign-in prompt belongs to so that it opens in front of it. It is the window
+// Wails reports as current (the one the user just pressed the button in),
+// or else the first window there is, or 0 when there is none, as in tests:
+// the prompt then has no owner.
+func lumenWindow() uintptr {
+	app := application.Get()
+	if app == nil {
+		return 0
+	}
+	w := app.Window.Current()
+	if w == nil {
+		if all := app.Window.GetAll(); len(all) > 0 {
+			w = all[0]
+		}
+	}
+	if w == nil {
+		return 0
+	}
+	return uintptr(w.NativeWindow())
 }
 
 // LockBlocks closes access to the private list as the user leaves the screen.
 func (s *LibraryService) LockBlocks() {
 	s.blocked.Lock()
-	s.blocked.unlocked = false
+	s.gate.close()
 	s.blocked.Unlock()
 }
 
@@ -98,6 +152,16 @@ func (s *LibraryService) Blocks(ctx context.Context) ([]core.Block, error) {
 
 // SetBlock adds or changes one visibility rule.
 func (s *LibraryService) SetBlock(ctx context.Context, kind core.BlockKind, targetID int64, path string, mode core.BlockMode) (core.BlockChange, error) {
+	return s.saveBlock(ctx, func(allowChange bool) (int64, bool, error) {
+		return s.store.SetBlockWithCreated(ctx, kind, targetID, path, mode, allowChange)
+	})
+}
+
+// saveBlock holds the rules every way of making a block shares: the PIN must
+// have been created, an existing block changes only while the Blocked screen
+// is unlocked (save is told whether it may), and only a new block offers
+// Undo.
+func (s *LibraryService) saveBlock(ctx context.Context, save func(allowChange bool) (id int64, created bool, err error)) (core.BlockChange, error) {
 	configured, err := s.store.HasBlockPIN(ctx)
 	if err != nil {
 		return core.BlockChange{}, err
@@ -107,7 +171,7 @@ func (s *LibraryService) SetBlock(ctx context.Context, kind core.BlockKind, targ
 	}
 	s.blocked.Lock()
 	defer s.blocked.Unlock()
-	id, created, err := s.store.SetBlockWithCreated(ctx, kind, targetID, path, mode, s.unlockedNow())
+	id, created, err := save(s.unlockedNow())
 	if errors.Is(err, store.ErrBlockChangeLocked) {
 		return core.BlockChange{}, ErrBlockLocked
 	}
@@ -117,7 +181,7 @@ func (s *LibraryService) SetBlock(ctx context.Context, kind core.BlockKind, targ
 		} else if id == s.blocked.lastID {
 			s.blocked.lastID = 0
 		}
-		s.blocksChanged()
+		s.viewsChanged()
 	}
 	return core.BlockChange{ID: id, Created: created}, err
 }
@@ -133,7 +197,23 @@ func (s *LibraryService) UndoBlock(ctx context.Context, id int64) error {
 		return err
 	}
 	s.blocked.lastID = 0
-	s.blocksChanged()
+	s.viewsChanged()
+	return nil
+}
+
+// SetBlockMode changes what the block blockID hides: its label only, or its
+// photos too. It needs the PIN unlock, as RemoveBlock does, and takes the
+// block's own id, which is not always what SetBlock's target means.
+func (s *LibraryService) SetBlockMode(ctx context.Context, blockID int64, mode core.BlockMode) error {
+	s.blocked.Lock()
+	defer s.blocked.Unlock()
+	if !s.unlockedNow() {
+		return ErrBlockLocked
+	}
+	if err := s.store.SetBlockMode(ctx, blockID, mode); err != nil {
+		return err
+	}
+	s.viewsChanged()
 	return nil
 }
 
@@ -147,14 +227,34 @@ func (s *LibraryService) RemoveBlock(ctx context.Context, id int64) error {
 	if err := s.store.RemoveBlock(ctx, id); err != nil {
 		return err
 	}
-	s.blocksChanged()
+	s.viewsChanged()
 	return nil
 }
 
-// blocksChanged tells every view: a block changes which assets, Things and
-// people are shown.
-func (s *LibraryService) blocksChanged() {
-	if s.ix != nil {
-		s.ix.LibraryChanged(core.Changes{Assets: true, Tags: true, People: true})
+// BlockedItems lists the photos the block blockID covers, for the Blocked
+// screen's browser; it needs the PIN unlock. The lock is held while the list
+// is read, so nothing is handed out after the screen has locked.
+func (s *LibraryService) BlockedItems(ctx context.Context, blockID int64) ([]core.CoveredItem, error) {
+	s.blocked.Lock()
+	defer s.blocked.Unlock()
+	if !s.unlockedNow() {
+		return nil, ErrBlockLocked
 	}
+	return s.store.BlockCoverage(ctx, blockID)
+}
+
+// TrashCovered moves photos a block covers to the Trash, from the Blocked
+// screen's browser; it needs the PIN unlock. Like TrashAssets, it leaves the
+// files where they are.
+func (s *LibraryService) TrashCovered(ctx context.Context, ids []int64) error {
+	s.blocked.Lock()
+	defer s.blocked.Unlock()
+	if !s.unlockedNow() {
+		return ErrBlockLocked
+	}
+	if err := s.store.TrashAssets(ctx, ids); err != nil {
+		return err
+	}
+	s.viewsChanged()
+	return nil
 }

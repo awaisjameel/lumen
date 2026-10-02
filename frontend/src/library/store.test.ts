@@ -4,7 +4,7 @@ import { nextTick, watch } from 'vue'
 import { Device, engine, Filter, onLibraryChanged, onProgress, startMedia } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Errors from '../shared/errors'
-import type { DayBucket, DayItems, Progress, SearchResults } from '../bridge'
+import type { Changes, DayBucket, DayItems, Progress, SearchResults } from '../bridge'
 import { affects, scopeKey, useLibrary } from './store'
 import { reportError } from '../shared/errors'
 
@@ -25,6 +25,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     progress: vi.fn(),
     setFavourite: vi.fn(),
     setPaused: vi.fn(),
+    trashCount: vi.fn(),
   },
   onLibraryChanged: vi.fn(),
   onProgress: vi.fn(),
@@ -51,6 +52,7 @@ const progress: Progress = {
   thumbnail: 0,
   embedding: 0,
   faces: 0,
+  ocr: 0,
   errors: 0,
   skipped: 0,
   paused: false,
@@ -72,15 +74,22 @@ beforeEach(() => {
   vi.mocked(engine.search).mockReset()
   vi.mocked(engine.visibleAssets).mockReset()
   vi.mocked(engine.sources).mockReset().mockResolvedValue([])
-  vi.mocked(engine.settings)
-    .mockReset()
-    .mockResolvedValue({ videos: false, aiOnBattery: false, tagConfidence: 0.02, eventGapHours: 12 })
+  vi.mocked(engine.settings).mockReset().mockResolvedValue({
+    videos: false,
+    aiOnBattery: false,
+    tagConfidence: 0.02,
+    eventGapHours: 12,
+    thumbCacheMB: 2048,
+    ocr: false,
+    xmp: false,
+  })
   vi.mocked(engine.progress).mockReset().mockResolvedValue(progress)
   vi.mocked(startMedia).mockReset().mockResolvedValue(undefined)
   vi.mocked(onProgress).mockReset().mockReturnValue(vi.fn())
   vi.mocked(onLibraryChanged).mockReset().mockReturnValue(vi.fn())
   vi.mocked(engine.setFavourite).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setPaused).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.trashCount).mockReset().mockResolvedValue(0)
   vi.mocked(reportError).mockClear()
 })
 
@@ -654,5 +663,23 @@ describe('what a change affects', () => {
     expect(affects({ filter: Filter.FilterAll, tag: 3 }, { ...none, tags: true })).toBe(true)
     expect(affects({ filter: Filter.FilterAll, person: 3 }, { ...none, tags: true })).toBe(false)
     expect(affects({ filter: Filter.FilterAll, album: 3 }, { ...none, people: true })).toBe(true)
+  })
+})
+
+describe('the Trash count', () => {
+  it('is read at start and again when the library changes its assets', async () => {
+    let changed!: (c: Changes) => void
+    vi.mocked(onLibraryChanged).mockImplementation((callback) => {
+      changed = callback
+      return vi.fn()
+    })
+    vi.mocked(engine.trashCount).mockResolvedValue(3)
+    const lib = useLibrary()
+    await lib.init()
+    await vi.waitFor(() => expect(lib.trashCount).toBe(3))
+    vi.mocked(engine.trashCount).mockResolvedValue(5)
+    changed({ assets: false, thumbs: true, tags: false, people: false })
+    changed({ assets: true, thumbs: false, tags: false, people: false })
+    await vi.waitFor(() => expect(lib.trashCount).toBe(5))
   })
 })

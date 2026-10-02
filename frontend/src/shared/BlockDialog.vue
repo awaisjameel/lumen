@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import { BlockMode, engine, PIN_MAX_LEN, PIN_MIN_LEN } from '../bridge'
+import { BlockKind, BlockMode, engine, PIN_MAX_LEN, PIN_MIN_LEN } from '../bridge'
 import { blockRequest, showBlocksChanged, showBlockUndo } from './block'
 import type { BlockRequest } from './block'
 import { errorText, reportError } from './errors'
@@ -9,6 +9,7 @@ import PinFields from './PinFields.vue'
 
 const dialog = ref<HTMLDialogElement | null>(null)
 const mode = ref<BlockMode>(BlockMode.BlockPhotos)
+const lookalikes = ref(false) // a face: block faces like it too
 const configured = ref(true)
 const pin = ref('')
 const confirmPIN = ref('')
@@ -21,6 +22,7 @@ watch(blockRequest, async (request) => {
     return
   }
   mode.value = request.photosAllowed ? BlockMode.BlockPhotos : BlockMode.BlockLabel
+  lookalikes.value = false
   configured.value = true
   pin.value = ''
   confirmPIN.value = ''
@@ -57,13 +59,17 @@ async function save() {
   }
   busy.value = true
   const requestedMode = mode.value
+  const requestedLookalikes = lookalikes.value
   try {
     if (!configured.value) {
       await engine.createBlockPIN(pin.value)
       if (blockRequest.value !== request) return
       configured.value = true
     }
-    const change = await engine.setBlock(request.kind, request.targetID, request.path, requestedMode)
+    const change =
+      request.kind === BlockKind.BlockFace
+        ? await engine.blockFace(request.targetID, requestedMode, requestedLookalikes)
+        : await engine.setBlock(request.kind, request.targetID, request.path, requestedMode)
     if (change.created) showBlockUndo(change.id, request.name)
     close(request, true)
     void showBlocksChanged().catch(reportError)
@@ -80,6 +86,12 @@ async function save() {
     <form v-if="blockRequest" @submit.prevent="save">
       <h2 id="block-title">{{ t('blocked.confirmTitle', { name: blockRequest.name }) }}</h2>
       <p>{{ t('blocked.confirmText') }}</p>
+      <fieldset v-if="blockRequest.kind === BlockKind.BlockFace">
+        <legend>{{ t('blocked.faceScope') }}</legend>
+        <label><input v-model="lookalikes" type="radio" :value="false" />{{ t('blocked.faceOnly') }}</label>
+        <label><input v-model="lookalikes" type="radio" :value="true" />{{ t('blocked.faceLookalikes') }}</label>
+        <p class="hint">{{ t('blocked.faceLookalikesHint') }}</p>
+      </fieldset>
       <fieldset v-if="blockRequest.labelOnly && blockRequest.photosAllowed">
         <legend>{{ t('blocked.mode') }}</legend>
         <label><input v-model="mode" type="radio" :value="BlockMode.BlockLabel" />{{ t('blocked.labelOnly') }}</label>
@@ -117,6 +129,11 @@ fieldset {
   margin: 16px 0;
   border: 0;
   padding: 0;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
 }
 
 legend {

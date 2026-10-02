@@ -19,6 +19,7 @@ import { useThings } from '../things/store'
 import { useAlbums } from '../albums/store'
 import { buildLayout, GAP, move, rowHeight, rowOfItem } from './layout'
 import type { Row } from './layout'
+import TrashBar from '../trash/TrashBar.vue'
 import { RESULTS, scopeKey, useLibrary, ZOOM_MAX, ZOOM_MIN } from './store'
 import type { Scope, Sel } from './store'
 import TimelineScrubber from './TimelineScrubber.vue'
@@ -65,6 +66,7 @@ const titles: Record<Filter, MessageKey> = {
   [Filter.FilterAll]: 'nav.library',
   [Filter.FilterFavourites]: 'nav.favourites',
   [Filter.FilterVideos]: 'nav.videos',
+  [Filter.FilterTrash]: 'nav.trash',
 }
 
 const tagId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.tag ?? 0) : 0))
@@ -308,7 +310,7 @@ async function onKey(e: KeyboardEvent) {
     lib.viewer = { ...sel }
   } else if (e.key === 'Escape') {
     lib.selected = null
-  } else if (e.key.toLowerCase() === 'f' && sel) {
+  } else if (e.key.toLowerCase() === 'f' && sel && !lib.inTrash) {
     void lib.toggleFavourite(sel)
   } else if (e.key.toLowerCase() === 'i') {
     lib.showDetails = !lib.showDetails
@@ -351,6 +353,7 @@ const emptyText = computed((): [string, string] => {
           : 'albums.manualEmptyHint',
       ),
     ]
+  if (lib.inTrash) return [t('trash.empty'), t('trash.emptyHint')]
   if (placeId.value) return [t('places.viewEmpty'), t('places.emptyHint')]
   if (eventId.value) return [t('events.viewEmpty'), t('events.emptyHint')]
   const keys: [MessageKey, MessageKey] =
@@ -430,6 +433,8 @@ const searchNotes = computed(() => {
         </button>
       </header>
 
+      <TrashBar v-if="lib.inTrash" />
+
       <p v-for="n in searchNotes" :key="n" class="note">{{ n }}</p>
       <p v-if="lib.isSearch && lib.searchInfo?.blocked" class="note">
         {{ t('search.blocked') }} <RouterLink to="/settings/blocked">{{ t('search.openBlocked') }}</RouterLink>
@@ -457,7 +462,7 @@ const searchNotes = computed(() => {
           <EmptyState
             v-else-if="empty"
             class="overlay"
-            :icon="lib.isSearch ? 'search' : 'photos'"
+            :icon="lib.isSearch ? 'search' : lib.inTrash ? 'trash' : 'photos'"
             :title="emptyText[0]"
             :text="emptyText[1]"
           />

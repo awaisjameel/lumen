@@ -47,7 +47,7 @@ func openStreamTest(t *testing.T) (stream *Streamer, assetID int64) {
 	if err := st.SaveMetadata(t.Context(), "test", []store.MetadataResult{{AssetID: id, VideoCodec: "h264"}}); err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewStreamer(st, media.Decoders{})
+	s, err := NewStreamer(st, media.Decoders{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

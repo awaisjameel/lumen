@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -100,23 +101,23 @@ func TestPersonBlockModesAndOverlappingAssetBlock(t *testing.T) {
 	if n, _ := st.CountVisible(ctx); n != 2 {
 		t.Fatalf("photo block count = %d, want 2", n)
 	}
-	if ok, _ := st.AssetVisible(ctx, a); ok {
+	if ok, _ := st.AssetVisible(ctx, a, false); ok {
 		t.Fatal("person's photo remains visible")
 	}
-	if _, err := st.AssetFile(ctx, a); !errors.Is(err, ErrNotFound) {
+	if _, err := st.AssetFile(ctx, a, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("blocked media file: %v", err)
 	}
 	assetBlock, err := st.SetBlock(ctx, core.BlockAsset, a, "", core.BlockLabel)
 	check(t, err)
 	check(t, st.RemoveBlock(ctx, personBlock))
-	if ok, _ := st.AssetVisible(ctx, a); ok {
+	if ok, _ := st.AssetVisible(ctx, a, false); ok {
 		t.Fatal("overlapping asset block lost after person unblock")
 	}
 	check(t, st.RemoveBlock(ctx, assetBlock))
 	if n, _ := st.CountVisible(ctx); n != 3 {
 		t.Fatalf("unblocked count = %d, want 3", n)
 	}
-	if ok, _ := st.AssetVisible(ctx, b); !ok {
+	if ok, _ := st.AssetVisible(ctx, b, false); !ok {
 		t.Fatal("unrelated asset hidden")
 	}
 }
@@ -149,7 +150,7 @@ func TestFolderAndThingBlocksFollowNewMedia(t *testing.T) {
 	check(t, st.TagAsset(ctx, asset, tag))
 	_, err = st.SetBlock(ctx, core.BlockTag, tag, "", core.BlockPhotos)
 	check(t, err)
-	if ok, _ := st.AssetVisible(ctx, asset); ok {
+	if ok, _ := st.AssetVisible(ctx, asset, false); ok {
 		t.Fatal("tagged asset escaped Thing block")
 	}
 	if tags, err := st.SearchTags(ctx, "Private", 5); err != nil || len(tags) != 0 {
@@ -170,7 +171,7 @@ func TestPersonBlockFollowsMerge(t *testing.T) {
 		t.Fatalf("merged identity block = %v, %v", blocked, err)
 	}
 	for _, id := range []int64{a, b} {
-		if ok, err := st.AssetVisible(ctx, id); err != nil || ok {
+		if ok, err := st.AssetVisible(ctx, id, false); err != nil || ok {
 			t.Fatalf("merged photo %d visible: %v, %v", id, ok, err)
 		}
 	}
@@ -196,7 +197,7 @@ func TestFolderBlockBoundaries(t *testing.T) {
 			}
 			var id int64
 			check(t, st.r.QueryRowContext(ctx, "SELECT asset_id FROM files WHERE path = ?", tc.inside).Scan(&id))
-			if ok, err := st.AssetVisible(ctx, id); err != nil || ok {
+			if ok, err := st.AssetVisible(ctx, id, false); err != nil || ok {
 				t.Fatalf("descendant visible = %v, %v", ok, err)
 			}
 		})
@@ -275,6 +276,53 @@ func TestUpgradeConvertsUserHiddenLabelsButNotSink(t *testing.T) {
 	}
 }
 
+func TestUpgradeRebuildsBlocksAndKeepsTheirTriggers(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "library.db")
+	db, err := sql.Open(driverName, path+"?_foreign_keys=1")
+	check(t, err)
+	names, err := fs.Glob(migrationFS, "migrations/*.sql")
+	check(t, err)
+	for _, name := range names {
+		// Numbers have gaps, so the schema version is read from the name.
+		version, err := strconv.Atoi(strings.SplitN(filepath.Base(name), "_", 2)[0])
+		check(t, err)
+		if version >= 23 {
+			break
+		}
+		body, err := migrationFS.ReadFile(name)
+		check(t, err)
+		tx, err := db.BeginTx(ctx, nil)
+		check(t, err)
+		_, err = tx.ExecContext(ctx, string(body))
+		check(t, err)
+		_, err = tx.ExecContext(ctx, "PRAGMA user_version = "+fmt.Sprint(version))
+		check(t, err)
+		check(t, tx.Commit())
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO people(id, name, created_at) VALUES (1, 'Ali', 1);
+		INSERT INTO blocks(kind, target_id, mode, name, created_at) VALUES ('person', 1, 'photos', 'Ali', 1);
+		INSERT INTO blocks(kind, path, mode, name, created_at) VALUES ('folder', 'C:\Private', 'photos', 'Private', 1);`)
+	check(t, err)
+	check(t, db.Close())
+	st, err := Open(path)
+	check(t, err)
+	defer st.Close()
+	blocks, err := st.Blocks(ctx)
+	check(t, err)
+	if len(blocks) != 2 {
+		t.Fatalf("blocks after the rebuild = %+v, want the person and the folder", blocks)
+	}
+	check(t, errOf(st.w.ExecContext(ctx, `INSERT INTO blocks(kind, target_id, mode, name, created_at)
+		VALUES ('event', 7, 'photos', 'Trip', 1), ('face', 8, 'label', 'Face', 1)`)))
+	// Migration 0014's triggers on people read blocks by name: they must still
+	// find the rebuilt table.
+	check(t, errOf(st.w.ExecContext(ctx, "DELETE FROM people WHERE id = 1")))
+	if blocked, err := st.IsBlocked(ctx, core.BlockPerson, 1); err != nil || blocked {
+		t.Fatalf("a removed person is still blocked: %v, %v", blocked, err)
+	}
+}
+
 func TestSmartAlbumBlockTracksRuleAndNewMatches(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
 	src, err := st.AddSource(ctx, `C:\Photos`)
@@ -290,10 +338,10 @@ func TestSmartAlbumBlockTracksRuleAndNewMatches(t *testing.T) {
 	check(t, err)
 	blockID, err := st.SetBlock(ctx, core.BlockAlbum, album, "", core.BlockPhotos)
 	check(t, err)
-	if ok, _ := st.AssetVisible(ctx, a); ok {
+	if ok, _ := st.AssetVisible(ctx, a, false); ok {
 		t.Fatal("smart album member remains visible")
 	}
-	if ok, _ := st.AssetVisible(ctx, b); !ok {
+	if ok, _ := st.AssetVisible(ctx, b, false); !ok {
 		t.Fatal("nonmember hidden")
 	}
 	var before, after int64
@@ -303,7 +351,7 @@ func TestSmartAlbumBlockTracksRuleAndNewMatches(t *testing.T) {
 	if after <= before {
 		t.Fatal("smart album membership did not invalidate visibility caches")
 	}
-	if ok, _ := st.AssetVisible(ctx, b); ok {
+	if ok, _ := st.AssetVisible(ctx, b, false); ok {
 		t.Fatal("new smart album member escaped block")
 	}
 	check(t, st.RemoveBlock(ctx, blockID))
@@ -327,13 +375,13 @@ func TestPlaceLabelBlockKeepsPhotoButRemovesPlaceDetail(t *testing.T) {
 	if n, _ := st.CountVisible(ctx); n != 1 {
 		t.Fatalf("label-only place block hid photo: %d", n)
 	}
-	detail, err := st.AssetDetail(ctx, 1)
+	detail, err := st.AssetDetail(ctx, 1, false)
 	check(t, err)
 	if detail.PlaceID != 0 {
 		t.Fatalf("blocked place leaked in detail: %d", detail.PlaceID)
 	}
 	check(t, st.RemoveBlock(ctx, blockID))
-	detail, err = st.AssetDetail(ctx, 1)
+	detail, err = st.AssetDetail(ctx, 1, false)
 	check(t, err)
 	if detail.PlaceID != 1 {
 		t.Fatalf("unblocked place not restored: %d", detail.PlaceID)
@@ -363,7 +411,7 @@ func TestSmartAlbumPersonChangesInvalidateVisibility(t *testing.T) {
 		if after <= before {
 			t.Fatal("person smart album membership did not invalidate visibility")
 		}
-		if visible, err := st.AssetVisible(ctx, b); err != nil || visible == assigned {
+		if visible, err := st.AssetVisible(ctx, b, false); err != nil || visible == assigned {
 			t.Fatalf("assigned = %v, visible = %v, %v", assigned, visible, err)
 		}
 	}

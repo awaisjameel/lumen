@@ -23,14 +23,21 @@ type Original struct {
 }
 
 // Cache is the on-disk thumbnail cache. Thumbnails can disappear (the user
-// clears the folder; the planned size cap will evict them), so readers call
-// Ensure, which rebuilds a missing pair from the original.
+// clears the folder; the size cap evicts them), so readers call Ensure, which
+// rebuilds a missing pair from the original.
+//
+// It also keeps what the size cap needs (see evict.go): a running total of
+// the bytes the thumbnails and sprites take, and which assets were shown
+// since the database last heard of it.
 type Cache struct {
 	Dir     string
 	Decoder Decoder
 
 	rebuilding stripes        // one rebuild per asset at a time; waiting for it can be cancelled
 	writing    [64]sync.Mutex // one writer per asset at a time: Windows refuses two renames onto one file
+
+	size  sizeLedger
+	views viewLog
 }
 
 // NewCache returns the cache in dir, rebuilding with d.
@@ -39,6 +46,7 @@ func NewCache(dir string, d Decoder) *Cache {
 	for i := range c.rebuilding {
 		c.rebuilding[i] = make(chan struct{}, 1)
 	}
+	c.size.wake = make(chan struct{}, 1)
 	return c
 }
 
@@ -171,22 +179,44 @@ func (c *Cache) EnsureFrame(ctx context.Context, id, at int64, path string) (str
 
 // Write saves both thumbnails for an asset, atomically per file: readers
 // see the old file or the new one, never half of one. Writers of one asset
-// (the indexer, a rebuild) take turns.
+// (the indexer, a rebuild) take turns. The size total grows by what was
+// written, less what it replaced.
 func (c *Cache) Write(id int64, t Thumbs) error {
-	return c.lockedWrite(id, func() error {
-		for _, v := range []struct {
-			size int
-			data []byte
-		}{{core.ThumbSmall, t.Small}, {core.ThumbLarge, t.Large}} {
-			if err := c.writeAtomic(c.Path(id, v.size), v.data); err != nil {
+	files := []cacheFile{{c.Path(id, core.ThumbSmall), t.Small}, {c.Path(id, core.ThumbLarge), t.Large}}
+	if len(t.Sprite) > 0 { // photos have none
+		files = append(files, cacheFile{c.SpritePath(id), t.Sprite})
+	}
+	err := c.lockedWrite(id, func() error {
+		for _, f := range files {
+			if err := c.writeCounted(f.path, f.data); err != nil {
 				return err
 			}
 		}
-		if len(t.Sprite) > 0 {
-			return c.writeAtomic(c.SpritePath(id), t.Sprite)
-		}
 		return nil
 	})
+	c.size.wakeIfOver()
+	return err
+}
+
+// cacheFile is one file Write puts in the cache.
+type cacheFile struct {
+	path string
+	data []byte
+}
+
+// writeCounted is writeAtomic, keeping the size total: the file's new size
+// less the old one it replaces. Call it with the asset's write lock held, so
+// nothing else changes the file between the two sizes.
+func (c *Cache) writeCounted(path string, data []byte) error {
+	var before int64
+	if fi, err := os.Stat(path); err == nil {
+		before = fi.Size()
+	}
+	if err := c.writeAtomic(path, data); err != nil {
+		return err
+	}
+	c.size.add(int64(len(data)) - before)
+	return nil
 }
 
 // writeAtomic writes data to a temporary file, then renames it into place.
@@ -268,5 +298,12 @@ func (c *Cache) ensure(ctx context.Context, id int64, path string, orig Original
 	if err != nil {
 		return err
 	}
-	return c.Write(id, t)
+	if err := c.Write(id, t); err != nil {
+		return err
+	}
+	// A rebuilt asset may carry the "evicted" marker in the database, which
+	// hides it from the cap. Recording a view lets the next flush clear it,
+	// whichever stage or request made the files.
+	c.Viewed(id)
+	return nil
 }

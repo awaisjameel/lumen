@@ -46,7 +46,7 @@ func (s *Store) People(ctx context.Context) ([]core.Person, error) {
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
 		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), count(DISTINCT f.asset_id)
 			FROM people p JOIN faces f ON f.person_id = p.id JOIN assets a ON a.id = f.asset_id AND `+visibleA+`
-			WHERE NOT `+labelBlocked(core.BlockPerson, "p.id")+`
+			WHERE NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND `+faceShown+`
 			GROUP BY p.id ORDER BY p.name IS NULL, count(DISTINCT f.asset_id) DESC, p.name, p.id`)
 		if err != nil {
 			return err
@@ -62,8 +62,8 @@ func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
 		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''),
 				(SELECT count(DISTINCT f.asset_id) FROM faces f JOIN assets a ON a.id = f.asset_id
-					WHERE f.person_id = p.id AND `+visibleA+`)
-			FROM people p WHERE p.id = ? AND NOT `+labelBlocked(core.BlockPerson, "p.id"), id)
+					WHERE f.person_id = p.id AND `+visibleA+` AND `+faceShown+`)
+			FROM people p WHERE p.id = ? AND NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND NOT `+personCovered("p.id"), id)
 		if err != nil {
 			return err
 		}
@@ -85,7 +85,7 @@ func scanPerson(r *sql.Rows) (p core.Person, err error) {
 
 // addCovers picks each person's clearest face with a thumbnail to show.
 func addCovers(ctx context.Context, tx *sql.Tx, people []core.Person) error {
-	st, err := tx.PrepareContext(ctx, faceSelect+` WHERE f.person_id = ? AND `+visibleA+` AND a.thumb_version > 0
+	st, err := tx.PrepareContext(ctx, faceSelect+` WHERE f.person_id = ? AND `+visibleA+` AND `+faceShown+` AND a.thumb_version > 0
 		ORDER BY `+clearest+` LIMIT 1`)
 	if err != nil {
 		return err
@@ -105,7 +105,8 @@ func addCovers(ctx context.Context, tx *sql.Tx, people []core.Person) error {
 }
 
 // PersonFaces returns a person's faces in visible photos with their identity
-// vectors (vecs[i] belongs to faces[i]), newest photos first.
+// vectors (vecs[i] belongs to faces[i]), newest photos first. A face a face
+// block covers is left out.
 func (s *Store) PersonFaces(ctx context.Context, id int64) (faces []core.Face, vecs [][]float32, err error) {
 	type row struct {
 		f   core.Face
@@ -118,7 +119,7 @@ func (s *Store) PersonFaces(ctx context.Context, id int64) (faces []core.Face, v
 		x.vec = bytesFloat32(vec)
 		return x, err
 	}, "SELECT "+faceColumns+", f.vec"+faceFrom+
-		` WHERE f.person_id = ? AND `+visibleA+` AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+`
+		` WHERE f.person_id = ? AND `+visibleA+` AND `+faceShown+` AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+`
 		ORDER BY a.taken_at DESC, f.id`, id)
 	if err != nil {
 		return nil, nil, err
@@ -130,18 +131,20 @@ func (s *Store) PersonFaces(ctx context.Context, id int64) (faces []core.Face, v
 	return faces, vecs, nil
 }
 
-// AssetFaces returns the faces in one photo, left to right.
+// AssetFaces returns the faces in one photo, left to right, except those a
+// face block covers: in a photo shown in label mode they have no box or name.
 func (s *Store) AssetFaces(ctx context.Context, assetID int64) ([]core.Face, error) {
-	return queryAll(ctx, s.r, scanFace, faceSelect+` WHERE f.asset_id = ? AND `+visibleA+` AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+` ORDER BY f.x`, assetID)
+	return queryAll(ctx, s.r, scanFace, faceSelect+` WHERE f.asset_id = ? AND `+visibleA+` AND `+faceShown+` AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+` ORDER BY f.x`, assetID)
 }
 
 // NamedPeople returns everyone the user has named (for finding names in a
-// search).
+// search), except those every face of whom a face block covers.
 func (s *Store) NamedPeople(ctx context.Context) ([]core.Person, error) {
 	return queryAll(ctx, s.r, func(r *sql.Rows) (p core.Person, err error) {
 		err = r.Scan(&p.ID, &p.Name)
 		return p, err
 	}, `SELECT id, name FROM people WHERE name IS NOT NULL AND NOT `+labelBlocked(core.BlockPerson, "people.id")+`
+		AND NOT `+personCovered("people.id")+`
 		ORDER BY length(name) DESC, name`)
 }
 
@@ -157,7 +160,7 @@ func (s *Store) PeopleAssets(ctx context.Context, people []int64) ([]int64, erro
 		return id, err
 	},
 		`SELECT f.asset_id FROM faces f JOIN assets a ON a.id = f.asset_id
-		WHERE f.person_id IN (SELECT value FROM json_each(?1)) AND `+visibleA+`
+		WHERE f.person_id IN (SELECT value FROM json_each(?1)) AND `+visibleA+` AND `+faceShown+`
 		AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+`
 		GROUP BY f.asset_id HAVING count(DISTINCT f.person_id) = (SELECT count(DISTINCT value) FROM json_each(?1))
 		ORDER BY max(a.taken_at) DESC, f.asset_id DESC`, string(list))
@@ -176,7 +179,7 @@ func (s *Store) SearchPeople(ctx context.Context, text string, limit int) ([]cor
 			err = r.Scan(&p.ID, &p.Name)
 			return p, err
 		}, `SELECT id, name FROM people WHERE name IS NOT NULL AND `+nameMatch+`
-			AND NOT `+labelBlocked(core.BlockPerson, "people.id")+`
+			AND NOT `+labelBlocked(core.BlockPerson, "people.id")+` AND NOT `+personCovered("people.id")+`
 			ORDER BY `+nameFirst+` LIMIT ?2`, core.Fold(text), limit)
 		if err != nil {
 			return err

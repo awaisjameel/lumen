@@ -1,6 +1,9 @@
 <script setup lang="ts">
-// Duplicates: exact file copies and similar-looking photos, for review only.
-// Lumen never deletes or moves files; each copy can be shown in Explorer.
+// Duplicates: exact file copies and similar-looking photos. Each group
+// pre-selects the copy to keep (the engine's suggestion, or the user's own
+// pick); its Review button lists what would happen and does nothing until the
+// user confirms. Similar photos go to Lumen's Trash, and the extra files of
+// exact copies to the Recycle Bin.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
@@ -8,18 +11,24 @@ import { DuplicateKind, engine, THUMB_LARGE, thumbUrl } from '../bridge'
 import type { DuplicateGroup, DuplicateItem } from '../bridge'
 import SearchBox from '../search/SearchBox.vue'
 import EmptyState from '../shared/EmptyState.vue'
-import { errorText } from '../shared/errors'
+import { errorText, notice } from '../shared/errors'
 import { bytes } from '../shared/format'
 import Icon from '../shared/Icon.vue'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
-import { useDuplicates } from './store'
+import { showTrashUndo } from '../trash/undo'
+import ReviewDialog from './ReviewDialog.vue'
+import { useDuplicates, useKeepChoices } from './store'
+import type { Review } from './store'
 
 const duplicates = useDuplicates()
+const choices = useKeepChoices()
 const busy = ref(false)
 const error = ref('')
 const preview = shallowRef<DuplicateItem | null>(null)
 const previewDialog = ref<HTMLDialogElement | null>(null)
+const reviewing = shallowRef<Review | null>(null)
+const acting = ref(false) // a confirmed move is under way
 
 const exact = computed(() => duplicates.list.filter((g) => g.kind === DuplicateKind.DuplicateExact))
 const similar = computed(() => duplicates.list.filter((g) => g.kind === DuplicateKind.DuplicateSimilar))
@@ -131,6 +140,46 @@ async function showPath(item: DuplicateItem, path: string) {
   }
 }
 
+/** Opens the confirmation for a group; nothing is changed until it is confirmed. */
+function startReview(group: DuplicateGroup) {
+  reviewing.value = choices.reviewOf(group)
+}
+
+// A review lists paths of photos the reload may have hidden (blocked, missing)
+// or changed: it must not outlive the group it describes.
+watch(
+  () => duplicates.list,
+  () => {
+    if (reviewing.value && !choices.holds(reviewing.value) && !acting.value) reviewing.value = null
+  },
+)
+
+function cancelReview() {
+  if (!acting.value) reviewing.value = null
+}
+
+async function confirmReview() {
+  const review = reviewing.value
+  if (!review || acting.value) return
+  acting.value = true
+  error.value = ''
+  try {
+    if (review.kind === DuplicateKind.DuplicateExact) {
+      const done = await engine.deleteCopies(review.keep.id, review.keepPath, review.recycle)
+      if (done.kept.length) notice.value = t('trash.kept', { n: done.kept.length })
+    } else {
+      const ids = review.trash.map((item) => item.id)
+      await engine.trashAssets(ids)
+      showTrashUndo(ids)
+    }
+  } catch (e) {
+    error.value = errorText(e)
+  }
+  acting.value = false
+  reviewing.value = null
+  await refresh() // the groups changed, or the move failed part way
+}
+
 async function openPreview(item: DuplicateItem) {
   preview.value = item
   await nextTick()
@@ -150,7 +199,7 @@ async function openPreview(item: DuplicateItem) {
     </header>
     <div ref="scroller" class="page-body">
       <div ref="intro">
-        <p class="muted">{{ t('duplicates.intro') }}</p>
+        <p class="muted">{{ t('duplicates.intro') }} {{ t('duplicates.bestHint') }}</p>
         <p v-if="error || duplicates.error" class="page-error" role="alert">{{ error || duplicates.error }}</p>
         <p v-if="busy" class="muted" role="status">{{ t('duplicates.loading') }}</p>
       </div>
@@ -170,59 +219,93 @@ async function openPreview(item: DuplicateItem) {
               {{ t(row.kind === DuplicateKind.DuplicateExact ? 'duplicates.exactHint' : 'duplicates.similarHint') }}
             </p>
           </template>
-          <div v-else-if="row.kind === DuplicateKind.DuplicateExact" class="group">
-            <div v-for="item in row.group.items" :key="item.id" class="item">
-              <button
-                class="preview-button"
-                :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
-                @click="openPreview(item)"
-              >
-                <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
-                <span v-else class="ph" />
-              </button>
-              <div class="item-info">
+          <div v-else class="group">
+            <template v-if="row.kind === DuplicateKind.DuplicateExact">
+              <div v-for="item in row.group.items" :key="item.id" class="item">
+                <button
+                  class="preview-button"
+                  :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
+                  @click="openPreview(item)"
+                >
+                  <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
+                  <span v-else class="ph" />
+                </button>
+                <div class="item-info">
+                  <span class="muted">{{
+                    t('duplicates.copies', {
+                      n: item.paths.length,
+                      size: bytes(item.size),
+                    })
+                  }}</span>
+                  <ul>
+                    <li v-for="path in item.paths" :key="path" :title="path">
+                      <span>{{ path }}</span>
+                      <label class="keep">
+                        <input
+                          type="radio"
+                          :name="`keep-${item.id}`"
+                          :aria-label="t('duplicates.keepNamed', { name: path })"
+                          :checked="choices.keeperOf(row.group)?.path === path"
+                          @change="choices.choose(row.group, item, path)"
+                        />
+                        {{ t('duplicates.keep') }}
+                        <em v-if="item.keep === path">{{ t('duplicates.suggested') }}</em>
+                      </label>
+                      <button
+                        class="btn btn-subtle"
+                        :aria-label="t('duplicates.showFile', { name: path })"
+                        @click="showPath(item, path)"
+                      >
+                        {{ t('common.showInFolder') }}
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </template>
+            <div v-else class="similar">
+              <div v-for="item in row.group.items" :key="item.id" class="similar-item">
+                <button
+                  class="preview-button"
+                  :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
+                  @click="openPreview(item)"
+                >
+                  <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
+                  <span v-else class="ph" />
+                </button>
+                <strong :title="item.paths[0]">{{ filename(item.paths[0] ?? '') }}</strong>
                 <span class="muted">{{
-                  t('duplicates.copies', {
-                    n: item.paths.length,
-                    size: bytes(item.size),
-                  })
+                  t('duplicates.photoSize', { w: item.width, h: item.height, size: bytes(item.size) })
                 }}</span>
-                <ul>
-                  <li v-for="path in item.paths" :key="path" :title="path">
-                    <span>{{ path }}</span>
-                    <button
-                      class="btn btn-subtle"
-                      :aria-label="t('duplicates.showFile', { name: path })"
-                      @click="showPath(item, path)"
-                    >
-                      {{ t('common.showInFolder') }}
-                    </button>
-                  </li>
-                </ul>
+                <label class="keep">
+                  <input
+                    type="radio"
+                    :name="`keep-${row.key}`"
+                    :aria-label="t('duplicates.keepNamed', { name: filename(item.paths[0] ?? '') })"
+                    :checked="choices.keeperOf(row.group)?.item.id === item.id"
+                    @change="choices.choose(row.group, item)"
+                  />
+                  {{ t('duplicates.keep') }}
+                  <em v-if="item.best">{{ t('duplicates.suggested') }}</em>
+                </label>
+                <button
+                  v-if="item.paths[0]"
+                  class="btn btn-subtle"
+                  :aria-label="t('duplicates.showFile', { name: item.paths[0] })"
+                  @click="showPath(item, item.paths[0])"
+                >
+                  {{ t('common.showInFolder') }}
+                </button>
               </div>
             </div>
-          </div>
-          <div v-else class="group similar">
-            <div v-for="item in row.group.items" :key="item.id" class="similar-item">
+            <div class="group-actions">
               <button
-                class="preview-button"
-                :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
-                @click="openPreview(item)"
+                class="btn"
+                :aria-label="t('duplicates.reviewNamed', { name: filename(row.group.items[0]?.paths[0] ?? '') })"
+                :disabled="acting || !choices.reviewOf(row.group)"
+                @click="startReview(row.group)"
               >
-                <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
-                <span v-else class="ph" />
-              </button>
-              <strong :title="item.paths[0]">{{ filename(item.paths[0] ?? '') }}</strong>
-              <span class="muted">{{
-                t('duplicates.photoSize', { w: item.width, h: item.height, size: bytes(item.size) })
-              }}</span>
-              <button
-                v-if="item.paths[0]"
-                class="btn btn-subtle"
-                :aria-label="t('duplicates.showFile', { name: item.paths[0] })"
-                @click="showPath(item, item.paths[0])"
-              >
-                {{ t('common.showInFolder') }}
+                {{ t('duplicates.review') }}
               </button>
             </div>
           </div>
@@ -250,6 +333,7 @@ async function openPreview(item: DuplicateItem) {
         <p v-for="path in preview.paths" :key="path">{{ path }}</p>
       </template>
     </dialog>
+    <ReviewDialog :review="reviewing" :busy="acting" @confirm="confirmReview" @cancel="cancelReview" />
   </div>
 </template>
 
@@ -329,6 +413,23 @@ li .btn {
   display: flex;
   gap: 14px;
   overflow-x: auto;
+}
+
+.keep {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.keep em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.group-actions {
+  margin-top: 12px;
 }
 
 .similar-item {

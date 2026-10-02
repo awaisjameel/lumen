@@ -3,9 +3,11 @@ package services
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 
 	"lumen/internal/core"
+	"lumen/internal/index"
 	"lumen/internal/people"
 	"lumen/internal/search"
 	"lumen/internal/store"
@@ -18,24 +20,43 @@ var ErrNoAI = errors.New("the on-device AI isn't available")
 // suggestions is how many matches the search box suggests of each kind.
 const suggestions = 6
 
+// How many photos whose text matches a search it returns: the same cap as
+// the semantic results, so merging them keeps the total bounded.
+const textHitLimit = 1000
+
+// semanticSearch is what Search needs of the search engine, which tests
+// replace with a fake.
+type semanticSearch interface {
+	Search(ctx context.Context, query string, allow func(id int64) bool) (hits []search.Hit, complete bool, err error)
+}
+
 // SearchService is natural-language search and Things (tags).
 type SearchService struct {
-	store  *store.Store
-	engine *search.Engine // nil when the AI can't run
-	faces  bool           // faces are being recognised (the people engine runs)
+	store    *store.Store
+	engine   *search.Engine // nil when the AI can't run
+	semantic semanticSearch // engine, but nil (not a nil engine in an interface) when the AI can't run
+	faces    bool           // faces are being recognised (the people engine runs)
+	ix       *index.Indexer // tells the UI what changed; nil in tests
 }
 
 // NewSearchService returns the search service (engine is nil without the AI;
 // faces says whether faces are recognised).
-func NewSearchService(st *store.Store, engine *search.Engine, faces bool) *SearchService {
-	return &SearchService{store: st, engine: engine, faces: faces}
+func NewSearchService(st *store.Store, engine *search.Engine, faces bool, ix *index.Indexer) *SearchService {
+	s := &SearchService{store: st, engine: engine, faces: faces, ix: ix}
+	if engine != nil {
+		s.semantic = engine
+	}
+	return s
 }
 
 // Search finds photos matching a description, best match first. Named
 // people in it narrow the search to photos of all of them ("Ali at the
-// beach"); names alone give their photos, newest first. Without the AI,
-// the description can't be searched (the result says so): named people's
-// photos are still found.
+// beach"); names alone give their photos, newest first. Photos whose text
+// (read from screenshots and documents, when the user has that on) holds
+// every word of the description come first, newest first, then the photos
+// the description matches by meaning. Without the AI, the description can't
+// be searched by meaning (the result says so): named people's photos and
+// text are still found.
 func (s *SearchService) Search(ctx context.Context, query string) (core.SearchResult, error) {
 	query = search.BoundQuery(query) // before the names are matched too
 	named, err := s.store.SearchNames(ctx, query)
@@ -56,10 +77,11 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 		}
 	}
 	text := people.RemainingQuery(query, personMatches)
-	var ids []int64
+	var ids []int64 // the named people's photos, if any are named; then the result
 	var moments map[int64]int64
 	var waitFor []core.Stage // stages whose photos can't be found yet
 	complete, noAI := true, false
+	var theirs map[int64]bool // the named people's photos; nil if none are named
 	if len(who) > 0 {
 		if ids, err = s.store.PeopleAssets(ctx, who); err != nil {
 			return core.SearchResult{}, err
@@ -67,40 +89,56 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 		if s.faces {
 			waitFor = append(waitFor, core.StageFaces)
 		}
+		theirs = make(map[int64]bool, len(ids))
+		for _, id := range ids {
+			theirs[id] = true
+		}
 	}
-	switch {
-	case text == "" || (len(who) > 0 && len(ids) == 0):
-		// Nothing to describe, or no photo has all of them.
-	case s.engine == nil:
-		noAI = true
-	default:
-		waitFor = append(waitFor, core.StageEmbedding)
-		var allow func(int64) bool
-		if len(who) > 0 {
-			theirs := make(map[int64]bool, len(ids))
-			for _, id := range ids {
-				theirs[id] = true
-			}
-			allow = func(id int64) bool { return theirs[id] }
-		}
-		hits, all, err := s.engine.Search(ctx, text, allow)
-		if errors.Is(err, search.ErrNotLoaded) {
-			noAI = true
-			break
-		}
+	// With text left to search for, unless no photo has all the people named:
+	// first the photos whose own text has every word, then those it matches
+	// by meaning.
+	if text != "" && (len(who) == 0 || len(ids) > 0) {
+		withText, err := s.textHits(ctx, text, theirs)
 		if err != nil {
 			return core.SearchResult{}, err
 		}
-		complete = all
-		ids = make([]int64, len(hits))
-		moments = make(map[int64]int64, len(hits))
-		for i, h := range hits {
-			ids[i] = h.ID
-			moments[h.ID] = h.At
+		complete = len(withText) < textHitLimit
+		reading, err := s.store.Bool(ctx, core.SettingOCR, false)
+		if err != nil {
+			return core.SearchResult{}, err
 		}
-	}
-	if noAI && len(who) == 0 {
-		ids = nil // the description was all there was to search
+		if reading {
+			waitFor = append(waitFor, core.StageOCR)
+		}
+		var meaning []search.Hit
+		described := false // the description was searched by meaning
+		if s.semantic == nil {
+			noAI = true
+		} else {
+			waitFor = append(waitFor, core.StageEmbedding)
+			var allow func(int64) bool
+			if theirs != nil {
+				allow = func(id int64) bool { return theirs[id] }
+			}
+			hits, all, err := s.semantic.Search(ctx, text, allow)
+			switch {
+			case errors.Is(err, search.ErrNotLoaded):
+				noAI = true
+			case err != nil:
+				return core.SearchResult{}, err
+			default:
+				meaning, described = hits, true
+				complete = complete && all
+			}
+		}
+		switch {
+		case described:
+			ids, moments = mergeHits(withText, meaning)
+		case len(who) > 0:
+			ids = appendUnseen(withText, ids) // the description can't narrow their photos, but its text does
+		default:
+			ids = withText
+		}
 	}
 	items, err := s.store.GridItems(ctx, ids)
 	if err != nil {
@@ -195,7 +233,15 @@ func (s *SearchService) TagAsset(ctx context.Context, assetID int64, name string
 	if err != nil {
 		return err
 	}
-	return s.store.TagAsset(ctx, assetID, id)
+	if err := s.store.TagAsset(ctx, assetID, id); err != nil {
+		return err
+	}
+	// A photo the user calls a screenshot is one to read, if that is on.
+	if s.ix != nil {
+		return s.ix.QueueOCR(ctx) // and wakes the stage
+	}
+	_, err = s.store.QueueOCR(ctx)
+	return err
 }
 
 // UntagAsset takes a tag off a photo. The AI won't put it back.
@@ -207,4 +253,48 @@ func (s *SearchService) UntagAsset(ctx context.Context, assetID, tagID int64) er
 // (SetTagConfidence keeps it in range; the store caches it).
 func tagConfidence(ctx context.Context, st *store.Store) (float64, error) {
 	return st.Float(ctx, core.SettingTagConfidence, core.TagConfidenceDefault)
+}
+
+// textHits returns the photos whose text holds every word of query, newest
+// first, among theirs if it is not nil (chosen before the limit).
+func (s *SearchService) textHits(ctx context.Context, query string, theirs map[int64]bool) ([]int64, error) {
+	if theirs == nil {
+		return s.store.TextMatches(ctx, query, textHitLimit)
+	}
+	return s.store.TextMatchesAmong(ctx, query, textHitLimit, slices.Collect(maps.Keys(theirs)))
+}
+
+// mergeHits lists the photos found by their text, then those found by their
+// meaning that the text did not find, and the moments of the video matches.
+func mergeHits(withText []int64, meaning []search.Hit) (ids []int64, moments map[int64]int64) {
+	ids = slices.Clone(withText)
+	seen := make(map[int64]bool, len(withText)+len(meaning))
+	for _, id := range withText {
+		seen[id] = true
+	}
+	moments = make(map[int64]int64, len(meaning))
+	for _, h := range meaning {
+		if !seen[h.ID] {
+			seen[h.ID] = true
+			ids = append(ids, h.ID)
+			moments[h.ID] = h.At
+		}
+	}
+	return ids, moments
+}
+
+// appendUnseen is first followed by the photos of more that it does not
+// hold.
+func appendUnseen(first, more []int64) []int64 {
+	ids := slices.Clone(first)
+	seen := make(map[int64]bool, len(first))
+	for _, id := range first {
+		seen[id] = true
+	}
+	for _, id := range more {
+		if !seen[id] {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }

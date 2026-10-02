@@ -46,10 +46,33 @@ export function AssetAlbums(id: number): $CancellablePromise<number[] | null> {
 }
 
 /**
+ * BlockFace blocks one face, and with lookalikes the faces like it too, in
+ * existing and future photos. It behaves as SetBlock does: it needs the PIN
+ * to have been created, offers Undo for a new block only, and refuses to
+ * change an existing block's mode while the Blocked screen is locked. Asking
+ * again for a face already blocked widens its block to look-alikes (that
+ * hides more, so it needs no unlock), narrows it to the face alone only while
+ * unlocked (that reveals photos, like a mode change), and otherwise returns it
+ * as it is.
+ */
+export function BlockFace(faceID: number, mode: core$0.BlockMode, lookalikes: boolean): $CancellablePromise<core$0.BlockChange> {
+    return $Call.ByID(1231754019, faceID, mode, lookalikes);
+}
+
+/**
  * BlockPINConfigured reports whether the first block must establish a PIN.
  */
 export function BlockPINConfigured(): $CancellablePromise<boolean> {
     return $Call.ByID(2718993985);
+}
+
+/**
+ * BlockedItems lists the photos the block blockID covers, for the Blocked
+ * screen's browser; it needs the PIN unlock. The lock is held while the list
+ * is read, so nothing is handed out after the screen has locked.
+ */
+export function BlockedItems(blockID: number): $CancellablePromise<core$0.CoveredItem[] | null> {
+    return $Call.ByID(2941869533, blockID);
 }
 
 /**
@@ -89,6 +112,34 @@ export function DeleteAlbum(id: number): $CancellablePromise<void> {
 }
 
 /**
+ * DeleteAllTrashFromDisk moves the files of everything in the Trash to the
+ * Windows Recycle Bin.
+ */
+export function DeleteAllTrashFromDisk(): $CancellablePromise<core$0.DiskDeletion> {
+    return $Call.ByID(55127656);
+}
+
+/**
+ * DeleteCopies moves the files recycle of the asset assetID, the extra files
+ * of exact copies, to the Windows Recycle Bin, keeping the file keep. keep and
+ * every path of recycle must be current files of the asset, and recycle must
+ * not be empty or hold keep, else nothing happens and the call fails with
+ * ErrNotFound. Files of the asset in neither list are left alone, and so is a
+ * file edited since it was indexed: it is reported in Kept.
+ */
+export function DeleteCopies(assetID: number, keep: string, recycle: string[] | null): $CancellablePromise<core$0.DiskDeletion> {
+    return $Call.ByID(940230471, assetID, keep, recycle);
+}
+
+/**
+ * DeleteFromDisk moves the files of trashed assets to the Windows Recycle
+ * Bin. Assets that are not in the Trash are refused.
+ */
+export function DeleteFromDisk(ids: number[] | null): $CancellablePromise<core$0.DiskDeletion> {
+    return $Call.ByID(1507331539, ids);
+}
+
+/**
  * DuplicateGroups returns exact file copies and likely similar photos for review.
  */
 export function DuplicateGroups(): $CancellablePromise<core$0.DuplicateGroup[] | null> {
@@ -110,6 +161,14 @@ export function Events(): $CancellablePromise<core$0.Event[] | null> {
 }
 
 /**
+ * ExportXMPNow writes every photo's sidecar that is out of date now.
+ * Phase 5 unit U11.
+ */
+export function ExportXMPNow(): $CancellablePromise<core$0.XMPExport> {
+    return $Call.ByID(1888094908);
+}
+
+/**
  * Focus tells the indexer which days are on screen so they are processed first.
  */
 export function Focus($from: string, to: string): $CancellablePromise<void> {
@@ -121,6 +180,13 @@ export function Focus($from: string, to: string): $CancellablePromise<void> {
  */
 export function LockBlocks(): $CancellablePromise<void> {
     return $Call.ByID(3334848804);
+}
+
+/**
+ * OrganiseRuns lists the runs that have started, newest first.
+ */
+export function OrganiseRuns(): $CancellablePromise<core$0.OrganiseRun[] | null> {
+    return $Call.ByID(1826895655);
 }
 
 /**
@@ -142,6 +208,16 @@ export function Place(id: number): $CancellablePromise<core$0.Place> {
  */
 export function Places(): $CancellablePromise<core$0.Place[] | null> {
     return $Call.ByID(2155255637);
+}
+
+/**
+ * PlanOrganise previews where template would move the files of the source
+ * sourceID (0: every source), and saves the preview as a planned run.
+ * Only visible photos are planned, and only visible names reach folder names.
+ * A scheme that cannot be used fails with fileops.ErrInvalidTemplate.
+ */
+export function PlanOrganise(template: string, sourceID: number): $CancellablePromise<core$0.OrganisePlan> {
+    return $Call.ByID(2885257754, template, sourceID);
 }
 
 /**
@@ -173,6 +249,35 @@ export function Rescan(): $CancellablePromise<void> {
 }
 
 /**
+ * ResetBlockPIN replaces a forgotten PIN after the user signs in to Windows
+ * (Windows Hello, or the PC's password). Blocks are kept, and the list
+ * stays locked until the new PIN unlocks it.
+ * 
+ * The PIN's format is checked before Windows is asked, so nobody signs in for
+ * a PIN that would be refused. The attempt counter and cooldown are left as
+ * they are: a reset is no way round them, and a failed sign-in is not a wrong
+ * PIN, so it adds nothing to them either. The prompt can take as long as the
+ * user does, so the lock on the Blocked state is not held while it is open.
+ */
+export function ResetBlockPIN(pin: string): $CancellablePromise<void> {
+    return $Call.ByID(2236387432, pin);
+}
+
+/**
+ * RestoreAllTrash takes everything out of the Trash.
+ */
+export function RestoreAllTrash(): $CancellablePromise<void> {
+    return $Call.ByID(2784798122);
+}
+
+/**
+ * RestoreAssets takes assets out of the Trash.
+ */
+export function RestoreAssets(ids: number[] | null): $CancellablePromise<void> {
+    return $Call.ByID(1245830972, ids);
+}
+
+/**
  * SetAIOnBattery lets the AI keep working on battery power (it waits for
  * mains power by default).
  */
@@ -195,6 +300,15 @@ export function SetBlock(kind: core$0.BlockKind, targetID: number, path: string,
 }
 
 /**
+ * SetBlockMode changes what the block blockID hides: its label only, or its
+ * photos too. It needs the PIN unlock, as RemoveBlock does, and takes the
+ * block's own id, which is not always what SetBlock's target means.
+ */
+export function SetBlockMode(blockID: number, mode: core$0.BlockMode): $CancellablePromise<void> {
+    return $Call.ByID(2909120951, blockID, mode);
+}
+
+/**
  * SetEventGapHours sets the quiet period that splits detected events.
  */
 export function SetEventGapHours(hours: number): $CancellablePromise<void> {
@@ -209,10 +323,27 @@ export function SetEventName(id: number, name: string): $CancellablePromise<void
 }
 
 /**
+ * SetEventPinned pins or unpins the event holding asset id: pinned events
+ * sort first, and the pin follows the event as it regroups.
+ */
+export function SetEventPinned(id: number, pinned: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2954515139, id, pinned);
+}
+
+/**
  * SetFavourite marks or unmarks a favourite.
  */
 export function SetFavourite(id: number, fav: boolean): $CancellablePromise<void> {
     return $Call.ByID(2033754606, id, fav);
+}
+
+/**
+ * SetOCR turns reading the text in screenshots and documents on or off.
+ * Turning it on queues the photos it applies to; turning it off stops the
+ * work, and text already read stays searchable.
+ */
+export function SetOCR(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2726961037, on);
 }
 
 /**
@@ -231,10 +362,26 @@ export function SetTagConfidence(v: number): $CancellablePromise<void> {
 }
 
 /**
+ * SetThumbCacheMB sets the thumbnail cache's size cap. The least recently
+ * viewed thumbnails are dropped in the background to fit, and made again
+ * when next shown.
+ */
+export function SetThumbCacheMB(mb: number): $CancellablePromise<void> {
+    return $Call.ByID(2577875554, mb);
+}
+
+/**
  * SetVideos turns video indexing on or off, then rescans so the change applies.
  */
 export function SetVideos(on: boolean): $CancellablePromise<void> {
     return $Call.ByID(1683613775, on);
+}
+
+/**
+ * SetXMP turns writing XMP sidecars on or off. Phase 5 unit U11.
+ */
+export function SetXMP(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2716217540, on);
 }
 
 /**
@@ -260,6 +407,17 @@ export function Sources(): $CancellablePromise<core$0.Source[] | null> {
 }
 
 /**
+ * StartOrganise makes (or resumes) the moves of the run runID. It returns once
+ * the run has started: the moves are made in the background, scans are held
+ * meanwhile, and progress arrives as organise:progress events. A run that
+ * failed part-way is resumed; a second start while a run is moving files is
+ * refused with ErrOrganiseBusy.
+ */
+export function StartOrganise(runID: number): $CancellablePromise<void> {
+    return $Call.ByID(2999108199, runID);
+}
+
+/**
  * SuggestedFolders returns likely photo folders that exist on this machine,
  * for the first-run screen.
  */
@@ -275,10 +433,53 @@ export function Timeline(view: core$0.View): $CancellablePromise<core$0.DayBucke
 }
 
 /**
+ * TrashAssets moves assets to Lumen's Trash: they leave every view, and
+ * their files are untouched.
+ */
+export function TrashAssets(ids: number[] | null): $CancellablePromise<void> {
+    return $Call.ByID(2663586304, ids);
+}
+
+/**
+ * TrashCount is how many assets the Trash holds.
+ */
+export function TrashCount(): $CancellablePromise<number> {
+    return $Call.ByID(305184172);
+}
+
+/**
+ * TrashCovered moves photos a block covers to the Trash, from the Blocked
+ * screen's browser; it needs the PIN unlock. Like TrashAssets, it leaves the
+ * files where they are.
+ */
+export function TrashCovered(ids: number[] | null): $CancellablePromise<void> {
+    return $Call.ByID(941133961, ids);
+}
+
+/**
+ * TrashFileCount is how many files the trashed assets ids have on disk (an
+ * asset with exact copies has several), or, with no ids, how many everything
+ * in the Trash has: what Delete from disk will move to the Recycle Bin. Ids
+ * that are not in the Trash are refused.
+ */
+export function TrashFileCount(ids: number[] | null): $CancellablePromise<number> {
+    return $Call.ByID(4027191930, ids);
+}
+
+/**
  * UndoBlock removes the most recent new block during its short Undo window.
  */
 export function UndoBlock(id: number): $CancellablePromise<void> {
     return $Call.ByID(2625728520, id);
+}
+
+/**
+ * UndoOrganise moves the files of the run runID back, never replacing a file
+ * that has since appeared at their old place (the run then stays done, for a
+ * second try once the way is clear). It returns once the undo has started.
+ */
+export function UndoOrganise(runID: number): $CancellablePromise<void> {
+    return $Call.ByID(694597831, runID);
 }
 
 /**

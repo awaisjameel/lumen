@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fetches and prepares everything Lumen needs besides Go and Node: libvips,
-# ONNX Runtime with DirectML, FFmpeg, the SigLIP 2 and face models, and the
-# linters. Every download is pinned and checked against its SHA-256 (the two
+# ONNX Runtime with DirectML, FFmpeg, the SigLIP 2, face and OCR models, and
+# the linters. Every download is pinned and checked against its SHA-256 (the two
 # values model prep reads from the SigLIP checkpoint are pinned in
 # prepare_models.py; its Python packages are pinned by version). Run from Git
 # Bash; safe to re-run (finished steps are skipped). Needs curl, unzip, Go and
@@ -77,6 +77,24 @@ get $YUNET/LICENSE face-yunet.LICENSE c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e
 get $SFACE/face_recognition_sface_2021dec.onnx face-sface.onnx 0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79
 get $SFACE/LICENSE face-sface.LICENSE cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
 for f in yunet.onnx yunet.LICENSE sface.onnx sface.LICENSE; do ln -f "$D/cache/face-$f" "$D/src/faces/$f"; done
+
+# OCR (an optional add-on, off by default): the PP-OCRv5 mobile text detector
+# and the English PP-OCRv5 recogniser in ONNX, both Apache-2.0 (their model
+# cards, kept as the licence notice, say so). Phase 0 measured exactly these
+# files (spikes/README.md). They are used as they are, with no preparation.
+DET=https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d
+REC=https://huggingface.co/monkt/paddleocr-onnx/resolve/7b02d0a30a07ba2b92ad1ff5a8941ae2c633de65
+get $DET/inference.onnx ocr-det.onnx a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d
+get $DET/inference.yml ocr-det.yml 98069072e1b6b37d727fd9d9f11725faa46d6ea0de012f2ed26caea011c37699
+get $DET/README.md ocr-det.README.md 951c155673ac6c15feb85857c9024a62266e5956d15319ce578a8f508f399d66
+get $REC/languages/english/rec.onnx ocr-rec.onnx 4e16deb22c4da6468bdca539b2cd3c8687825538b67109177c47d359ab994cd7
+get $REC/languages/english/dict.txt ocr-rec.dict.txt e025a66d31f327ba0c232e03f407ae8d105e1e709e7ccb3f408aa778c24e70d6
+get $REC/languages/english/config.json ocr-rec.json c7decf6d184bd44ed5dca9a5e7e4bd208d0bd9747e6d9d284de9e0bee2d22f6a
+get $REC/README.md ocr-rec.README.md 783815b2d4127bbdf2847fac50d4dfa3b4ec58508324e43a7b41de66994f6611
+mkdir -p "$RT/models/ocr"
+for f in det.onnx det.yml det.README.md rec.onnx rec.dict.txt rec.json rec.README.md; do
+  ln -f "$D/cache/ocr-$f" "$RT/models/ocr/$f"
+done
 
 # prepare MODEL: scripts/prepare_models.py turns deps/src/MODEL into
 # deps/runtime/models/MODEL, again whenever the script changes.

@@ -97,8 +97,9 @@ type label struct {
 	floor     float32     // least probability that counts (see Label)
 }
 
-// builtins finds a built-in label's definition by name. Names are unique
-// across all tags, so a user's own tag can never be mistaken for one.
+// builtins finds a built-in label's definition by its vocabulary name, which
+// stays the same when the user renames the Thing. Only built-in tags have
+// one, so a user's own tag can never be mistaken for one.
 var builtins = func() map[string]Label {
 	m := make(map[string]Label, len(Vocabulary))
 	for _, l := range Vocabulary {
@@ -110,7 +111,7 @@ var builtins = func() map[string]Label {
 // newLabel builds a label from a stored tag and its prompt vectors.
 func newLabel(t store.AutoTag, vecs [][]float32) label {
 	l := label{id: t.ID, vecs: vecs, exclusive: t.Exclusive}
-	if def, ok := builtins[strings.ToLower(t.Name)]; ok && t.Builtin {
+	if def, ok := builtins[strings.ToLower(t.VocabName)]; ok && t.Builtin {
 		l.sink, l.floor = def.Sink, def.Floor
 	}
 	return l

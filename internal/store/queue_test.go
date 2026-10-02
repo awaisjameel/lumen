@@ -134,6 +134,7 @@ func TestUpgradeBackfillsJobKinds(t *testing.T) {
 	check(t, errOf(st.Ingest(ctx, []IngestItem{photo, video})))
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX asset_jobs_pending_kind")))
 	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE asset_jobs DROP COLUMN kind")))
+	downgradeToV18(t, st)
 	check(t, errOf(st.w.ExecContext(ctx, "PRAGMA user_version = 16")))
 	check(t, st.Close())
 	st, err = Open(path)
@@ -323,6 +324,7 @@ func TestUpgradeKeepsOneRowPerFileInAnyCase(t *testing.T) {
 	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\Été.jpg`, "old"), item(src.ID, `C:\Photos\b.jpg`, "b")})))
 	// A schema 17 library could hold a second spelling with other content.
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX files_path_fold")))
+	downgradeToV18(t, st)
 	check(t, errOf(st.w.ExecContext(ctx, "INSERT INTO assets (content_hash, kind, ext, taken_at, date_from, added_at) VALUES (x'6e6577', 'photo', '.jpg', 0, 'file', 0)")))
 	check(t, errOf(st.w.ExecContext(ctx, `INSERT INTO files (asset_id, source_id, path, size, mtime) VALUES (last_insert_rowid(), ?, 'C:\Photos\été.jpg', 1, 1)`, src.ID)))
 	check(t, errOf(st.w.ExecContext(ctx, "PRAGMA user_version = 17")))
@@ -421,6 +423,7 @@ func TestUpgradeMovesBlockedJobsToWaiting(t *testing.T) {
 	a, b := jobs[0].AssetID, jobs[1].AssetID
 	check(t, st.SaveMetadata(ctx, "m", []MetadataResult{{AssetID: b, Orientation: 1}}))
 	check(t, errOf(st.w.ExecContext(ctx, "UPDATE asset_jobs SET status = 'pending' WHERE status = 'waiting'")))
+	downgradeToV18(t, st)
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX asset_jobs_pending_kind")))
 	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE asset_jobs DROP COLUMN kind")))          // added by v17
 	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE asset_jobs DROP COLUMN prior_version"))) // added by v9
@@ -429,7 +432,8 @@ func TestUpgradeMovesBlockedJobsToWaiting(t *testing.T) {
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX assets_pending_place")))
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX assets_event_cover")))
 	for _, trigger := range []string{"event_asset_added", "event_asset_changed", "event_asset_deleted", "event_name_added", "event_name_changed", "event_name_deleted", "event_cover_changed", "event_block_added", "event_block_changed", "event_block_deleted", "event_block_face_added", "event_block_face_changed", "event_block_face_deleted", "event_block_tag_added", "event_block_tag_changed", "event_block_tag_deleted", "event_block_album_added", "event_block_album_deleted", "event_block_album_rule_changed", "event_block_favourite_changed", "event_block_confidence_changed", "event_block_confidence_added", "event_block_file_added", "event_block_file_changed", "event_block_file_deleted", "block_asset_deleted", "block_person_deleted", "block_tag_deleted", "block_place_deleted", "block_album_deleted",
-		"visible_asset_added", "visible_asset_deleted", "visible_asset_changed", "visible_block_place_changed", "visible_block_date_changed"} {
+		"visible_asset_added", "visible_asset_deleted", "visible_asset_changed", "visible_block_place_changed", "visible_block_date_changed",
+		"face_block_removed", "visible_face_block_added", "visible_face_block_deleted"} {
 		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER IF EXISTS "+trigger))) // added after v7
 	}
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE blocks")))

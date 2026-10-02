@@ -14,6 +14,7 @@ declare module "@wailsio/runtime" {
         interface CustomEvents {
             "index:progress": core$0.Progress;
             "library:changed": core$0.Changes;
+            "organise:progress": core$0.OrganiseProgress;
         }
     }
 }

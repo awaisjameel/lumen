@@ -3,6 +3,7 @@ import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import {
   engine,
   EVENT_GAP_DEFAULT,
+  THUMB_CACHE_DEFAULT_MB,
   Filter,
   isCancelled,
   onLibraryChanged,
@@ -16,6 +17,8 @@ import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { latestSave } from '../shared/latestSave'
 import type { LatestSave } from '../shared/latestSave'
+import { deleteFromDisk } from '../trash/actions'
+import { showTrashUndo } from '../trash/undo'
 
 const ZOOM_KEY = 'lumen.zoom'
 export const ZOOM_MIN = 96
@@ -74,12 +77,17 @@ export const useLibrary = defineStore('library', () => {
     aiOnBattery: false,
     tagConfidence: TAG_CONFIDENCE_DEFAULT,
     eventGapHours: EVENT_GAP_DEFAULT,
+    thumbCacheMB: THUMB_CACHE_DEFAULT_MB,
+    ocr: false,
+    xmp: false,
   })
   const settingsError = ref('')
   let eventGapSave: LatestSave<number> | null = null
   let confidenceSave: LatestSave<number> | null = null
   let videosSave: LatestSave<boolean> | null = null
   let batterySave: LatestSave<boolean> | null = null
+  let thumbCacheSave: LatestSave<number> | null = null
+  let ocrSave: LatestSave<boolean> | null = null
   const settingFailed = (e: unknown) => (settingsError.value = errorText(e))
 
   function saveVideos(on: boolean) {
@@ -102,6 +110,16 @@ export const useLibrary = defineStore('library', () => {
     return batterySave(on)
   }
 
+  function saveOCR(on: boolean) {
+    ocrSave ??= latestSave(engine.setOCR, settings.value.ocr, {
+      rollback: (value) => (settings.value.ocr = value),
+      failed: settingFailed,
+    })
+    settings.value.ocr = on
+    settingsError.value = ''
+    return ocrSave(on)
+  }
+
   function saveEventGap(hours: number) {
     eventGapSave ??= latestSave(engine.setEventGapHours, settings.value.eventGapHours, {
       saved: () => refresh(),
@@ -111,6 +129,16 @@ export const useLibrary = defineStore('library', () => {
     settings.value.eventGapHours = hours
     settingsError.value = ''
     return eventGapSave(hours)
+  }
+
+  function saveThumbCacheMB(mb: number) {
+    thumbCacheSave ??= latestSave(engine.setThumbCacheMB, settings.value.thumbCacheMB, {
+      rollback: (value) => (settings.value.thumbCacheMB = value),
+      failed: settingFailed,
+    })
+    settings.value.thumbCacheMB = mb
+    settingsError.value = ''
+    return thumbCacheSave(mb)
   }
 
   function confidenceQueue() {
@@ -175,6 +203,8 @@ export const useLibrary = defineStore('library', () => {
   const selectedItem = computed(() => itemAt(selected.value))
   const viewerItem = computed(() => itemAt(viewer.value))
   const isSearch = computed(() => scope.value.kind === 'search')
+  const inTrash = computed(() => scope.value.kind === 'timeline' && scope.value.view.filter === Filter.FilterTrash)
+  const trashCount = ref(0) // for the sidebar
 
   function itemAt(p: Sel | null): GridItem | null {
     if (!p) return null
@@ -183,6 +213,14 @@ export const useLibrary = defineStore('library', () => {
 
   function indexOf(p: Sel): number {
     return days.value.get(p.day)?.findIndex((x) => x.id === p.id) ?? -1
+  }
+
+  // Assets being taken out of the view (trashed, restored, deleted) -> where
+  // the viewer and selection go once they are gone. A reload that lands before
+  // the engine answers drops the asset from the grid; it must advance, not close.
+  const advancing = new Map<number, Sel | null>()
+  function movedOn(p: Sel): Sel | null {
+    return advancing.get(p.id) ?? null
   }
 
   /** The asset at index i of a day, as a selection (if that day is loaded). */
@@ -214,8 +252,12 @@ export const useLibrary = defineStore('library', () => {
   async function init() {
     if (ready.value || disposed) return
     stopProgress ??= onProgress((p) => (progress.value = p))
-    stopChanges ??= onLibraryChanged((c) => void refresh(c).catch(logError))
+    stopChanges ??= onLibraryChanged((c) => {
+      void refresh(c).catch(logError)
+      if (c.assets) void loadTrashCount()
+    })
     await initialise()
+    void loadTrashCount()
   }
   const stopBlocks = onBlocksChanged(() => refreshVisibility())
   onScopeDispose(() => {
@@ -275,8 +317,8 @@ export const useLibrary = defineStore('library', () => {
         buckets.value = b
         const present = new Set(b.map((bucket) => bucket.day))
         days.value = new Map([...days.value].filter(([day]) => present.has(day)))
-        if (selected.value && !present.has(selected.value.day)) selected.value = null
-        if (viewer.value && !present.has(viewer.value.day)) viewer.value = null
+        if (selected.value && !present.has(selected.value.day)) selected.value = movedOn(selected.value)
+        if (viewer.value && !present.has(viewer.value.day)) viewer.value = movedOn(viewer.value)
       }
       timelineLoaded.value = true
     } catch (e) {
@@ -315,8 +357,8 @@ export const useLibrary = defineStore('library', () => {
       if (current !== generation || load !== loadRequest || request !== visibilityRequest) return
       buckets.value = kept.length ? [{ day: RESULTS, count: kept.length }] : []
       days.value = new Map(kept.length ? [[RESULTS, kept]] : [])
-      if (selected.value && !itemAt(selected.value)) selected.value = null
-      if (viewer.value && !itemAt(viewer.value)) viewer.value = null
+      if (selected.value && !itemAt(selected.value)) selected.value = movedOn(selected.value)
+      if (viewer.value && !itemAt(viewer.value)) viewer.value = movedOn(viewer.value)
       stale = false
     } catch (e) {
       if (current !== generation || request !== visibilityRequest || isCancelled(e)) return
@@ -446,8 +488,10 @@ export const useLibrary = defineStore('library', () => {
       days.value = next
       // A filter edit or source removal can remove the selected item while
       // leaving its day in place. Do not leave a panel with inactive actions.
-      if (selected.value && missing.includes(selected.value.day) && !itemAt(selected.value)) selected.value = null
-      if (viewer.value && missing.includes(viewer.value.day) && !itemAt(viewer.value)) viewer.value = null
+      if (selected.value && missing.includes(selected.value.day) && !itemAt(selected.value))
+        selected.value = movedOn(selected.value)
+      if (viewer.value && missing.includes(viewer.value.day) && !itemAt(viewer.value))
+        viewer.value = movedOn(viewer.value)
     } catch (e) {
       if (!isCancelled(e)) logError(e)
     }
@@ -566,6 +610,65 @@ export const useLibrary = defineStore('library', () => {
     return pauseSave(paused)
   }
 
+  const readTrashCount = coalescedLoad(engine.trashCount, (n) => (trashCount.value = n))
+  /** Read how many assets the Trash holds; a failure is logged, the count stays. */
+  async function loadTrashCount() {
+    try {
+      await readTrashCount()
+    } catch (e) {
+      logError(e)
+    }
+  }
+
+  /** The Trash changed: the grid and the Trash's count show it now. */
+  async function trashChanged() {
+    await Promise.all([refresh().catch(logError), loadTrashCount()])
+  }
+
+  /**
+   * Run a change that takes the asset at p out of this view (trashing,
+   * restoring, deleting from disk) and move the viewer and the selection on
+   * to its neighbour, the next photo or else the previous. Failures are
+   * reported; the result says whether the change was made, with its value.
+   */
+  async function removeFromView<T>(p: Sel, change: () => Promise<T>): Promise<{ value: T } | null> {
+    const next = (await neighbour(p, 1)) ?? (await neighbour(p, -1))
+    let done: { value: T } | null = null
+    advancing.set(p.id, next)
+    try {
+      done = { value: await change() }
+    } catch (e) {
+      reportError(e)
+    } finally {
+      advancing.delete(p.id)
+    }
+    if (done) {
+      if (viewer.value?.id === p.id) viewer.value = next
+      if (selected.value?.id === p.id) selected.value = next
+    }
+    await trashChanged() // even after a failure: it may have done part of the work
+    return done
+  }
+
+  /** Move an asset to the Trash, which offers to undo it. */
+  async function moveToTrash(p: Sel) {
+    if (await removeFromView(p, () => engine.trashAssets([p.id]))) showTrashUndo([p.id])
+  }
+
+  /** Take the trashed asset at p out of the Trash. */
+  async function restoreFromTrash(p: Sel) {
+    await removeFromView(p, () => engine.restoreAssets([p.id]))
+  }
+
+  /** Take assets out of the Trash (Undo of moving them there). Throws if the engine refuses. */
+  async function restoreAssets(ids: number[]) {
+    try {
+      await engine.restoreAssets(ids)
+    } finally {
+      await trashChanged()
+    }
+  }
+
   /** Reload the folders (after adding or removing one), then what they hold. */
   const reloadSources = coalescedLoad(engine.sources, (got) => (sources.value = got))
   async function sourcesChanged() {
@@ -580,7 +683,9 @@ export const useLibrary = defineStore('library', () => {
     settingsError,
     saveVideos,
     saveAIOnBattery,
+    saveOCR,
     saveEventGap,
+    saveThumbCacheMB,
     intendTagConfidence,
     saveTagConfidence,
     progress,
@@ -598,6 +703,8 @@ export const useLibrary = defineStore('library', () => {
     selectedItem,
     viewerItem,
     isSearch,
+    inTrash,
+    trashCount,
     itemAt,
     indexOf,
     selAt,
@@ -614,5 +721,92 @@ export const useLibrary = defineStore('library', () => {
     toggleFavourite,
     setPaused,
     sourcesChanged,
+    loadTrashCount,
+    trashChanged,
+    removeFromView,
+    moveToTrash,
+    restoreFromTrash,
+    restoreAssets,
   }
 })
+
+type Library = ReturnType<typeof useLibrary>
+
+/** What the Viewer's bar offers besides browsing; an action that is absent is not offered. */
+export interface ViewerActions {
+  favourite?: () => void
+  moveToTrash?: () => void
+  restore?: () => void
+  deleteFromDisk?: () => void
+  /** Whether the details panel, and the key that toggles it, are offered. */
+  details: boolean
+}
+
+/**
+ * Where the Viewer's photos come from: the library grid (and the Trash, which
+ * is the grid showing trashed photos) or the Blocked screen's browser. The
+ * Viewer asks its source for the photo shown and the one beside it, and for
+ * what it may do with it, so it knows nothing of days or blocks.
+ */
+export interface ViewerSource {
+  /** The id of the photo shown, even before its item has loaded. */
+  readonly id: number | null
+  /** The photo shown, or null while it is not in the source's items. */
+  readonly item: GridItem | null
+  /** The photo as the library grid addresses it, for the details panel; null for a source without one. */
+  readonly sel: Sel | null
+  /** Moves to the next (1) or previous (-1) photo, if there is one. */
+  step: (dir: 1 | -1) => Promise<void>
+  /** Closes the Viewer. */
+  close: () => void
+  /** Called as the photo is looked at (a video playing), by sources whose screen locks when unused. */
+  touch?: () => void
+  readonly actions: ViewerActions
+}
+
+/**
+ * The library grid as a Viewer source. It reads the store at each call, so a
+ * change of scope or an item reloaded in place is seen as it happens.
+ */
+export function libraryViewerSource(lib: Library): ViewerSource {
+  return {
+    get id() {
+      return lib.viewer?.id ?? null
+    },
+    get item() {
+      return lib.viewerItem
+    },
+    get sel() {
+      return lib.viewer
+    },
+    async step(dir) {
+      const from = lib.viewer
+      if (!from) return
+      const next = await lib.neighbour(from, dir)
+      if (next && lib.viewer === from) lib.viewer = next // not if the viewer was closed or moved meanwhile
+    },
+    close() {
+      lib.viewer = null
+    },
+    get actions() {
+      // The Trash's photos can be restored or deleted from disk, not edited.
+      return lib.inTrash
+        ? {
+            restore: () => {
+              if (lib.viewer) void lib.restoreFromTrash(lib.viewer)
+            },
+            deleteFromDisk: () => {
+              if (lib.viewer) void deleteFromDisk(lib, lib.viewer)
+            },
+            details: true,
+          }
+        : {
+            favourite: () => void lib.toggleFavourite(lib.viewer),
+            moveToTrash: () => {
+              if (lib.viewer) void lib.moveToTrash(lib.viewer)
+            },
+            details: true,
+          }
+    },
+  }
+}
