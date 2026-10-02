@@ -62,7 +62,8 @@ export function BlockPINConfigured(): $CancellablePromise<boolean> {
 
 /**
  * BlockedItems lists the photos the block blockID covers, for the Blocked
- * screen's browser; it needs the PIN unlock. Phase 5 unit U8.
+ * screen's browser; it needs the PIN unlock. The lock is held while the list
+ * is read, so nothing is handed out after the screen has locked.
  */
 export function BlockedItems(blockID: number): $CancellablePromise<core$0.CoveredItem[] | null> {
     return $Call.ByID(2941869533, blockID);
@@ -437,7 +438,8 @@ export function TrashCount(): $CancellablePromise<number> {
 
 /**
  * TrashCovered moves photos a block covers to the Trash, from the Blocked
- * screen's browser; it needs the PIN unlock. Phase 5 unit U8.
+ * screen's browser; it needs the PIN unlock. Like TrashAssets, it leaves the
+ * files where they are.
  */
 export function TrashCovered(ids: number[] | null): $CancellablePromise<void> {
     return $Call.ByID(941133961, ids);
