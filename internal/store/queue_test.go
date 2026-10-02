@@ -378,10 +378,10 @@ func TestJobsWaitOutsideTheQueueUntilTheirTurn(t *testing.T) {
 	}
 	want("new", map[core.Stage]core.JobStatus{core.StageMetadata: core.JobPending,
 		core.StageThumbnail: core.JobWaiting, core.StageEmbedding: core.JobWaiting, core.StageFaces: core.JobWaiting})
-	pending, _, _, err := st.JobCounts(ctx)
+	c, err := st.JobCounts(ctx)
 	check(t, err)
-	if pending[core.StageFaces] != 1 {
-		t.Errorf("JobCounts = %v, want the waiting faces job counted", pending)
+	if c.Pending[core.StageFaces] != 1 {
+		t.Errorf("JobCounts = %v, want the waiting faces job counted", c.Pending)
 	}
 	if n, err := st.CountPending(ctx, core.StageEmbedding); err != nil || n != 1 {
 		t.Errorf("CountPending(embedding) = %d, %v; want 1", n, err)

@@ -49,5 +49,6 @@ export type {
     Tag,
     Video,
     View,
+    Working,
     XMPExport
 } from "./models.js";

@@ -752,6 +752,16 @@ export interface Progress {
     "scanning": boolean;
 
     /**
+     * the folder being looked through, while scanning
+     */
+    "scanPath": string;
+
+    /**
+     * photos and videos found in it so far
+     */
+    "scanSeen": number;
+
+    /**
      * assets in the library
      */
     "total": number;
@@ -767,19 +777,29 @@ export interface Progress {
     "thumbnail": number;
 
     /**
-     * assets still waiting for the AI
+     * photos still waiting for the AI
      */
     "embedding": number;
 
     /**
-     * assets still waiting for face recognition
+     * photos still waiting for face recognition
      */
     "faces": number;
+
+    /**
+     * videos still waiting for the AI or face recognition
+     */
+    "videos": number;
 
     /**
      * photos still waiting for their text to be read
      */
     "ocr": number;
+
+    /**
+     * the stages at work right now; the rest wait their turn
+     */
+    "working": Working;
     "errors": number;
     "skipped": number;
     "paused": boolean;
@@ -992,6 +1012,32 @@ export interface View {
      * 0 = any event
      */
     "event"?: number;
+}
+
+/**
+ * Working says which stages are at work right now. A stage with files left
+ * but not at work is waiting: for an earlier stage to finish them, for mains
+ * power, or to try its model again.
+ */
+export interface Working {
+    "metadata": boolean;
+    "thumbnail": boolean;
+
+    /**
+     * on photos
+     */
+    "embedding": boolean;
+
+    /**
+     * on photos
+     */
+    "faces": boolean;
+
+    /**
+     * the AI and face recognition, on videos' frames
+     */
+    "videos": boolean;
+    "ocr": boolean;
 }
 
 /**

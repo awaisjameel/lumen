@@ -141,10 +141,24 @@ func TestJobCountsCountAFileThatFailsInSeveralStagesOnce(t *testing.T) {
 	check(t, errOf(st.w.ExecContext(ctx, `UPDATE asset_jobs SET status = CASE
 		WHEN asset_id = (SELECT asset_id FROM files WHERE path = ?) THEN 'error'
 		WHEN stage IN ('metadata', 'thumbnail') THEN 'skipped' ELSE 'done' END`, `C:\Photos\broken.mts`)))
-	pending, failed, skipped, err := st.JobCounts(ctx)
+	c, err := st.JobCounts(ctx)
 	check(t, err)
-	if len(pending) != 0 || failed != 1 || skipped != 1 {
-		t.Fatalf("counts = %v, failed %d, skipped %d; want nothing pending, 1 failed, 1 skipped", pending, failed, skipped)
+	if len(c.Pending) != 0 || c.Failed != 1 || c.Skipped != 1 {
+		t.Fatalf("counts = %+v; want nothing pending, 1 failed, 1 skipped", c)
+	}
+}
+
+func TestJobCountsSayWhichJobsAreOnVideos(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	clip := item(src.ID, `C:\Photos\clip.mp4`, "clip")
+	clip.Kind = core.KindVideo
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b"), clip})))
+	c, err := st.JobCounts(ctx)
+	check(t, err)
+	if c.Pending[core.StageEmbedding] != 3 || c.Videos[core.StageEmbedding] != 1 || c.Videos[core.StageMetadata] != 1 {
+		t.Fatalf("counts = %+v; want 3 to embed, 1 of them a video, and the video's metadata", c)
 	}
 }
 
@@ -165,10 +179,10 @@ func TestJobCountsOnlyIncludeVisibleAssets(t *testing.T) {
 				WHEN 'embedding' THEN 'pending' ELSE 'waiting' END`)))
 			counts := func(want int) {
 				t.Helper()
-				pending, failed, skipped, err := st.JobCounts(ctx)
+				c, err := st.JobCounts(ctx)
 				check(t, err)
-				if len(pending) != 2 || pending[core.StageEmbedding] != want || pending[core.StageFaces] != want || failed != want || skipped != want {
-					t.Fatalf("counts = %v, failed %d, skipped %d; want %d of each", pending, failed, skipped, want)
+				if len(c.Pending) != 2 || c.Pending[core.StageEmbedding] != want || c.Pending[core.StageFaces] != want || c.Failed != want || c.Skipped != want {
+					t.Fatalf("counts = %+v; want %d of each", c, want)
 				}
 			}
 			counts(2)

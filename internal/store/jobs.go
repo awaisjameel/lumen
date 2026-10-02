@@ -584,44 +584,57 @@ func (s *Store) CountPending(ctx context.Context, stages ...core.Stage) (int, er
 	return n, err
 }
 
-// JobCounts returns how many visible jobs are still to do per stage, and how
-// many files failed or were skipped (a file is counted once, however many of
+// QueueCounts is what the job queue holds for the visible assets.
+type QueueCounts struct {
+	Pending map[core.Stage]int // jobs still to do per stage, photos and videos
+	Videos  map[core.Stage]int // of Pending, the jobs on videos
+	Failed  int                // files with a stage that failed
+	Skipped int                // files with a stage this PC can't run
+}
+
+// JobCounts returns how many visible jobs are still to do per stage, and of
+// them on videos (a stage of its own for the AI), and how many files failed
+// or were skipped (a file is counted once, however many of
 // its stages did: the UI says how many files couldn't be read). Hidden
 // assets keep being indexed, but their jobs must not appear in the UI's
 // progress counts.
-func (s *Store) JobCounts(ctx context.Context) (pending map[core.Stage]int, failed, skipped int, err error) {
-	rows, err := s.r.QueryContext(ctx, `SELECT j.stage, j.status, count(*) FROM asset_jobs j
+func (s *Store) JobCounts(ctx context.Context) (QueueCounts, error) {
+	rows, err := s.r.QueryContext(ctx, `SELECT j.stage, j.kind, j.status, count(*) FROM asset_jobs j
 		JOIN assets a ON a.id = j.asset_id
 		WHERE j.status IN ('pending', 'waiting') AND `+visibleA+`
-		GROUP BY j.stage, j.status
+		GROUP BY j.stage, j.kind, j.status
 		UNION ALL
-		SELECT '', j.status, count(DISTINCT j.asset_id) FROM asset_jobs j
+		SELECT '', '', j.status, count(DISTINCT j.asset_id) FROM asset_jobs j
 		JOIN assets a ON a.id = j.asset_id
 		WHERE j.status IN ('error', 'skipped') AND `+visibleA+`
 		GROUP BY j.status`)
 	if err != nil {
-		return nil, 0, 0, err
+		return QueueCounts{}, err
 	}
 	defer rows.Close()
-	pending = map[core.Stage]int{}
+	c := QueueCounts{Pending: map[core.Stage]int{}, Videos: map[core.Stage]int{}}
 	for rows.Next() {
 		var stage core.Stage
+		var kind core.Kind
 		var status core.JobStatus
 		var n int
-		if err := rows.Scan(&stage, &status, &n); err != nil {
-			return nil, 0, 0, err
+		if err := rows.Scan(&stage, &kind, &status, &n); err != nil {
+			return QueueCounts{}, err
 		}
 		switch status {
 		case core.JobPending, core.JobWaiting:
-			pending[stage] += n
+			c.Pending[stage] += n
+			if kind == core.KindVideo {
+				c.Videos[stage] += n
+			}
 		case core.JobSkipped:
-			skipped += n
+			c.Skipped += n
 		case core.JobError:
-			failed += n
+			c.Failed += n
 		case core.JobDone: // not selected
 		}
 	}
-	return pending, failed, skipped, rows.Err()
+	return c, rows.Err()
 }
 
 // CPUThreads is how many CPU threads indexing may keep busy: the user's

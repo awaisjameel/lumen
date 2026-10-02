@@ -225,9 +225,9 @@ func TestIngestJoinsDuplicatesAndKeepsMovedAssets(t *testing.T) {
 		t.Fatalf("visible after move = %d, want 2", v)
 	}
 
-	pending, failed, skipped, err := st.JobCounts(ctx)
-	if err != nil || pending[core.StageMetadata] != 2 || pending[core.StageThumbnail] != 2 || failed != 0 || skipped != 0 {
-		t.Fatalf("job counts = %v, %d, %d (%v)", pending, failed, skipped, err)
+	c, err := st.JobCounts(ctx)
+	if err != nil || c.Pending[core.StageMetadata] != 2 || c.Pending[core.StageThumbnail] != 2 || c.Failed != 0 || c.Skipped != 0 {
+		t.Fatalf("job counts = %+v (%v)", c, err)
 	}
 }
 
@@ -388,8 +388,8 @@ func TestJobsFlowAndRequeue(t *testing.T) {
 	if err := st.SaveThumbnails(ctx, "t1", []ThumbResult{{AssetID: id, Skipped: true}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, skipped, _ := st.JobCounts(ctx); skipped != 1 {
-		t.Fatalf("skipped = %d, want 1", skipped)
+	if c, _ := st.JobCounts(ctx); c.Skipped != 1 {
+		t.Fatalf("skipped = %d, want 1", c.Skipped)
 	}
 	for _, stage := range []core.Stage{core.StageEmbedding, core.StageFaces} {
 		if jobs, _ := st.PendingJobs(ctx, stage, nil, 10); len(jobs) != 1 || jobs[0].Orientation != 6 {
@@ -399,8 +399,8 @@ func TestJobsFlowAndRequeue(t *testing.T) {
 
 	// Jobs of an asset whose file is gone neither run nor count as waiting.
 	check(t, st.RemoveFiles(ctx, []int64{1}))
-	if pending, _, skipped, _ := st.JobCounts(ctx); pending[core.StageEmbedding] != 0 || skipped != 0 {
-		t.Fatalf("missing asset still counted: %v, %d skipped", pending, skipped)
+	if c, _ := st.JobCounts(ctx); c.Pending[core.StageEmbedding] != 0 || c.Skipped != 0 {
+		t.Fatalf("missing asset still counted: %v, %d skipped", c.Pending, c.Skipped)
 	}
 	if jobs, _ := st.PendingJobs(ctx, core.StageEmbedding, nil, 10); len(jobs) != 0 {
 		t.Fatalf("missing asset's job offered: %+v", jobs)

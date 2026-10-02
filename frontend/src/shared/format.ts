@@ -80,3 +80,8 @@ export function duration(ms: number): string {
   const h = Math.floor(seconds / 3600)
   return h ? `${h}:${m}:${s}` : `${Math.floor(seconds / 60)}:${s}`
 }
+
+/** The last part of a Windows or POSIX path: a file's name, or a folder's ("D:" for a drive). */
+export function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path
+}

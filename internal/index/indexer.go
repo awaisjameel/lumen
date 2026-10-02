@@ -4,6 +4,7 @@
 package index
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"maps"
@@ -107,6 +108,8 @@ type Indexer struct {
 	aiError     string
 	facesError  string
 	scanning    bool
+	scanPath    string          // the folder the running scan looks through
+	scanSeen    int             // the media files it has found so far
 	pendingFS   map[string]bool // changed paths waiting for the debounce
 	fsSince     time.Time       // when the oldest of them arrived
 	fsDue       time.Time       // the next flush's deadline (mu)
@@ -117,6 +120,7 @@ type Indexer struct {
 	changes atomic.Uint32 // what changed in the library (changeBits; implies stale)
 	stale   atomic.Bool   // only the progress changed (scan counts, pause)
 	last    core.Progress
+	working atomic.Uint32 // the stages with a batch in hand (workBits), set by runStage
 
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
@@ -206,6 +210,45 @@ const (
 	changedTags
 	changedPeople
 )
+
+// Bits of Indexer.working, one per field of core.Working.
+const (
+	workMetadata uint32 = 1 << iota
+	workThumbnail
+	workEmbedding
+	workFaces
+	workVideos
+	workOCR
+)
+
+// setWorking records whether a stage has a batch in hand, for the progress.
+func (ix *Indexer) setWorking(bit uint32, on bool) {
+	var old uint32
+	if on {
+		old = ix.working.Or(bit)
+	} else {
+		old = ix.working.And(^bit)
+	}
+	if (old&bit != 0) != on {
+		ix.stale.Store(true)
+	}
+}
+
+// workingNow says which stages are at work: those with a batch in hand that
+// nothing holds (a held stage finishes its batch, then waits). Call with mu
+// held.
+func (ix *Indexer) workingNow() core.Working {
+	bits := ix.working.Load()
+	at := func(bit uint32, stage core.Stage) bool { return bits&bit != 0 && !ix.held(stage) }
+	return core.Working{
+		Metadata:  at(workMetadata, core.StageMetadata),
+		Thumbnail: at(workThumbnail, core.StageThumbnail),
+		Embedding: at(workEmbedding, core.StageEmbedding),
+		Faces:     at(workFaces, core.StageFaces),
+		Videos:    at(workVideos, core.StageEmbedding), // AI work, held as the AI is
+		OCR:       at(workOCR, core.StageOCR),
+	}
+}
 
 // LibraryChanged records a change made outside the indexer (a block), so the
 // UI hears of it with the indexer's own, at most once a second.
@@ -323,7 +366,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	})
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.MetadataResult]{
-			name: core.StageMetadata, batch: metadataBatch, wake: ix.wakeMeta, next: []chan struct{}{ix.wakeThum},
+			name: core.StageMetadata, work: workMetadata, batch: metadataBatch, wake: ix.wakeMeta, next: []chan struct{}{ix.wakeThum},
 			changes:   core.Changes{Assets: true},
 			unchanged: func(r store.MetadataResult) bool { return r.Unchanged },
 			process:   eachItem(metadataWorkers, ix.doMetadata),
@@ -334,7 +377,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	})
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.ThumbResult]{
-			name: core.StageThumbnail, batch: thumbnailBatch, wake: ix.wakeThum, next: []chan struct{}{ix.wakeEmbed, ix.wakeFaces, ix.wakeVideo},
+			name: core.StageThumbnail, work: workThumbnail, batch: thumbnailBatch, wake: ix.wakeThum, next: []chan struct{}{ix.wakeEmbed, ix.wakeFaces, ix.wakeVideo},
 			changes:   core.Changes{Thumbs: true}, // the timeline's days and counts stay as they are
 			unchanged: func(r store.ThumbResult) bool { return r.Unchanged },
 			process:   ix.doThumbnails,
@@ -346,7 +389,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	if ix.search != nil {
 		ix.run(func() {
 			runStage(ctx, ix, stage[store.EmbedResult]{
-				name: core.StageEmbedding, batch: embeddingBatch, wake: ix.wakeEmbed, model: ix.encoder,
+				name: core.StageEmbedding, work: workEmbedding, batch: embeddingBatch, wake: ix.wakeEmbed, model: ix.encoder,
 				next:    []chan struct{}{ix.wakeOCR}, // the tags may make a photo a screenshot
 				changes: core.Changes{Tags: true},
 				process: ix.doEmbeddings,
@@ -358,7 +401,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	if ix.people != nil {
 		ix.run(func() {
 			runStage(ctx, ix, stage[store.FaceResult]{
-				name: core.StageFaces, batch: facesBatch, wake: ix.wakeFaces, model: ix.faces,
+				name: core.StageFaces, work: workFaces, batch: facesBatch, wake: ix.wakeFaces, model: ix.faces,
 				changes:   core.Changes{People: true},
 				unchanged: facesUnchanged,
 				process:   ix.doFaces,
@@ -370,7 +413,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 	}
 	ix.run(func() {
 		runStage(ctx, ix, stage[store.OCRResult]{
-			name: core.StageOCR, batch: ocrBatch, wake: ix.wakeOCR, model: ix.ocr,
+			name: core.StageOCR, work: workOCR, batch: ocrBatch, wake: ix.wakeOCR, model: ix.ocr,
 			fetch: ix.fetchOCR, process: ix.doOCR, save: ix.saveOCR,
 		})
 	})
@@ -381,7 +424,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 				name = core.StageFaces
 			}
 			runStage(ctx, ix, stage[videoResults]{
-				name: name, batch: 4, wake: ix.wakeVideo,
+				name: name, work: workVideos, batch: 4, wake: ix.wakeVideo,
 				model: videoModels{ix.encoder, ix.faces},
 				fetch: ix.fetchVideos, process: ix.doVideos, save: ix.saveVideos,
 				changes: core.Changes{Tags: true, People: true},
@@ -656,6 +699,12 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 	sc := &scanner.Scanner{
 		Store:       ix.store,
 		HashWorkers: hashWorkers,
+		OnProgress: func(seen int) {
+			ix.mu.Lock()
+			ix.scanSeen = seen
+			ix.mu.Unlock()
+			ix.stale.Store(true)
+		},
 		OnIngested: func(int) {
 			ix.markChanged(core.Changes{Assets: true}) // new assets, moves, revived files
 			nudge(ix.wakeMeta)
@@ -695,7 +744,7 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 			ix.onScanTurn()
 		}
 		ix.mu.Lock()
-		ix.scanning = true
+		ix.scanning, ix.scanPath, ix.scanSeen = true, cmp.Or(req.under, src.Path), 0
 		ix.mu.Unlock()
 		ix.stale.Store(true)
 
@@ -725,7 +774,7 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 		}
 
 		ix.mu.Lock()
-		ix.scanning = len(ix.scanReqs) > 0
+		ix.scanning, ix.scanPath, ix.scanSeen = len(ix.scanReqs) > 0, "", 0
 		ix.mu.Unlock()
 		if res.Removed > 0 {
 			ix.markChanged(core.Changes{Assets: true})
@@ -988,23 +1037,27 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 	ix.mu.Lock()
 	p := core.Progress{
-		Scanning: ix.scanning, Paused: ix.paused,
+		Scanning: ix.scanning, ScanPath: ix.scanPath, ScanSeen: ix.scanSeen, Paused: ix.paused,
+		Working:   ix.workingNow(),
 		OnBattery: ix.onBattery && !ix.aiOnBattery, // narrowed below to the AI that is there
 		AI:        core.AI{Device: ix.aiDevice, Error: ix.aiError, FacesError: ix.facesError},
 	}
 	ix.mu.Unlock()
-	if pending, failed, skipped, err := ix.store.JobCounts(ctx); err == nil {
-		p.Metadata, p.Thumbnail, p.Errors, p.Skipped = pending[core.StageMetadata], pending[core.StageThumbnail], failed, skipped
+	if c, err := ix.store.JobCounts(ctx); err == nil {
+		p.Metadata, p.Thumbnail, p.Errors, p.Skipped = c.Pending[core.StageMetadata], c.Pending[core.StageThumbnail], c.Failed, c.Skipped
+		// Photos and videos apart: the video stage works through its own.
 		if ix.search != nil {
-			p.Embedding = pending[core.StageEmbedding]
+			p.Embedding = c.Pending[core.StageEmbedding] - c.Videos[core.StageEmbedding]
+			p.Videos = c.Videos[core.StageEmbedding]
 		}
 		if ix.people != nil {
-			p.Faces = pending[core.StageFaces]
+			p.Faces = c.Pending[core.StageFaces] - c.Videos[core.StageFaces]
+			p.Videos = max(p.Videos, c.Videos[core.StageFaces])
 		}
 		// Only while it is on: what an upgrade queued while it was off waits
 		// for the user to turn it on.
 		if on, err := ix.store.Bool(ctx, core.SettingOCR, false); err == nil && on {
-			p.OCR = pending[core.StageOCR]
+			p.OCR = c.Pending[core.StageOCR]
 		}
 		p.OnBattery = p.OnBattery && (ix.search != nil || ix.people != nil || p.OCR > 0)
 	} else if ctx.Err() == nil {
