@@ -11,7 +11,7 @@ const lib = useLibrary()
   <div v-if="lib.total" class="trash-bar">
     <p>{{ t('trash.summary', { n: lib.total }) }}</p>
     <button class="btn" @click="restoreAll(lib)">{{ t('trash.restoreAll') }}</button>
-    <button class="btn" @click="deleteAllFromDisk(lib, lib.total)">{{ t('trash.deleteAll') }}</button>
+    <button class="btn" @click="deleteAllFromDisk(lib)">{{ t('trash.deleteAll') }}</button>
   </div>
 </template>
 

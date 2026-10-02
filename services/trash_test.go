@@ -1,12 +1,16 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -378,5 +382,96 @@ func TestDeleteFromDiskForgetsRecycledFilesEvenIfTheCallWasCancelled(t *testing.
 func TestTheRecycleBinFailureCodeIsDeclaredForTheUI(t *testing.T) {
 	if got := MarshalError(ErrDeleteFailed); string(got) != `{"code":"delete_failed"}` {
 		t.Fatalf("MarshalError = %s", got)
+	}
+}
+
+func TestAFailedRecycleLogsNoFilePaths(t *testing.T) {
+	f := newTrashFixture(t)
+	ctx := t.Context()
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	f.svc.recycle = func(_ context.Context, paths []string) ([]fileops.Outcome, error) {
+		return []fileops.Outcome{{Path: paths[0], Status: fileops.Failed, Err: fmt.Errorf("in use: %s", paths[0])}}, nil
+	}
+	if err := f.svc.TrashAssets(ctx, []int64{f.ids["b"]}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.DeleteFromDisk(ctx, []int64{f.ids["b"]}); err != nil {
+		t.Fatal(err)
+	}
+	if logs.Len() == 0 {
+		t.Fatal("the failure was not logged at all")
+	}
+	// The text handler escapes backslashes, so look for the file's name, which
+	// survives quoting, rather than for the whole path.
+	if strings.Contains(logs.String(), filepath.Base(f.paths["b"])) {
+		t.Fatalf("a file path reached the log: %s", logs.String())
+	}
+}
+
+func TestTrashFileCountCountsEveryCopyAndRefusesAssetsOutsideTheTrash(t *testing.T) {
+	f := newTrashFixture(t)
+	ctx := t.Context()
+	if err := f.svc.TrashAssets(ctx, []int64{f.ids["a"], f.ids["c"]}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		ids  []int64
+		want int
+	}{{[]int64{f.ids["a"]}, 2}, {[]int64{f.ids["c"]}, 1}, {[]int64{f.ids["a"], f.ids["c"]}, 3}, {nil, 3}} {
+		if n, err := f.svc.TrashFileCount(ctx, c.ids); err != nil || n != c.want {
+			t.Errorf("TrashFileCount(%v) = %d, %v, want %d", c.ids, n, err, c.want)
+		}
+	}
+	if _, err := f.svc.TrashFileCount(ctx, []int64{f.ids["b"]}); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("a photo outside the Trash: %v", err)
+	}
+}
+
+func TestDeleteFromDiskLeavesAFileThatTookOverARecycledFilesRowId(t *testing.T) {
+	f := newTrashFixture(t)
+	ctx := t.Context()
+	if err := f.svc.TrashAssets(ctx, []int64{f.ids["a"]}); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := f.st.ListSources(ctx)
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("sources = %v, %v", sources, err)
+	}
+	newcomer := filepath.Join(f.dir, "newcomer.jpg")
+	if err := os.WriteFile(newcomer, []byte("n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// While the shell works, the scanner forgets the copy's row (the highest
+	// id) and then finds an unrelated file, which SQLite gives the same id.
+	f.svc.recycle = func(ctx context.Context, paths []string) ([]fileops.Outcome, error) {
+		files, err := f.st.TrashedFiles(ctx, []int64{f.ids["a"]})
+		if err != nil {
+			t.Error(err)
+		}
+		i := slices.IndexFunc(files, func(x store.TrashedFile) bool { return x.Path == f.copyOfA })
+		if i < 0 {
+			t.Fatal("the copy of a has no row")
+		}
+		if err := f.st.RemoveFiles(ctx, []int64{files[i].ID}); err != nil {
+			t.Error(err)
+		}
+		if _, err := f.st.Ingest(ctx, []store.IngestItem{{SourceID: sources[0].ID, Path: newcomer, Size: 1, MTime: 1,
+			Hash: []byte("n"), Kind: core.KindPhoto, Ext: ".jpg", TakenAt: 1_700_000_100, DateFrom: core.DateFromFile}}); err != nil {
+			t.Error(err)
+		}
+		return f.rec.recycle(ctx, paths)
+	}
+	if _, err := f.svc.DeleteFromDisk(ctx, []int64{f.ids["a"]}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := assetAt(ctx, f.st, newcomer)
+	if err != nil {
+		t.Fatalf("the newcomer's asset is gone: %v", err)
+	}
+	if ok, err := f.st.AssetVisible(ctx, id); err != nil || !ok {
+		t.Fatalf("the newcomer is not visible (%v, %v): its row was removed by a stale id", ok, err)
 	}
 }

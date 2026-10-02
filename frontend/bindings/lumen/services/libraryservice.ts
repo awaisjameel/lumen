@@ -355,6 +355,16 @@ export function TrashCount(): $CancellablePromise<number> {
 }
 
 /**
+ * TrashFileCount is how many files the trashed assets ids have on disk (an
+ * asset with exact copies has several), or, with no ids, how many everything
+ * in the Trash has: what Delete from disk will move to the Recycle Bin. Ids
+ * that are not in the Trash are refused.
+ */
+export function TrashFileCount(ids: number[] | null): $CancellablePromise<number> {
+    return $Call.ByID(4027191930, ids);
+}
+
+/**
  * UndoBlock removes the most recent new block during its short Undo window.
  */
 export function UndoBlock(id: number): $CancellablePromise<void> {

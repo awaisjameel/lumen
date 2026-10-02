@@ -213,6 +213,14 @@ export const useLibrary = defineStore('library', () => {
     return days.value.get(p.day)?.findIndex((x) => x.id === p.id) ?? -1
   }
 
+  // Assets being taken out of the view (trashed, restored, deleted) -> where
+  // the viewer and selection go once they are gone. A reload that lands before
+  // the engine answers drops the asset from the grid; it must advance, not close.
+  const advancing = new Map<number, Sel | null>()
+  function movedOn(p: Sel): Sel | null {
+    return advancing.get(p.id) ?? null
+  }
+
   /** The asset at index i of a day, as a selection (if that day is loaded). */
   function selAt(day: string, i: number): Sel | null {
     const it = days.value.get(day)?.[i]
@@ -307,8 +315,8 @@ export const useLibrary = defineStore('library', () => {
         buckets.value = b
         const present = new Set(b.map((bucket) => bucket.day))
         days.value = new Map([...days.value].filter(([day]) => present.has(day)))
-        if (selected.value && !present.has(selected.value.day)) selected.value = null
-        if (viewer.value && !present.has(viewer.value.day)) viewer.value = null
+        if (selected.value && !present.has(selected.value.day)) selected.value = movedOn(selected.value)
+        if (viewer.value && !present.has(viewer.value.day)) viewer.value = movedOn(viewer.value)
       }
       timelineLoaded.value = true
     } catch (e) {
@@ -347,8 +355,8 @@ export const useLibrary = defineStore('library', () => {
       if (current !== generation || load !== loadRequest || request !== visibilityRequest) return
       buckets.value = kept.length ? [{ day: RESULTS, count: kept.length }] : []
       days.value = new Map(kept.length ? [[RESULTS, kept]] : [])
-      if (selected.value && !itemAt(selected.value)) selected.value = null
-      if (viewer.value && !itemAt(viewer.value)) viewer.value = null
+      if (selected.value && !itemAt(selected.value)) selected.value = movedOn(selected.value)
+      if (viewer.value && !itemAt(viewer.value)) viewer.value = movedOn(viewer.value)
       stale = false
     } catch (e) {
       if (current !== generation || request !== visibilityRequest || isCancelled(e)) return
@@ -478,8 +486,10 @@ export const useLibrary = defineStore('library', () => {
       days.value = next
       // A filter edit or source removal can remove the selected item while
       // leaving its day in place. Do not leave a panel with inactive actions.
-      if (selected.value && missing.includes(selected.value.day) && !itemAt(selected.value)) selected.value = null
-      if (viewer.value && missing.includes(viewer.value.day) && !itemAt(viewer.value)) viewer.value = null
+      if (selected.value && missing.includes(selected.value.day) && !itemAt(selected.value))
+        selected.value = movedOn(selected.value)
+      if (viewer.value && missing.includes(viewer.value.day) && !itemAt(viewer.value))
+        viewer.value = movedOn(viewer.value)
     } catch (e) {
       if (!isCancelled(e)) logError(e)
     }
@@ -622,10 +632,13 @@ export const useLibrary = defineStore('library', () => {
   async function removeFromView<T>(p: Sel, change: () => Promise<T>): Promise<{ value: T } | null> {
     const next = (await neighbour(p, 1)) ?? (await neighbour(p, -1))
     let done: { value: T } | null = null
+    advancing.set(p.id, next)
     try {
       done = { value: await change() }
     } catch (e) {
       reportError(e)
+    } finally {
+      advancing.delete(p.id)
     }
     if (done) {
       if (viewer.value?.id === p.id) viewer.value = next

@@ -78,8 +78,43 @@ func requireAll(ctx context.Context, q querier, condition, list string) error {
 // files were recycled stay marked: should the file come back from the
 // Recycle Bin it returns to the Trash, not the library.
 func (s *Store) RestoreAllTrash(ctx context.Context) error {
-	_, err := s.w.ExecContext(ctx, "UPDATE assets SET trashed_at = NULL WHERE "+trashed)
-	return err
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE assets SET trashed_at = NULL WHERE "+trashed)
+		return err
+	})
+}
+
+// RemoveRecycledFiles forgets files that were moved to the Recycle Bin, so
+// their assets become missing and keep their names, tags and albums (as
+// RemoveFiles does). A row goes only if it still holds the path that was
+// recycled: the scanner may have dropped it meanwhile, and SQLite may have
+// given its id to another file.
+func (s *Store) RemoveRecycledFiles(ctx context.Context, files []TrashedFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+	type pair struct {
+		ID   int64  `json:"id"`
+		Path string `json:"path"`
+	}
+	pairs := make([]pair, len(files))
+	for i, f := range files {
+		pairs[i] = pair{f.ID, f.Path}
+	}
+	list, err := json.Marshal(pairs)
+	if err != nil {
+		return err
+	}
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		// The id list picks the rows by primary key; the path check runs only on those.
+		assets, err := queryAll(ctx, tx, scanID, `DELETE FROM files
+			WHERE id IN (SELECT json_extract(value, '$.id') FROM json_each(?1)) AND EXISTS (SELECT 1 FROM json_each(?1) j
+			WHERE json_extract(j.value, '$.id') = files.id AND `+foldKey("json_extract(j.value, '$.path')")+` = `+foldKey("files.path")+`) RETURNING asset_id`, string(list))
+		if err != nil {
+			return err
+		}
+		return markOrphans(ctx, tx, assets, time.Now().Unix())
+	})
 }
 
 // TrashCount is how many assets the Trash shows.

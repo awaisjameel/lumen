@@ -72,7 +72,7 @@ function restore() {
   if (lib.viewer) void lib.restoreFromTrash(lib.viewer)
 }
 function deleteThisFromDisk() {
-  if (lib.viewer) void deleteFromDisk(lib, lib.viewer, Math.max(detail.value?.paths.length ?? 1, 1))
+  if (lib.viewer) void deleteFromDisk(lib, lib.viewer)
 }
 
 function videoReady() {

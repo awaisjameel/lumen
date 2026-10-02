@@ -385,11 +385,6 @@ const en = {
     one: '1 file will be moved to the Windows Recycle Bin. You can still restore it from there.',
     other: '{n} files will be moved to the Windows Recycle Bin. You can still restore them from there.',
   },
-  'trash.confirmAll': {
-    one: 'The 1 item in the Trash, with any exact copies of it, will be moved to the Windows Recycle Bin. You can still restore it from there.',
-    other:
-      'All {n} items in the Trash, with any exact copies of them, will be moved to the Windows Recycle Bin. You can still restore them from there.',
-  },
   'trash.confirmOk': 'Move to Recycle Bin',
   'trash.kept': {
     one: '1 file couldn’t be moved to the Recycle Bin, so it was left where it is.',

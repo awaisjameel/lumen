@@ -251,6 +251,8 @@ export const engine = {
   restoreAssets: (ids: number[]): Promise<void> => LibraryService.RestoreAssets(ids),
   restoreAllTrash: (): Promise<void> => LibraryService.RestoreAllTrash(),
   trashCount: (): Promise<number> => LibraryService.TrashCount(),
+  /** How many files Delete from disk would move for these trashed assets (none given: all of the Trash). */
+  trashFileCount: (ids: number[]): Promise<number> => LibraryService.TrashFileCount(ids),
   /** Moves trashed assets' files to the Windows Recycle Bin. */
   deleteFromDisk: async (ids: number[]): Promise<DiskDeletion> => {
     const r = await LibraryService.DeleteFromDisk(ids)

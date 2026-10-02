@@ -11,6 +11,7 @@ import { useLibrary } from '../library/store'
 import { confirm } from '../shared/confirm'
 import { notice } from '../shared/errors'
 import { deleteAllFromDisk, deleteFromDisk, restoreAll } from './actions'
+import TrashBar from './TrashBar.vue'
 import TrashUndo from './TrashUndo.vue'
 import { clearTrashUndo, trashUndo } from './undo'
 
@@ -35,6 +36,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     restoreAssets: vi.fn(),
     restoreAllTrash: vi.fn(),
     trashCount: vi.fn(),
+    trashFileCount: vi.fn(),
     deleteFromDisk: vi.fn(),
     deleteAllTrashFromDisk: vi.fn(),
   },
@@ -81,6 +83,7 @@ beforeEach(() => {
   vi.mocked(engine.restoreAssets).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.restoreAllTrash).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.trashCount).mockReset().mockResolvedValue(0)
+  vi.mocked(engine.trashFileCount).mockReset().mockResolvedValue(2)
   vi.mocked(engine.deleteFromDisk).mockReset().mockResolvedValue({ recycled: 1, kept: [] })
   vi.mocked(engine.deleteAllTrashFromDisk).mockReset().mockResolvedValue({ recycled: 3, kept: [] })
   vi.mocked(engine.asset)
@@ -152,15 +155,15 @@ it('restores everything in the Trash', async () => {
 it('calls nothing when the delete-from-disk question is declined', async () => {
   const lib = await libraryShowing(Filter.FilterTrash)
   vi.mocked(confirm).mockResolvedValue(false)
-  await deleteFromDisk(lib, { day, id: 1 }, 2)
-  await deleteAllFromDisk(lib, 3)
+  await deleteFromDisk(lib, { day, id: 1 })
+  await deleteAllFromDisk(lib)
   expect(engine.deleteFromDisk).not.toHaveBeenCalled()
   expect(engine.deleteAllTrashFromDisk).not.toHaveBeenCalled()
 })
 
 it('says how many files go to the Recycle Bin before deleting them from disk', async () => {
   const lib = await libraryShowing(Filter.FilterTrash)
-  await deleteFromDisk(lib, { day, id: 1 }, 2)
+  await deleteFromDisk(lib, { day, id: 1 })
   expect(confirm).toHaveBeenCalledWith(
     'Delete from disk?',
     expect.stringContaining('2 files will be moved to the Windows Recycle Bin'),
@@ -170,14 +173,51 @@ it('says how many files go to the Recycle Bin before deleting them from disk', a
   expect(notice.value).toBe('')
 })
 
+it('states the engine’s own file count, for one photo and for the whole Trash', async () => {
+  const lib = await libraryShowing(Filter.FilterTrash)
+  vi.mocked(engine.trashFileCount).mockResolvedValueOnce(5)
+  await deleteFromDisk(lib, { day, id: 1 })
+  expect(engine.trashFileCount).toHaveBeenLastCalledWith([1])
+  expect(confirm).toHaveBeenLastCalledWith(expect.anything(), expect.stringContaining('5 files'), expect.anything())
+  vi.mocked(engine.trashFileCount).mockResolvedValueOnce(7)
+  await deleteAllFromDisk(lib)
+  expect(engine.trashFileCount).toHaveBeenLastCalledWith([])
+  expect(confirm).toHaveBeenLastCalledWith(expect.anything(), expect.stringContaining('7 files'), expect.anything())
+})
+
+it('deletes nothing and asks nothing when the file count cannot be read', async () => {
+  const lib = await libraryShowing(Filter.FilterTrash)
+  vi.mocked(engine.trashFileCount).mockRejectedValue(new Error('no'))
+  await deleteFromDisk(lib, { day, id: 1 })
+  expect(confirm).not.toHaveBeenCalled()
+  expect(engine.deleteFromDisk).not.toHaveBeenCalled()
+})
+
+it('advances the viewer to the neighbour even when a reload lands before the trash call answers', async () => {
+  const lib = await libraryShowing(Filter.FilterAll)
+  lib.viewer = { day, id: 2 }
+  let answer!: () => void
+  vi.mocked(engine.trashAssets).mockReturnValue(new Promise<void>((done) => (answer = done)))
+  vi.mocked(engine.timeline).mockResolvedValue([{ day, count: 2 }])
+  vi.mocked(engine.days).mockResolvedValue([{ day, items: [1, 3].map((id) => ({ id, w: 10, h: 10, t: 1 })) }])
+  const moving = lib.moveToTrash({ day, id: 2 })
+  await flushPromises()
+  await lib.refresh() // library:changed, before the engine has answered
+  await lib.ensureDays([day])
+  expect(lib.viewer).toEqual({ day, id: 3 })
+  answer()
+  await moving
+  expect(lib.viewer).toEqual({ day, id: 3 })
+})
+
 it('reports the files the Recycle Bin would not take', async () => {
   const lib = await libraryShowing(Filter.FilterTrash)
   vi.mocked(engine.deleteFromDisk).mockResolvedValue({ recycled: 0, kept: ['D:\\share\\a.jpg'] })
-  await deleteFromDisk(lib, { day, id: 1 }, 1)
+  await deleteFromDisk(lib, { day, id: 1 })
   expect(notice.value).toContain('1 file couldn’t be moved to the Recycle Bin')
   vi.mocked(engine.deleteAllTrashFromDisk).mockResolvedValue({ recycled: 1, kept: ['a', 'b'] })
   notice.value = ''
-  await deleteAllFromDisk(lib, 3)
+  await deleteAllFromDisk(lib)
   expect(notice.value).toContain('2 files couldn’t be moved')
 })
 
@@ -191,6 +231,32 @@ it('shows Restore and Delete from disk, not the editing controls, in the Viewer 
   expect(labels).toContain('Delete from disk…')
   expect(labels).not.toContain('Move to Trash')
   expect(labels).not.toContain('Favourite')
+})
+
+it('confirms the engine’s file count from the Viewer even before the photo’s details have loaded', async () => {
+  const lib = await libraryShowing(Filter.FilterTrash)
+  lib.viewer = { day, id: 1 }
+  vi.mocked(engine.asset).mockReturnValue(new Promise(() => undefined)) // the details never arrive
+  vi.mocked(engine.trashFileCount).mockResolvedValue(2)
+  wrapper = mount(Viewer, { global: { stubs: { teleport: true } } })
+  await flushPromises()
+  const button = wrapper.findAll('.bar button').find((b) => b.text() === 'Delete from disk…')
+  await button?.trigger('click')
+  await flushPromises()
+  expect(engine.trashFileCount).toHaveBeenCalledWith([1])
+  expect(confirm).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('2 files'), expect.anything())
+})
+
+it('confirms the number of files, not of photos, when deleting the whole Trash from its bar', async () => {
+  const lib = await libraryShowing(Filter.FilterTrash)
+  vi.mocked(engine.trashFileCount).mockResolvedValue(5)
+  wrapper = mount(TrashBar)
+  const button = wrapper.findAll('button').find((b) => b.text().includes('Delete all from disk'))
+  await button?.trigger('click')
+  await flushPromises()
+  expect(lib.total).toBe(3)
+  expect(engine.trashFileCount).toHaveBeenCalledWith([])
+  expect(confirm).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('5 files'), expect.anything())
 })
 
 it('offers Move to Trash in the Viewer outside the Trash', async () => {

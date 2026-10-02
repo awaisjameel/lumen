@@ -1,6 +1,7 @@
 package services
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -53,6 +54,21 @@ func (s *LibraryService) TrashCount(ctx context.Context) (int, error) {
 	return s.store.TrashCount(ctx)
 }
 
+// TrashFileCount is how many files the trashed assets ids have on disk (an
+// asset with exact copies has several), or, with no ids, how many everything
+// in the Trash has: what Delete from disk will move to the Recycle Bin. Ids
+// that are not in the Trash are refused.
+func (s *LibraryService) TrashFileCount(ctx context.Context, ids []int64) (int, error) {
+	var files []store.TrashedFile
+	var err error
+	if len(ids) == 0 {
+		files, err = s.store.AllTrashedFiles(ctx)
+	} else {
+		files, err = s.store.TrashedFiles(ctx, ids)
+	}
+	return len(files), err
+}
+
 // DeleteFromDisk moves the files of trashed assets to the Windows Recycle
 // Bin. Assets that are not in the Trash are refused.
 func (s *LibraryService) DeleteFromDisk(ctx context.Context, ids []int64) (core.DiskDeletion, error) {
@@ -97,23 +113,31 @@ func (s *LibraryService) recycleFiles(ctx context.Context, files []store.Trashed
 		return result, fmt.Errorf("%w: %d outcomes for %d files", ErrDeleteFailed, len(outcomes), len(files))
 	}
 
-	var forget []int64
+	var forget []store.TrashedFile
+	failed := 0
+	var failure error
 	for i, o := range outcomes {
 		switch o.Status {
 		case fileops.Recycled:
 			result.Recycled++
-			forget = append(forget, files[i].ID)
+			forget = append(forget, files[i])
 		case fileops.Gone:
-			forget = append(forget, files[i].ID)
+			forget = append(forget, files[i])
 		case fileops.Kept:
 			result.Kept = append(result.Kept, o.Path)
 		case fileops.Failed:
-			slog.Warn("recycle file", "path", o.Path, "err", o.Err)
+			failed++
+			failure = cmp.Or(failure, o.Err)
 			result.Kept = append(result.Kept, o.Path)
 		}
 	}
+	if failed > 0 {
+		// Never a path: the log must not say which photos were handled (they
+		// may be blocked ones). The paths go back to the UI in Kept.
+		slog.Warn("recycle files", "failed", failed, "kind", fmt.Sprintf("%T", failure))
+	}
 	// Even if ctx ended, the files already in the bin must leave the library.
-	if err := s.store.RemoveFiles(context.WithoutCancel(ctx), forget); err != nil {
+	if err := s.store.RemoveRecycledFiles(context.WithoutCancel(ctx), forget); err != nil {
 		return result, fmt.Errorf("forget recycled files: %w", err)
 	}
 	if len(forget) > 0 {

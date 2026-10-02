@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -499,4 +500,44 @@ func TestTheTrashQueryUsesItsPartialIndex(t *testing.T) {
 	}
 	check(t, rows.Err())
 	t.Fatal("the Trash count does not use assets_trash")
+}
+
+func TestRemovingRecycledFilesForgetsOnlyRowsStillHoldingTheRecycledPath(t *testing.T) {
+	f := newTrashFixture(t)
+	f.trash(t, f.a)
+	files, err := f.st.TrashedFiles(f.ctx, []int64{f.a})
+	check(t, err)
+	// The scanner dropped the first row meanwhile, and SQLite gave its id to
+	// an unrelated file (here: another path takes over the same id).
+	stale := files[0]
+	check(t, errOf(f.st.w.ExecContext(f.ctx, "UPDATE files SET path = ? WHERE id = ?", `C:\Photos\someone-else.jpg`, stale.ID)))
+	check(t, f.st.RemoveRecycledFiles(f.ctx, files))
+
+	var n int
+	check(t, f.st.r.QueryRowContext(f.ctx, "SELECT count(*) FROM files WHERE id = ?", stale.ID).Scan(&n))
+	if n != 1 {
+		t.Fatal("a row that no longer holds the recycled path was removed")
+	}
+	// The other copy goes, whatever the case of the recorded path.
+	other := files[1]
+	other.Path = strings.ToUpper(other.Path)
+	check(t, f.st.RemoveRecycledFiles(f.ctx, []TrashedFile{other}))
+	check(t, f.st.r.QueryRowContext(f.ctx, "SELECT count(*) FROM files WHERE id = ?", other.ID).Scan(&n))
+	if n != 0 {
+		t.Fatal("the recycled file's row was kept")
+	}
+	// Both rows gone would mark the asset missing; one left keeps it present.
+	var missing bool
+	check(t, f.st.r.QueryRowContext(f.ctx, "SELECT missing_since IS NOT NULL FROM assets WHERE id = ?", f.a).Scan(&missing))
+	if missing {
+		t.Fatal("an asset that still has a file was marked missing")
+	}
+}
+
+func TestEveryStoreWriteThatChangesTheTrashGoesThroughATransaction(t *testing.T) {
+	src, err := os.ReadFile("trash.go")
+	check(t, err)
+	if strings.Contains(string(src), "s.w.") {
+		t.Fatal("trash.go writes with the bare writer: Store.tx must wrap every write that changes trashed_at")
+	}
 }

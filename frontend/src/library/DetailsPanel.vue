@@ -292,7 +292,7 @@ function restore() {
   if (props.sel) void lib.restoreFromTrash(props.sel)
 }
 function deleteThisFromDisk() {
-  if (props.sel && detail.value) void deleteFromDisk(lib, props.sel, Math.max(detail.value.paths.length, 1))
+  if (props.sel) void deleteFromDisk(lib, props.sel)
 }
 
 function showInFolder(id: number) {
