@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -145,6 +147,39 @@ func TestJobCountsCountAFileThatFailsInSeveralStagesOnce(t *testing.T) {
 	check(t, err)
 	if len(c.Pending) != 0 || c.Failed != 1 || c.Skipped != 1 {
 		t.Fatalf("counts = %+v; want nothing pending, 1 failed, 1 skipped", c)
+	}
+}
+
+func TestFailuresSayWhyEachFileFailedOnce(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{
+		item(src.ID, `C:\Photos\module.mts`, "module"),
+		item(src.ID, `C:\Photos\film.jpg`, "film"),
+		item(src.ID, `C:\Photos\fine.jpg`, "fine"),
+	})))
+	fail := func(path string, stage core.Stage, msg string) {
+		t.Helper()
+		check(t, errOf(st.w.ExecContext(ctx, `UPDATE asset_jobs SET status = 'error', error = ?
+			WHERE stage = ? AND asset_id = (SELECT asset_id FROM files WHERE path = ?)`, msg, stage, path)))
+	}
+	// The module failed first in metadata; its thumbnail failed after, for the same cause.
+	fail(`C:\Photos\module.mts`, core.StageMetadata, `ffprobe: C:\Photos\module.mts: Invalid data found when processing input`)
+	fail(`C:\Photos\module.mts`, core.StageThumbnail, `context deadline exceeded`)
+	fail(`C:\Photos\film.jpg`, core.StageEmbedding, `sample video C:\Photos\film.jpg: context deadline exceeded`)
+	groups, err := st.Failures(ctx)
+	check(t, err)
+	want := []core.FailureGroup{
+		{Reason: core.FailDamaged, Count: 1, Files: []core.FailedFile{{Path: `C:\Photos\module.mts`, Error: `ffprobe: module.mts: Invalid data found when processing input`}}},
+		{Reason: core.FailSlow, Count: 1, Files: []core.FailedFile{{Path: `C:\Photos\film.jpg`, Error: `sample video film.jpg: context deadline exceeded`}}},
+	}
+	slices.SortFunc(groups, func(a, b core.FailureGroup) int { return strings.Compare(string(a.Reason), string(b.Reason)) })
+	if !reflect.DeepEqual(groups, want) {
+		t.Fatalf("Failures = %+v\nwant %+v", groups, want)
+	}
+	if c, _ := st.JobCounts(ctx); c.Failed != 2 {
+		t.Fatalf("JobCounts says %d failed, Failures 2", c.Failed)
 	}
 }
 

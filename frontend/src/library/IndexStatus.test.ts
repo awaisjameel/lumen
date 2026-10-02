@@ -1,7 +1,7 @@
-import { beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { mount } from '@vue/test-utils'
-import { Device } from '../bridge'
+import { flushPromises, mount } from '@vue/test-utils'
+import { Device, engine, FailReason } from '../bridge'
 import type { Progress } from '../bridge'
 import { useLibrary } from './store'
 import IndexStatus from './IndexStatus.vue'
@@ -34,6 +34,7 @@ const label = (status: ReturnType<typeof show>) => status.find('.label').text()
 const rows = (status: ReturnType<typeof show>) => status.findAll('.queue li').map((li) => li.text())
 
 beforeEach(() => setActivePinia(createPinia()))
+afterEach(() => vi.restoreAllMocks())
 
 it('says what is at work, not only that a scan runs', () => {
   const status = show(
@@ -92,4 +93,39 @@ it('says the library is up to date, with nothing behind it', () => {
   expect(status.text()).toContain('100 items')
   expect(status.find('.queue').exists()).toBe(false)
   expect(status.find('.bar').exists()).toBe(false)
+})
+
+it('says why files couldn’t be read, reading it only when the list opens', async () => {
+  const failures = vi.spyOn(engine, 'failures').mockResolvedValue([
+    {
+      reason: FailReason.FailDamaged,
+      count: 5,
+      files: [
+        { path: 'D:\\Downloads\\icon.d.mts', error: 'ffprobe: icon.d.mts: Invalid data found when processing input' },
+      ],
+    },
+    {
+      reason: FailReason.FailSlow,
+      count: 1,
+      files: [{ path: 'D:\\Films\\GOAT.mp4', error: 'context deadline exceeded' }],
+    },
+  ])
+  const status = show({ errors: 6 })
+  expect(failures).not.toHaveBeenCalled()
+  await status.trigger('mouseenter')
+  await flushPromises()
+  const reasons = status.findAll('.reason')
+  expect(reasons.map((r) => r.text())).toEqual([
+    expect.stringMatching(/^Damaged, or not really a photo or video\s*icon\.d\.mts\s*4 more\s*5$/),
+    expect.stringMatching(/^Took too long to read\s*GOAT\.mp4\s*1$/),
+  ])
+  // The file's own error is a hover away.
+  expect(status.find('.reason .path').attributes('title')).toBe(
+    'ffprobe: icon.d.mts: Invalid data found when processing input',
+  )
+  // Read again only once the count changes.
+  await status.trigger('mouseenter')
+  expect(failures).toHaveBeenCalledTimes(1)
+  // Nothing at work: the count itself takes focus, and leads to the list.
+  expect(status.find('.failed-count').attributes('aria-describedby')).toBe(status.find('.queue').attributes('id'))
 })

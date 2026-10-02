@@ -348,6 +348,11 @@ func showInFolder(ctx context.Context, path string) error {
 // Progress returns the current indexing state.
 func (s *LibraryService) Progress(ctx context.Context) core.Progress { return s.ix.Progress(ctx) }
 
+// Failures says why the files that couldn't be read failed, by reason.
+func (s *LibraryService) Failures(ctx context.Context) ([]core.FailureGroup, error) {
+	return s.store.Failures(ctx)
+}
+
 // SetPaused pauses or resumes background indexing.
 func (s *LibraryService) SetPaused(paused bool) { s.ix.SetPaused(paused) }
 

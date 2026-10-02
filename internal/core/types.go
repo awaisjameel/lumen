@@ -642,6 +642,57 @@ type Working struct {
 	OCR       bool `json:"ocr"`
 }
 
+// FailureGroup is the files that couldn't be read for one reason: what the
+// status's "couldn't be read" count is made of.
+type FailureGroup struct {
+	Reason FailReason   `json:"reason"`
+	Count  int          `json:"count"`
+	Files  []FailedFile `json:"files"` // the first few, as examples
+}
+
+// FailedFile is one file that couldn't be read.
+type FailedFile struct {
+	Path  string `json:"path"`
+	Error string `json:"error"` // what the decoder said, with the path shortened to the file's name
+}
+
+// FailReason is why a file couldn't be read, in the user's terms.
+type FailReason string
+
+// The reasons.
+const (
+	FailDamaged FailReason = "damaged" // not a readable photo or video: damaged, or another kind of file with its extension
+	FailSlow    FailReason = "slow"    // reading it took longer than a file may
+	FailLocked  FailReason = "locked"  // another app holds it, or Windows doesn't allow reading it
+	FailOther   FailReason = "other"
+)
+
+// failSigns are what the decoders' messages say for each reason (lower case).
+var failSigns = []struct {
+	reason FailReason
+	signs  []string
+}{
+	{FailSlow, []string{"context deadline exceeded", "timed out"}},
+	{FailLocked, []string{"being used by another process", "access is denied", "permission denied"}},
+	{FailDamaged, []string{
+		"invalid data found", "not a known file format", "end of file", "moov atom not found", "premature end",
+		"corrupt", "truncated", "unsupported image format", "the video has no frames",
+	}},
+}
+
+// FailReasonOf says why a file failed, from the error a stage stored.
+func FailReasonOf(msg string) FailReason {
+	msg = strings.ToLower(msg)
+	for _, f := range failSigns {
+		for _, s := range f.signs {
+			if strings.Contains(msg, s) {
+				return f.reason
+			}
+		}
+	}
+	return FailOther
+}
+
 // Changes says what changed in the library: the payload of library:changed,
 // so each view reloads only for what it shows. While the AI works through a
 // big library, tags and people change for hours after the timeline settles.

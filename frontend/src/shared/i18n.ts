@@ -220,6 +220,14 @@ const en = {
   'status.aiOff': 'Search is off',
   'status.peopleOff': 'People is off',
   'status.errors': '{n} couldn’t be read',
+  'status.failed': 'Couldn’t be read',
+  'status.failedHint':
+    'Lumen tries a file again when it changes, and a few times when it next looks through its folder.',
+  'status.more': '{n} more',
+  'failure.damaged': 'Damaged, or not really a photo or video',
+  'failure.slow': 'Took too long to read',
+  'failure.locked': 'Locked by another app, or not allowed',
+  'failure.other': 'Something else went wrong',
   'status.skipped': '{n} can’t be shown on this PC yet',
   'status.items': { one: '1 item', other: '{n} items' },
 

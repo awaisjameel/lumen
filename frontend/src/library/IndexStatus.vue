@@ -1,10 +1,14 @@
 <script setup lang="ts">
 // The small, calm status card in the sidebar. The app is fully usable while
 // indexing runs; this says what it is doing now and offers a pause. Hovering
-// it, or focusing its button, lists everything at work and what comes next.
-import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
+// it, or focusing it, lists everything at work, what comes next, and why the
+// files that couldn't be read failed.
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId } from 'vue'
+import { engine, FailReason } from '../bridge'
+import type { FailureGroup } from '../bridge'
 import { fileName } from '../shared/format'
 import { t } from '../shared/i18n'
+import type { MessageKey } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { isAI, lead, tasks } from './activity'
 import type { Task } from './activity'
@@ -15,6 +19,8 @@ const p = computed(() => lib.progress)
 const id = useId()
 
 const list = computed(() => (p.value ? tasks(p.value) : []))
+// The list behind the card: what's at work and next, and what failed.
+const hasList = computed(() => list.value.length > 0 || !!p.value?.errors)
 const next = computed(() => list.value.filter((task) => !task.now))
 const groups = computed(() =>
   [
@@ -54,6 +60,28 @@ function count(task: Task | undefined): string {
   return task.kind === 'scan' ? t('status.found', { n: task.count }) : t('status.left', { n: task.count })
 }
 
+// Why files failed: read when the list opens, and again once their count changes.
+const failures = shallowRef<FailureGroup[]>([])
+let failuresAt = 0 // the count they were read at
+async function loadFailures() {
+  const n = p.value?.errors ?? 0
+  if (!n || n === failuresAt) return
+  failuresAt = n
+  try {
+    failures.value = await engine.failures()
+  } catch {
+    failuresAt = 0 // read again next time
+  }
+}
+
+const reasonText: Record<FailReason, MessageKey> = {
+  [FailReason.FailDamaged]: 'failure.damaged',
+  [FailReason.FailSlow]: 'failure.slow',
+  [FailReason.FailLocked]: 'failure.locked',
+  [FailReason.FailOther]: 'failure.other',
+  [FailReason.$zero]: 'failure.other', // never sent
+}
+
 function togglePause() {
   if (p.value) void lib.setPaused(!p.value.paused)
 }
@@ -65,10 +93,16 @@ function onKey(e: KeyboardEvent) {
 }
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+
+// The pointer or focus arriving brings the list back, with the reasons read.
+function open() {
+  dismissed.value = false
+  void loadFailures()
+}
 </script>
 
 <template>
-  <div v-if="p" class="status" @mouseenter="dismissed = false" @focusin="dismissed = false">
+  <div v-if="p" class="status" @mouseenter="open" @focusin="open">
     <div class="line">
       <span class="label" role="status">{{ label }}</span>
       <button
@@ -76,7 +110,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         class="icon-btn small"
         :title="p.paused ? t('status.resume') : t('status.pause')"
         :aria-label="p.paused ? t('status.resume') : t('status.pause')"
-        :aria-describedby="list.length ? id : undefined"
+        :aria-describedby="hasList ? id : undefined"
         @click="togglePause"
       >
         <Icon :name="p.paused ? 'play' : 'pause'" :size="14" />
@@ -90,9 +124,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     <p v-if="p.ai.error" class="sub" :title="p.ai.error">{{ t('status.aiOff') }}</p>
     <p v-if="p.ai.facesError" class="sub" :title="p.ai.facesError">{{ t('status.peopleOff') }}</p>
     <p v-if="p.skipped" class="sub">{{ t('status.skipped', { n: p.skipped }) }}</p>
-    <p v-if="p.errors" class="sub">{{ t('status.errors', { n: p.errors }) }}</p>
+    <p v-if="p.errors" class="sub failed-count" tabindex="0" :aria-describedby="id">
+      {{ t('status.errors', { n: p.errors }) }}
+    </p>
 
-    <div v-if="list.length" :id="id" class="queue" :class="{ dismissed }">
+    <div v-if="hasList" :id="id" class="queue" :class="{ dismissed }">
       <template v-for="g in groups" :key="g.head">
         <p class="head">{{ g.head }}</p>
         <ul :aria-label="g.head">
@@ -108,6 +144,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       </template>
       <p v-if="paused" class="note">{{ t('status.pausedNote') }}</p>
       <p v-else-if="onBattery" class="note">{{ t('status.batteryNote') }}</p>
+      <section v-if="p.errors" class="failures" :class="{ apart: list.length }">
+        <p class="head">{{ t('status.failed') }}</p>
+        <ul :aria-label="t('status.failed')">
+          <li v-for="g in failures" :key="g.reason" class="reason">
+            <span class="what">
+              {{ t(reasonText[g.reason]) }}
+              <span v-for="f in g.files" :key="f.path" class="path" :title="f.error">{{ fileName(f.path) }}</span>
+              <span v-if="g.count > g.files.length" class="path">
+                {{ t('status.more', { n: g.count - g.files.length }) }}
+              </span>
+            </span>
+            <span class="count">{{ g.count }}</span>
+          </li>
+        </ul>
+        <p class="note">{{ t('status.failedHint') }}</p>
+      </section>
     </div>
   </div>
 </template>
@@ -178,6 +230,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   min-width: 100%;
   width: max-content;
   max-width: 320px;
+  max-height: min(75vh, 640px);
+  overflow-y: auto;
   padding: 8px 12px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
@@ -263,5 +317,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   padding-top: 6px;
   border-top: 1px solid var(--border);
   color: var(--text-3);
+}
+.failures.apart {
+  margin-top: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.reason {
+  padding: 4px 0;
+}
+.reason .what {
+  color: var(--text);
+}
+.failed-count {
+  border-radius: var(--radius-s);
+}
+.failed-count:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 </style>

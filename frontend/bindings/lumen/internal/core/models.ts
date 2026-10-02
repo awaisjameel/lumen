@@ -482,6 +482,60 @@ export interface Face {
 }
 
 /**
+ * FailReason is why a file couldn't be read, in the user's terms.
+ */
+export enum FailReason {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The reasons.
+     *
+     * not a readable photo or video: damaged, or another kind of file with its extension
+     */
+    FailDamaged = "damaged",
+
+    /**
+     * reading it took longer than a file may
+     */
+    FailSlow = "slow",
+
+    /**
+     * another app holds it, or Windows doesn't allow reading it
+     */
+    FailLocked = "locked",
+    FailOther = "other",
+};
+
+/**
+ * FailedFile is one file that couldn't be read.
+ */
+export interface FailedFile {
+    "path": string;
+
+    /**
+     * what the decoder said, with the path shortened to the file's name
+     */
+    "error": string;
+}
+
+/**
+ * FailureGroup is the files that couldn't be read for one reason: what the
+ * status's "couldn't be read" count is made of.
+ */
+export interface FailureGroup {
+    "reason": FailReason;
+    "count": number;
+
+    /**
+     * the first few, as examples
+     */
+    "files": FailedFile[] | null;
+}
+
+/**
  * Filter narrows the grid to a subset of the library.
  */
 export enum Filter {
