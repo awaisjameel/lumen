@@ -3,9 +3,11 @@ package index
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -51,7 +53,7 @@ func newThumbFixture(tb testing.TB, n int, wanted ...int64) *thumbFixture {
 	if _, err := st.Ingest(ctx, items); err != nil {
 		tb.Fatal(err)
 	}
-	cache := media.NewCache(paths.ThumbDir, media.Decoders{})
+	cache := media.NewCache(paths.ThumbDir, thumbDecoder{})
 	meta, thumbs, embeds, faces := []store.MetadataResult{}, []store.ThumbResult{}, []store.EmbedResult{}, []store.FaceResult{}
 	for id := int64(1); id <= int64(n); id++ {
 		meta = append(meta, store.MetadataResult{AssetID: id, Width: 4, Height: 3, Orientation: 1})
@@ -76,6 +78,13 @@ func newThumbFixture(tb testing.TB, n int, wanted ...int64) *thumbFixture {
 		}
 	}
 	return &thumbFixture{st: st, cache: cache, ix: New(st, paths, cache, Models{}, &fakeEvents{})}
+}
+
+// thumbDecoder makes a thumbnail pair of fixed bytes, as a rebuild would.
+type thumbDecoder struct{ media.Decoder }
+
+func (thumbDecoder) Thumbnail(context.Context, string, core.Kind, int) (media.Thumbs, error) {
+	return media.Thumbs{Small: bytes.Repeat([]byte{1}, 100), Large: bytes.Repeat([]byte{2}, pairBytes-100)}, nil
 }
 
 // cached lists which assets still have a thumbnail on disk.
@@ -322,4 +331,69 @@ func (b *lockedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+func TestAThumbnailRebuiltAfterEvictionBecomesEvictableAgain(t *testing.T) {
+	f := newThumbFixture(t, 3)
+	f.cache.SetCap(1000)
+	check(t, f.ix.evictThumbs(t.Context(), 10))
+	if got := f.cached(3); len(got) != 0 {
+		t.Fatalf("thumbnails left = %v, want none", got)
+	}
+	// A stage (not a request) makes photo 2's thumbnail again.
+	orig := media.Original{Path: "2.jpg", Kind: core.KindPhoto}
+	check(t, f.cache.Ensure(t.Context(), 2, core.ThumbLarge, orig))
+	check(t, f.cache.FlushViews(t.Context(), f.st))
+	ids, err := f.st.ThumbEvictionCandidates(t.Context(), 10)
+	check(t, err)
+	if want := []int64{2}; !slices.Equal(ids, want) {
+		t.Fatalf("candidates = %v, want %v: the rebuilt files count toward the cap, so they must be evictable", ids, want)
+	}
+}
+
+func TestAnAssetWhoseFilesCouldNotBeRemovedStaysACandidate(t *testing.T) {
+	f := newThumbFixture(t, 3)
+	small := f.cache.Path(1, core.ThumbSmall)
+	check(t, os.Remove(small))
+	check(t, os.MkdirAll(small, 0o750)) // a folder that can't be removed
+	check(t, os.WriteFile(filepath.Join(small, "x"), []byte("x"), 0o600))
+	f.cache.SetCap(1000)
+	check(t, f.ix.evictThumbs(t.Context(), 10))
+	ids, err := f.st.ThumbEvictionCandidates(t.Context(), 10)
+	check(t, err)
+	if want := []int64{1}; !slices.Equal(ids, want) {
+		t.Fatalf("candidates = %v, want %v: photo 1 still has files, so it must be tried again", ids, want)
+	}
+}
+
+func TestModelInputMakesTheThumbnailAgainIfEvictionTakesItBeforeItIsRead(t *testing.T) {
+	f := newThumbFixture(t, 1)
+	orig := media.Original{Path: "1.jpg", Kind: core.KindPhoto}
+	reads := 0
+	read := func(path string, _ int) ([]byte, error) {
+		reads++
+		if reads == 1 { // the cap evicts it between Ensure and the read
+			if _, evicted, err := f.cache.EvictOne(t.Context(), 1); err != nil || !evicted {
+				t.Fatalf("setup eviction: %v, %v", evicted, err)
+			}
+		}
+		return os.ReadFile(path)
+	}
+	px, err := modelInput(t.Context(), f.cache, 1, orig, 224, read)
+	if err != nil || len(px) != pairBytes-100 {
+		t.Fatalf("modelInput = %d bytes, %v; want the rebuilt 1024 px file", len(px), err)
+	}
+	if reads != 2 {
+		t.Fatalf("%d reads, want 2", reads)
+	}
+}
+
+func TestModelInputGivesUpAfterOneRetryAndReportsOtherFailuresAtOnce(t *testing.T) {
+	f := newThumbFixture(t, 1)
+	orig := media.Original{Path: "1.jpg", Kind: core.KindPhoto}
+	reads := 0
+	broken := func(string, int) ([]byte, error) { reads++; return nil, errors.New("not a picture") }
+	if _, err := modelInput(t.Context(), f.cache, 1, orig, 224, broken); err == nil || reads != 1 {
+		t.Fatalf("a corrupt file: %d reads, %v; want one read and the error", reads, err)
+	}
 }

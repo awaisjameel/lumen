@@ -266,3 +266,71 @@ func check(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+func TestRebuildThroughEnsureRecordsAViewSoTheDatabaseClearsTheEvictedMarker(t *testing.T) {
+	d := &countingDecoder{}
+	c := NewCache(t.TempDir(), d)
+	orig := Original{Path: "photo.jpg", Kind: core.KindPhoto}
+	check(t, c.Ensure(t.Context(), 1, core.ThumbSmall, orig)) // made now
+	if _, ok := c.PendingViews()[1]; !ok {
+		t.Fatal("a rebuild did not record a view")
+	}
+	c.ViewsSaved(c.PendingViews())
+	check(t, c.Ensure(t.Context(), 1, core.ThumbSmall, orig)) // already there: nothing happens
+	if len(c.PendingViews()) != 0 {
+		t.Fatal("finding the thumbnail in the cache recorded a view")
+	}
+}
+
+func TestEvictOneReportsAFileItCouldNotRemoveAndLeavesTheAssetUnevicted(t *testing.T) {
+	c := NewCache(t.TempDir(), Decoders{})
+	check(t, c.Write(1, pair()))
+	// A non-empty folder where the small thumbnail was: removing it fails.
+	small := c.Path(1, core.ThumbSmall)
+	check(t, os.Remove(small))
+	check(t, os.MkdirAll(small, 0o750))
+	check(t, os.WriteFile(filepath.Join(small, "x"), []byte("x"), 0o600))
+	freed, evicted, err := c.EvictOne(t.Context(), 1)
+	if err == nil || evicted {
+		t.Fatalf("EvictOne = evicted %v, %v; want it to report the failure", evicted, err)
+	}
+	if freed != 1000 {
+		t.Fatalf("freed %d, want the large thumbnail's 1000", freed)
+	}
+	if _, _, err := c.EvictOne(t.Context(), 2); err != nil { // nothing cached is evicted without error
+		t.Fatal(err)
+	}
+}
+
+func TestEvictOneRechecksForAViewAfterTakingTheLock(t *testing.T) {
+	c := NewCache(t.TempDir(), Decoders{})
+	check(t, c.Write(1, pair()))
+	release, holding := make(chan struct{}), make(chan struct{})
+	go func() {
+		_ = c.lockedWrite(1, func() error {
+			close(holding)
+			<-release
+			return nil
+		})
+	}()
+	<-holding
+	type result struct {
+		evicted bool
+		err     error
+	}
+	got := make(chan result, 1)
+	go func() {
+		_, evicted, err := c.EvictOne(t.Context(), 1)
+		got <- result{evicted, err}
+	}()
+	time.Sleep(50 * time.Millisecond) // EvictOne is now waiting for the lock
+	c.Viewed(1)                       // a request shows it while it waits
+	close(release)
+	r := <-got
+	if r.err != nil || r.evicted {
+		t.Fatalf("EvictOne = evicted %v, %v; want it left alone", r.evicted, r.err)
+	}
+	if _, err := os.Stat(c.Path(1, core.ThumbSmall)); err != nil {
+		t.Fatalf("a thumbnail shown while eviction waited was removed: %v", err)
+	}
+}

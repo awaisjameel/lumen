@@ -421,3 +421,21 @@ func check(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+func TestAThumbnailEvictedWhileBeingServedIsRebuiltInsteadOfAnswering404(t *testing.T) {
+	l := newShownLibrary(t, 1)
+	opens := 0
+	l.m.open = func(path string) (*os.File, error) {
+		opens++
+		if opens == 1 { // the cap evicts the file after it was seen and before it is opened
+			if _, evicted, err := l.cache.EvictOne(t.Context(), 1); err != nil || !evicted {
+				t.Fatalf("setup eviction: %v, %v", evicted, err)
+			}
+		}
+		return core.OpenShared(path)
+	}
+	rec := l.get(t, "/thumb/1/1024?v=1")
+	if rec.Code != http.StatusOK || rec.Body.String() != "large thumbnail, rebuilt" {
+		t.Fatalf("status %d, body %q, want the rebuilt thumbnail", rec.Code, rec.Body.String())
+	}
+}

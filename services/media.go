@@ -30,13 +30,14 @@ type MediaService struct {
 	store  *store.Store
 	cache  *media.Cache
 	stream *Streamer
-	views  viewFlusher // saves which thumbnails were shown, for the cache's size cap
+	views  viewFlusher                         // saves which thumbnails were shown, for the cache's size cap
+	open   func(path string) (*os.File, error) // opens a cached picture; tests make it fail
 }
 
 // NewMediaService returns the media service. stream may be nil (no videos).
 func NewMediaService(st *store.Store, cache *media.Cache, stream *Streamer) *MediaService {
 	return &MediaService{store: st, cache: cache, stream: stream,
-		views: viewFlusher{cache: cache, sink: st, every: viewFlushEvery}}
+		views: viewFlusher{cache: cache, sink: st, every: viewFlushEvery}, open: core.OpenShared}
 }
 
 // ServiceStartup starts saving thumbnail views (Wails calls it once the app runs).
@@ -106,42 +107,53 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int64, size int) {
-	path := m.cache.Path(id, size)
-	if _, err := os.Stat(path); err != nil {
-		// Missing from the cache (the folder was cleared): rebuild it now if the asset had one.
+	m.serveCachedPicture(w, r, id, m.cache.Path(id, size), func() bool {
+		// Missing from the cache (the folder was cleared, or the size cap evicted it): rebuild it now if the asset had one.
 		f, path, ok := assetFile(r.Context(), m.store, id, w)
 		if !ok {
-			return
+			return false
 		}
 		if f.ThumbVersion == 0 {
 			http.NotFound(w, r) // not made yet: the grid shows a placeholder
-			return
+			return false
 		}
-		if !served(w, m.cache.Ensure(r.Context(), id, size, media.Original{Path: path, Kind: f.Kind, Orientation: f.Orientation}), id) {
-			return
-		}
-	}
-	m.cache.Viewed(id)
-	serveCached(w, r, m.cache.Path(id, size))
+		return served(w, m.cache.Ensure(r.Context(), id, size, media.Original{Path: path, Kind: f.Kind, Orientation: f.Orientation}), id)
+	})
 }
 
 func (m *MediaService) serveSprite(w http.ResponseWriter, r *http.Request, id int64) {
-	path := m.cache.SpritePath(id)
-	if _, err := os.Stat(path); err != nil {
+	m.serveCachedPicture(w, r, id, m.cache.SpritePath(id), func() bool {
 		f, orig, ok := assetFile(r.Context(), m.store, id, w)
 		if !ok {
-			return
+			return false
 		}
 		if f.Kind != core.KindVideo || f.ThumbVersion == 0 {
 			http.NotFound(w, r)
+			return false
+		}
+		return served(w, m.cache.EnsureSprite(r.Context(), id, media.Original{Path: orig, Kind: f.Kind, Orientation: f.Orientation}), id)
+	})
+}
+
+// serveCachedPicture serves a cached thumbnail or sprite. If it is not there
+// it calls rebuild (which answers the request itself and returns false when it
+// cannot make it) and opens it again. Opening, not a separate check, decides:
+// the size cap can evict the file between a check and the open, and that must
+// cost one rebuild, not a 404.
+func (m *MediaService) serveCachedPicture(w http.ResponseWriter, r *http.Request, id int64, path string, rebuild func() bool) {
+	file, err := m.open(path)
+	if err != nil {
+		if !rebuild() {
 			return
 		}
-		if !served(w, m.cache.EnsureSprite(r.Context(), id, media.Original{Path: orig, Kind: f.Kind, Orientation: f.Orientation}), id) {
+		if file, err = m.open(path); err != nil {
+			served(w, err, id)
 			return
 		}
 	}
+	defer file.Close()
 	m.cache.Viewed(id)
-	serveCached(w, r, path)
+	serveOpened(w, r, file, "image/jpeg")
 }
 
 func (m *MediaService) serveFrame(w http.ResponseWriter, r *http.Request, id, at int64) {
@@ -224,6 +236,11 @@ func serveFile(w http.ResponseWriter, r *http.Request, path, contentType string)
 		return
 	}
 	defer file.Close()
+	serveOpened(w, r, file, contentType)
+}
+
+// serveOpened serves an open file with Range support.
+func serveOpened(w http.ResponseWriter, r *http.Request, file *os.File, contentType string) {
 	fi, err := file.Stat()
 	if err != nil {
 		served(w, err, 0)

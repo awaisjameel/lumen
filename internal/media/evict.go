@@ -125,34 +125,51 @@ func (c *Cache) Measure(ctx context.Context) error {
 	return nil
 }
 
-// Evict removes the thumbnails and sprite of each asset in ids, one asset at
-// a time under its write lock, so it never races a rebuild writing them. It
-// returns the bytes freed. Assets shown since the database last heard of it
-// are left alone (they are the opposite of what the cap drops). A file that
-// can't be removed doesn't stop the rest; the errors come back together. The
-// files are Lumen's own cache, not the user's, so a plain remove is right.
+// Evict removes the thumbnails and sprite of each asset in ids, as EvictOne
+// does for one. It returns the bytes freed. A file that can't be removed
+// doesn't stop the rest; the errors come back together.
 func (c *Cache) Evict(ctx context.Context, ids []int64) (int64, error) {
 	var freed int64
 	var errs []error
 	for _, id := range ids {
-		if err := ctx.Err(); err != nil {
-			return freed, err
+		n, _, err := c.EvictOne(ctx, id)
+		freed += n
+		errs = append(errs, err)
+		if ctx.Err() != nil {
+			break
 		}
-		if c.views.pending(id) {
-			continue
-		}
-		errs = append(errs, c.lockedWrite(id, func() error {
-			var errs []error
-			for _, path := range []string{c.Path(id, core.ThumbSmall), c.Path(id, core.ThumbLarge), c.SpritePath(id)} {
-				size, err := removeFile(path)
-				c.size.add(-size)
-				freed += size
-				errs = append(errs, err)
-			}
-			return errors.Join(errs...)
-		}))
 	}
 	return freed, errors.Join(errs...)
+}
+
+// EvictOne removes one asset's thumbnails and sprite under its write lock, so
+// it never races a rebuild writing them. It reports the bytes freed and
+// whether the asset is now out of the cache: false if it was left alone
+// (shown since the database last heard of it, the opposite of what the cap
+// drops) or a file could not be removed (the error says which). The files are
+// Lumen's own cache, not the user's, so a plain remove is right.
+func (c *Cache) EvictOne(ctx context.Context, id int64) (freed int64, evicted bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return 0, false, err
+	}
+	err = c.lockedWrite(id, func() error {
+		// Checked under the lock: a request can show it, or a rebuild record it,
+		// between the caller choosing the asset and the lock being taken.
+		if c.views.pending(id) {
+			return nil
+		}
+		var errs []error
+		for _, path := range []string{c.Path(id, core.ThumbSmall), c.Path(id, core.ThumbLarge), c.SpritePath(id)} {
+			size, err := removeFile(path)
+			c.size.add(-size)
+			freed += size
+			errs = append(errs, err)
+		}
+		err := errors.Join(errs...)
+		evicted = err == nil
+		return err
+	})
+	return freed, evicted, err
 }
 
 // removeFile removes a cached file and reports the bytes it freed. A file

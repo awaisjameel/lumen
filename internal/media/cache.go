@@ -298,5 +298,12 @@ func (c *Cache) ensure(ctx context.Context, id int64, path string, orig Original
 	if err != nil {
 		return err
 	}
-	return c.Write(id, t)
+	if err := c.Write(id, t); err != nil {
+		return err
+	}
+	// A rebuilt asset may carry the "evicted" marker in the database, which
+	// hides it from the cap. Recording a view lets the next flush clear it,
+	// whichever stage or request made the files.
+	c.Viewed(id)
+	return nil
 }

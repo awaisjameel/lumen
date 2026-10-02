@@ -105,7 +105,7 @@ func (ix *Indexer) evictThumbs(ctx context.Context, batch int) error {
 			if !ix.overThumbCap(evictTarget) {
 				break
 			}
-			n, err := ix.cache.Evict(ctx, []int64{id})
+			n, evicted, err := ix.cache.EvictOne(ctx, id)
 			if cerr := ctx.Err(); cerr != nil {
 				return cerr // shutting down: the caller expects that
 			}
@@ -113,7 +113,9 @@ func (ix *Indexer) evictThumbs(ctx context.Context, batch int) error {
 				slog.Warn("evict thumbnail", "asset", id, "err", err)
 			}
 			freed += n
-			done = append(done, id)
+			if evicted { // one that survived stays a candidate, to be tried again
+				done = append(done, id)
+			}
 		}
 		freedTotal += freed
 		marked, err := ix.store.MarkThumbsEvicted(ctx, done, began)
