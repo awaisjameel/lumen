@@ -12,6 +12,7 @@ import { useLiveReload } from '../shared/liveReload'
 import { nameTooLong, trimName } from '../shared/names'
 import FaceThumb from '../people/FaceThumb.vue'
 import PersonPicker from '../people/PersonPicker.vue'
+import { deleteFromDisk } from '../trash/actions'
 import { useLibrary } from './store'
 import { emptyRule, useAlbums } from '../albums/store'
 import type { Sel } from './store'
@@ -81,7 +82,9 @@ useLiveReload(
 
 // Tags and faces: load with the photo, and again as the library changes
 // while the panel is open (the AI adds tags, finds faces, groups people).
-const loadExtras = (id: number | undefined) => Promise.all([loadTags(id), loadFaces(id), loadAlbums(id)])
+// A trashed photo can't be edited, so its tags, people and albums are not shown.
+const loadExtras = (id: number | undefined) =>
+  lib.inTrash ? Promise.resolve([]) : Promise.all([loadTags(id), loadFaces(id), loadAlbums(id)])
 watch(
   () => props.sel?.id,
   (id) => {
@@ -282,6 +285,16 @@ const dateFromText: Record<DateSource, MessageKey> = {
   [DateSource.$zero]: 'details.dateFrom.file', // never stored; the scanner always sets one
 }
 
+function moveToTrash() {
+  if (props.sel) void lib.moveToTrash(props.sel)
+}
+function restore() {
+  if (props.sel) void lib.restoreFromTrash(props.sel)
+}
+function deleteThisFromDisk() {
+  if (props.sel && detail.value) void deleteFromDisk(lib, props.sel, Math.max(detail.value.paths.length, 1))
+}
+
 function showInFolder(id: number) {
   error.value = ''
   engine.showInFolder(id).catch((e: unknown) => {
@@ -348,10 +361,12 @@ function showInFolder(id: number) {
         <h3>{{ t('details.location') }}</h3>
         <p v-if="placeName">{{ placeName }}</p>
         <p class="mono">{{ detail.lat.toFixed(5) }}, {{ detail.lon.toFixed(5) }}</p>
-        <button v-if="detail.placeId" class="btn btn-subtle" @click="blockPlace">{{ t('blocked.blockPlace') }}</button>
+        <button v-if="detail.placeId && !lib.inTrash" class="btn btn-subtle" @click="blockPlace">
+          {{ t('blocked.blockPlace') }}
+        </button>
       </section>
 
-      <section>
+      <section v-if="!lib.inTrash">
         <h3>{{ t('details.tags') }}</h3>
         <ul v-if="tags.length" class="tags">
           <li
@@ -391,7 +406,7 @@ function showInFolder(id: number) {
         </p>
       </section>
 
-      <section>
+      <section v-if="!lib.inTrash">
         <h3>{{ t('nav.albums') }}</h3>
         <label v-for="album in manualAlbums" :key="album.id" class="album-option">
           <input type="checkbox" :checked="albumIDs.includes(album.id)" @change="toggleAlbum(album.id, $event)" />
@@ -419,7 +434,7 @@ function showInFolder(id: number) {
         </p>
       </section>
 
-      <section v-if="faces.length">
+      <section v-if="faces.length && !lib.inTrash">
         <h3>{{ t('details.people') }}</h3>
         <ul class="faces">
           <li v-for="f in faces" :key="f.id">
@@ -457,18 +472,32 @@ function showInFolder(id: number) {
         </p>
         <div v-for="p in detail.paths" :key="p" class="path" :title="p">
           {{ p }}
-          <button class="btn btn-subtle" :aria-label="t('blocked.blockFolder', { path: p })" @click="blockFolder(p)">
+          <button
+            v-if="!lib.inTrash"
+            class="btn btn-subtle"
+            :aria-label="t('blocked.blockFolder', { path: p })"
+            @click="blockFolder(p)"
+          >
             {{ t('blocked.blockFolderShort') }}
           </button>
         </div>
       </section>
 
       <div class="actions">
-        <button class="btn" @click="blockAsset"><Icon name="eye-off" :size="16" />{{ t('blocked.block') }}</button>
-        <button class="btn" @click="lib.toggleFavourite(props.sel)">
-          <Icon :name="detail.favourite ? 'heart-filled' : 'heart'" :size="16" />
-          {{ detail.favourite ? t('details.unfavourite') : t('details.favourite') }}
-        </button>
+        <template v-if="lib.inTrash">
+          <button class="btn" @click="restore">{{ t('trash.restore') }}</button>
+          <button class="btn" @click="deleteThisFromDisk">
+            <Icon name="trash" :size="16" />{{ t('trash.deleteFromDisk') }}
+          </button>
+        </template>
+        <template v-else>
+          <button class="btn" @click="blockAsset"><Icon name="eye-off" :size="16" />{{ t('blocked.block') }}</button>
+          <button class="btn" @click="lib.toggleFavourite(props.sel)">
+            <Icon :name="detail.favourite ? 'heart-filled' : 'heart'" :size="16" />
+            {{ detail.favourite ? t('details.unfavourite') : t('details.favourite') }}
+          </button>
+          <button class="btn" @click="moveToTrash"><Icon name="trash" :size="16" />{{ t('trash.move') }}</button>
+        </template>
         <button class="btn" @click="showInFolder(detail.id)">
           <Icon name="folder" :size="16" />
           {{ t('common.showInFolder') }}

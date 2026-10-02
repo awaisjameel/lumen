@@ -348,6 +348,7 @@ const en = {
   'error.blocksLocked': 'Enter your PIN on the Blocked screen first.',
   'error.undoExpired': 'It’s too late to undo that block. Unblock it on the Blocked screen instead.',
   'error.invalidBlock': 'That can’t be blocked.',
+  'error.deleteFailed': 'Lumen couldn’t use the Recycle Bin, so it left the remaining files where they are.',
 
   // Things and Events: rename and pin.
   'things.pin': 'Pin',
@@ -368,6 +369,35 @@ const en = {
   'events.pinned': 'Pinned',
 
   // Trash.
+  'trash.move': 'Move to Trash',
+  'trash.moved': { one: 'Moved 1 item to the Trash.', other: 'Moved {n} items to the Trash.' },
+  'trash.undo': 'Undo',
+  'trash.restore': 'Restore',
+  'trash.restoreAll': 'Restore all',
+  'trash.deleteFromDisk': 'Delete from disk…',
+  'trash.deleteAll': 'Delete all from disk…',
+  'trash.summary': {
+    one: '1 item is in the Trash. Nothing is removed from your disk until you delete it from here.',
+    other: '{n} items are in the Trash. Nothing is removed from your disk until you delete them from here.',
+  },
+  'trash.confirmTitle': 'Delete from disk?',
+  'trash.confirmFiles': {
+    one: '1 file will be moved to the Windows Recycle Bin. You can still restore it from there.',
+    other: '{n} files will be moved to the Windows Recycle Bin. You can still restore them from there.',
+  },
+  'trash.confirmAll': {
+    one: 'The 1 item in the Trash, with any exact copies of it, will be moved to the Windows Recycle Bin. You can still restore it from there.',
+    other:
+      'All {n} items in the Trash, with any exact copies of them, will be moved to the Windows Recycle Bin. You can still restore them from there.',
+  },
+  'trash.confirmOk': 'Move to Recycle Bin',
+  'trash.kept': {
+    one: '1 file couldn’t be moved to the Recycle Bin, so it was left where it is.',
+    other: '{n} files couldn’t be moved to the Recycle Bin, so they were left where they are.',
+  },
+  'trash.empty': 'The Trash is empty',
+  'trash.emptyHint':
+    'Photos and videos you move to the Trash wait here until you restore them or delete them from disk.',
 
   // Thumbnail cache.
   'settings.cache': 'Thumbnail cache',

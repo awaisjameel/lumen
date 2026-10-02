@@ -27,6 +27,7 @@ export const router = createRouter({
     { path: '/', name: 'library', component: LibraryView, meta: { filter: Filter.FilterAll } },
     { path: '/favourites', name: 'favourites', component: LibraryView, meta: { filter: Filter.FilterFavourites } },
     { path: '/videos', name: 'videos', component: LibraryView, meta: { filter: Filter.FilterVideos } },
+    { path: '/trash', name: 'trash', component: LibraryView, meta: { filter: Filter.FilterTrash } },
     { path: '/people', name: 'people', component: PeopleView },
     { path: '/people/:id(\\d+)', name: 'person', component: LibraryView, meta: { filter: Filter.FilterAll } },
     { path: '/people/:id(\\d+)/faces', name: 'personFaces', component: PersonFaces },

@@ -9,6 +9,7 @@ import { dateTime, duration } from '../shared/format'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { isTyping, ownsArrows } from '../shared/keys'
+import { deleteFromDisk } from '../trash/actions'
 import { useLibrary } from './store'
 import DetailsPanel from './DetailsPanel.vue'
 
@@ -61,6 +62,17 @@ async function go(dir: 1 | -1) {
 
 function close() {
   lib.viewer = null
+}
+
+// The viewer moves on to the next photo by itself once this one has left.
+function moveToTrash() {
+  if (lib.viewer) void lib.moveToTrash(lib.viewer)
+}
+function restore() {
+  if (lib.viewer) void lib.restoreFromTrash(lib.viewer)
+}
+function deleteThisFromDisk() {
+  if (lib.viewer) void deleteFromDisk(lib, lib.viewer, Math.max(detail.value?.paths.length ?? 1, 1))
 }
 
 function videoReady() {
@@ -128,6 +140,7 @@ function onKey(e: KeyboardEvent) {
       break
     case 'f':
     case 'F':
+      if (lib.inTrash) return // a trashed photo can't be edited
       void lib.toggleFavourite(lib.viewer)
       break
     case 'i':
@@ -179,15 +192,24 @@ onBeforeUnmount(() => {
           </button>
           <span class="date">{{ detail ? dateTime(detail.takenAt) : '' }}</span>
           <div class="spacer" />
-          <button
-            class="icon-btn"
-            :aria-pressed="!!lib.viewerItem?.f"
-            :title="t('common.withKey', { label: t('details.favourite'), key: 'F' })"
-            :aria-label="t('details.favourite')"
-            @click="lib.toggleFavourite(lib.viewer)"
-          >
-            <Icon :name="lib.viewerItem?.f ? 'heart-filled' : 'heart'" />
-          </button>
+          <template v-if="lib.inTrash">
+            <button class="text-btn" @click="restore">{{ t('trash.restore') }}</button>
+            <button class="text-btn" @click="deleteThisFromDisk">{{ t('trash.deleteFromDisk') }}</button>
+          </template>
+          <template v-else>
+            <button
+              class="icon-btn"
+              :aria-pressed="!!lib.viewerItem?.f"
+              :title="t('common.withKey', { label: t('details.favourite'), key: 'F' })"
+              :aria-label="t('details.favourite')"
+              @click="lib.toggleFavourite(lib.viewer)"
+            >
+              <Icon :name="lib.viewerItem?.f ? 'heart-filled' : 'heart'" />
+            </button>
+            <button class="icon-btn" :title="t('trash.move')" :aria-label="t('trash.move')" @click="moveToTrash">
+              <Icon name="trash" />
+            </button>
+          </template>
           <button
             class="icon-btn"
             :aria-pressed="lib.showDetails"
@@ -303,6 +325,18 @@ onBeforeUnmount(() => {
 .bar .icon-btn:hover {
   background: var(--viewer-control);
   color: var(--viewer-text);
+}
+.bar .text-btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--viewer-control);
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--viewer-text);
+  cursor: pointer;
+}
+.bar .text-btn:hover {
+  background: var(--viewer-control);
 }
 .date {
   font-size: 13px;

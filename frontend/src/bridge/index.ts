@@ -150,6 +150,7 @@ export const ErrorCode = {
   BlocksLocked: 'blocks_locked',
   UndoExpired: 'undo_expired',
   InvalidBlock: 'invalid_block',
+  DeleteFailed: 'delete_failed',
 } as const
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 

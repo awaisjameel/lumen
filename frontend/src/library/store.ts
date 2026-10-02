@@ -17,6 +17,7 @@ import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { latestSave } from '../shared/latestSave'
 import type { LatestSave } from '../shared/latestSave'
+import { showTrashUndo } from '../trash/undo'
 
 const ZOOM_KEY = 'lumen.zoom'
 export const ZOOM_MIN = 96
@@ -200,6 +201,8 @@ export const useLibrary = defineStore('library', () => {
   const selectedItem = computed(() => itemAt(selected.value))
   const viewerItem = computed(() => itemAt(viewer.value))
   const isSearch = computed(() => scope.value.kind === 'search')
+  const inTrash = computed(() => scope.value.kind === 'timeline' && scope.value.view.filter === Filter.FilterTrash)
+  const trashCount = ref(0) // for the sidebar
 
   function itemAt(p: Sel | null): GridItem | null {
     if (!p) return null
@@ -239,8 +242,12 @@ export const useLibrary = defineStore('library', () => {
   async function init() {
     if (ready.value || disposed) return
     stopProgress ??= onProgress((p) => (progress.value = p))
-    stopChanges ??= onLibraryChanged((c) => void refresh(c).catch(logError))
+    stopChanges ??= onLibraryChanged((c) => {
+      void refresh(c).catch(logError)
+      if (c.assets) void loadTrashCount()
+    })
     await initialise()
+    void loadTrashCount()
   }
   const stopBlocks = onBlocksChanged(() => refreshVisibility())
   onScopeDispose(() => {
@@ -591,6 +598,62 @@ export const useLibrary = defineStore('library', () => {
     return pauseSave(paused)
   }
 
+  const readTrashCount = coalescedLoad(engine.trashCount, (n) => (trashCount.value = n))
+  /** Read how many assets the Trash holds; a failure is logged, the count stays. */
+  async function loadTrashCount() {
+    try {
+      await readTrashCount()
+    } catch (e) {
+      logError(e)
+    }
+  }
+
+  /** The Trash changed: the grid and the Trash's count show it now. */
+  async function trashChanged() {
+    await Promise.all([refresh().catch(logError), loadTrashCount()])
+  }
+
+  /**
+   * Run a change that takes the asset at p out of this view (trashing,
+   * restoring, deleting from disk) and move the viewer and the selection on
+   * to its neighbour, the next photo or else the previous. Failures are
+   * reported; the result says whether the change was made, with its value.
+   */
+  async function removeFromView<T>(p: Sel, change: () => Promise<T>): Promise<{ value: T } | null> {
+    const next = (await neighbour(p, 1)) ?? (await neighbour(p, -1))
+    let done: { value: T } | null = null
+    try {
+      done = { value: await change() }
+    } catch (e) {
+      reportError(e)
+    }
+    if (done) {
+      if (viewer.value?.id === p.id) viewer.value = next
+      if (selected.value?.id === p.id) selected.value = next
+    }
+    await trashChanged() // even after a failure: it may have done part of the work
+    return done
+  }
+
+  /** Move an asset to the Trash, which offers to undo it. */
+  async function moveToTrash(p: Sel) {
+    if (await removeFromView(p, () => engine.trashAssets([p.id]))) showTrashUndo([p.id])
+  }
+
+  /** Take the trashed asset at p out of the Trash. */
+  async function restoreFromTrash(p: Sel) {
+    await removeFromView(p, () => engine.restoreAssets([p.id]))
+  }
+
+  /** Take assets out of the Trash (Undo of moving them there). Throws if the engine refuses. */
+  async function restoreAssets(ids: number[]) {
+    try {
+      await engine.restoreAssets(ids)
+    } finally {
+      await trashChanged()
+    }
+  }
+
   /** Reload the folders (after adding or removing one), then what they hold. */
   const reloadSources = coalescedLoad(engine.sources, (got) => (sources.value = got))
   async function sourcesChanged() {
@@ -625,6 +688,8 @@ export const useLibrary = defineStore('library', () => {
     selectedItem,
     viewerItem,
     isSearch,
+    inTrash,
+    trashCount,
     itemAt,
     indexOf,
     selAt,
@@ -641,5 +706,11 @@ export const useLibrary = defineStore('library', () => {
     toggleFavourite,
     setPaused,
     sourcesChanged,
+    loadTrashCount,
+    trashChanged,
+    removeFromView,
+    moveToTrash,
+    restoreFromTrash,
+    restoreAssets,
   }
 })

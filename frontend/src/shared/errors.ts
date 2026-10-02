@@ -31,6 +31,7 @@ const codeText: Record<ErrorCode, MessageKey> = {
   [ErrorCode.BlocksLocked]: 'error.blocksLocked',
   [ErrorCode.UndoExpired]: 'error.undoExpired',
   [ErrorCode.InvalidBlock]: 'error.invalidBlock',
+  [ErrorCode.DeleteFailed]: 'error.deleteFailed',
 }
 
 /** A user-facing message for a failed engine call or other thrown value. */
