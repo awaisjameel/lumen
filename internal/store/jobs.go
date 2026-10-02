@@ -623,3 +623,21 @@ func (s *Store) JobCounts(ctx context.Context) (pending map[core.Stage]int, fail
 	}
 	return pending, failed, skipped, rows.Err()
 }
+
+// CPUThreads is how many CPU threads indexing may keep busy: the user's
+// choice, held to what this machine has (a library moved from a bigger one
+// keeps working), or core.DefaultCPUThreads if they made none.
+func (s *Store) CPUThreads(ctx context.Context) (int, error) {
+	n, err := s.Int(ctx, core.SettingCPUThreads, 0)
+	if n < 1 {
+		return core.DefaultCPUThreads(), err
+	}
+	return min(n, core.MaxCPUThreads()), err
+}
+
+// SetCPUThreads stores how many CPU threads indexing may keep busy, held to
+// 1..core.MaxCPUThreads, and returns the value stored.
+func (s *Store) SetCPUThreads(ctx context.Context, n int) (int, error) {
+	n = min(max(n, 1), core.MaxCPUThreads())
+	return n, s.SetInt(ctx, core.SettingCPUThreads, n)
+}

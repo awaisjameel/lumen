@@ -447,7 +447,7 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 		return nil, ctx.Err()
 	}
 
-	b := &modelBatch{enc: enc, cpu: ix.encoderSlots(enc)}
+	b := &modelBatch{enc: enc, cpu: ix.cpu}
 	for i, in := range inputs {
 		if in == nil {
 			continue
@@ -471,22 +471,6 @@ func (ix *Indexer) doEmbeddings(ctx context.Context, items []store.JobItem) ([]s
 	return results, nil
 }
 
-// encoderSlots is how a run of the image model takes the CPU budget: not at
-// all on the GPU, and on the CPU the threads its runs keep busy (half the
-// machine's, see ai.OpenImageEncoder). The device is checked at each run: a model that fails on the GPU
-// moves to the CPU.
-func (ix *Indexer) encoderSlots(enc *ai.ImageEncoder) func(context.Context) (context.Context, func(), error) {
-	if enc == nil {
-		return nil
-	}
-	return func(ctx context.Context) (context.Context, func(), error) {
-		if enc.Device() == ai.GPU {
-			return ctx, func() {}, nil
-		}
-		return ix.cpu.acquire(ctx, core.DefaultCPUThreads())
-	}
-}
-
 // errNoVector is the per-file error for an input the image model made no
 // usable vector of.
 const errNoVector = "the image model gave no usable result"
@@ -494,6 +478,7 @@ const errNoVector = "the image model gave no usable result"
 // imageEncoder is the model input contract, also implemented by batch test fakes.
 type imageEncoder interface {
 	BatchSize() int
+	CPUThreads() int // checked at each run: a model that fails on the GPU moves to the CPU
 	Encode([][]byte) ([][]float32, error)
 }
 
@@ -501,10 +486,8 @@ type imageEncoder interface {
 // the model whenever a full batch is waiting, handing each vector to the
 // input's owner. At most one batch of inputs is held at a time.
 type modelBatch struct {
-	enc imageEncoder
-	// cpu, if set, takes the CPU budget for a run of the model (see
-	// encoderSlots); nil when it runs on the GPU.
-	cpu    func(context.Context) (context.Context, func(), error)
+	enc    imageEncoder
+	cpu    *cpuBudget // where a run on the CPU takes its threads
 	inputs [][]byte
 	owners []func(vec []float32) // vec is nil where the model made no usable one
 	err    error                 // the model failed: the stage can't run
@@ -531,16 +514,11 @@ func (b *modelBatch) flush(ctx context.Context) error {
 	if b.err != nil || len(b.inputs) == 0 {
 		return b.err
 	}
-	release := func() {}
-	if b.cpu != nil {
-		var err error
-		if _, release, err = b.cpu(ctx); err != nil {
-			return err
-		}
-	}
-	vecs, err := b.enc.Encode(b.inputs)
-	release()
-	if err != nil {
+	vecs, err := b.encode(ctx)
+	switch {
+	case ctx.Err() != nil:
+		return ctx.Err() // cancelled waiting for the CPU: the model is fine
+	case err != nil:
 		b.err = fmt.Errorf("embed image batch: %w", err)
 		return b.err
 	}
@@ -549,6 +527,20 @@ func (b *modelBatch) flush(ctx context.Context) error {
 	}
 	b.inputs, b.owners = b.inputs[:0], b.owners[:0]
 	return nil
+}
+
+// encode runs the model on the batch. On the CPU the run takes its threads
+// from the budget, unless the work calling it holds some already (see
+// cpuBudget); on the GPU it takes none.
+func (b *modelBatch) encode(ctx context.Context) ([][]float32, error) {
+	if n := b.enc.CPUThreads(); n > 0 {
+		_, release, err := b.cpu.acquire(ctx, n)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
+	return b.enc.Encode(b.inputs)
 }
 
 // videoEmbedding collects one video's frame vectors as the model makes them.
@@ -651,9 +643,9 @@ func (ix *Indexer) doFaces(ctx context.Context, items []store.JobItem) ([]store.
 			}
 			return modelError{err}
 		}
-		// The face models take the GPU when it is free and run on the CPU
-		// otherwise, a short run on faceThreads; decoding is one thread.
-		ctx, release, err := ix.cpu.acquire(ctx, 1)
+		// Decoding takes one thread, then the face models faceThreads: they
+		// run on the CPU whenever the image model has the GPU.
+		ctx, release, err := ix.cpu.acquire(ctx, faceThreads)
 		if err != nil {
 			return // cancelled: nothing is saved
 		}

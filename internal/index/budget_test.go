@@ -6,7 +6,46 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"lumen/internal/core"
+	"lumen/internal/media"
+	"lumen/internal/store"
 )
+
+func TestIndexerTakesTheThreadsSettingAtStartAndAtOnce(t *testing.T) {
+	paths := core.PathsIn(t.TempDir())
+	if err := paths.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	if _, err := st.SetCPUThreads(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{})
+	size := func() int {
+		ix.cpu.mu.Lock()
+		defer ix.cpu.mu.Unlock()
+		return ix.cpu.size
+	}
+	ix.Start(ctx)
+	defer func() {
+		cancel()
+		ix.Stop()
+	}()
+	if got := size(); got != 1 {
+		t.Fatalf("started with %d threads, want the stored 1", got)
+	}
+	ix.SetCPUThreads(2)
+	if got := size(); got != 2 {
+		t.Fatalf("%d threads after the setting changed, want 2", got)
+	}
+	(*Indexer)(nil).SetCPUThreads(2) // a library without an indexer only stores it
+}
 
 func TestCPUBudgetNeverHandsOutMoreThanItsSlots(t *testing.T) {
 	b := newCPUBudget(4)

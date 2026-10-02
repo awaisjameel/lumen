@@ -12,7 +12,8 @@ import (
 // models' threads, FFmpeg) is background work that must give way to whatever
 // the user is doing; at normal priority it froze the other programs. Lumen's
 // own window keeps up because indexing leaves half the CPU free (see
-// index.cpuSlots), and a playing video converts at normal priority.
+// index.cpuBudget) and runs at normal priority (raiseWebView), and a playing
+// video converts at normal priority.
 func lowerPriority() {
 	if err := windows.SetPriorityClass(windows.CurrentProcess(), windows.BELOW_NORMAL_PRIORITY_CLASS); err != nil {
 		slog.Warn("lower process priority", "err", err)

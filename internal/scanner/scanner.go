@@ -198,7 +198,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 		if skipName(d.Name()) || isHiddenOrSystem(info) {
 			return nil // e.g. macOS's "._IMG_0001.JPG" beside the real photo
 		}
-		if !transportStream(path) {
+		if notTransportStream(path) {
 			return nil // e.g. a TypeScript module (.mts), which a library leaves forgotten
 		}
 		res.Seen++
@@ -334,27 +334,27 @@ func walkable(root string, isSource bool) (walk string, ok bool, err error) {
 	return target, true, nil
 }
 
-// transportStream reports whether a file with a transport stream's name
-// (.mts, .m2ts: AVCHD and Blu-ray video) is one: TypeScript gives its modules
-// the same name, and a downloads folder holding a project's node_modules
-// offered hundreds of them as videos, each failing in every stage. A stream
-// is packets with a 0x47 sync byte every 188 bytes, or every 192 after a
-// 4-byte time code. Other files, and one that can't be read (its stages say
-// why), pass.
-func transportStream(path string) bool {
+// notTransportStream reports whether a file with a transport stream's name
+// (.mts, .m2ts: AVCHD and Blu-ray video) isn't one: TypeScript gives its
+// modules the same name, and a downloads folder holding a project's
+// node_modules offered hundreds of them as videos, each failing in every
+// stage. A stream is packets with a 0x47 sync byte every 188 bytes, or every
+// 192 after a 4-byte time code. Other files, and one that can't be read (its
+// stages say why), are kept.
+func notTransportStream(path string) bool {
 	if ext := strings.ToLower(filepath.Ext(path)); ext != ".mts" && ext != ".m2ts" {
-		return true
+		return false
 	}
 	f, err := core.OpenShared(path)
 	if err != nil {
-		return true
+		return false
 	}
 	defer f.Close()
 	var b [2*192 + 5]byte // through the third packet's sync byte
 	if _, err := io.ReadFull(f, b[:]); err != nil {
-		return !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) // too short to be a video
+		return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) // too short to be a video
 	}
-	return (b[0] == 0x47 && b[188] == 0x47 && b[376] == 0x47) || (b[4] == 0x47 && b[196] == 0x47 && b[388] == 0x47)
+	return (b[0] != 0x47 || b[188] != 0x47 || b[376] != 0x47) && (b[4] != 0x47 || b[196] != 0x47 || b[388] != 0x47)
 }
 
 // Files up to this size are hashed in full. Bigger ones (videos, mostly) are

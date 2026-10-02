@@ -290,7 +290,7 @@ const en = {
   'settings.pause': 'Pause indexing',
   'settings.threads': 'Processor threads for indexing: {n} of {max}',
   'settings.threadsHint':
-    'Half by default ({n}). More threads index faster; fewer leave more for your other programs. Lumen always gives way to them, and a change applies at once.',
+    '{n} by default. More threads index faster; fewer leave more for your other programs. Lumen always gives way to them, and a change applies at once.',
   'settings.threadsFewer': 'Lighter',
   'settings.threadsMore': 'Faster',
   'settings.ai': 'Search, Things and People',
