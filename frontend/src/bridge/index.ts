@@ -161,6 +161,7 @@ export const ErrorCode = {
   UndoExpired: 'undo_expired',
   InvalidBlock: 'invalid_block',
   DeleteFailed: 'delete_failed',
+  XMPOff: 'xmp_off',
   SigninFailed: 'signin_failed',
   SigninUnavailable: 'signin_unavailable',
 } as const

@@ -154,3 +154,19 @@ func TestPersonInImageListsEachNameOnceFromFacesAndFromNames(t *testing.T) {
 		t.Fatalf("%d regions, want one per box:\n%s", n, got)
 	}
 }
+
+func TestOnlyAPacketWithLumensMarkerIsLumens(t *testing.T) {
+	if !IsLumens(Marshal(full)) || !IsLumens(Marshal(Doc{})) {
+		t.Fatal("a packet Lumen wrote is not recognised")
+	}
+	for name, packet := range map[string]string{
+		"empty":          "",
+		"another tool":   `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF/></x:xmpmeta>`,
+		"namespace only": `<x xmlns:lumen="` + nsLumen + `"/>`,
+		"older version":  strings.Replace(string(Marshal(Doc{})), `lumen:Exporter="`+Version+`"`, `lumen:Exporter="0"`, 1),
+	} {
+		if IsLumens([]byte(packet)) {
+			t.Errorf("%s is taken for Lumen's", name)
+		}
+	}
+}

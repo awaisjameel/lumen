@@ -66,10 +66,10 @@ func newXMPFixture(t *testing.T) xmpFixture {
 // export reads the assets XMPAssets returns, by id.
 func (f xmpFixture) export(t *testing.T) map[int64]XMPAsset {
 	t.Helper()
-	assets, err := f.st.XMPAssets(f.ctx, 0, 100)
+	batch, err := f.st.XMPAssets(f.ctx, 0, 100)
 	check(t, err)
 	out := map[int64]XMPAsset{}
-	for _, a := range assets {
+	for _, a := range batch.Assets {
 		out[a.ID] = a
 	}
 	return out
@@ -186,7 +186,7 @@ func TestXMPAssetsSkipBlockedHiddenTrashedAndMissingPhotos(t *testing.T) {
 
 func TestXMPAssetsKeepAnAssetThatIsNoLongerExportableWhileASidecarIsRecordedForIt(t *testing.T) {
 	f := newXMPFixture(t)
-	check(t, f.st.SaveXMPExports(f.ctx, []XMPRecord{{AssetID: f.a, Path: `C:\Photos\a.jpg.xmp`, Hash: []byte("h")}}))
+	check(t, f.st.SaveXMP(f.ctx, XMPChanges{Records: []XMPRecord{{AssetID: f.a, Path: `C:\Photos\a.jpg.xmp`, Hash: []byte("h")}}}))
 	check(t, errOf(f.st.SetBlock(f.ctx, core.BlockAsset, f.a, "", core.BlockPhotos)))
 	a, ok := f.export(t)[f.a]
 	if !ok {
@@ -214,31 +214,31 @@ func TestXMPAssetsPageByID(t *testing.T) {
 	for after := int64(0); ; {
 		page, err := f.st.XMPAssets(f.ctx, after, 2)
 		check(t, err)
-		if len(page) == 0 {
+		if len(page.Assets) == 0 {
 			break
 		}
-		for _, a := range page {
+		for _, a := range page.Assets {
 			seen = append(seen, a.ID)
 		}
-		after = page[len(page)-1].ID
+		after = page.Assets[len(page.Assets)-1].ID
 	}
 	if want := []int64{f.a, f.b, f.c}; !slices.Equal(seen, want) {
 		t.Fatalf("pages gave %v, want %v", seen, want)
 	}
 }
 
-func TestSaveXMPExportsReplacesTheRecordOfAPathWhateverItsCaseAndFindsItBesideTheFile(t *testing.T) {
+func TestSaveXMPReplacesTheRecordOfAPathWhateverItsCaseAndFindsItBesideTheFile(t *testing.T) {
 	f := newXMPFixture(t)
 	check(t, f.st.SetFavourite(f.ctx, f.a, true))
-	check(t, f.st.SaveXMPExports(f.ctx, []XMPRecord{
+	check(t, f.st.SaveXMP(f.ctx, XMPChanges{Records: []XMPRecord{
 		{AssetID: f.a, Path: `C:\PHOTOS\A.JPG.XMP`, Hash: []byte("one")},
 		{AssetID: 9999, Path: `C:\Photos\gone.jpg.xmp`, Hash: []byte("x")}, // deleted meanwhile: skipped
-	}))
+	}}))
 	if got := f.export(t)[f.a].Files; len(got) != 1 || string(got[0].Wrote) != "one" {
 		t.Fatalf("the record is not found beside the file: %+v", got)
 	}
 	// The same path in another spelling, now beside photo b: one record.
-	check(t, f.st.SaveXMPExports(f.ctx, []XMPRecord{{AssetID: f.b, Path: `c:\photos\a.jpg.xmp`, Hash: []byte("two")}}))
+	check(t, f.st.SaveXMP(f.ctx, XMPChanges{Records: []XMPRecord{{AssetID: f.b, Path: `c:\photos\a.jpg.xmp`, Hash: []byte("two")}}}))
 	var n int
 	check(t, f.st.r.QueryRowContext(f.ctx, "SELECT count(*) FROM xmp_exports").Scan(&n))
 	if n != 1 {
@@ -338,4 +338,89 @@ func TestMigration0027CanRunAgainOverACurrentSchema(t *testing.T) {
 	body, err := migrationFS.ReadFile("migrations/0027_xmp.sql")
 	check(t, err)
 	check(t, errOf(st.w.ExecContext(t.Context(), string(body))))
+}
+
+func TestXMPAssetsCarryTheRevisionTheyWereReadAtAndXMPAssetReadsOneAgain(t *testing.T) {
+	f := newXMPFixture(t)
+	check(t, f.st.SetXMP(f.ctx, true))
+	check(t, f.st.SetFavourite(f.ctx, f.a, true))
+	batch, err := f.st.XMPAssets(f.ctx, 0, 10)
+	check(t, err)
+	now, err := f.st.XMPRevision(f.ctx)
+	check(t, err)
+	if batch.Revision != now {
+		t.Fatalf("batch revision %+v, store %+v", batch.Revision, now)
+	}
+	check(t, errOf(f.st.SetBlock(f.ctx, core.BlockPerson, f.ali, "", core.BlockLabel)))
+	if moved, err := f.st.XMPRevision(f.ctx); err != nil || moved == batch.Revision {
+		t.Fatalf("a block did not move the revision: %+v, %v", moved, err)
+	}
+	a, ok, err := f.st.XMPAsset(f.ctx, f.a)
+	if err != nil || !ok || len(a.Faces) != 0 {
+		t.Fatalf("re-read of a = %+v, %v, %v; want it without the blocked name", a, ok, err)
+	}
+	if _, ok, err := f.st.XMPAsset(f.ctx, f.c); err != nil || ok {
+		t.Fatalf("c has nothing to say but was found: %v, %v", ok, err)
+	}
+}
+
+func TestSaveXMPKeepsSkipsBesideTheFileAndForgetsRecords(t *testing.T) {
+	f := newXMPFixture(t)
+	check(t, f.st.SetFavourite(f.ctx, f.a, true))
+	sidecar := `C:\Photos\a.jpg.xmp`
+	check(t, f.st.SaveXMP(f.ctx, XMPChanges{
+		Records: []XMPRecord{{AssetID: f.a, Path: sidecar, Hash: []byte("h")}},
+		Skips:   []XMPSkip{{Path: `C:\PHOTOS\A.JPG.XMP`, XMPStamp: XMPStamp{Size: 42, MTime: 7}}},
+	}))
+	file := f.export(t)[f.a].Files[0]
+	if string(file.Wrote) != "h" || file.Skip == nil || *file.Skip != (XMPStamp{Size: 42, MTime: 7}) {
+		t.Fatalf("file = %+v, want the record and the skip", file)
+	}
+	check(t, f.st.SaveXMP(f.ctx, XMPChanges{Forget: []string{`c:\photos\a.jpg.xmp`}, Unskip: []string{sidecar}}))
+	if file := f.export(t)[f.a].Files[0]; file.Wrote != nil || file.Skip != nil {
+		t.Fatalf("file = %+v, want neither", file)
+	}
+}
+
+func TestXMPOrphansAreSidecarsBesideNoFileWhosePhotoIsGoneOrNotShown(t *testing.T) {
+	f := newXMPFixture(t)
+	check(t, f.st.SaveXMP(f.ctx, XMPChanges{Records: []XMPRecord{
+		{AssetID: f.a, Path: `C:\Photos\a.jpg.xmp`, Hash: []byte("a")},
+		{AssetID: f.b, Path: `C:\Photos\b.jpg.xmp`, Hash: []byte("b")},
+		{AssetID: f.c, Path: `C:\Photos\c.jpg.xmp`, Hash: []byte("c")},
+	}}))
+	orphans := func() []string {
+		list, err := f.st.XMPOrphans(f.ctx, 0, 10)
+		check(t, err)
+		var paths []string
+		for _, o := range list {
+			paths = append(paths, o.Path)
+		}
+		return paths
+	}
+	if got := orphans(); len(got) != 0 {
+		t.Fatalf("orphans %v while every sidecar is beside its file", got)
+	}
+
+	// The user moves b in Explorer; the scanner follows it. Its old sidecar stays
+	// behind, but the photo is still shown: nothing to do.
+	check(t, errOf(f.st.w.ExecContext(f.ctx, `UPDATE files SET path = 'C:\Photos\moved\b.jpg' WHERE asset_id = ?`, f.b)))
+	if got := orphans(); len(got) != 0 {
+		t.Fatalf("orphans %v for a photo that moved and is still shown", got)
+	}
+	// Blocked, it has to be brought back to the marker.
+	check(t, errOf(f.st.SetBlock(f.ctx, core.BlockAsset, f.b, "", core.BlockPhotos)))
+	if got := orphans(); !slices.Equal(got, []string{`C:\Photos\b.jpg.xmp`}) {
+		t.Fatalf("orphans = %v, want b's old sidecar", got)
+	}
+	// Gone altogether (the file was deleted and the asset forgotten).
+	check(t, errOf(f.st.w.ExecContext(f.ctx, `DELETE FROM assets WHERE id = ?`, f.c)))
+	if got := orphans(); len(got) != 2 {
+		t.Fatalf("orphans = %v, want b's and c's: a record outlives its deleted asset", got)
+	}
+	var kept int
+	check(t, f.st.r.QueryRowContext(f.ctx, "SELECT count(*) FROM xmp_exports").Scan(&kept))
+	if kept != 3 {
+		t.Fatalf("%d records, want 3: deleting an asset must not drop its record", kept)
+	}
 }

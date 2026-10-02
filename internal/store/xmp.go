@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strconv"
 
 	"lumen/internal/core"
 )
@@ -60,8 +61,17 @@ func (s *Store) SetXMP(ctx context.Context, on bool) error {
 
 // XMPFile is one file of an asset, and the sidecar beside it.
 type XMPFile struct {
-	Path  string // the file's; its sidecar is Path + XMPSidecarSuffix
-	Wrote []byte // hash of what Lumen last wrote to the sidecar; nil if it never has
+	Path  string    // the file's; its sidecar is Path + XMPSidecarSuffix
+	Wrote []byte    // hash of what Lumen last wrote to the sidecar; nil if it never has
+	Skip  *XMPStamp // the sidecar as it was when Lumen last left it alone; nil if it has not
+}
+
+// XMPStamp is how a sidecar file looked when it was left alone: its size and
+// modification time (unix nanoseconds), or size -1 when there was no file. A
+// file that still looks the same would be left alone again.
+type XMPStamp struct {
+	Size  int64
+	MTime int64
 }
 
 // XMPFace is a named person's face in a photo.
@@ -86,18 +96,30 @@ type XMPAsset struct {
 	Faces      []XMPFace // named people, none whose name is blocked
 }
 
+// XMPBatch is assets read together with the revision they were read at.
+type XMPBatch struct {
+	Assets   []XMPAsset
+	Revision XMPRevision // at the snapshot the assets come from
+}
+
 // XMPAssets returns up to limit assets with an id above after, in id order, that
 // have something to export or a sidecar to bring back to the marker. It is the
 // one place export reads photos, Things and people through, with the same
 // predicates as browsing: visible assets only, no Thing or person a block
-// covers, and people only when named. The three reads share a snapshot.
+// covers, and people only when named. The reads share a snapshot, and the
+// batch carries the revision of it, so that the exporter can tell later that
+// something changed since.
 //
 // Asset ids above the last one returned are for the next call; fewer than
 // limit assets means there are no more.
-func (s *Store) XMPAssets(ctx context.Context, after int64, limit int) ([]XMPAsset, error) {
-	var assets []XMPAsset
+func (s *Store) XMPAssets(ctx context.Context, after int64, limit int) (XMPBatch, error) {
+	var batch XMPBatch
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
-		assets, err = queryAll(ctx, tx, func(r *sql.Rows) (a XMPAsset, err error) {
+		if err := tx.QueryRowContext(ctx, `SELECT x.value, e.visible_value
+			FROM xmp_revision x, event_revision e WHERE x.id = 1 AND e.id = 1`).Scan(&batch.Revision.Content, &batch.Revision.Visible); err != nil {
+			return err
+		}
+		batch.Assets, err = queryAll(ctx, tx, func(r *sql.Rows) (a XMPAsset, err error) {
 			err = r.Scan(&a.ID, &a.Exportable, &a.Video, &a.Favourite, &a.Width, &a.Height)
 			return a, err
 		}, `SELECT id, `+visible+`, kind = 'video', favourite, COALESCE(width, 0), COALESCE(height, 0)
@@ -109,12 +131,23 @@ func (s *Store) XMPAssets(ctx context.Context, after int64, limit int) ([]XMPAss
 						WHERE f.asset_id = assets.id AND p.name IS NOT NULL)))
 				OR (`+present+` AND `+xmpHasRecord+`))
 			ORDER BY id LIMIT ?2`, after, limit)
-		if err != nil || len(assets) == 0 {
+		if err != nil || len(batch.Assets) == 0 {
 			return err
 		}
-		return fillXMPAssets(ctx, tx, assets)
+		return fillXMPAssets(ctx, tx, batch.Assets)
 	})
-	return assets, err
+	return batch, err
+}
+
+// XMPAsset reads one asset again, as XMPAssets does; ok is false when it has
+// nothing to export and no sidecar of Lumen's to bring back to the marker. The
+// exporter re-reads an asset when the revision moved since its batch was read.
+func (s *Store) XMPAsset(ctx context.Context, id int64) (a XMPAsset, ok bool, err error) {
+	batch, err := s.XMPAssets(ctx, id-1, 1)
+	if err != nil || len(batch.Assets) == 0 || batch.Assets[0].ID != id {
+		return XMPAsset{}, false, err
+	}
+	return batch.Assets[0], true, nil
 }
 
 // xmpHasRecord is true for an assets row with a sidecar Lumen wrote.
@@ -141,10 +174,14 @@ func fillXMPAssets(ctx context.Context, tx *sql.Tx, assets []XMPAsset) error {
 		asset int64
 		XMPFile
 	}, err error) {
-		err = r.Scan(&f.asset, &f.Path, &f.Wrote)
+		var size, mtime sql.NullInt64
+		if err = r.Scan(&f.asset, &f.Path, &f.Wrote, &size, &mtime); err == nil && size.Valid {
+			f.Skip = &XMPStamp{Size: size.Int64, MTime: mtime.Int64}
+		}
 		return f, err
-	}, `SELECT f.asset_id, f.path, x.hash FROM files f
+	}, `SELECT f.asset_id, f.path, x.hash, k.size, k.mtime FROM files f
 		LEFT JOIN xmp_exports x ON `+foldKey("x.path")+` = `+foldKey("f.path || '"+XMPSidecarSuffix+"'")+`
+		LEFT JOIN xmp_skips k ON `+foldKey("k.path")+` = `+foldKey("f.path || '"+XMPSidecarSuffix+"'")+`
 		WHERE f.asset_id IN (SELECT value FROM json_each(?)) ORDER BY f.asset_id, f.id`, string(all))
 	if err != nil {
 		return err
@@ -198,33 +235,93 @@ func fillXMPAssets(ctx context.Context, tx *sql.Tx, assets []XMPAsset) error {
 	return nil
 }
 
-// XMPRecord is a sidecar Lumen has just written.
+// XMPRecord is a sidecar Lumen wrote, or now owns.
 type XMPRecord struct {
 	AssetID int64
 	Path    string // the sidecar's
-	Hash    []byte // of the bytes written
+	Hash    []byte // of the bytes in it
 }
 
-// SaveXMPExports records the sidecars Lumen wrote, replacing any earlier record
-// of the same path (the file may now sit beside another asset). An asset
-// deleted meanwhile is skipped.
-func (s *Store) SaveXMPExports(ctx context.Context, rs []XMPRecord) error {
-	if len(rs) == 0 {
+// XMPSkip is a sidecar left alone, and how it looked then.
+type XMPSkip struct {
+	Path string // the sidecar's
+	XMPStamp
+}
+
+// XMPChanges is what an export batch changes in the store, saved together.
+type XMPChanges struct {
+	Records []XMPRecord // sidecars written, or taken as Lumen's own; replaces any record of the path
+	Forget  []string    // sidecars (paths) Lumen no longer owns
+	Skips   []XMPSkip   // sidecars left alone
+	Unskip  []string    // sidecars (paths) that are no longer left alone
+}
+
+// Empty reports whether there is nothing to save.
+func (c XMPChanges) Empty() bool {
+	return len(c.Records) == 0 && len(c.Forget) == 0 && len(c.Skips) == 0 && len(c.Unskip) == 0
+}
+
+// SaveXMP saves what an export batch did. A record of an asset deleted
+// meanwhile is skipped. It is one transaction, so a sidecar is never both
+// owned and left alone.
+func (s *Store) SaveXMP(ctx context.Context, c XMPChanges) error {
+	if c.Empty() {
 		return nil
 	}
+	forget := "DELETE FROM xmp_exports WHERE " + foldPath + " = " + foldKey("?1")
+	unskip := "DELETE FROM xmp_skips WHERE " + foldPath + " = " + foldKey("?1")
+	record := `INSERT INTO xmp_exports (asset_id, path, hash)
+		SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM assets WHERE id = ?1)
+		ON CONFLICT (` + foldPath + `) DO UPDATE SET asset_id = excluded.asset_id, path = excluded.path, hash = excluded.hash`
+	skip := `INSERT INTO xmp_skips (path, size, mtime) VALUES (?1, ?2, ?3)
+		ON CONFLICT (` + foldPath + `) DO UPDATE SET path = excluded.path, size = excluded.size, mtime = excluded.mtime`
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		st, err := tx.PrepareContext(ctx, `INSERT INTO xmp_exports (asset_id, path, hash)
-			SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM assets WHERE id = ?1)
-			ON CONFLICT (`+foldPath+`) DO UPDATE SET asset_id = excluded.asset_id, path = excluded.path, hash = excluded.hash`)
-		if err != nil {
-			return err
+		// Forgetting comes before recording, so a path in both ends up recorded.
+		for _, p := range c.Forget {
+			if _, err := tx.ExecContext(ctx, forget, p); err != nil {
+				return err
+			}
 		}
-		defer st.Close()
-		for _, r := range rs {
-			if _, err := st.ExecContext(ctx, r.AssetID, r.Path, r.Hash); err != nil {
+		for _, p := range c.Unskip {
+			if _, err := tx.ExecContext(ctx, unskip, p); err != nil {
+				return err
+			}
+		}
+		for _, r := range c.Records {
+			if _, err := tx.ExecContext(ctx, record, r.AssetID, r.Path, r.Hash); err != nil {
+				return err
+			}
+		}
+		for _, k := range c.Skips {
+			if _, err := tx.ExecContext(ctx, skip, k.Path, k.Size, k.MTime); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// XMPOrphan is a sidecar Lumen wrote that is no longer beside any file of the
+// library, and whose photo is gone or may not be shown any more.
+type XMPOrphan struct {
+	Row  int64 // for paging
+	Path string
+	Hash []byte // of what Lumen wrote
+}
+
+// XMPOrphans lists up to limit such sidecars with a Row above after, in Row
+// order. They come about when the user moves or deletes a photo outside Lumen
+// (its sidecar stays behind) or blocks it. A moved photo that can still be
+// shown is not listed: its old sidecar is stale but harmless, and is left as
+// it is.
+func (s *Store) XMPOrphans(ctx context.Context, after int64, limit int) ([]XMPOrphan, error) {
+	return queryAll(ctx, s.r, func(r *sql.Rows) (o XMPOrphan, err error) {
+		err = r.Scan(&o.Row, &o.Path, &o.Hash)
+		return o, err
+	}, `SELECT e.rowid, e.path, e.hash FROM xmp_exports e
+		WHERE e.rowid > ?1
+		AND NOT EXISTS (SELECT 1 FROM files f
+			WHERE `+foldKey("f.path")+` = `+foldKey("substr(e.path, 1, length(e.path) - "+strconv.Itoa(len(XMPSidecarSuffix))+")")+`)
+		AND NOT EXISTS (SELECT 1 FROM assets WHERE id = e.asset_id AND `+visible+`)
+		ORDER BY e.rowid LIMIT ?2`, after, limit)
 }

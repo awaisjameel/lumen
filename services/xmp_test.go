@@ -24,8 +24,12 @@ func TestXMPIsOffByDefaultAndTheSettingsFollowTheToggle(t *testing.T) {
 	if s, err := svc.Settings(ctx); err != nil || s.XMP {
 		t.Fatalf("settings = %+v, %v; want XMP off by default", s, err)
 	}
-	if _, err := svc.ExportXMPNow(ctx); !errors.Is(err, index.ErrXMPOff) {
+	_, err = svc.ExportXMPNow(ctx)
+	if !errors.Is(err, index.ErrXMPOff) {
 		t.Fatalf("Export now while off = %v, want ErrXMPOff", err)
+	}
+	if got := MarshalError(err); string(got) != `{"code":"xmp_off"}` {
+		t.Fatalf("the UI sees %s, want the xmp_off code", got)
 	}
 	if err := svc.SetXMP(ctx, true); err != nil {
 		t.Fatal(err)

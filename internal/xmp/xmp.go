@@ -214,3 +214,11 @@ func number(v float64) string {
 func escape(b *bytes.Buffer, s string) {
 	_ = xml.EscapeText(b, []byte(s)) // writing to a bytes.Buffer cannot fail
 }
+
+// IsLumens reports whether packet carries Lumen's marker: the lumen: namespace
+// and its exporter version. Only a file that does, and is byte for byte what
+// Lumen would write now, is taken as Lumen's own when no record says so.
+func IsLumens(packet []byte) bool {
+	return bytes.Contains(packet, []byte(`xmlns:lumen="`+nsLumen+`"`)) &&
+		bytes.Contains(packet, []byte(`lumen:Exporter="`+Version+`"`))
+}

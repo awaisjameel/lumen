@@ -162,3 +162,58 @@ func TestWriteSidecarDoesNothingOnceTheContextIsDone(t *testing.T) {
 		t.Fatalf("folder holds %v, want nothing", n)
 	}
 }
+
+func TestWriteSidecarChecksTheFileAgainJustBeforeReplacingIt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "IMG_1.jpg.xmp")
+	if _, err := WriteSidecar(t.Context(), path, []byte("v1"), nil); err != nil {
+		t.Fatal(err)
+	}
+	// Someone edits the sidecar while the new bytes are being written.
+	edit := func() {
+		if err := os.WriteFile(path, []byte("edited meanwhile"), 0o600); err != nil {
+			t.Error(err)
+		}
+	}
+	got, err := writeSidecar(t.Context(), path, []byte("v2"), SidecarHash([]byte("v1")), true, edit)
+	if err != nil || got != SidecarEdited {
+		t.Fatalf("writeSidecar = %v, %v; want edited", got, err)
+	}
+	if mustRead(t, path) != "edited meanwhile" {
+		t.Fatal("an edit made during the write was overwritten")
+	}
+	if n := names(t, dir); len(n) != 1 {
+		t.Fatalf("folder holds %v, want only the sidecar (no temporary file)", n)
+	}
+}
+
+func TestReviseSidecarNeverCreatesOne(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "IMG_1.jpg.xmp")
+	if got, err := ReviseSidecar(t.Context(), path, []byte("v1"), SidecarHash([]byte("old"))); err != nil || got != SidecarGone {
+		t.Fatalf("ReviseSidecar of a missing file = %v, %v; want gone", got, err)
+	}
+	if n := names(t, dir); len(n) != 0 {
+		t.Fatalf("folder holds %v, want nothing", n)
+	}
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ReviseSidecar(t.Context(), path, []byte("v1"), SidecarHash([]byte("old"))); err != nil || got != SidecarReplaced || mustRead(t, path) != "v1" {
+		t.Fatalf("ReviseSidecar of its own file = %v, %v, %q; want replaced", got, err, mustRead(t, path))
+	}
+}
+
+func TestOnlyLumensTemporaryNamesAreSidecarTemps(t *testing.T) {
+	for path, want := range map[string]bool{
+		`C:\p\IMG_1.jpg.xmp.0a1b2c3d4e5f.lumen-tmp`: true,
+		`C:\p\IMG_1.JPG.XMP.0A1B.LUMEN-TMP`:         true,
+		`C:\p\IMG_1.jpg.xmp`:                        false,
+		`C:\p\IMG_1.jpg`:                            false,
+		`C:\p\lumen-tmp`:                            false,
+	} {
+		if got := IsSidecarTemp(path); got != want {
+			t.Errorf("IsSidecarTemp(%q) = %v, want %v", path, got, want)
+		}
+	}
+}

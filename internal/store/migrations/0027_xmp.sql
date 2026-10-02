@@ -7,15 +7,28 @@
 -- no row here is someone else's and is never touched. The path is the
 -- sidecar's (IMG_1.jpg.xmp), unique by its fold key like files.path, so a
 -- re-spelled path is the same file; the asset is whichever photo's file the
--- sidecar sits beside now.
+-- sidecar sits beside now. No foreign key: when an asset is deleted its row
+-- must stay, so that the names in the sidecar it leaves behind can be taken out.
 CREATE TABLE IF NOT EXISTS xmp_exports (
-  asset_id INTEGER NOT NULL REFERENCES assets (id) ON DELETE CASCADE,
+  asset_id INTEGER NOT NULL,
   path     TEXT    NOT NULL,
   hash     BLOB    NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS xmp_exports_path
   ON xmp_exports ((CASE WHEN octet_length(path) != length(path) THEN fold(path) ELSE lower(path) END));
 CREATE INDEX IF NOT EXISTS xmp_exports_asset ON xmp_exports (asset_id);
+
+-- Sidecars Lumen left alone (someone else's, edited since, or not writable),
+-- and the file as it was then: size and modification time in nanoseconds,
+-- or size -1 for no file at all. A background pass does not look at the path
+-- again until the file differs from this; Export now always does.
+CREATE TABLE IF NOT EXISTS xmp_skips (
+  path  TEXT    NOT NULL,
+  size  INTEGER NOT NULL,
+  mtime INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS xmp_skips_path
+  ON xmp_skips ((CASE WHEN octet_length(path) != length(path) THEN fold(path) ELSE lower(path) END));
 
 -- Counts changes to what a sidecar says. Together with event_revision's
 -- visible_value (which assets may be exported at all) it tells the exporter

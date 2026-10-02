@@ -470,6 +470,7 @@ const en = {
   // Organise on disk.
 
   // XMP sidecars.
+  'error.xmpOff': 'XMP sidecar files are turned off. Turn them on in Settings first.',
   'settings.xmpTitle': 'Sidecar files',
   'settings.xmp': 'Write XMP sidecar files beside my photos',
   'settings.xmpHint':
@@ -477,7 +478,8 @@ const en = {
   'settings.xmpExport': 'Export now',
   'settings.xmpExporting': 'Exporting…',
   'settings.xmpResult': 'Wrote {written}, {unchanged} already up to date, {skipped} left alone.',
-  'settings.xmpSkippedHint': 'Left alone means another program made the file, or it was edited after Lumen wrote it.',
+  'settings.xmpSkippedHint':
+    'Left alone means another program made the file, it was edited after Lumen wrote it, or Lumen couldn’t write it (a read-only folder or a locked file).',
 } as const satisfies Record<string, Message>
 
 export type MessageKey = keyof typeof en

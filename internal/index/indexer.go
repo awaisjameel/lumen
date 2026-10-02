@@ -17,6 +17,7 @@ import (
 
 	"lumen/internal/ai"
 	"lumen/internal/core"
+	"lumen/internal/fileops"
 	"lumen/internal/media"
 	"lumen/internal/people"
 	"lumen/internal/scanner"
@@ -725,6 +726,11 @@ func (ix *Indexer) watchLoop(ctx context.Context, src core.Source) {
 // quiet for a moment, so copying 500 photos in causes one scan, not 500.
 func (ix *Indexer) onFSChange(path string) {
 	if core.IsWithin(path, ix.paths.DataDir) {
+		return
+	}
+	if fileops.IsSidecarTemp(path) {
+		// Lumen's own sidecar on its way into place: it is made, then renamed
+		// away, and the vanished name would look like a deleted folder.
 		return
 	}
 	if ext := filepath.Ext(path); ext != "" && core.KindOf(path) == "" {
