@@ -151,6 +151,8 @@ export const ErrorCode = {
   UndoExpired: 'undo_expired',
   InvalidBlock: 'invalid_block',
   DeleteFailed: 'delete_failed',
+  SigninFailed: 'signin_failed',
+  SigninUnavailable: 'signin_unavailable',
 } as const
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 

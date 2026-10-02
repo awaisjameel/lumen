@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { BLOCK_UNLOCK_IDLE_MINUTES, BlockKind, BlockMode, engine, ErrorCode } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Block from '../shared/block'
+import { t } from '../shared/i18n'
 import BlockedView from './BlockedView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -15,6 +16,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     blocks: vi.fn(),
     setBlock: vi.fn(),
     removeBlock: vi.fn(),
+    resetBlockPIN: vi.fn(),
   },
 }))
 vi.mock('../shared/block', async (importOriginal) => ({
@@ -52,6 +54,7 @@ beforeEach(() => {
   vi.mocked(engine.blocks).mockReset().mockResolvedValue([])
   vi.mocked(engine.setBlock).mockReset().mockResolvedValue({ id: 1, created: false })
   vi.mocked(engine.removeBlock).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.resetBlockPIN).mockReset().mockResolvedValue(undefined)
 })
 afterEach(() => {
   wrapper?.unmount()
@@ -154,4 +157,81 @@ it('shows the private list only after unlock and relocks on leaving', async () =
   wrapper.unmount()
   wrapper = undefined
   expect(engine.lockBlocks).toHaveBeenCalledTimes(1)
+})
+
+async function forgotten() {
+  wrapper = mount(BlockedView, { attachTo: document.body, global: { stubs: { RouterLink: true } } })
+  await flushPromises()
+  await wrapper.get('button[type="button"]').trigger('click')
+  return wrapper
+}
+
+async function chooseNewPIN(view: ReturnType<typeof mount>, first: string, second: string) {
+  const [pin, confirmation] = view.findAll('input')
+  await pin?.setValue(first)
+  await confirmation?.setValue(second)
+  await view.get('form').trigger('submit')
+  await flushPromises()
+}
+
+it('resets a forgotten PIN after the Windows sign-in and asks for the new PIN to unlock', async () => {
+  const view = await forgotten()
+  expect(view.text()).toContain(t('blocked.resetHint'))
+  await chooseNewPIN(view, '654321', '654321')
+  expect(engine.resetBlockPIN).toHaveBeenCalledExactlyOnceWith('654321')
+  expect(view.text()).toContain(t('blocked.pinChanged'))
+  expect(view.find('.page-error').exists()).toBe(false)
+  // Still locked: the list is not opened by the reset, and the form asks for the PIN.
+  expect(engine.unlockBlocks).not.toHaveBeenCalled()
+  expect(engine.blocks).not.toHaveBeenCalled()
+  expect(view.findAll('input')).toHaveLength(1)
+  expect(view.get('input').element).toHaveProperty('value', '')
+  await view.get('input').setValue('654321')
+  await view.get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.unlockBlocks).toHaveBeenCalledExactlyOnceWith('654321')
+  expect(view.text()).not.toContain(t('blocked.pinChanged'))
+})
+
+it('makes no call when the two new PINs differ', async () => {
+  const view = await forgotten()
+  await chooseNewPIN(view, '654321', '654322')
+  expect(engine.resetBlockPIN).not.toHaveBeenCalled()
+  expect(view.get('.page-error').text()).toBe(t('blocked.pinMismatch'))
+  expect(view.text()).not.toContain(t('blocked.pinChanged'))
+})
+
+it.each([
+  [ErrorCode.SigninFailed, 'error.signinFailed'],
+  [ErrorCode.SigninUnavailable, 'error.signinUnavailable'],
+  [ErrorCode.InvalidPIN, 'error.invalidPIN'],
+] as const)('explains a reset that fails with %s and keeps the form for another try', async (code, key) => {
+  vi.mocked(engine.resetBlockPIN).mockRejectedValueOnce(new Error('refused', { cause: { code } }))
+  const view = await forgotten()
+  await chooseNewPIN(view, '654321', '654321')
+  expect(view.get('.page-error').text()).toBe(t(key, { pinMin: 6, pinMax: 12 }))
+  expect(view.text()).not.toContain(t('blocked.pinChanged'))
+  expect(view.findAll('input')).toHaveLength(2)
+  await view.get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.resetBlockPIN).toHaveBeenCalledTimes(2)
+  expect(view.find('.page-error').exists()).toBe(false)
+  expect(view.text()).toContain(t('blocked.pinChanged'))
+})
+
+it('goes back to the PIN form from the reset form without calling the engine', async () => {
+  const view = await forgotten()
+  await view.get('input').setValue('654321')
+  const buttons = view.findAll('button[type="button"]')
+  await buttons[0]?.trigger('click')
+  expect(view.findAll('input')).toHaveLength(1)
+  expect(view.get('input').element).toHaveProperty('value', '')
+  expect(engine.resetBlockPIN).not.toHaveBeenCalled()
+})
+
+it('offers no reset while there is no PIN to reset', async () => {
+  vi.mocked(engine.blockPINConfigured).mockResolvedValue(false)
+  wrapper = mount(BlockedView, { global: { stubs: { RouterLink: true } } })
+  await flushPromises()
+  expect(wrapper.text()).not.toContain(t('blocked.forgotPIN'))
 })

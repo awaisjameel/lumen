@@ -33,7 +33,7 @@ const en = {
   'blocked.labelPhotos': 'Label and photos',
   'blocked.photosOnly': 'This hides the photo or folder and its media.',
   'blocked.createPINHint':
-    'Create a {pinMin}–{pinMax} digit PIN to protect the Blocked screen. Keep it safe: PIN reset is not available yet.',
+    'Create a {pinMin}–{pinMax} digit PIN to protect the Blocked screen. If you forget it, you can choose a new one by signing in to Windows.',
   'blocked.enterPINHint': 'Enter your PIN to open the Blocked screen.',
   'blocked.newPIN': 'New PIN',
   'blocked.confirmPIN': 'Confirm PIN',
@@ -409,6 +409,14 @@ const en = {
   'status.readingPhase': 'Reading text in your photos',
 
   // Forgotten PIN.
+  'blocked.forgotPIN': 'Forgot PIN?',
+  'blocked.resetHint':
+    'Choose a new PIN. Windows will then ask you to sign in, with Windows Hello or your PC password, to confirm it is you. Your blocks are kept.',
+  'blocked.reset': 'Reset with Windows sign-in',
+  'blocked.resetCancel': 'Cancel',
+  'blocked.pinChanged': 'Your PIN was changed. Enter the new PIN to open the Blocked screen.',
+  'error.signinFailed': 'Windows could not confirm it is you, so the PIN was not changed.',
+  'error.signinUnavailable': 'This PC has no Windows sign-in that Lumen can use, so the PIN cannot be reset.',
 } as const satisfies Record<string, Message>
 
 export type MessageKey = keyof typeof en
