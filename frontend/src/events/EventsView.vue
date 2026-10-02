@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { engine, MAX_NAME_LEN } from '../bridge'
+import { onBeforeUnmount, ref, watch } from 'vue'
+import { BlockKind, engine, MAX_NAME_LEN } from '../bridge'
 import type { Event } from '../bridge'
+import { block, onBlocksChanged } from '../shared/block'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
@@ -13,12 +14,15 @@ import GroupCard from '../shared/GroupCard.vue'
 import Icon from '../shared/Icon.vue'
 import SearchBox from '../search/SearchBox.vue'
 
-const { list, loaded, error, load } = useList(engine.events)
+const { list, loaded, error, load, invalidate } = useList(engine.events)
 const rename = useRename<number>()
 const { editing, draft } = rename
 const busy = ref(false)
 const actionError = ref('') // a rename's; the list's own reloads don't clear it
 useLiveReload(load, (c) => c.assets || c.thumbs)
+// A block, its Undo or its removal on the Blocked screen changes which events
+// there are, whoever made it.
+onBeforeUnmount(onBlocksChanged(invalidate))
 
 watch(list, (events) => {
   if (editing.value !== null && !events.some((event) => event.id === editing.value)) void rename.close(false)
@@ -36,6 +40,10 @@ async function togglePin(event: Event) {
   } finally {
     busy.value = false
   }
+}
+
+function blockEvent(event: Event) {
+  void block(BlockKind.BlockEvent, event.id, event.name)
 }
 
 function edit(event: Event) {
@@ -135,6 +143,16 @@ async function save(id: number, value: string) {
             @click="togglePin(event)"
           >
             <Icon name="pin" :size="16" />
+          </button>
+          <button
+            v-if="editing !== event.id"
+            class="icon-btn"
+            :disabled="busy"
+            :title="t('blocked.block')"
+            :aria-label="t('blocked.confirmTitle', { name: event.name })"
+            @click="blockEvent(event)"
+          >
+            <Icon name="eye-off" :size="16" />
           </button>
         </GroupCard>
       </div>

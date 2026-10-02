@@ -102,10 +102,11 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int) ([]core.Event, e
 	var placeCounts map[int64]int
 	var pinnedAt int64 // the newest pin the event holds
 	var customName string
+	var blocked bool // the event holds a photo of a label-mode event block
 	var pins []int64 // pinnedAt of each event in out
 	finish := func() {
-		if current.ID == 0 {
-			return
+		if current.ID == 0 || blocked {
+			return // a blocked event is left out, its photos stay in the library
 		}
 		for id, n := range placeCounts {
 			if n > placeCounts[current.PlaceID] || (n == placeCounts[current.PlaceID] && id < current.PlaceID) {
@@ -129,7 +130,7 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int) ([]core.Event, e
 			finish()
 			current = core.Event{ID: a.id, FirstID: a.id, StartAt: a.at}
 			placeCounts = map[int64]int{}
-			pinnedAt, customName = 0, ""
+			pinnedAt, customName, blocked = 0, "", false
 		}
 		// The event shows the name of its earliest photo that has one (the
 		// lowest tag id if that photo holds several).
@@ -142,6 +143,8 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int) ([]core.Event, e
 				}
 			case eventTagPin:
 				pinnedAt = max(pinnedAt, ref.createdAt)
+			case eventTagBlock:
+				blocked = true
 			}
 		}
 		current.LastID, current.EndAt = a.id, a.at

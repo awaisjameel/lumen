@@ -36,7 +36,7 @@ import (
 const (
 	eventTagName  = "name"
 	eventTagPin   = "pin"
-	eventTagBlock = "block" // for Wave 2: nothing here creates one
+	eventTagBlock = "block" // made by eventBlockTarget
 )
 
 // eventTagRef is one event tag a photo holds, as groupEvents reads them.
@@ -47,10 +47,16 @@ type eventTagRef struct {
 	createdAt int64
 }
 
-// eventTagRefs returns the name and pin tags of every photo that holds one.
+// eventTagRefs returns the name and pin tags of every photo that holds one,
+// and the block tags of the events whose block leaves their photos showing
+// (label mode). The members of a photo-mode block are all hidden, and the
+// event shows none of them, so they are left out.
 func eventTagRefs(ctx context.Context, tx *sql.Tx) (map[int64][]eventTagRef, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT m.asset_id, t.id, t.kind, COALESCE(t.name, ''), t.created_at
-		FROM event_members m JOIN event_tags t ON t.id = m.tag_id WHERE t.kind IN ('name', 'pin') ORDER BY t.id`)
+		FROM event_members m JOIN event_tags t ON t.id = m.tag_id
+		WHERE t.kind IN ('name', 'pin') OR (t.kind = 'block'
+			AND EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'event' AND b.target_id = t.id AND b.mode = 'label'))
+		ORDER BY t.id`)
 	if err != nil {
 		return nil, err
 	}
