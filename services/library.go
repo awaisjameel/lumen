@@ -58,6 +58,7 @@ type LibraryService struct {
 	store   *store.Store
 	ix      *index.Indexer
 	now     func() time.Time // the clock: time.Now, or a test's
+	recycle recycler         // moves files to the Recycle Bin; nil means fileops.Recycle (a test's fake otherwise)
 	blocked struct {         // the PIN, rate limiting and Undo; guarded by its mutex
 		sync.Mutex
 		unlocked bool

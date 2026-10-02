@@ -41,6 +41,7 @@ const (
 	CodeBlocksLocked    ErrorCode = "blocks_locked"    // the Blocked list needs the PIN first
 	CodeUndoExpired     ErrorCode = "undo_expired"     // too late to undo that block
 	CodeInvalidBlock    ErrorCode = "invalid_block"    // that can't be blocked
+	CodeDeleteFailed    ErrorCode = "delete_failed"    // the Recycle Bin could not be used
 )
 
 // ErrFolderNotFound means a folder to add does not exist (or is a file).
@@ -81,6 +82,7 @@ var errorCodes = []struct {
 	{store.ErrBlockChangeLocked, CodeBlocksLocked},
 	{ErrBlockUndoExpired, CodeUndoExpired},
 	{store.ErrInvalidBlock, CodeInvalidBlock},
+	{ErrDeleteFailed, CodeDeleteFailed},
 }
 
 // Failure is what a failed call gives the UI besides its message (the

@@ -133,6 +133,8 @@ func (s *Store) viewFilterSQL(ctx context.Context, v core.View, minScore float64
 	}
 	switch v.Filter {
 	case core.FilterAll:
+	case core.FilterTrash:
+		f.trash = true
 	case core.FilterFavourites:
 		f.favourites = true
 	case core.FilterVideos:
@@ -155,13 +157,17 @@ type assetFilter struct {
 	place      int64  // near this city
 	event      *core.Event
 	album      int64 // in this manual album
+	trash      bool  // the Trash's assets instead of the visible ones
 }
 
 // where is the filter as a WHERE clause for the assets table, with only
-// bound values. It starts with visible, so the grid's queries use the
-// assets_timeline index.
+// bound values. It starts with visible (or trashed), so the grid's queries
+// use the assets_timeline (or assets_trash) index.
 func (f assetFilter) where(minScore float64) (where string, args []any) {
 	where, args = visible, []any{}
+	if f.trash {
+		where = trashed
+	}
 	if f.kind != "" {
 		where += " AND kind = ?"
 		args = append(args, f.kind)
@@ -306,7 +312,7 @@ func assetDetail(ctx context.Context, q querier, id int64) (core.AssetDetail, er
 	err := q.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
 		CASE WHEN `+placeBlocked("assets.place_id")+` THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
 		duration_ms, video_codec, audio_codec
-		FROM assets WHERE id = ? AND `+visible, id).
+		FROM assets WHERE id = ? AND `+servable, id).
 		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.PlaceID, &d.Favourite,
 			&duration, &videoCodec, &audioCodec)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -359,7 +365,7 @@ func (s *Store) AssetFile(ctx context.Context, id int64) (MediaFile, error) {
 	err := s.read(ctx, func(tx *sql.Tx) error {
 		err := tx.QueryRowContext(ctx, `SELECT ext, kind, orientation, thumb_version,
 			COALESCE(video_codec, ''), COALESCE(audio_codec, ''), COALESCE(duration_ms, 0)
-			FROM assets WHERE id = ? AND `+visible, id).
+			FROM assets WHERE id = ? AND `+servable, id).
 			Scan(&m.Ext, &m.Kind, &m.Orientation, &m.ThumbVersion, &m.VideoCodec, &m.AudioCodec, &m.Duration)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
@@ -391,10 +397,23 @@ func (s *Store) CountVisible(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// AssetVisible checks the same browse predicate used by grid queries. Media
-// handlers call this before serving even a cached thumbnail or video sprite.
+// trashed is what the Trash view shows: trashed, still on disk and not
+// hidden, blocks ignored (a blocked photo is in the Trash like any other). It
+// is spelled as the assets_trash partial index (migration 0020) spells it, so
+// SQLite can use that index.
+const trashed = "trashed_at IS NOT NULL AND missing_since IS NULL AND hidden = 0"
+
+// servable is what the media handler, the details panel and Explorer accept:
+// visible, or in the Trash, since the Trash's photos open in the Viewer. The
+// Blocked screen's browser (covered photos, only while unlocked) is Wave 2's
+// third branch: it joins here as `OR (:unlocked AND trashed_at IS NULL AND missing_since IS NULL AND hidden = 0)`.
+var servable = "(" + visible + " OR (" + trashed + "))"
+
+// AssetVisible checks the servable predicate: the browse predicate used by
+// grid queries, or the Trash's. Media handlers call this before serving even
+// a cached thumbnail or video sprite.
 func (s *Store) AssetVisible(ctx context.Context, id int64) (bool, error) {
 	var ok bool
-	err := s.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM assets WHERE id = ? AND "+visible+")", id).Scan(&ok)
+	err := s.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM assets WHERE id = ? AND "+servable+")", id).Scan(&ok)
 	return ok, err
 }
