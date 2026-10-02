@@ -237,6 +237,9 @@ func (s *SearchService) TagAsset(ctx context.Context, assetID int64, name string
 		return err
 	}
 	// A photo the user calls a screenshot is one to read, if that is on.
+	if s.ix != nil {
+		return s.ix.QueueOCR(ctx) // and wakes the stage
+	}
 	_, err = s.store.QueueOCR(ctx)
 	return err
 }

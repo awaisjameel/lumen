@@ -534,7 +534,6 @@ func TestTurningTextReadingOnAndOffThroughTheLibraryService(t *testing.T) {
 	}
 }
 
-
 // screenshotLibrary is a text library whose photos are indexed except for
 // their text, with a Screenshots Thing.
 func screenshotLibrary(t *testing.T) (lib *textLibrary, screenshots int64) {

@@ -20,9 +20,9 @@ import (
 
 // ocrKindTags selects the tags that make a photo worth reading: the
 // built-in Screenshots and Documents kinds (search/vocabulary.go). It is the
-// one place that names them; it keys by name until built-in tags carry a
-// stable vocab_name, which a renamed Thing would need.
-const ocrKindTags = `SELECT id FROM tags WHERE kind = 'builtin' AND name IN ('Screenshots', 'Documents')`
+// one place that names them, by their vocabulary names, which stay the same
+// when the user renames the Thing.
+const ocrKindTags = `SELECT id FROM tags WHERE kind = 'builtin' AND vocab_name IN ('Screenshots', 'Documents')`
 
 // ocrEligible is the condition for the assets row alias to be read: a photo
 // with a file on disk (a hidden, trashed or blocked one too, as every stage

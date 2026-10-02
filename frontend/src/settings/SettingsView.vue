@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
+import OcrSetting from './OcrSetting.vue'
 import {
   BlockKind,
   Device,
@@ -223,7 +224,7 @@ onBeforeUnmount(saveConfidence)
               <small class="muted">{{ t('settings.aiOnBatteryHint') }}</small>
             </span>
           </label>
-          <!-- Lead: mount the OCR toggle component (unit u4) here. -->
+          <OcrSetting />
           <details class="advanced">
             <summary>{{ t('settings.advanced') }}</summary>
             <label class="event-gap">

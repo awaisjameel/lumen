@@ -745,3 +745,15 @@ func TestTextMatchesAmongChoosesPhotosBeforeTheLimit(t *testing.T) {
 		t.Fatalf("matches among nobody = %v, %v", got, err)
 	}
 }
+
+func TestARenamedScreenshotsThingStillMarksPhotosToRead(t *testing.T) {
+	l := newOCRLibrary(t)
+	st, ctx := l.st, t.Context()
+	shot := l.photo(t, "shot")
+	l.tag(t, shot, l.shots, 0.5)
+	check(t, st.RenameTag(ctx, l.shots, "My captures"))
+	check(t, st.SetOCR(ctx, true))
+	if got := ocrJobIDs(t, st); !slices.Equal(got, []int64{shot}) {
+		t.Fatalf("OCR jobs after renaming Screenshots = %v, want the screenshot", got)
+	}
+}
