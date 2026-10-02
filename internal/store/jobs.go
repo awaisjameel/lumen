@@ -40,11 +40,19 @@ type TimeRange struct{ From, To int64 }
 // and faces need both (the orientation to decode upright, the thumbnail to be
 // shown cut out of). Every earlier stage is listed, not just the previous
 // one, so a re-run of metadata holds back everything after it.
+//
+// Text is read from the original photo, but only once the embedding says the
+// photo is a screenshot or a document, so it waits for that too.
 var waitsFor = map[core.Stage][]core.Stage{
 	core.StageThumbnail: {core.StageMetadata},
 	core.StageEmbedding: {core.StageMetadata, core.StageThumbnail},
 	core.StageFaces:     {core.StageMetadata, core.StageThumbnail},
+	core.StageOCR:       {core.StageMetadata, core.StageThumbnail, core.StageEmbedding},
 }
+
+// queuedStages is every stage that has jobs: core.Stages, and the OCR stage,
+// which only some photos have.
+var queuedStages = append(slices.Clone(core.Stages), core.StageOCR)
 
 // unfinished is the SQL list of statuses of a job still to do.
 const unfinished = "('pending', 'waiting')"
@@ -54,7 +62,7 @@ const unfinished = "('pending', 'waiting')"
 var heldBack = func() string {
 	var b strings.Builder
 	b.WriteString("CASE asset_jobs.stage")
-	for _, st := range core.Stages {
+	for _, st := range queuedStages {
 		before := waitsFor[st]
 		if len(before) == 0 {
 			continue
@@ -88,7 +96,7 @@ func settle(ctx context.Context, tx *sql.Tx, where string, args ...any) error {
 
 // afterMetadata are the stages whose results depend on the orientation
 // metadata reads, so they re-run when it changes.
-var afterMetadata = []core.Stage{core.StageThumbnail, core.StageEmbedding, core.StageFaces}
+var afterMetadata = []core.Stage{core.StageThumbnail, core.StageEmbedding, core.StageFaces, core.StageOCR}
 
 // MaxAttempts is how many times in a row a job may fail before it is left
 // failed until its stage's version changes.

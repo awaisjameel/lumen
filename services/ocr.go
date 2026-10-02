@@ -6,5 +6,5 @@ import "context"
 // Turning it on queues the photos it applies to; turning it off stops the
 // work, and text already read stays searchable.
 func (s *LibraryService) SetOCR(ctx context.Context, on bool) error {
-	return unbuilt(ctx, on) // Phase 5 unit U4
+	return s.ix.SetOCR(ctx, on)
 }

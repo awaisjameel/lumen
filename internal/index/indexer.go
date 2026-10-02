@@ -74,11 +74,13 @@ type Indexer struct {
 	wakeThum  chan struct{}
 	wakeEmbed chan struct{}
 	wakeFaces chan struct{}
+	wakeOCR   chan struct{}
 	wakeVideo chan struct{}
 	wakeFS    chan struct{}
 
 	encoder *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
+	ocr     *model[textReader]       // PP-OCRv5's detector and recogniser, while their stage has work
 	pixels  decoded                  // photos the thumbnail stage decoded for the faces stage
 
 	videoEmbedRetry stageBackoff // used only by the video coordinator
@@ -129,6 +131,7 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 		wakeThum:  make(chan struct{}, 1),
 		wakeEmbed: make(chan struct{}, 1),
 		wakeFaces: make(chan struct{}, 1),
+		wakeOCR:   make(chan struct{}, 1),
 		wakeVideo: make(chan struct{}, 1),
 		wakeFS:    make(chan struct{}, 1),
 		resume:    make(chan struct{}),
@@ -182,6 +185,7 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 			},
 		}
 	}
+	ix.ocr = ix.openOCR()
 	ix.version = ix.versions()
 	return ix
 }
@@ -233,6 +237,8 @@ func (ix *Indexer) versions() map[core.Stage]store.StageVersion {
 	v := map[core.Stage]store.StageVersion{
 		core.StageMetadata:  {Photo: metadata, Video: metadata},
 		core.StageThumbnail: {Photo: thumbnail, Video: thumbnail},
+		// Text is only read from photos, but a stage's version has both.
+		core.StageOCR: {Photo: ai.OCRVersion, Video: ai.OCRVersion},
 	}
 	if ix.search != nil {
 		photo := ix.search.Model().Version
@@ -286,6 +292,15 @@ func (ix *Indexer) Start(ctx context.Context) {
 			slog.Info("re-running stages after an upgrade", "jobs", n)
 			ix.wakeStages()
 		}
+		// Photos that became screenshots or documents while nothing was
+		// watching (a changed tag confidence, a tag the user added) still get
+		// their text read.
+		if n, err := ix.store.QueueOCR(ctx); err != nil {
+			slog.Error("queue text reading", "err", err)
+		} else if n > 0 {
+			slog.Info("queued photos for text reading", "photos", n)
+			nudge(ix.wakeOCR)
+		}
 		ix.RescanAll() // opening watchers can take seconds for a network share
 		ix.scanLoop(ctx)
 	})
@@ -315,6 +330,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 		ix.run(func() {
 			runStage(ctx, ix, stage[store.EmbedResult]{
 				name: core.StageEmbedding, batch: embeddingBatch, wake: ix.wakeEmbed, model: ix.encoder,
+				next:    []chan struct{}{ix.wakeOCR}, // the tags may make a photo a screenshot
 				changes: core.Changes{Tags: true},
 				process: ix.doEmbeddings,
 				save:    ix.saveEmbeddings,
@@ -335,6 +351,12 @@ func (ix *Indexer) Start(ctx context.Context) {
 		})
 		ix.run(func() { ix.people.Run(ctx, func() { ix.markChanged(core.Changes{People: true}) }) })
 	}
+	ix.run(func() {
+		runStage(ctx, ix, stage[store.OCRResult]{
+			name: core.StageOCR, batch: ocrBatch, wake: ix.wakeOCR, model: ix.ocr,
+			fetch: ix.fetchOCR, process: ix.doOCR, save: ix.saveOCR,
+		})
+	})
 	if ix.search != nil || ix.people != nil {
 		ix.run(func() {
 			name := core.StageEmbedding
@@ -357,7 +379,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 
 // wakeStages nudges every stage to look for work.
 func (ix *Indexer) wakeStages() {
-	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed, ix.wakeFaces, ix.wakeVideo} {
+	for _, ch := range []chan struct{}{ix.wakeMeta, ix.wakeThum, ix.wakeEmbed, ix.wakeFaces, ix.wakeOCR, ix.wakeVideo} {
 		nudge(ch)
 	}
 }
@@ -381,6 +403,7 @@ func (ix *Indexer) Stop() {
 	if ix.faces != nil {
 		ix.faces.release()
 	}
+	ix.ocr.release()
 }
 
 func (ix *Indexer) run(fn func()) {
@@ -877,6 +900,11 @@ func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 		}
 		if ix.people != nil {
 			p.Faces = pending[core.StageFaces]
+		}
+		// Only while it is on: what an upgrade queued while it was off waits
+		// for the user to turn it on.
+		if on, err := ix.store.Bool(ctx, core.SettingOCR, false); err == nil && on {
+			p.OCR = pending[core.StageOCR]
 		}
 	} else if ctx.Err() == nil {
 		slog.Error("count jobs", "err", err)
