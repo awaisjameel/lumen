@@ -420,8 +420,8 @@ func TestUpgradeFromV18KeepsEventNamesAndBuiltinIdentity(t *testing.T) {
 	defer st.Close()
 	var version int
 	check(t, st.r.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version))
-	if names, _ := migrationFS.ReadDir("migrations"); version != len(names) {
-		t.Fatalf("user_version = %d after the upgrade, want %d", version, len(names))
+	if want := latestMigration(t); version != want {
+		t.Fatalf("user_version = %d after the upgrade, want %d", version, want)
 	}
 	var tables int
 	check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE name = 'event_names'").Scan(&tables))

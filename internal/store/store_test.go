@@ -130,9 +130,15 @@ func TestClusterDataReadsCorrectionsFromItsFacesSnapshot(t *testing.T) {
 	}
 }
 
-func TestReopenKeepsSchemaVersion(t *testing.T) {
-	names, _ := fs.Glob(migrationFS, "migrations/*.sql")
-	latest := 0 // the highest number: a number reserved for later work leaves a gap
+// latestMigration is the schema version a fully migrated store has: the
+// highest migration number (a number reserved for later work leaves a gap).
+func latestMigration(t *testing.T) int {
+	t.Helper()
+	names, err := fs.Glob(migrationFS, "migrations/*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := 0
 	for _, name := range names {
 		n, err := strconv.Atoi(strings.SplitN(filepath.Base(name), "_", 2)[0])
 		if err != nil {
@@ -140,6 +146,11 @@ func TestReopenKeepsSchemaVersion(t *testing.T) {
 		}
 		latest = max(latest, n)
 	}
+	return latest
+}
+
+func TestReopenKeepsSchemaVersion(t *testing.T) {
+	latest := latestMigration(t)
 	path := filepath.Join(t.TempDir(), "library.db")
 	for range 2 { // the second open must find nothing to migrate
 		st, err := Open(path)
