@@ -22,8 +22,10 @@ var (
 
 const pinIterations = 600_000
 
-// validPIN reports whether pin is core.PINMinLen to core.PINMaxLen digits.
-func validPIN(pin string) bool {
+// ValidPIN reports whether pin is core.PINMinLen to core.PINMaxLen digits.
+// The service checks it before it asks the user to sign in to Windows, so a
+// PIN that would be refused anyway costs them nothing.
+func ValidPIN(pin string) bool {
 	if len(pin) < core.PINMinLen || len(pin) > core.PINMaxLen {
 		return false
 	}
@@ -42,17 +44,27 @@ func (s *Store) HasBlockPIN(ctx context.Context) (bool, error) {
 	return exists, err
 }
 
+// hashPIN returns a fresh random salt and the slow hash of pin under it, both
+// hex encoded as they are stored.
+func hashPIN(pin string) (saltHex, hashHex string, err error) {
+	salt := make([]byte, 32)
+	if _, err := rand.Read(salt); err != nil {
+		return "", "", err
+	}
+	hash, err := pbkdf2.Key(sha256.New, pin, salt, pinIterations, 32)
+	if err != nil {
+		return "", "", err
+	}
+	return hex.EncodeToString(salt), hex.EncodeToString(hash), nil
+}
+
 // CreateBlockPIN stores a salted, deliberately slow PIN hash. It never stores
 // the PIN itself. The two settings are committed together.
 func (s *Store) CreateBlockPIN(ctx context.Context, pin string) error {
-	if !validPIN(pin) {
+	if !ValidPIN(pin) {
 		return ErrInvalidPIN
 	}
-	salt := make([]byte, 32)
-	if _, err := rand.Read(salt); err != nil {
-		return err
-	}
-	hash, err := pbkdf2.Key(sha256.New, pin, salt, pinIterations, 32)
+	saltHex, hashHex, err := hashPIN(pin)
 	if err != nil {
 		return err
 	}
@@ -64,7 +76,7 @@ func (s *Store) CreateBlockPIN(ctx context.Context, pin string) error {
 		if exists {
 			return ErrPINExists
 		}
-		for key, value := range map[string]string{"block_pin_salt": hex.EncodeToString(salt), "block_pin_hash": hex.EncodeToString(hash)} {
+		for key, value := range map[string]string{"block_pin_salt": saltHex, "block_pin_hash": hashHex} {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO settings(key, value) VALUES (?, ?)", key, value); err != nil {
 				return err
 			}
@@ -73,9 +85,41 @@ func (s *Store) CreateBlockPIN(ctx context.Context, pin string) error {
 	})
 }
 
+// ReplaceBlockPIN swaps the PIN for a new one: a new salt and hash, written
+// together in one transaction so no reader sees one without the other. It is
+// the second half of the forgotten-PIN reset (the service first has the user
+// sign in to Windows), so it never asks for the old PIN. Blocks are not
+// touched: they are rows of their own, and the PIN only guards the screen
+// that lists them. With no PIN to replace it fails with ErrNotFound rather
+// than creating one, so a reset can't be the way a PIN first comes to exist.
+func (s *Store) ReplaceBlockPIN(ctx context.Context, pin string) error {
+	if !ValidPIN(pin) {
+		return ErrInvalidPIN
+	}
+	saltHex, hashHex, err := hashPIN(pin)
+	if err != nil {
+		return err
+	}
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE settings SET value = CASE key WHEN 'block_pin_salt' THEN ? ELSE ? END
+			WHERE key IN ('block_pin_salt', 'block_pin_hash')`, saltHex, hashHex)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 2 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
 // VerifyBlockPIN compares in constant time. The service limits attempts.
 func (s *Store) VerifyBlockPIN(ctx context.Context, pin string) (bool, error) {
-	if !validPIN(pin) {
+	if !ValidPIN(pin) {
 		return false, nil
 	}
 	var saltHex, hashHex string

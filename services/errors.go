@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"lumen/internal/search"
+	"lumen/internal/signin"
 	"lumen/internal/store"
 )
 
@@ -42,6 +43,9 @@ const (
 	CodeUndoExpired     ErrorCode = "undo_expired"     // too late to undo that block
 	CodeInvalidBlock    ErrorCode = "invalid_block"    // that can't be blocked
 	CodeDeleteFailed    ErrorCode = "delete_failed"    // the Recycle Bin could not be used
+
+	CodeSigninFailed ErrorCode = "signin_failed"      // the Windows sign-in was cancelled, or wrong
+	CodeNoSignin     ErrorCode = "signin_unavailable" // this PC has no way to check a Windows sign-in
 )
 
 // ErrFolderNotFound means a folder to add does not exist (or is a file).
@@ -83,6 +87,8 @@ var errorCodes = []struct {
 	{ErrBlockUndoExpired, CodeUndoExpired},
 	{store.ErrInvalidBlock, CodeInvalidBlock},
 	{ErrDeleteFailed, CodeDeleteFailed},
+	{signin.ErrNotVerified, CodeSigninFailed},
+	{signin.ErrUnavailable, CodeNoSignin},
 }
 
 // Failure is what a failed call gives the UI besides its message (the

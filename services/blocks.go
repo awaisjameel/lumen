@@ -5,7 +5,10 @@ import (
 	"errors"
 	"time"
 
+	"github.com/wailsapp/wails/v3/pkg/application"
+
 	"lumen/internal/core"
+	"lumen/internal/signin"
 	"lumen/internal/store"
 )
 
@@ -79,11 +82,65 @@ func (s *LibraryService) UnlockBlocks(ctx context.Context, pin string) error {
 	return nil
 }
 
+// resetReason is what the Windows sign-in prompt says it is for.
+const resetReason = "Sign in to choose a new PIN for Lumen's Blocked screen."
+
 // ResetBlockPIN replaces a forgotten PIN after the user signs in to Windows
 // (Windows Hello, or the PC's password). Blocks are kept, and the list
 // stays locked until the new PIN unlocks it.
+//
+// The PIN's format is checked before Windows is asked, so nobody signs in for
+// a PIN that would be refused. The attempt counter and cooldown are left as
+// they are: a reset is no way round them, and a failed sign-in is not a wrong
+// PIN, so it adds nothing to them either. The prompt can take as long as the
+// user does, so the lock on the Blocked state is not held while it is open.
 func (s *LibraryService) ResetBlockPIN(ctx context.Context, pin string) error {
-	return unbuilt(ctx, pin) // Phase 5 unit U5
+	if !store.ValidPIN(pin) {
+		return store.ErrInvalidPIN
+	}
+	configured, err := s.store.HasBlockPIN(ctx)
+	if err != nil {
+		return err
+	}
+	if !configured {
+		return store.ErrNotFound
+	}
+	verify := s.verify
+	if verify == nil {
+		verify = signin.Verify
+	}
+	if err := verify(ctx, lumenWindow(), resetReason); err != nil {
+		return err
+	}
+	s.blocked.Lock()
+	defer s.blocked.Unlock()
+	if err := s.store.ReplaceBlockPIN(ctx, pin); err != nil {
+		return err
+	}
+	s.blocked.unlocked = false
+	return nil
+}
+
+// lumenWindow is the native handle of Lumen's window, which the Windows
+// sign-in prompt belongs to so that it opens in front of it. It is the window
+// Wails reports as current (the one the user just pressed the button in),
+// or else the first window there is, or 0 when there is none, as in tests:
+// the prompt then has no owner.
+func lumenWindow() uintptr {
+	app := application.Get()
+	if app == nil {
+		return 0
+	}
+	w := app.Window.Current()
+	if w == nil {
+		if all := app.Window.GetAll(); len(all) > 0 {
+			w = all[0]
+		}
+	}
+	if w == nil {
+		return 0
+	}
+	return uintptr(w.NativeWindow())
 }
 
 // LockBlocks closes access to the private list as the user leaves the screen.

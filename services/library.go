@@ -68,6 +68,9 @@ type LibraryService struct {
 		lastID   int64
 		lastAt   time.Time
 	}
+	// verify is the Windows sign-in of ResetBlockPIN; nil means signin.Verify.
+	// A test sets it to answer for the dialog it cannot show.
+	verify func(ctx context.Context, owner uintptr, reason string) error
 }
 
 // NewLibraryService returns the library service.
