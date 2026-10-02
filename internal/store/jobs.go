@@ -1,11 +1,13 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -584,44 +586,107 @@ func (s *Store) CountPending(ctx context.Context, stages ...core.Stage) (int, er
 	return n, err
 }
 
-// JobCounts returns how many visible jobs are still to do per stage, and how
-// many files failed or were skipped (a file is counted once, however many of
+// QueueCounts is what the job queue holds for the visible assets.
+type QueueCounts struct {
+	Pending map[core.Stage]int // jobs still to do per stage, photos and videos
+	Videos  map[core.Stage]int // of Pending, the jobs on videos
+	Failed  int                // files with a stage that failed
+	Skipped int                // files with a stage this PC can't run
+}
+
+// JobCounts returns how many visible jobs are still to do per stage, and of
+// them on videos (a stage of its own for the AI), and how many files failed
+// or were skipped (a file is counted once, however many of
 // its stages did: the UI says how many files couldn't be read). Hidden
 // assets keep being indexed, but their jobs must not appear in the UI's
 // progress counts.
-func (s *Store) JobCounts(ctx context.Context) (pending map[core.Stage]int, failed, skipped int, err error) {
-	rows, err := s.r.QueryContext(ctx, `SELECT j.stage, j.status, count(*) FROM asset_jobs j
+func (s *Store) JobCounts(ctx context.Context) (QueueCounts, error) {
+	rows, err := s.r.QueryContext(ctx, `SELECT j.stage, j.kind, j.status, count(*) FROM asset_jobs j
 		JOIN assets a ON a.id = j.asset_id
 		WHERE j.status IN ('pending', 'waiting') AND `+visibleA+`
-		GROUP BY j.stage, j.status
+		GROUP BY j.stage, j.kind, j.status
 		UNION ALL
-		SELECT '', j.status, count(DISTINCT j.asset_id) FROM asset_jobs j
+		SELECT '', '', j.status, count(DISTINCT j.asset_id) FROM asset_jobs j
 		JOIN assets a ON a.id = j.asset_id
 		WHERE j.status IN ('error', 'skipped') AND `+visibleA+`
 		GROUP BY j.status`)
 	if err != nil {
-		return nil, 0, 0, err
+		return QueueCounts{}, err
 	}
 	defer rows.Close()
-	pending = map[core.Stage]int{}
+	c := QueueCounts{Pending: map[core.Stage]int{}, Videos: map[core.Stage]int{}}
 	for rows.Next() {
 		var stage core.Stage
+		var kind core.Kind
 		var status core.JobStatus
 		var n int
-		if err := rows.Scan(&stage, &status, &n); err != nil {
-			return nil, 0, 0, err
+		if err := rows.Scan(&stage, &kind, &status, &n); err != nil {
+			return QueueCounts{}, err
 		}
 		switch status {
 		case core.JobPending, core.JobWaiting:
-			pending[stage] += n
+			c.Pending[stage] += n
+			if kind == core.KindVideo {
+				c.Videos[stage] += n
+			}
 		case core.JobSkipped:
-			skipped += n
+			c.Skipped += n
 		case core.JobError:
-			failed += n
+			c.Failed += n
 		case core.JobDone: // not selected
 		}
 	}
-	return pending, failed, skipped, rows.Err()
+	return c, rows.Err()
+}
+
+// failureExamples is how many files Failures lists for each reason.
+const failureExamples = 3
+
+// failedJob is a failed job of a visible asset, as Failures reads it.
+type failedJob struct {
+	assetID   int64
+	stage     core.Stage
+	path, msg string // the file the job read (primaryFile), and what it failed with
+}
+
+// Failures says why the visible files counted as failed (JobCounts) couldn't
+// be read, by reason, the commonest first. A file is counted once, by the
+// first stage that failed on it: the later ones fail for the same cause.
+func (s *Store) Failures(ctx context.Context) ([]core.FailureGroup, error) {
+	jobs, err := queryAll(ctx, s.r, func(r *sql.Rows) (j failedJob, err error) {
+		err = r.Scan(&j.assetID, &j.stage, &j.msg, &j.path)
+		return j, err
+	}, `SELECT j.asset_id, j.stage, COALESCE(j.error, ''), COALESCE(f.path, '')
+		FROM asset_jobs j JOIN assets a ON a.id = j.asset_id
+		LEFT JOIN files f ON f.id = `+primaryFile+`
+		WHERE j.status = 'error' AND `+visibleA)
+	if err != nil {
+		return nil, err
+	}
+	first := map[int64]failedJob{}
+	for _, j := range jobs {
+		if f, ok := first[j.assetID]; !ok || slices.Index(queuedStages, j.stage) < slices.Index(queuedStages, f.stage) {
+			first[j.assetID] = j
+		}
+	}
+	files := slices.SortedFunc(maps.Values(first), func(a, b failedJob) int { return strings.Compare(a.path, b.path) })
+	var groups []core.FailureGroup
+	for _, f := range files {
+		reason := core.FailReasonOf(f.msg)
+		i := slices.IndexFunc(groups, func(g core.FailureGroup) bool { return g.Reason == reason })
+		if i < 0 {
+			i = len(groups)
+			groups = append(groups, core.FailureGroup{Reason: reason, Files: []core.FailedFile{}})
+		}
+		g := &groups[i]
+		g.Count++
+		if len(g.Files) < failureExamples {
+			msg := strings.ReplaceAll(f.msg, f.path, filepath.Base(f.path)) // the name says enough
+			g.Files = append(g.Files, core.FailedFile{Path: f.path, Error: msg})
+		}
+	}
+	slices.SortStableFunc(groups, func(a, b core.FailureGroup) int { return cmp.Compare(b.Count, a.Count) })
+	return groups, nil
 }
 
 // CPUThreads is how many CPU threads indexing may keep busy: the user's

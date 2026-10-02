@@ -169,6 +169,13 @@ export function ExportXMPNow(): $CancellablePromise<core$0.XMPExport> {
 }
 
 /**
+ * Failures says why the files that couldn't be read failed, by reason.
+ */
+export function Failures(): $CancellablePromise<core$0.FailureGroup[] | null> {
+    return $Call.ByID(129227502);
+}
+
+/**
  * Focus tells the indexer which days are on screen so they are processed first.
  */
 export function Focus($from: string, to: string): $CancellablePromise<void> {

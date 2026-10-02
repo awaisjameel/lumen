@@ -47,12 +47,16 @@ const favourites = { kind: 'timeline', view: { filter: Filter.FilterFavourites }
 const result = (id: number): DayItems[] => [{ day, items: [{ id, w: 100, h: 100, t: 1 }] }]
 const progress: Progress = {
   scanning: false,
+  scanPath: '',
+  scanSeen: 0,
   total: 0,
   metadata: 0,
   thumbnail: 0,
   embedding: 0,
   faces: 0,
+  videos: 0,
   ocr: 0,
+  working: { metadata: false, thumbnail: false, embedding: false, faces: false, videos: false, ocr: false },
   errors: 0,
   skipped: 0,
   paused: false,

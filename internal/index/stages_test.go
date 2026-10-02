@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"lumen/internal/core"
@@ -100,5 +101,41 @@ func TestCancelledStageDoesNotFetchMoreJobs(t *testing.T) {
 	})
 	if fetches != 0 {
 		t.Fatalf("fetched %d times after cancellation", fetches)
+	}
+}
+
+func TestStageIsAtWorkFromItsBatchUntilItRunsOut(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	working := func() core.Working { ix.mu.Lock(); defer ix.mu.Unlock(); return ix.workingNow() }
+	var during, paused core.Working
+	var fetches atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runStage(ctx, ix, stage[int]{
+			name: core.StageThumbnail, work: workThumbnail, wake: make(chan struct{}),
+			fetch: func(context.Context, int) ([]store.JobItem, error) {
+				if fetches.Add(1) == 1 {
+					return []store.JobItem{{AssetID: 1}}, nil
+				}
+				return nil, nil
+			},
+			process: func(context.Context, []store.JobItem) ([]int, error) {
+				during = working()
+				ix.SetPaused(true) // a held stage finishes its batch, but isn't at work
+				paused = working()
+				ix.SetPaused(false)
+				return []int{1}, nil
+			},
+			save: func(context.Context, []int) error { return nil },
+		})
+	}()
+	eventually(t, "the stage to run out", func() bool { return fetches.Load() > 1 && !working().Thumbnail })
+	cancel()
+	<-done // during and paused are written before it closes
+	if during != (core.Working{Thumbnail: true}) || paused != (core.Working{}) {
+		t.Fatalf("at work during its batch: %+v, while paused: %+v; want only thumbnails, then nothing", during, paused)
 	}
 }

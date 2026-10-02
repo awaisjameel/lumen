@@ -22,6 +22,7 @@ import (
 // stage describes one step of the pipeline for runStage.
 type stage[R any] struct {
 	name  core.Stage
+	work  uint32          // its bit in Indexer.working
 	batch int             // jobs fetched per round
 	wake  chan struct{}   // nudged when new work may exist
 	next  []chan struct{} // nudged after a save: the stages that wait for this one
@@ -96,9 +97,11 @@ func (b *stageBackoff) fail(now time.Time) time.Duration {
 // runStage drains one stage's job queue: fetch a batch (what the user is
 // looking at first, then newest first), process it, save the results in one
 // transaction, repeat. With nothing to do it sleeps until woken. Batches are
-// small so the UI sees results stream in and focus changes apply fast.
+// small so the UI sees results stream in and focus changes apply fast. It is
+// at work (Indexer.working) from a batch it fetches until it runs out or fails.
 func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 	var backoff stageBackoff
+	defer ix.setWorking(s.work, false)
 	for {
 		if !ix.waitTurn(ctx, s.name, s.model) {
 			return
@@ -116,6 +119,7 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 			sleep(ctx, retryDelay)
 			continue
 		}
+		ix.setWorking(s.work, len(items) > 0)
 		if len(items) == 0 {
 			if s.model != nil {
 				s.model.releaseIdle()
@@ -150,6 +154,7 @@ func runStage[R any](ctx context.Context, ix *Indexer, s stage[R]) {
 			if s.fail != nil {
 				s.fail(err.Error())
 			}
+			ix.setWorking(s.work, false)
 			sleep(ctx, delay)
 			continue
 		}

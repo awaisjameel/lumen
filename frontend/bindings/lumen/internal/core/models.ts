@@ -482,6 +482,60 @@ export interface Face {
 }
 
 /**
+ * FailReason is why a file couldn't be read, in the user's terms.
+ */
+export enum FailReason {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The reasons.
+     *
+     * not a readable photo or video: damaged, or another kind of file with its extension
+     */
+    FailDamaged = "damaged",
+
+    /**
+     * reading it took longer than a file may
+     */
+    FailSlow = "slow",
+
+    /**
+     * another app holds it, or Windows doesn't allow reading it
+     */
+    FailLocked = "locked",
+    FailOther = "other",
+};
+
+/**
+ * FailedFile is one file that couldn't be read.
+ */
+export interface FailedFile {
+    "path": string;
+
+    /**
+     * what the decoder said, with the path shortened to the file's name
+     */
+    "error": string;
+}
+
+/**
+ * FailureGroup is the files that couldn't be read for one reason: what the
+ * status's "couldn't be read" count is made of.
+ */
+export interface FailureGroup {
+    "reason": FailReason;
+    "count": number;
+
+    /**
+     * the first few, as examples
+     */
+    "files": FailedFile[] | null;
+}
+
+/**
  * Filter narrows the grid to a subset of the library.
  */
 export enum Filter {
@@ -752,6 +806,16 @@ export interface Progress {
     "scanning": boolean;
 
     /**
+     * the folder being looked through, while scanning
+     */
+    "scanPath": string;
+
+    /**
+     * photos and videos found in it so far
+     */
+    "scanSeen": number;
+
+    /**
      * assets in the library
      */
     "total": number;
@@ -767,19 +831,29 @@ export interface Progress {
     "thumbnail": number;
 
     /**
-     * assets still waiting for the AI
+     * photos still waiting for the AI
      */
     "embedding": number;
 
     /**
-     * assets still waiting for face recognition
+     * photos still waiting for face recognition
      */
     "faces": number;
+
+    /**
+     * videos still waiting for the AI or face recognition
+     */
+    "videos": number;
 
     /**
      * photos still waiting for their text to be read
      */
     "ocr": number;
+
+    /**
+     * the stages at work right now; the rest wait their turn
+     */
+    "working": Working;
     "errors": number;
     "skipped": number;
     "paused": boolean;
@@ -992,6 +1066,32 @@ export interface View {
      * 0 = any event
      */
     "event"?: number;
+}
+
+/**
+ * Working says which stages are at work right now. A stage with files left
+ * but not at work is waiting: for an earlier stage to finish them, for mains
+ * power, or to try its model again.
+ */
+export interface Working {
+    "metadata": boolean;
+    "thumbnail": boolean;
+
+    /**
+     * on photos
+     */
+    "embedding": boolean;
+
+    /**
+     * on photos
+     */
+    "faces": boolean;
+
+    /**
+     * the AI and face recognition, on videos' frames
+     */
+    "videos": boolean;
+    "ocr": boolean;
 }
 
 /**

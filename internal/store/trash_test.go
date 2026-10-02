@@ -191,9 +191,9 @@ var trashReaders = []struct {
 	{"the progress counts", 1, func(t *testing.T, f trashFixture) int {
 		t.Helper()
 		check(t, errOf(f.st.w.ExecContext(f.ctx, "UPDATE asset_jobs SET status = 'pending' WHERE stage = 'embedding'")))
-		pending, _, _, err := f.st.JobCounts(f.ctx)
+		c, err := f.st.JobCounts(f.ctx)
 		check(t, err)
-		return pending[core.StageEmbedding]
+		return c.Pending[core.StageEmbedding]
 	}},
 }
 

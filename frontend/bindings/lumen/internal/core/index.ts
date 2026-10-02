@@ -8,6 +8,7 @@ export {
     DateSource,
     Device,
     DuplicateKind,
+    FailReason,
     Filter,
     Kind,
     OrganiseMoveState,
@@ -35,6 +36,8 @@ export type {
     DuplicateItem,
     Event,
     Face,
+    FailedFile,
+    FailureGroup,
     GridItem,
     OrganiseMove,
     OrganisePlan,
@@ -49,5 +52,6 @@ export type {
     Tag,
     Video,
     View,
+    Working,
     XMPExport
 } from "./models.js";

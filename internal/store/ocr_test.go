@@ -553,10 +553,10 @@ func TestProgressCountsOnlyVisiblePhotosWaitingForText(t *testing.T) {
 	_, err := st.SetBlock(ctx, core.BlockAsset, ids[3], "", core.BlockPhotos)
 	check(t, err)
 	saveText(t, st, ids[4], "words")
-	pending, _, _, err := st.JobCounts(ctx)
+	c, err := st.JobCounts(ctx)
 	check(t, err)
-	if pending[core.StageOCR] != 1 {
-		t.Fatalf("JobCounts: %d photos waiting for text, want the one visible photo", pending[core.StageOCR])
+	if c.Pending[core.StageOCR] != 1 {
+		t.Fatalf("JobCounts: %d photos waiting for text, want the one visible photo", c.Pending[core.StageOCR])
 	}
 	if n, err := st.CountPending(ctx, core.StageOCR); err != nil || n != 1 {
 		t.Fatalf("CountPending = %d, %v; want 1", n, err)

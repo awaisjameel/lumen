@@ -12,6 +12,7 @@ import {
   DateSource,
   Device,
   DuplicateKind,
+  FailReason,
   Filter,
   Kind,
   OrganiseMoveState,
@@ -40,6 +41,8 @@ import type {
   DuplicateGroup as RawDuplicateGroup,
   DuplicateItem as RawDuplicateItem,
   Event,
+  FailedFile,
+  FailureGroup as RawFailureGroup,
   Face,
   GridItem,
   Person,
@@ -59,6 +62,7 @@ export {
   DateSource,
   Device,
   DuplicateKind,
+  FailReason,
   Filter,
   Kind,
   OrganiseMoveState,
@@ -79,6 +83,7 @@ export type {
   GridItem,
   Person,
   Event,
+  FailedFile,
   OrganiseMove,
   OrganiseProgress,
   OrganiseRun,
@@ -112,6 +117,9 @@ export type DiskDeletion = NonNullLists<RawDiskDeletion, 'kept'>
 export type CoveredItem = NonNullLists<RawCoveredItem, 'hiddenBy'>
 /** An organise preview: the moves a template would make. */
 export type OrganisePlan = NonNullLists<RawOrganisePlan, 'moves'>
+
+/** The files that couldn't be read for one reason. */
+export type FailureGroup = NonNullLists<RawFailureGroup, 'files'>
 
 // Constants of the engine's that are not part of the generated bindings.
 // services/contract_test.go checks each against its Go original.
@@ -282,6 +290,8 @@ export const engine = {
 
   progress: (): Promise<Progress> => LibraryService.Progress(),
   setPaused: (paused: boolean): Promise<void> => LibraryService.SetPaused(paused),
+  failures: async (): Promise<FailureGroup[]> =>
+    ((await LibraryService.Failures()) ?? []).map((g) => ({ ...g, files: g.files ?? [] })),
   settings: (): Promise<Settings> => LibraryService.Settings(),
   setVideos: (on: boolean): Promise<void> => LibraryService.SetVideos(on),
   setAIOnBattery: (on: boolean): Promise<void> => LibraryService.SetAIOnBattery(on),

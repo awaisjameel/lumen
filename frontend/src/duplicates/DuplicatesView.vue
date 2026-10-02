@@ -12,7 +12,7 @@ import type { DuplicateGroup, DuplicateItem } from '../bridge'
 import SearchBox from '../search/SearchBox.vue'
 import EmptyState from '../shared/EmptyState.vue'
 import { errorText, notice } from '../shared/errors'
-import { bytes } from '../shared/format'
+import { bytes, fileName } from '../shared/format'
 import Icon from '../shared/Icon.vue'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
@@ -127,10 +127,6 @@ async function refresh() {
 onMounted(() => void refresh())
 useLiveReload(duplicates.load, (c) => c.assets || c.thumbs) // groups change as thumbnails are made
 
-function filename(path: string): string {
-  return path.split(/[\\/]/).pop() || path
-}
-
 async function showPath(item: DuplicateItem, path: string) {
   error.value = ''
   try {
@@ -224,7 +220,7 @@ async function openPreview(item: DuplicateItem) {
               <div v-for="item in row.group.items" :key="item.id" class="item">
                 <button
                   class="preview-button"
-                  :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
+                  :aria-label="t('duplicates.preview', { name: fileName(item.paths[0] ?? '') })"
                   @click="openPreview(item)"
                 >
                   <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
@@ -267,13 +263,13 @@ async function openPreview(item: DuplicateItem) {
               <div v-for="item in row.group.items" :key="item.id" class="similar-item">
                 <button
                   class="preview-button"
-                  :aria-label="t('duplicates.preview', { name: filename(item.paths[0] ?? '') })"
+                  :aria-label="t('duplicates.preview', { name: fileName(item.paths[0] ?? '') })"
                   @click="openPreview(item)"
                 >
                   <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
                   <span v-else class="ph" />
                 </button>
-                <strong :title="item.paths[0]">{{ filename(item.paths[0] ?? '') }}</strong>
+                <strong :title="item.paths[0]">{{ fileName(item.paths[0] ?? '') }}</strong>
                 <span class="muted">{{
                   t('duplicates.photoSize', { w: item.width, h: item.height, size: bytes(item.size) })
                 }}</span>
@@ -281,7 +277,7 @@ async function openPreview(item: DuplicateItem) {
                   <input
                     type="radio"
                     :name="`keep-${row.key}`"
-                    :aria-label="t('duplicates.keepNamed', { name: filename(item.paths[0] ?? '') })"
+                    :aria-label="t('duplicates.keepNamed', { name: fileName(item.paths[0] ?? '') })"
                     :checked="choices.keeperOf(row.group)?.item.id === item.id"
                     @change="choices.choose(row.group, item)"
                   />
@@ -301,7 +297,7 @@ async function openPreview(item: DuplicateItem) {
             <div class="group-actions">
               <button
                 class="btn"
-                :aria-label="t('duplicates.reviewNamed', { name: filename(row.group.items[0]?.paths[0] ?? '') })"
+                :aria-label="t('duplicates.reviewNamed', { name: fileName(row.group.items[0]?.paths[0] ?? '') })"
                 :disabled="acting || !choices.reviewOf(row.group)"
                 @click="startReview(row.group)"
               >
@@ -322,14 +318,14 @@ async function openPreview(item: DuplicateItem) {
     <dialog
       ref="previewDialog"
       class="dialog preview-dialog"
-      :aria-label="preview ? filename(preview.paths[0] ?? '') : undefined"
+      :aria-label="preview ? fileName(preview.paths[0] ?? '') : undefined"
       @close="preview = null"
     >
       <template v-if="preview">
         <button class="icon-btn close" :aria-label="t('common.close')" @click="previewDialog?.close()">
           <Icon name="close" />
         </button>
-        <img :src="thumbUrl(preview.id, preview.thumb, THUMB_LARGE)" :alt="filename(preview.paths[0] ?? '')" />
+        <img :src="thumbUrl(preview.id, preview.thumb, THUMB_LARGE)" :alt="fileName(preview.paths[0] ?? '')" />
         <p v-for="path in preview.paths" :key="path">{{ path }}</p>
       </template>
     </dialog>

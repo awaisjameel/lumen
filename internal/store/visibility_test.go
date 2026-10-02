@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -141,10 +143,59 @@ func TestJobCountsCountAFileThatFailsInSeveralStagesOnce(t *testing.T) {
 	check(t, errOf(st.w.ExecContext(ctx, `UPDATE asset_jobs SET status = CASE
 		WHEN asset_id = (SELECT asset_id FROM files WHERE path = ?) THEN 'error'
 		WHEN stage IN ('metadata', 'thumbnail') THEN 'skipped' ELSE 'done' END`, `C:\Photos\broken.mts`)))
-	pending, failed, skipped, err := st.JobCounts(ctx)
+	c, err := st.JobCounts(ctx)
 	check(t, err)
-	if len(pending) != 0 || failed != 1 || skipped != 1 {
-		t.Fatalf("counts = %v, failed %d, skipped %d; want nothing pending, 1 failed, 1 skipped", pending, failed, skipped)
+	if len(c.Pending) != 0 || c.Failed != 1 || c.Skipped != 1 {
+		t.Fatalf("counts = %+v; want nothing pending, 1 failed, 1 skipped", c)
+	}
+}
+
+func TestFailuresSayWhyEachFileFailedOnce(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{
+		item(src.ID, `C:\Photos\module.mts`, "module"),
+		item(src.ID, `C:\Photos\film.jpg`, "film"),
+		item(src.ID, `C:\Photos\fine.jpg`, "fine"),
+	})))
+	// A copy found later: the jobs read the first file, so it names that one.
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\0\module.mts`, "module")})))
+	fail := func(path string, stage core.Stage, msg string) {
+		t.Helper()
+		check(t, errOf(st.w.ExecContext(ctx, `UPDATE asset_jobs SET status = 'error', error = ?
+			WHERE stage = ? AND asset_id = (SELECT asset_id FROM files WHERE path = ?)`, msg, stage, path)))
+	}
+	// The module failed first in metadata; its thumbnail failed after, for the same cause.
+	fail(`C:\Photos\module.mts`, core.StageMetadata, `ffprobe: C:\Photos\module.mts: Invalid data found when processing input`)
+	fail(`C:\Photos\module.mts`, core.StageThumbnail, `context deadline exceeded`)
+	fail(`C:\Photos\film.jpg`, core.StageEmbedding, `sample video C:\Photos\film.jpg: context deadline exceeded`)
+	groups, err := st.Failures(ctx)
+	check(t, err)
+	want := []core.FailureGroup{
+		{Reason: core.FailDamaged, Count: 1, Files: []core.FailedFile{{Path: `C:\Photos\module.mts`, Error: `ffprobe: module.mts: Invalid data found when processing input`}}},
+		{Reason: core.FailSlow, Count: 1, Files: []core.FailedFile{{Path: `C:\Photos\film.jpg`, Error: `sample video film.jpg: context deadline exceeded`}}},
+	}
+	slices.SortFunc(groups, func(a, b core.FailureGroup) int { return strings.Compare(string(a.Reason), string(b.Reason)) })
+	if !reflect.DeepEqual(groups, want) {
+		t.Fatalf("Failures = %+v\nwant %+v", groups, want)
+	}
+	if c, _ := st.JobCounts(ctx); c.Failed != 2 {
+		t.Fatalf("JobCounts says %d failed, Failures 2", c.Failed)
+	}
+}
+
+func TestJobCountsSayWhichJobsAreOnVideos(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	clip := item(src.ID, `C:\Photos\clip.mp4`, "clip")
+	clip.Kind = core.KindVideo
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\a.jpg`, "a"), item(src.ID, `C:\Photos\b.jpg`, "b"), clip})))
+	c, err := st.JobCounts(ctx)
+	check(t, err)
+	if c.Pending[core.StageEmbedding] != 3 || c.Videos[core.StageEmbedding] != 1 || c.Videos[core.StageMetadata] != 1 {
+		t.Fatalf("counts = %+v; want 3 to embed, 1 of them a video, and the video's metadata", c)
 	}
 }
 
@@ -165,10 +216,10 @@ func TestJobCountsOnlyIncludeVisibleAssets(t *testing.T) {
 				WHEN 'embedding' THEN 'pending' ELSE 'waiting' END`)))
 			counts := func(want int) {
 				t.Helper()
-				pending, failed, skipped, err := st.JobCounts(ctx)
+				c, err := st.JobCounts(ctx)
 				check(t, err)
-				if len(pending) != 2 || pending[core.StageEmbedding] != want || pending[core.StageFaces] != want || failed != want || skipped != want {
-					t.Fatalf("counts = %v, failed %d, skipped %d; want %d of each", pending, failed, skipped, want)
+				if len(c.Pending) != 2 || c.Pending[core.StageEmbedding] != want || c.Pending[core.StageFaces] != want || c.Failed != want || c.Skipped != want {
+					t.Fatalf("counts = %+v; want %d of each", c, want)
 				}
 			}
 			counts(2)

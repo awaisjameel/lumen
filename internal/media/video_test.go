@@ -166,6 +166,37 @@ func TestLongVideosAreSampledBySeekingToEachPoint(t *testing.T) {
 	}
 }
 
+// A recording streamed to disk as it was made (a browser's MediaRecorder)
+// doesn't say how long it is: there is nothing to seek to, only the start.
+func TestVideoOfUnknownLengthGivesItsFirstFrame(t *testing.T) {
+	ffmpeg := testenv.File(t, "ffmpeg", "ffmpeg.exe")
+	ffprobe := testenv.File(t, "ffmpeg", "ffprobe.exe")
+	d := Decoders{FFmpeg: ffmpeg, FFprobe: ffprobe}
+	path := filepath.Join(t.TempDir(), "recording.mkv")
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	cmd := exec.CommandContext(t.Context(), ffmpeg, "-v", "error", "-f", "lavfi", "-i",
+		"testsrc2=size=64x48:rate=5", "-t", "4", "-c:v", "mpeg4", "-g", "5", "-f", "matroska", "-live", "1", "pipe:1")
+	cmd.Stdout = out
+	hideWindow(cmd)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("make recording: %v", err)
+	}
+	if v, err := d.probe(t.Context(), path); err != nil || v.Duration != 0 {
+		t.Fatalf("probe = %+v, %v; want no length", v, err)
+	}
+	var frames []Frame
+	if err := d.Frames(t.Context(), path, 3, 64, func(f Frame) error { frames = append(frames, f); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := frameTimes(frames); !slices.Equal(got, []int64{0}) {
+		t.Fatalf("frame times %v, want the first", got)
+	}
+}
+
 func frameTimes(frames []Frame) []int64 {
 	times := make([]int64, len(frames))
 	for i, f := range frames {
