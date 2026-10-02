@@ -838,3 +838,31 @@ func TestABlockedPersonRuleAlbumDoesNotHideAPhotoOnlyAFaceCoveredByLabelModeLink
 		t.Fatalf("shown = %v, want [true false true]", got)
 	}
 }
+
+func TestAFaceCoveredByALabelModeBlockIsNeverExportedToASidecar(t *testing.T) {
+	l := newFaceLibrary(t, 2)
+	l.save(t, "m1", 0, faceAt(0.1, 0), faceAt(0.5, 170))
+	l.save(t, "m1", 1, faceAt(0.1, 0))
+	_, err := l.st.NameFaces(l.ctx, []int64{l.faceID(t, 0, 0.1), l.faceID(t, 1, 0.1)}, "Ali")
+	check(t, err)
+	_, err = l.st.NameFaces(l.ctx, []int64{l.faceID(t, 0, 0.5)}, "Sara")
+	check(t, err)
+	_, _, err = l.st.SetFaceBlock(l.ctx, l.faceID(t, 0, 0.1), core.BlockLabel, false, false)
+	check(t, err)
+	batch, err := l.st.XMPAssets(l.ctx, 0, 10)
+	check(t, err)
+	names := map[int64][]string{}
+	for _, a := range batch.Assets {
+		for _, f := range a.Faces {
+			names[a.ID] = append(names[a.ID], f.Name)
+		}
+	}
+	// The first photo's Ali is covered, so only Sara is exported there; the
+	// second photo's Ali is another face, not covered.
+	if got := names[l.assets[0]]; !slices.Equal(got, []string{"Sara"}) {
+		t.Fatalf("first photo exports %v, want [Sara]", got)
+	}
+	if got := names[l.assets[1]]; !slices.Equal(got, []string{"Ali"}) {
+		t.Fatalf("second photo exports %v, want [Ali]", got)
+	}
+}

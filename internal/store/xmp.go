@@ -128,7 +128,7 @@ func (s *Store) XMPAssets(ctx context.Context, after int64, limit int) (XMPBatch
 				(`+visible+` AND (favourite = 1 OR `+xmpHasRecord+`
 					OR EXISTS (SELECT 1 FROM asset_tags x WHERE x.asset_id = assets.id AND `+tagAppliesTo("x", tagConfidenceSQL)+`)
 					OR EXISTS (SELECT 1 FROM faces f JOIN people p ON p.id = f.person_id
-						WHERE f.asset_id = assets.id AND p.name IS NOT NULL)))
+						WHERE f.asset_id = assets.id AND p.name IS NOT NULL AND `+faceShown+`)))
 				OR (`+present+` AND `+xmpHasRecord+`))
 			ORDER BY id LIMIT ?2`, after, limit)
 		if err != nil || len(batch.Assets) == 0 {
@@ -223,7 +223,7 @@ func fillXMPAssets(ctx context.Context, tx *sql.Tx, assets []XMPAsset) error {
 		return f, err
 	}, `SELECT f.asset_id, p.name, f.x, f.y, f.w, f.h FROM faces f JOIN people p ON p.id = f.person_id
 		WHERE f.asset_id IN (SELECT value FROM json_each(?)) AND p.name IS NOT NULL
-		AND NOT `+labelBlocked(core.BlockPerson, "p.id")+`
+		AND NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND `+faceShown+` -- a covered face's name never leaves the app
 		ORDER BY f.asset_id, f.x, f.id`, string(list))
 	if err != nil {
 		return err
