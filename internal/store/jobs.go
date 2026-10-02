@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -643,9 +644,9 @@ const failureExamples = 3
 
 // failedJob is a failed job of a visible asset, as Failures reads it.
 type failedJob struct {
-	assetID     int64
-	stage       core.Stage
-	path, error string
+	assetID   int64
+	stage     core.Stage
+	path, msg string // the file the job read (primaryFile), and what it failed with
 }
 
 // Failures says why the visible files counted as failed (JobCounts) couldn't
@@ -653,26 +654,25 @@ type failedJob struct {
 // first stage that failed on it: the later ones fail for the same cause.
 func (s *Store) Failures(ctx context.Context) ([]core.FailureGroup, error) {
 	jobs, err := queryAll(ctx, s.r, func(r *sql.Rows) (j failedJob, err error) {
-		err = r.Scan(&j.assetID, &j.stage, &j.error, &j.path)
+		err = r.Scan(&j.assetID, &j.stage, &j.msg, &j.path)
 		return j, err
-	}, `SELECT j.asset_id, j.stage, COALESCE(j.error, ''),
-			COALESCE((SELECT min(f.path) FROM files f WHERE f.asset_id = j.asset_id), '')
+	}, `SELECT j.asset_id, j.stage, COALESCE(j.error, ''), COALESCE(f.path, '')
 		FROM asset_jobs j JOIN assets a ON a.id = j.asset_id
+		LEFT JOIN files f ON f.id = `+primaryFile+`
 		WHERE j.status = 'error' AND `+visibleA)
 	if err != nil {
 		return nil, err
 	}
-	order := append(slices.Clone(core.Stages), core.StageOCR)
 	first := map[int64]failedJob{}
 	for _, j := range jobs {
-		if f, ok := first[j.assetID]; !ok || slices.Index(order, j.stage) < slices.Index(order, f.stage) {
+		if f, ok := first[j.assetID]; !ok || slices.Index(queuedStages, j.stage) < slices.Index(queuedStages, f.stage) {
 			first[j.assetID] = j
 		}
 	}
 	files := slices.SortedFunc(maps.Values(first), func(a, b failedJob) int { return strings.Compare(a.path, b.path) })
 	var groups []core.FailureGroup
 	for _, f := range files {
-		reason := core.FailReasonOf(f.error)
+		reason := core.FailReasonOf(f.msg)
 		i := slices.IndexFunc(groups, func(g core.FailureGroup) bool { return g.Reason == reason })
 		if i < 0 {
 			i = len(groups)
@@ -681,11 +681,11 @@ func (s *Store) Failures(ctx context.Context) ([]core.FailureGroup, error) {
 		g := &groups[i]
 		g.Count++
 		if len(g.Files) < failureExamples {
-			msg := strings.ReplaceAll(f.error, f.path, filepath.Base(f.path)) // the name says enough
+			msg := strings.ReplaceAll(f.msg, f.path, filepath.Base(f.path)) // the name says enough
 			g.Files = append(g.Files, core.FailedFile{Path: f.path, Error: msg})
 		}
 	}
-	slices.SortStableFunc(groups, func(a, b core.FailureGroup) int { return b.Count - a.Count })
+	slices.SortStableFunc(groups, func(a, b core.FailureGroup) int { return cmp.Compare(b.Count, a.Count) })
 	return groups, nil
 }
 

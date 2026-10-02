@@ -74,7 +74,7 @@ func (d Decoders) frames(ctx context.Context, path string, n, side int, fn func(
 	if v.Duration > 0 {
 		every = float64(v.Duration) / 1000 / float64(max(n, 1))
 	}
-	if n > 1 && every >= seekSeconds {
+	if n > 1 && v.Duration > 0 && every >= seekSeconds { // nothing to seek to in a video of unknown length
 		got, err := d.seekSamples(ctx, path, v, side, n, every, fn)
 		switch {
 		case err != nil || got > 1:

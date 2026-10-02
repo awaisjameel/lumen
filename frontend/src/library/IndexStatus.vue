@@ -68,18 +68,19 @@ async function loadFailures() {
   if (!n || n === failuresAt) return
   failuresAt = n
   try {
-    failures.value = await engine.failures()
+    const groups = await engine.failures()
+    if (failuresAt === n) failures.value = groups // not overtaken by a read of a newer count
   } catch {
     failuresAt = 0 // read again next time
   }
 }
 
 const reasonText: Record<FailReason, MessageKey> = {
-  [FailReason.FailDamaged]: 'failure.damaged',
-  [FailReason.FailSlow]: 'failure.slow',
-  [FailReason.FailLocked]: 'failure.locked',
-  [FailReason.FailOther]: 'failure.other',
-  [FailReason.$zero]: 'failure.other', // never sent
+  [FailReason.FailDamaged]: 'status.failure.damaged',
+  [FailReason.FailSlow]: 'status.failure.slow',
+  [FailReason.FailLocked]: 'status.failure.locked',
+  [FailReason.FailOther]: 'status.failure.other',
+  [FailReason.$zero]: 'status.failure.other', // never sent; the engine names a reason for every file
 }
 
 function togglePause() {
@@ -243,16 +244,18 @@ function open() {
     opacity 0.12s,
     visibility 0s 0.12s;
 }
-.queue::after {
-  content: '';
-  position: absolute;
-  inset: 100% 0 auto;
-  height: 8px;
-}
 .status:is(:hover, :focus-within) .queue:not(.dismissed) {
   visibility: visible;
   opacity: 1;
   transition-delay: 0.2s;
+}
+/* The pointer crosses the gap to the list over this bridge. It hangs off the
+   card: off the list, which scrolls, it would be cut off and scroll with it. */
+.status:is(:hover, :focus-within):has(.queue:not(.dismissed))::before {
+  content: '';
+  position: absolute;
+  inset: auto 0 100%;
+  height: 8px;
 }
 .head {
   margin: 4px 0 2px;

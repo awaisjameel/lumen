@@ -159,6 +159,8 @@ func TestFailuresSayWhyEachFileFailedOnce(t *testing.T) {
 		item(src.ID, `C:\Photos\film.jpg`, "film"),
 		item(src.ID, `C:\Photos\fine.jpg`, "fine"),
 	})))
+	// A copy found later: the jobs read the first file, so it names that one.
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Photos\0\module.mts`, "module")})))
 	fail := func(path string, stage core.Stage, msg string) {
 		t.Helper()
 		check(t, errOf(st.w.ExecContext(ctx, `UPDATE asset_jobs SET status = 'error', error = ?

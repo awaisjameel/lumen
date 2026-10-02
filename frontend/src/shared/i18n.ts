@@ -224,10 +224,10 @@ const en = {
   'status.failedHint':
     'Lumen tries a file again when it changes, and a few times when it next looks through its folder.',
   'status.more': '{n} more',
-  'failure.damaged': 'Damaged, or not really a photo or video',
-  'failure.slow': 'Took too long to read',
-  'failure.locked': 'Locked by another app, or not allowed',
-  'failure.other': 'Something else went wrong',
+  'status.failure.damaged': 'Damaged, or not really a photo or video',
+  'status.failure.slow': 'Took too long to read',
+  'status.failure.locked': 'Locked by another app, or not allowed',
+  'status.failure.other': 'Something else went wrong',
   'status.skipped': '{n} can’t be shown on this PC yet',
   'status.items': { one: '1 item', other: '{n} items' },
 
