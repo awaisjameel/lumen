@@ -10,12 +10,57 @@ import (
 	"lumen/internal/store"
 )
 
-type fakeImageEncoder struct{ calls int }
+type fakeImageEncoder struct {
+	calls    int
+	threads  int    // CPU threads a run keeps busy: 0 is on the GPU
+	onEncode func() // called in each run, if set
+}
 
-func (*fakeImageEncoder) BatchSize() int { return 2 }
+func (*fakeImageEncoder) BatchSize() int    { return 2 }
+func (e *fakeImageEncoder) CPUThreads() int { return e.threads }
 func (e *fakeImageEncoder) Encode(inputs [][]byte) ([][]float32, error) {
 	e.calls++
+	if e.onEncode != nil {
+		e.onEncode()
+	}
 	return make([][]float32, len(inputs)), nil
+}
+
+func TestImageBatchOnTheCPUTakesItsThreadsFromTheBudget(t *testing.T) {
+	budget := newCPUBudget(4)
+	free := func() int {
+		budget.mu.Lock()
+		defer budget.mu.Unlock()
+		return budget.free
+	}
+	holding, release, err := budget.acquire(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name     string
+		ctx      context.Context
+		threads  int
+		wantFree int // during the run
+	}{
+		{"on the CPU", t.Context(), 2, 1},
+		{"on the GPU", t.Context(), 0, 3},
+		{"in work holding threads", holding, 2, 3},
+	} {
+		during := -1
+		enc := &fakeImageEncoder{threads: c.threads, onEncode: func() { during = free() }}
+		batch := &modelBatch{enc: enc, cpu: budget}
+		if err := batch.add(c.ctx, []byte{1}, func([]float32) {}); err != nil {
+			t.Fatal(err)
+		}
+		if err := batch.flush(c.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if during != c.wantFree || free() != 3 {
+			t.Errorf("%s: %d of 4 threads free during the run (want %d), %d after (want 3)", c.name, during, c.wantFree, free())
+		}
+	}
+	release()
 }
 
 func TestImageBatchDoesNotRunQueuedInputsAfterCancellation(t *testing.T) {

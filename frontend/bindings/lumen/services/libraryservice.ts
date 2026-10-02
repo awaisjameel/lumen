@@ -309,6 +309,14 @@ export function SetBlockMode(blockID: number, mode: core$0.BlockMode): $Cancella
 }
 
 /**
+ * SetCPUThreads sets how many CPU threads indexing may keep busy, held to
+ * what the machine has. It applies at once.
+ */
+export function SetCPUThreads(n: number): $CancellablePromise<void> {
+    return $Call.ByID(2879786364, n);
+}
+
+/**
  * SetEventGapHours sets the quiet period that splits detected events.
  */
 export function SetEventGapHours(hours: number): $CancellablePromise<void> {

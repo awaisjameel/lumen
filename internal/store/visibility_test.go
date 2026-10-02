@@ -129,6 +129,25 @@ func TestVisibilityRevisionFollowsOnlyVisibility(t *testing.T) {
 	}, true)
 }
 
+func TestJobCountsCountAFileThatFailsInSeveralStagesOnce(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{
+		item(src.ID, `C:\Photos\broken.mts`, "broken"),
+		item(src.ID, `C:\Photos\odd.jpg`, "odd"),
+	})))
+	// Every stage of one file failed; two of the other's were skipped.
+	check(t, errOf(st.w.ExecContext(ctx, `UPDATE asset_jobs SET status = CASE
+		WHEN asset_id = (SELECT asset_id FROM files WHERE path = ?) THEN 'error'
+		WHEN stage IN ('metadata', 'thumbnail') THEN 'skipped' ELSE 'done' END`, `C:\Photos\broken.mts`)))
+	pending, failed, skipped, err := st.JobCounts(ctx)
+	check(t, err)
+	if len(pending) != 0 || failed != 1 || skipped != 1 {
+		t.Fatalf("counts = %v, failed %d, skipped %d; want nothing pending, 1 failed, 1 skipped", pending, failed, skipped)
+	}
+}
+
 func TestJobCountsOnlyIncludeVisibleAssets(t *testing.T) {
 	for _, state := range []string{"blocked", "hidden", "trashed", "missing"} {
 		t.Run(state, func(t *testing.T) {

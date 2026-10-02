@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	ort "github.com/yalue/onnxruntime_go"
 
@@ -191,33 +192,69 @@ var errClosed = errors.New("model is not loaded")
 // the CPU. So they take the GPU only when it is free and the image model
 // isn't waiting for it (tryRun), and run on the CPU otherwise; the image
 // model then waits for one face run at most, a few milliseconds.
-var gpu struct {
+var gpu gpuGate
+
+// gpuRest is how long the GPU is left alone after each run, as a share of the
+// run, so the models keep it busy at most two thirds of the time. A laptop's
+// GPU is usually part of its processor and also draws the screen and every
+// program's windows: kept busy run after run by the models, it made them
+// stutter.
+const gpuRest = 0.5
+
+// gpuGate is the GPU's turns and rests.
+type gpuGate struct {
 	mu      sync.Mutex
 	waiting atomic.Int32 // run calls waiting for mu
+	rested  time.Time    // when the GPU may run again; guarded by mu
+}
+
+// run waits for the GPU's turn and rest, then calls fn on it.
+func (g *gpuGate) run(fn func()) {
+	g.waiting.Add(1)
+	g.mu.Lock()
+	g.waiting.Add(-1)
+	defer g.mu.Unlock()
+	time.Sleep(time.Until(g.rested))
+	g.timed(fn)
+}
+
+// try calls fn on the GPU if it is free, rested and no run is waiting for
+// it, reporting whether it did.
+func (g *gpuGate) try(fn func()) bool {
+	if g.waiting.Load() > 0 || !g.mu.TryLock() {
+		return false
+	}
+	defer g.mu.Unlock()
+	if time.Now().Before(g.rested) {
+		return false
+	}
+	g.timed(fn)
+	return true
+}
+
+// timed calls fn and sets the rest after it. Call with mu held.
+func (g *gpuGate) timed(fn func()) {
+	start := time.Now()
+	fn()
+	g.rested = time.Now().Add(time.Duration(gpuRest * float64(time.Since(start))))
 }
 
 // run feeds one input and returns each output's data (copied), in the order
 // openSession named them, waiting for the GPU if it runs there. Safe for
 // concurrent use.
-func (s *session) run(in ort.Value) ([][]float32, error) {
+func (s *session) run(in ort.Value) (out [][]float32, err error) {
 	if s != nil && s.device == GPU {
-		gpu.waiting.Add(1)
-		gpu.mu.Lock()
-		gpu.waiting.Add(-1)
-		defer gpu.mu.Unlock()
+		gpu.run(func() { out, err = s.exec(in) })
+		return out, err
 	}
 	return s.exec(in)
 }
 
-// tryRun is run on the GPU if it is free and no run is waiting for it,
-// reporting whether it ran.
+// tryRun is run on the GPU if it is free, rested and no run is waiting for
+// it, reporting whether it ran.
 func (s *session) tryRun(in ort.Value) (out [][]float32, ran bool, err error) {
-	if gpu.waiting.Load() > 0 || !gpu.mu.TryLock() {
-		return nil, false, nil
-	}
-	defer gpu.mu.Unlock()
-	out, err = s.exec(in)
-	return out, true, err
+	ran = gpu.try(func() { out, err = s.exec(in) })
+	return out, ran, err
 }
 
 func (s *session) exec(in ort.Value) ([][]float32, error) {

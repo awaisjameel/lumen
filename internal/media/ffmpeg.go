@@ -31,11 +31,22 @@ func ffmpegDecode(ctx context.Context, exe, path string, maxSide int) (pix []byt
 	return parsePPM(out)
 }
 
+// DecodeThreads is how many threads one FFmpeg run decodes with. Left to
+// itself FFmpeg starts one per CPU thread for every run, and the index runs
+// several at once: eleven took every thread of a 20-thread laptop and froze
+// it. The index counts each run as this many threads of its CPU budget.
+const DecodeThreads = 2
+
+// decodeArgs caps a decode's threads (DecodeThreads); they go before -i.
+func decodeArgs() []string {
+	return []string{"-threads", strconv.Itoa(DecodeThreads), "-filter_threads", "1", "-filter_complex_threads", "1"}
+}
+
 // runFFmpeg runs ffmpeg with args plus "write one frame as PPM to stdout".
 func runFFmpeg(ctx context.Context, exe string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, ffmpegTimeout)
 	defer cancel()
-	args = append(ffmpegArgs(args...), "-frames:v", "1", "-f", "image2pipe", "-c:v", "ppm", "-pix_fmt", "rgb24", "-")
+	args = append(ffmpegArgs(append(decodeArgs(), args...)...), "-frames:v", "1", "-f", "image2pipe", "-c:v", "ppm", "-pix_fmt", "rgb24", "-")
 	var stdout bytes.Buffer
 	if err := runTool(ctx, exe, &stdout, args...); err != nil {
 		return nil, err

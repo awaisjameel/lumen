@@ -23,6 +23,7 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 - **Natural-language search** from the search box (Ctrl+F): results best first, cut relative to the best match so a query matching nothing returns nothing; an in-memory int8 index answers in milliseconds
 - **Things**: about 180 built-in labels, the broad kind of each photo (People, Screenshots, Documents…), labels users add ("Eiffel Tower", found across the library at once), tags users add or remove on any photo (their edits always win), a confidence slider
 - AI work waits while on battery (a setting allows it), and pauses with the rest
+- Indexing gives way to the user's programs: Lumen runs below normal priority, its stages share half the CPU's threads between them (Settings → Background work lets the user give it fewer or more, at once), FFmpeg decodes with two threads (long videos are sampled by seeking to each frame), and the GPU, which also draws the screen, rests a third of the time. A playing video still converts at normal priority
 
 **Phase 3 (people)** is working:
 
@@ -49,7 +50,7 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 
 Search reports exact blocked person, Thing, place and album names, with whole-word Unicode matching and longer-name precedence.
 
-Still to finish in Phase 5: face and event blocks, browsing covered photos from Blocked, forgotten-PIN recovery through Windows sign-in, renaming and pinning Things and pinning Events, then organise-on-disk with dry run and undo and XMP sidecar export. Trash, with the Duplicates review pre-selecting the best copy for it (never deleting without confirmation), the 2 GB cache cap and OCR also remain future work. Pausing indexing for full-screen apps or a busy CPU, and an "index only when idle" setting, are deferred to Phase 6's performance pass; indexing pauses on battery and by hand today. See [the blocking implementation note](docs/blocking-phase5-2026-09-30.md) for current coverage and acceptance limits.
+Still to finish in Phase 5: face and event blocks, browsing covered photos from Blocked, forgotten-PIN recovery through Windows sign-in, renaming and pinning Things and pinning Events, then organise-on-disk with dry run and undo and XMP sidecar export. Trash, with the Duplicates review pre-selecting the best copy for it (never deleting without confirmation), the 2 GB cache cap and OCR also remain future work. Pausing indexing for full-screen apps, and an "index only when idle" setting, are deferred to Phase 6's performance pass; indexing pauses on battery and by hand today, and always runs below normal priority on at most half the CPU. See [the blocking implementation note](docs/blocking-phase5-2026-09-30.md) for current coverage and acceptance limits.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 

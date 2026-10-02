@@ -2,6 +2,7 @@ package core
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -76,7 +77,16 @@ const (
 	SettingThumbCacheMB  = "thumb_cache_mb"     // int: the thumbnail cache's size cap, in MB
 	SettingOCR           = "ocr_enabled"        // bool: read text in screenshots and documents (off by default)
 	SettingXMP           = "xmp_enabled"        // bool: write XMP sidecars beside photos (off by default)
+	SettingCPUThreads    = "cpu_threads"        // int: CPU threads indexing may keep busy (unset: DefaultCPUThreads)
 )
+
+// MaxCPUThreads is the most CPU threads indexing may be given: the machine's.
+func MaxCPUThreads() int { return runtime.NumCPU() }
+
+// DefaultCPUThreads is how many CPU threads indexing keeps busy unless the
+// user chooses otherwise: half the machine's (at least two), leaving the rest
+// to the user's programs and Lumen's own window. All of them froze a laptop.
+func DefaultCPUThreads() int { return min(MaxCPUThreads(), max(2, MaxCPUThreads()/2)) }
 
 // Settings are the user-facing preferences.
 type Settings struct {
@@ -87,6 +97,12 @@ type Settings struct {
 	ThumbCacheMB  int     `json:"thumbCacheMB"` // ThumbCacheMinMB..ThumbCacheMaxMB
 	OCR           bool    `json:"ocr"`
 	XMP           bool    `json:"xmp"`
+	// CPUThreads is how many CPU threads indexing may keep busy: 1 to
+	// MaxCPUThreads, DefaultCPUThreads unless the user chose. The machine's
+	// two come with it, for the setting's range and its hint.
+	CPUThreads        int `json:"cpuThreads"`
+	MaxCPUThreads     int `json:"maxCPUThreads"`
+	DefaultCPUThreads int `json:"defaultCPUThreads"`
 }
 
 // XMPExport is what an export pass did.

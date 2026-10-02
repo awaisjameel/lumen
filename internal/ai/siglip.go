@@ -7,10 +7,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
+
+	"lumen/internal/core"
 )
 
 // Model describes the prepared SigLIP 2 files (siglip2.json, written by
@@ -73,8 +74,7 @@ func OpenImageEncoder(m Model, device Device) (*ImageEncoder, error) {
 
 func (e *ImageEncoder) open(device Device) error {
 	path := filepath.Join(e.m.Dir, "vision.onnx")
-	// Background work: on the CPU leave half the cores for everything else.
-	threads := max(1, runtime.NumCPU()/2)
+	threads := imageThreads()
 	if device == GPU {
 		s, err := openSession(path, GPU, threads)
 		if err == nil {
@@ -96,6 +96,19 @@ func (e *ImageEncoder) Device() Device {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.s.device
+}
+
+// imageThreads is how many CPU threads a run of the image model uses on the
+// CPU: background work, so the index's default CPU budget, which leaves the
+// rest of the machine to everything else.
+func imageThreads() int { return core.DefaultCPUThreads() }
+
+// CPUThreads is how many CPU threads a run keeps busy: none on the GPU.
+func (e *ImageEncoder) CPUThreads() int {
+	if e.Device() == GPU {
+		return 0
+	}
+	return imageThreads()
 }
 
 // BatchSize is how many images Encode takes at most.

@@ -585,13 +585,20 @@ func (s *Store) CountPending(ctx context.Context, stages ...core.Stage) (int, er
 }
 
 // JobCounts returns how many visible jobs are still to do per stage, and how
-// many failed or were skipped. Hidden assets keep being indexed, but their
-// jobs must not appear in the UI's progress counts.
+// many files failed or were skipped (a file is counted once, however many of
+// its stages did: the UI says how many files couldn't be read). Hidden
+// assets keep being indexed, but their jobs must not appear in the UI's
+// progress counts.
 func (s *Store) JobCounts(ctx context.Context) (pending map[core.Stage]int, failed, skipped int, err error) {
 	rows, err := s.r.QueryContext(ctx, `SELECT j.stage, j.status, count(*) FROM asset_jobs j
 		JOIN assets a ON a.id = j.asset_id
-		WHERE j.status IN ('pending', 'waiting', 'error', 'skipped') AND `+visibleA+`
-		GROUP BY j.stage, j.status`)
+		WHERE j.status IN ('pending', 'waiting') AND `+visibleA+`
+		GROUP BY j.stage, j.status
+		UNION ALL
+		SELECT '', j.status, count(DISTINCT j.asset_id) FROM asset_jobs j
+		JOIN assets a ON a.id = j.asset_id
+		WHERE j.status IN ('error', 'skipped') AND `+visibleA+`
+		GROUP BY j.status`)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -615,4 +622,22 @@ func (s *Store) JobCounts(ctx context.Context) (pending map[core.Stage]int, fail
 		}
 	}
 	return pending, failed, skipped, rows.Err()
+}
+
+// CPUThreads is how many CPU threads indexing may keep busy: the user's
+// choice, held to what this machine has (a library moved from a bigger one
+// keeps working), or core.DefaultCPUThreads if they made none.
+func (s *Store) CPUThreads(ctx context.Context) (int, error) {
+	n, err := s.Int(ctx, core.SettingCPUThreads, 0)
+	if n < 1 {
+		return core.DefaultCPUThreads(), err
+	}
+	return min(n, core.MaxCPUThreads()), err
+}
+
+// SetCPUThreads stores how many CPU threads indexing may keep busy, held to
+// 1..core.MaxCPUThreads, and returns the value stored.
+func (s *Store) SetCPUThreads(ctx context.Context, n int) (int, error) {
+	n = min(max(n, 1), core.MaxCPUThreads())
+	return n, s.SetInt(ctx, core.SettingCPUThreads, n)
 }

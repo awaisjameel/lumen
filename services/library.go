@@ -378,8 +378,24 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 		return core.Settings{}, err
 	}
 	xmp, err := s.store.Bool(ctx, core.SettingXMP, false)
+	if err != nil {
+		return core.Settings{}, err
+	}
+	threads, err := s.store.CPUThreads(ctx)
 	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf, EventGapHours: gap,
-		ThumbCacheMB: cacheMB, OCR: ocr, XMP: xmp}, err
+		ThumbCacheMB: cacheMB, OCR: ocr, XMP: xmp,
+		CPUThreads: threads, MaxCPUThreads: core.MaxCPUThreads(), DefaultCPUThreads: core.DefaultCPUThreads()}, err
+}
+
+// SetCPUThreads sets how many CPU threads indexing may keep busy, held to
+// what the machine has. It applies at once.
+func (s *LibraryService) SetCPUThreads(ctx context.Context, n int) error {
+	n, err := s.store.SetCPUThreads(ctx, n)
+	if err != nil {
+		return err
+	}
+	s.ix.SetCPUThreads(n)
+	return nil
 }
 
 // SetEventGapHours sets the quiet period that splits detected events.

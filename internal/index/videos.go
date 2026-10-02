@@ -156,7 +156,7 @@ func (ix *Indexer) processVideos(ctx context.Context, items []store.JobItem, sam
 		defer done()
 	}
 	var rs videoResults
-	batch := &modelBatch{enc: enc}
+	batch := &modelBatch{enc: enc, cpu: ix.cpu}
 	var videos []*videoEmbedding
 	generation := uint64(0)
 	if enc != nil {
@@ -221,6 +221,11 @@ func (ix *Indexer) processVideos(ctx context.Context, items []store.JobItem, sam
 }
 
 func (ix *Indexer) analyseVideo(ctx context.Context, j store.JobItem, sample frameSampler, batch *modelBatch, v *videoEmbedding, faces *ai.Faces, r *store.FaceResult, faceErr error) error {
+	ctx, release, err := ix.cpu.acquire(ctx, videoThreads(batch.enc, v != nil, r != nil))
+	if err != nil {
+		return faceErr // cancelled: the caller stops
+	}
+	defer release()
 	var decodeErr string
 	func() {
 		defer recoverInto(&decodeErr, j.Path)
@@ -277,6 +282,21 @@ func (ix *Indexer) analyseVideo(ctx context.Context, j store.JobItem, sample fra
 		}
 	}
 	return faceErr
+}
+
+// videoThreads is the CPU budget analysing one video takes: FFmpeg decodes
+// the next frames while a model reads the last one, the face models (on the
+// CPU whenever the image model has the GPU) or the image model on the CPU.
+// The models run on these threads, taking none of their own (see cpuBudget).
+func videoThreads(enc imageEncoder, embed, faces bool) int {
+	model := 0
+	if faces {
+		model = faceThreads
+	}
+	if embed {
+		model = max(model, enc.CPUThreads())
+	}
+	return media.DecodeThreads + model
 }
 
 func (ix *Indexer) saveVideos(ctx context.Context, batches []videoResults) error {

@@ -87,6 +87,7 @@ type Indexer struct {
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
 	ocr     *model[textReader]       // PP-OCRv5's detector and recogniser, while their stage has work
 	pixels  decoded                  // photos the thumbnail stage decoded for the faces stage
+	cpu     *cpuBudget               // the CPU threads the stages' heavy work shares
 	xmp     xmpState                 // the XMP sidecar pass's lock and wake-up
 
 	videoEmbedRetry stageBackoff // used only by the video coordinator
@@ -143,6 +144,7 @@ func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Eve
 		wakeFS:    make(chan struct{}, 1),
 		resume:    make(chan struct{}),
 		pendingFS: map[string]bool{},
+		cpu:       newCPUBudget(core.DefaultCPUThreads()),
 	}
 	if m.SearchErr != nil {
 		ix.aiError = m.SearchErr.Error()
@@ -278,6 +280,11 @@ func (ix *Indexer) Start(ctx context.Context) {
 		slog.Error("read settings", "err", err)
 	}
 	ix.aiOnBattery, ix.onBattery = on, onBattery()
+	threads, err := ix.store.CPUThreads(ctx)
+	if err != nil {
+		slog.Error("read settings", "err", err)
+	}
+	ix.cpu.resize(threads)
 	ix.run(func() {
 		for ctx.Err() == nil {
 			n, err := ix.store.BackfillPlaces(ctx)
@@ -518,6 +525,17 @@ func (ix *Indexer) SetFocus(from, to string) {
 
 // SetPaused pauses or resumes the stage workers (scanning keeps going; it is cheap).
 func (ix *Indexer) SetPaused(p bool) { ix.setHold(func() { ix.paused = p }) }
+
+// SetCPUThreads sets how many CPU threads indexing may keep busy (the
+// setting is stored already). It applies at once: more lets waiting work
+// start, fewer lets running work finish first.
+func (ix *Indexer) SetCPUThreads(n int) {
+	if ix == nil {
+		return
+	}
+	ix.cpu.resize(n)
+	slog.Info("indexing threads changed", "threads", n)
+}
 
 // SetAIOnBattery lets the AI keep working on battery power, or not.
 func (ix *Indexer) SetAIOnBattery(on bool) { ix.setHold(func() { ix.aiOnBattery = on }) }

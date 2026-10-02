@@ -83,6 +83,19 @@ function setEventGap(e: Event) {
   return lib.saveEventGap(value)
 }
 
+// The indexing threads: the number follows the slider while it moves, and is
+// saved when it is let go.
+const threadsDraft = ref<number | null>(null)
+const threadsShown = computed(() => threadsDraft.value ?? lib.settings.cpuThreads)
+function onThreadsInput(e: Event) {
+  if (e.target instanceof HTMLInputElement) threadsDraft.value = e.target.valueAsNumber
+}
+function setThreads(e: Event) {
+  if (!(e.target instanceof HTMLInputElement)) return
+  threadsDraft.value = null
+  return lib.saveCPUThreads(Math.round(e.target.valueAsNumber))
+}
+
 // The cap is shown in GB and kept in MB, which is what the engine holds it in.
 const MB_PER_GB = 1024
 const cacheCapGB = computed(() => Number((lib.settings.thumbCacheMB / MB_PER_GB).toFixed(2)))
@@ -210,6 +223,26 @@ onBeforeUnmount(saveConfidence)
             <input type="checkbox" :checked="lib.progress?.paused" @change="lib.setPaused(checked($event))" />
             <span>{{ t('settings.pause') }}</span>
           </label>
+          <div v-if="lib.settings.maxCPUThreads > 1" class="slider">
+            <label for="cpu-threads">{{
+              t('settings.threads', { n: threadsShown, max: lib.settings.maxCPUThreads })
+            }}</label>
+            <small class="muted">{{ t('settings.threadsHint', { n: lib.settings.defaultCPUThreads }) }}</small>
+            <input
+              id="cpu-threads"
+              type="range"
+              min="1"
+              :max="lib.settings.maxCPUThreads"
+              step="1"
+              :value="threadsShown"
+              @input="onThreadsInput"
+              @change="setThreads"
+            />
+            <div class="ends muted">
+              <span>{{ t('settings.threadsFewer') }}</span>
+              <span>{{ t('settings.threadsMore') }}</span>
+            </div>
+          </div>
         </section>
 
         <section>

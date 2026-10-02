@@ -217,11 +217,16 @@ func first(tags map[string]string, keys ...string) string {
 }
 
 // runTool runs one of the bundled FFmpeg programs without a console window,
-// writing its standard output to stdout. A failure carries the first line
-// of what the program printed about it.
+// in the background (see hideWindow), writing its standard output to stdout.
+// A failure carries the first line of what the program printed about it.
 func runTool(ctx context.Context, exe string, stdout io.Writer, args ...string) error {
+	return runToolAs(ctx, hideWindow, exe, stdout, args...)
+}
+
+// runToolAs is runTool, with start setting how the program runs.
+func runToolAs(ctx context.Context, start func(*exec.Cmd), exe string, stdout io.Writer, args ...string) error {
 	cmd := exec.CommandContext(ctx, exe, args...)
-	hideWindow(cmd)
+	start(cmd)
 	stderr := &headWriter{max: 64 << 10} // a damaged file can make a long run print without end
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	return toolError(ctx, exe, cmd.Run(), stderr.String())

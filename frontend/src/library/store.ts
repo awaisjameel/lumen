@@ -80,6 +80,10 @@ export const useLibrary = defineStore('library', () => {
     thumbCacheMB: THUMB_CACHE_DEFAULT_MB,
     ocr: false,
     xmp: false,
+    // The machine's threads come with the settings; none until they load.
+    cpuThreads: 0,
+    maxCPUThreads: 0,
+    defaultCPUThreads: 0,
   })
   const settingsError = ref('')
   let eventGapSave: LatestSave<number> | null = null
@@ -87,6 +91,7 @@ export const useLibrary = defineStore('library', () => {
   let videosSave: LatestSave<boolean> | null = null
   let batterySave: LatestSave<boolean> | null = null
   let thumbCacheSave: LatestSave<number> | null = null
+  let threadsSave: LatestSave<number> | null = null
   let ocrSave: LatestSave<boolean> | null = null
   const settingFailed = (e: unknown) => (settingsError.value = errorText(e))
 
@@ -139,6 +144,16 @@ export const useLibrary = defineStore('library', () => {
     settings.value.thumbCacheMB = mb
     settingsError.value = ''
     return thumbCacheSave(mb)
+  }
+
+  function saveCPUThreads(n: number) {
+    threadsSave ??= latestSave(engine.setCPUThreads, settings.value.cpuThreads, {
+      rollback: (value) => (settings.value.cpuThreads = value),
+      failed: settingFailed,
+    })
+    settings.value.cpuThreads = n
+    settingsError.value = ''
+    return threadsSave(n)
   }
 
   function confidenceQueue() {
@@ -686,6 +701,7 @@ export const useLibrary = defineStore('library', () => {
     saveOCR,
     saveEventGap,
     saveThumbCacheMB,
+    saveCPUThreads,
     intendTagConfidence,
     saveTagConfidence,
     progress,
