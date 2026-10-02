@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"lumen/internal/core"
+	"lumen/internal/index"
 	"lumen/internal/people"
 	"lumen/internal/search"
 	"lumen/internal/store"
@@ -23,12 +24,13 @@ type SearchService struct {
 	store  *store.Store
 	engine *search.Engine // nil when the AI can't run
 	faces  bool           // faces are being recognised (the people engine runs)
+	ix     *index.Indexer // tells the UI what changed; nil in tests
 }
 
 // NewSearchService returns the search service (engine is nil without the AI;
 // faces says whether faces are recognised).
-func NewSearchService(st *store.Store, engine *search.Engine, faces bool) *SearchService {
-	return &SearchService{store: st, engine: engine, faces: faces}
+func NewSearchService(st *store.Store, engine *search.Engine, faces bool, ix *index.Indexer) *SearchService {
+	return &SearchService{store: st, engine: engine, faces: faces, ix: ix}
 }
 
 // Search finds photos matching a description, best match first. Named

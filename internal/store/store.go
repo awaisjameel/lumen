@@ -155,7 +155,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := s.tx(ctx, func(tx *sql.Tx) error {
+		if err := s.runTx(ctx, false, func(tx *sql.Tx) error {
 			if _, err := tx.ExecContext(ctx, string(body)); err != nil {
 				return err
 			}
@@ -183,8 +183,16 @@ func (s *Store) read(ctx context.Context, fn func(*sql.Tx) error) error {
 
 // tx runs fn in a write transaction, committing on success. The deferred
 // rollback also runs if fn panics, so the single writer connection is never
-// left inside a transaction (every later write would wait on it).
+// left inside a transaction (every later write would wait on it). Before it
+// commits, the transaction settles the event tags of any photos fn changed
+// (see settleDirty), so the tags and the photos never disagree on disk.
 func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
+	return s.runTx(ctx, true, fn)
+}
+
+// runTx is tx, with the settling optional: a migration must not settle,
+// because the tables it needs may not exist yet.
+func (s *Store) runTx(ctx context.Context, settle bool, fn func(*sql.Tx) error) error {
 	tx, err := s.w.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -192,6 +200,11 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	defer func() { _ = tx.Rollback() }() // after Commit: sql.ErrTxDone, ignored; else fn's error is the one that matters
 	if err := fn(tx); err != nil {
 		return err
+	}
+	if settle {
+		if err := settleDirty(ctx, tx); err != nil {
+			return fmt.Errorf("settle event tags: %w", err)
+		}
 	}
 	return tx.Commit()
 }

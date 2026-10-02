@@ -63,7 +63,7 @@ func TestSearchWithoutAI(t *testing.T) {
 	if _, err := st.NameFaces(ctx, []int64{faces[0].ID}, "Ali Khan"); err != nil {
 		t.Fatal(err)
 	}
-	s := NewSearchService(st, nil, true)
+	s := NewSearchService(st, nil, true, nil)
 	for _, name := range []string{"Ali", "Ali Khan"} {
 		query := strings.Repeat(name+" ", 8000)
 		prefix := string([]rune(query)[:search.MaxQueryRunes])
@@ -198,7 +198,7 @@ func TestVisibleAssetsPrunesResultsInOrder(t *testing.T) {
 	if _, err := w.ExecContext(ctx, "UPDATE assets SET hidden = 1 WHERE id = ?", hidden); err != nil {
 		t.Fatal(err)
 	}
-	s := NewSearchService(st, nil, false)
+	s := NewSearchService(st, nil, false, nil)
 	for _, read := range []struct {
 		name string
 		fn   func(context.Context, []int64) ([]int64, error)

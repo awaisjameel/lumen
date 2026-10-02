@@ -190,11 +190,9 @@ func (f assetFilter) where(minScore float64) (where string, args []any) {
 		args = append(args, f.place)
 	}
 	if f.event != nil {
-		e := f.event
-		where += " AND taken_at >= ? AND taken_at <= ?"
-		where += " AND (taken_at > ? OR (taken_at = ? AND id >= ?))"
-		where += " AND (taken_at < ? OR (taken_at = ? AND id <= ?))"
-		args = append(args, e.StartAt, e.EndAt, e.StartAt, e.StartAt, e.FirstID, e.EndAt, e.EndAt, e.LastID)
+		bounds, boundArgs := eventBounds(f.event)
+		where += " AND " + bounds
+		args = append(args, boundArgs...)
 	}
 	if f.album != 0 {
 		where += " AND id IN (SELECT asset_id FROM album_items WHERE album_id = ?)"

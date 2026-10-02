@@ -354,7 +354,7 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 // SetEventGapHours sets the quiet period that splits detected events.
 func (s *LibraryService) SetEventGapHours(ctx context.Context, hours int) error {
 	hours = min(max(hours, core.EventGapMin), core.EventGapMax)
-	return s.store.SetInt(ctx, core.SettingEventGapHours, hours)
+	return s.store.SetEventGapHours(ctx, hours)
 }
 
 // SetAIOnBattery lets the AI keep working on battery power (it waits for
