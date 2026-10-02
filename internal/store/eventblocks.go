@@ -7,6 +7,15 @@ import (
 	"time"
 )
 
+// eventBlocked is true when an event block holds the assets row alias asset,
+// in either mode: a view of one event re-checks it in the snapshot that reads
+// the photos, as viewSQL does for the targets that have a row to name.
+func eventBlocked(asset string) string {
+	return `EXISTS (SELECT 1 FROM event_members blk_held JOIN blocks blk_event
+		ON blk_event.kind = 'event' AND blk_event.target_id = blk_held.tag_id
+		WHERE blk_held.asset_id = ` + asset + ".id)"
+}
+
 // eventBlockTarget finds the event holding the asset eventID, as Event groups
 // it, and returns the block tag (an event_tags row of kind 'block') whose
 // members are that event's photos, making it if the event has none yet, and

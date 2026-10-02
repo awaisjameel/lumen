@@ -97,6 +97,10 @@ func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float64) (whe
 			args = append(args, target.id)
 		}
 	}
+	if v.Event != 0 {
+		// The event is a run of photos, so its block is the one holding them.
+		where += " AND NOT " + eventBlocked("assets")
+	}
 	return where, args, nil
 }
 

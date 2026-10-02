@@ -72,6 +72,10 @@ func (s *Store) SearchNames(ctx context.Context, query string) ([]core.NamedTarg
 		}
 		queries = append(queries, q)
 	}
+	// An event has no row to name: its block holds the name it had when it was
+	// blocked, so a search for that name finds the block, whatever its mode.
+	queries = append(queries, "SELECT target_id, name, '"+string(core.BlockEvent)+"', 1 FROM blocks WHERE kind = '"+
+		string(core.BlockEvent)+"' AND name != '' AND instr(?1, "+foldKey("blocks.name")+") > 0")
 	return queryAll(ctx, s.r, func(r *sql.Rows) (target core.NamedTarget, err error) {
 		err = r.Scan(&target.ID, &target.Name, &target.Kind, &target.Blocked)
 		return target, err

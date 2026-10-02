@@ -438,6 +438,68 @@ func TestAVideoInABlockedEventIsNeitherShownNorServed(t *testing.T) {
 	}
 }
 
+func TestAnEventsGridRechecksItsBlockInTheSnapshotThatReadsIt(t *testing.T) {
+	for _, mode := range []core.BlockMode{core.BlockLabel, core.BlockPhotos} {
+		t.Run(string(mode), func(t *testing.T) {
+			st, ctx := openTest(t), context.Background()
+			f := newEventFixture(t, st)
+			a := f.add(0)
+			f.add(1)
+			view := core.View{Event: a}
+			where, args, err := st.viewSQL(ctx, view, core.TagConfidenceDefault)
+			check(t, err)
+			count := func(want int) {
+				t.Helper()
+				var n int
+				check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM assets WHERE "+where, args...).Scan(&n))
+				if n != want {
+					t.Fatalf("the prepared event grid returned %d photos, want %d", n, want)
+				}
+			}
+			count(2)
+			// The block commits between resolving the event and reading its photos.
+			blockID := f.block(a, mode)
+			count(0)
+			if _, err := st.DayBuckets(ctx, view, core.TagConfidenceDefault); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("a blocked event's grid: %v, want ErrNotFound", err)
+			}
+			check(t, st.RemoveBlock(ctx, blockID))
+			count(2)
+		})
+	}
+}
+
+func TestSearchNamesReportsABlockedEventsNameWhateverItsMode(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	f := newEventFixture(t, st)
+	a, c := f.add(0), f.add(100)
+	f.name(a, "Wedding")
+	f.name(c, "Picnic")
+	found := func(query string) []core.NamedTarget {
+		t.Helper()
+		names, err := st.SearchNames(ctx, query)
+		check(t, err)
+		return names
+	}
+	if names := found("photos of the WEDDING"); len(names) != 0 {
+		t.Fatalf("an unblocked event's name is reported: %+v", names)
+	}
+	for _, mode := range []core.BlockMode{core.BlockLabel, core.BlockPhotos} {
+		blockID := f.block(a, mode)
+		names := found("photos of the WEDDING")
+		if len(names) != 1 || names[0].Kind != core.BlockEvent || !names[0].Blocked || names[0].Name != "Wedding" {
+			t.Fatalf("%s mode: names = %+v, want the blocked event's name", mode, names)
+		}
+		if names := found("a picnic"); len(names) != 0 {
+			t.Fatalf("%s mode: an unblocked event's name is reported: %+v", mode, names)
+		}
+		check(t, st.RemoveBlock(ctx, blockID))
+		if names := found("photos of the wedding"); len(names) != 0 {
+			t.Fatalf("%s mode: the name is reported after unblocking: %+v", mode, names)
+		}
+	}
+}
+
 // BenchmarkBlockedTimelineWithAnEventBlock is BenchmarkBlockedTimeline's
 // count on 100,000 photos in events of 100, with no block and with one event
 // blocked in photo mode: the new branch of blockMatch must not slow the

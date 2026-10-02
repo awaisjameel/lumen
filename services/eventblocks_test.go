@@ -132,3 +132,38 @@ func TestAVideoInABlockedEventAnswers404ToEveryRouteAndPlaysAgainOnceUnblocked(t
 		}
 	}
 }
+
+func TestSearchingABlockedEventsNameAnswersBlockedWithoutResults(t *testing.T) {
+	ctx := t.Context()
+	st, err := store.Open(filepath.Join(t.TempDir(), "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Ingest(ctx, []store.IngestItem{{SourceID: src.ID, Path: `C:\Photos\a.jpg`, Size: 1, Hash: []byte("a"),
+		Kind: core.KindPhoto, Ext: ".jpg", TakenAt: 1_700_000_000}}); err != nil {
+		t.Fatal(err)
+	}
+	days, err := st.DayItems(ctx, "2023-11-14", "2023-11-15", core.View{}, 0)
+	if err != nil || len(days) != 1 || len(days[0].Items) != 1 {
+		t.Fatalf("days: %+v, %v", days, err)
+	}
+	photo := days[0].Items[0].ID
+	if err := st.SetEventName(ctx, photo, "Wedding", core.EventGapDefault); err != nil {
+		t.Fatal(err)
+	}
+	s := NewSearchService(st, nil, true, nil)
+	if r, err := s.Search(ctx, "Wedding"); err != nil || r.Blocked {
+		t.Fatalf("an unblocked event's name: blocked = %v, %v", r.Blocked, err)
+	}
+	if _, err := st.SetBlock(ctx, core.BlockEvent, photo, "", core.BlockLabel); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := s.Search(ctx, "Wedding"); err != nil || !r.Blocked || len(r.Items) != 0 {
+		t.Fatalf("a blocked event's name: blocked = %v, %d items, %v", r.Blocked, len(r.Items), err)
+	}
+}
