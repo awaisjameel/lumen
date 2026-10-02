@@ -137,6 +137,8 @@ func (s *Store) viewFilterSQL(ctx context.Context, v core.View, minScore float64
 		f.favourites = true
 	case core.FilterVideos:
 		f.kind = core.KindVideo
+	case core.FilterTrash:
+		return "", nil, ErrNotFound // the Trash view arrives with its Phase 5 unit
 	}
 	where, args = f.where(minScore)
 	return where, args, nil
