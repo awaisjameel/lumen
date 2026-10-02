@@ -183,7 +183,7 @@ export function LockBlocks(): $CancellablePromise<void> {
 }
 
 /**
- * OrganiseRuns lists the runs, newest first. Phase 5 unit U10.
+ * OrganiseRuns lists the runs that have started, newest first.
  */
 export function OrganiseRuns(): $CancellablePromise<core$0.OrganiseRun[] | null> {
     return $Call.ByID(1826895655);
@@ -213,7 +213,8 @@ export function Places(): $CancellablePromise<core$0.Place[] | null> {
 /**
  * PlanOrganise previews where template would move the files of the source
  * sourceID (0: every source), and saves the preview as a planned run.
- * Phase 5 unit U10.
+ * Only visible photos are planned, and only visible names reach folder names.
+ * A scheme that cannot be used fails with fileops.ErrInvalidTemplate.
  */
 export function PlanOrganise(template: string, sourceID: number): $CancellablePromise<core$0.OrganisePlan> {
     return $Call.ByID(2885257754, template, sourceID);
@@ -406,7 +407,11 @@ export function Sources(): $CancellablePromise<core$0.Source[] | null> {
 }
 
 /**
- * StartOrganise makes (or resumes) the moves of the run runID. Phase 5 unit U10.
+ * StartOrganise makes (or resumes) the moves of the run runID. It returns once
+ * the run has started: the moves are made in the background, scans are held
+ * meanwhile, and progress arrives as organise:progress events. A run that
+ * failed part-way is resumed; a second start while a run is moving files is
+ * refused with ErrOrganiseBusy.
  */
 export function StartOrganise(runID: number): $CancellablePromise<void> {
     return $Call.ByID(2999108199, runID);
@@ -469,7 +474,9 @@ export function UndoBlock(id: number): $CancellablePromise<void> {
 }
 
 /**
- * UndoOrganise moves the files of the run runID back. Phase 5 unit U10.
+ * UndoOrganise moves the files of the run runID back, never replacing a file
+ * that has since appeared at their old place (the run then stays done, for a
+ * second try once the way is clear). It returns once the undo has started.
  */
 export function UndoOrganise(runID: number): $CancellablePromise<void> {
     return $Call.ByID(694597831, runID);

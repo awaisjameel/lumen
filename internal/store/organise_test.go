@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"slices"
 	"strings"
@@ -514,5 +515,41 @@ func TestRetryFailedOfRequeuesTheFailedJobsOfTheGivenAssetsOnly(t *testing.T) {
 	}
 	if n, err := st.RetryFailedOf(ctx, nil); err != nil || n != 0 {
 		t.Fatalf("retry of no assets = %d, %v", n, err)
+	}
+}
+
+func TestAMovedSidecarKeepsLumensRecordOfItAndDropsAnyRememberedSkip(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	moves := movesOf(`C:\a`, `C:\b`)
+	run, err := st.SaveOrganisePlan(ctx, "t", moves)
+	check(t, err)
+	// Rows as an export pass leaves them: Lumen's sidecar beside a, a stale
+	// record at b's path (of a file not there) and a remembered skip of a's.
+	check(t, errOf(st.w.ExecContext(ctx, `INSERT INTO xmp_exports (asset_id, path, hash) VALUES
+		(1, 'C:\a.xmp', x'01'), (9, 'C:\B.XMP', x'09');
+		INSERT INTO xmp_skips (path, size, mtime) VALUES ('C:\a.xmp', 1, 1)`)))
+	m := moves[0]
+	m.Seq = 1
+	check(t, st.JournalOrganiseMove(ctx, run, 1, core.MovePlanned, core.MoveMoving, SidecarPlanned))
+	check(t, st.FinishOrganiseMove(ctx, run, m, m.From, m.To, core.MoveMoved,
+		OrganiseSidecar{State: SidecarMoved, From: `C:\a.xmp`, To: `C:\b.xmp`}))
+	type record struct {
+		path string
+		hash []byte
+	}
+	recs, err := queryAll(ctx, st.r, func(r *sql.Rows) (x record, err error) {
+		err = r.Scan(&x.path, &x.hash)
+		return x, err
+	}, "SELECT path, hash FROM xmp_exports ORDER BY path")
+	check(t, err)
+	// The record follows the sidecar (and the stale one at its new path, of a
+	// file that was not there, is gone); the old skip is forgotten.
+	if len(recs) != 1 || recs[0].path != `C:\b.xmp` || !slices.Equal(recs[0].hash, []byte{1}) {
+		t.Fatalf("records = %+v, want the moved sidecar's at its new path", recs)
+	}
+	var skips int
+	check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM xmp_skips").Scan(&skips))
+	if skips != 0 {
+		t.Fatalf("%d skips remembered after the move, want none", skips)
 	}
 }

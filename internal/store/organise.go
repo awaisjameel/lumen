@@ -345,12 +345,25 @@ func (s *Store) FinishOrganiseMove(ctx context.Context, runID int64, m OrganiseM
 	})
 }
 
-// organiseSidecarMoved is called in the transaction that commits a move, for
-// each sidecar that moved with its photo (from the old path to the new, both
-// of the sidecar). It is the place for anything else that keeps a record of
-// sidecar paths (the XMP export's table, once it is in the schema) to follow
-// the file in the same commit; there is no such record yet.
-func organiseSidecarMoved(_ context.Context, _ *sql.Tx, _, _ string) error { return nil }
+// organiseSidecarMoved is called in the transaction that commits a move (or
+// its undo), for each sidecar that moved with its photo, from its old path to
+// its new one. Lumen's record of the sidecars it wrote follows the file in
+// the same commit, so a moved sidecar stays Lumen's to rewrite or scrub, and
+// a remembered skip is dropped: the file at either path is new to the export.
+// The new path held no file (the move does not replace), so a record there is
+// stale and goes first.
+func organiseSidecarMoved(ctx context.Context, tx *sql.Tx, from, to string) error {
+	for _, q := range []string{
+		`DELETE FROM xmp_exports WHERE ` + foldKey("path") + ` = ` + foldKey("?2"),
+		`UPDATE xmp_exports SET path = ?2 WHERE ` + foldKey("path") + ` = ` + foldKey("?1"),
+		`DELETE FROM xmp_skips WHERE ` + foldKey("path") + ` IN (` + foldKey("?1") + `, ` + foldKey("?2") + `)`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, from, to); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // Move refusals, for OrganiseMovable.
 const (
