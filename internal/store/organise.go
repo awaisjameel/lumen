@@ -148,6 +148,7 @@ type OrganiseMove struct {
 	Seq     int
 	FileID  int64 // 0 when the plan had no files row for it
 	AssetID int64
+	Root    string // the source folder the file moves inside
 	From    string
 	To      string
 	Size    int64
@@ -176,8 +177,8 @@ func (s *Store) SaveOrganisePlan(ctx context.Context, template string, moves []O
 			return err
 		}
 		ins, err := tx.PrepareContext(ctx, `INSERT INTO organise_moves
-			(run_id, seq, file_id, asset_id, from_path, to_path, size, mtime, renamed, sidecar, state, error)
-			VALUES (?, ?, NULLIF(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))`)
+			(run_id, seq, file_id, asset_id, root, from_path, to_path, size, mtime, renamed, sidecar, state, error)
+			VALUES (?, ?, NULLIF(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))`)
 		if err != nil {
 			return err
 		}
@@ -185,7 +186,7 @@ func (s *Store) SaveOrganisePlan(ctx context.Context, template string, moves []O
 		for i := range moves {
 			m := &moves[i]
 			m.Seq = i + 1
-			if _, err := ins.ExecContext(ctx, runID, m.Seq, m.FileID, m.AssetID, m.From, m.To, m.Size, m.MTime, m.Renamed,
+			if _, err := ins.ExecContext(ctx, runID, m.Seq, m.FileID, m.AssetID, m.Root, m.From, m.To, m.Size, m.MTime, m.Renamed,
 				m.Sidecar, m.State, m.Error); err != nil {
 				return err
 			}
@@ -215,10 +216,10 @@ func (s *Store) OrganiseRuns(ctx context.Context) ([]core.OrganiseRun, error) {
 
 func (s *Store) organiseRuns(ctx context.Context, where string, args ...any) ([]core.OrganiseRun, error) {
 	return queryAll(ctx, s.r, func(r *sql.Rows) (run core.OrganiseRun, err error) {
-		err = r.Scan(&run.ID, &run.Template, &run.CreatedAt, &run.State, &run.Moved, &run.Total)
+		err = r.Scan(&run.ID, &run.Template, &run.CreatedAt, &run.State, &run.Moved, &run.Total, &run.SidecarsKept)
 		return run, err
 	}, `SELECT r.id, r.template, r.created_at, r.state,
-		COALESCE(SUM(m.state = 'moved'), 0), COUNT(m.seq)
+		COALESCE(SUM(m.state = 'moved'), 0), COUNT(m.seq), COALESCE(SUM(m.sidecar = 'kept'), 0)
 		FROM organise_runs r LEFT JOIN organise_moves m ON m.run_id = r.id `+where+`
 		GROUP BY r.id ORDER BY r.created_at DESC, r.id DESC`, args...)
 }
@@ -260,12 +261,12 @@ func (s *Store) OrganiseMoves(ctx context.Context, runID int64, descending bool,
 		}
 		args = append(args, string(list))
 	}
-	return queryAll(ctx, s.r, scanOrganiseMove, `SELECT seq, COALESCE(file_id, 0), asset_id, from_path, to_path, size, mtime,
+	return queryAll(ctx, s.r, scanOrganiseMove, `SELECT seq, COALESCE(file_id, 0), asset_id, root, from_path, to_path, size, mtime,
 		renamed, sidecar, state, COALESCE(error, '') FROM organise_moves WHERE run_id = ?`+filter+" ORDER BY seq "+order, args...)
 }
 
 func scanOrganiseMove(r *sql.Rows) (m OrganiseMove, err error) {
-	err = r.Scan(&m.Seq, &m.FileID, &m.AssetID, &m.From, &m.To, &m.Size, &m.MTime, &m.Renamed, &m.Sidecar, &m.State, &m.Error)
+	err = r.Scan(&m.Seq, &m.FileID, &m.AssetID, &m.Root, &m.From, &m.To, &m.Size, &m.MTime, &m.Renamed, &m.Sidecar, &m.State, &m.Error)
 	return m, err
 }
 
@@ -313,6 +314,19 @@ func (s *Store) FinishOrganiseMove(ctx context.Context, runID int64, m OrganiseM
 	state core.OrganiseMoveState, side OrganiseSidecar) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		if m.FileID != 0 {
+			// The file is at newPath, so another row for that path is stale
+			// (or the same file seen twice by a scan between a crash and its
+			// recovery): left in place it would break the unique path and
+			// fail this commit for ever. Its asset keeps its other files, or
+			// is marked missing as when a scan forgets the file.
+			gone, err := queryAll(ctx, tx, scanID, "DELETE FROM files WHERE id != ?1 AND "+foldPath+" = "+foldKey("?2")+" RETURNING asset_id",
+				m.FileID, newPath)
+			if err != nil {
+				return err
+			}
+			if err := markOrphans(ctx, tx, gone, time.Now().Unix()); err != nil {
+				return err
+			}
 			// A row the library no longer has (a scan forgot the file) is not
 			// an error: the file is where it is, and the next scan says so.
 			if _, err := tx.ExecContext(ctx, "UPDATE files SET path = ?1 WHERE id = ?2 AND "+foldPath+" = "+foldKey("?3"),
@@ -439,4 +453,37 @@ func requireOne(res sql.Result, err, notFound error) error {
 		return notFound
 	}
 	return nil
+}
+
+// OrganiseMovedAssets lists the assets with a file the run moved (or put
+// back), for the work that tripped over a file mid-move to be done again.
+func (s *Store) OrganiseMovedAssets(ctx context.Context, runID int64) ([]int64, error) {
+	return queryAll(ctx, s.r, scanID, `SELECT DISTINCT asset_id FROM organise_moves
+		WHERE run_id = ? AND state IN ('moved', 'undone') ORDER BY asset_id`, runID)
+}
+
+// RetryFailedOf puts the failed jobs of the assets back in the queue, however
+// many times they failed: a stage that read a file just as organising moved
+// it failed through no fault of the file. It returns how many were requeued.
+func (s *Store) RetryFailedOf(ctx context.Context, assetIDs []int64) (n int64, err error) {
+	if len(assetIDs) == 0 {
+		return 0, nil
+	}
+	list, err := json.Marshal(assetIDs)
+	if err != nil {
+		return 0, err
+	}
+	const ofAssets = "asset_id IN (SELECT value FROM json_each(?))"
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?
+			WHERE status = 'error' AND `+ofAssets, time.Now().Unix(), string(list))
+		if err != nil {
+			return err
+		}
+		if n, _ = res.RowsAffected(); n == 0 {
+			return nil
+		}
+		return settle(ctx, tx, ofAssets, string(list))
+	})
+	return n, err
 }

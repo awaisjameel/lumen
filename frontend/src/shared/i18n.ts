@@ -512,7 +512,17 @@ const en = {
   'organise.reason.changed': 'The file has changed since it was last scanned.',
   'organise.reason.taken': 'Something else is already at the new place.',
   'organise.reason.too_long': 'The new path would be too long for Windows.',
-  'organise.reason.not_a_folder': 'A file is where the folder would go.',
+  'organise.reason.not_a_folder': 'A file, link or hidden folder is where the folder would go.',
+  'organise.reason.sidecar_taken':
+    'The photo moves, but its .xmp sidecar stays because something is already at its new name.',
+  'organise.sidecars': {
+    one: '1 sidecar file (.xmp) will move with its photo.',
+    other: '{n} sidecar files (.xmp) will move with their photos.',
+  },
+  'organise.runKept': {
+    one: '1 sidecar stayed behind',
+    other: '{n} sidecars stayed behind',
+  },
   'organise.move': { one: 'Move 1 file…', other: 'Move {n} files…' },
   'organise.confirmTitle': { one: 'Move 1 file?', other: 'Move {n} files?' },
   'organise.confirmText':

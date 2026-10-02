@@ -79,8 +79,9 @@ type Indexer struct {
 	wakeVideo chan struct{}
 	wakeFS    chan struct{}
 
-	scanTurn   chan struct{} // holds a token while a scan runs or HoldScans is in force: one at a time
-	onScanTurn func()        // a test's hook, called when a scan has its turn; nil otherwise
+	scanTurn   chan struct{}           // holds a token while a scan runs or HoldScans is in force: one at a time
+	onScanTurn func()                  // a test's hook, called when a scan has its turn; nil otherwise
+	before     []func(context.Context) // run before the first scan (BeforeFirstScan); guarded by mu
 
 	encoder *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
 	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
@@ -307,6 +308,9 @@ func (ix *Indexer) Start(ctx context.Context) {
 			slog.Info("queued photos for text reading", "photos", n)
 			nudge(ix.wakeOCR)
 		}
+		for _, before := range ix.beforeScan() {
+			before(ctx)
+		}
 		ix.RescanAll() // opening watchers can take seconds for a network share
 		ix.scanLoop(ctx)
 	})
@@ -435,6 +439,38 @@ func (ix *Indexer) HoldScans(ctx context.Context) (release func(), err error) {
 	}
 	var once sync.Once
 	return func() { once.Do(func() { <-ix.scanTurn }) }, nil
+}
+
+// BeforeFirstScan registers work that must be done before the indexer scans
+// anything after it starts: settling the files an interrupted organise run
+// left in doubt, which a scan would otherwise find half-moved. It runs on the
+// indexer's own goroutine, in the order registered, and delays the first scan
+// until it returns. Register before Start.
+func (ix *Indexer) BeforeFirstScan(fn func(ctx context.Context)) {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	ix.before = append(ix.before, fn)
+}
+
+func (ix *Indexer) beforeScan() []func(context.Context) {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	return slices.Clone(ix.before)
+}
+
+// RetryFailedOf puts the failed jobs of the assets back in the queue and wakes
+// the stages: organising moves files under a stage that has read their path,
+// and the job it fails then is nothing to do with the file.
+func (ix *Indexer) RetryFailedOf(ctx context.Context, assetIDs []int64) {
+	n, err := ix.store.RetryFailedOf(ctx, assetIDs)
+	switch {
+	case err != nil:
+		if ctx.Err() == nil {
+			slog.Error("retry jobs of moved files", "err", err)
+		}
+	case n > 0:
+		ix.wakeStages()
+	}
 }
 
 // RescanAll queues a scan of every enabled source and restarts the watchers.
@@ -612,26 +648,30 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 		if !ok {
 			return
 		}
-		src, videos, err := ix.scanSettings(ctx, req)
-		switch {
-		case ctx.Err() != nil:
-			return
-		case err != nil:
-			// Scanning with a wrong guess (videos off) would drop every video.
-			slog.Error("can't read what to scan; retrying", "err", err)
-			ix.queueScan(req)
-			sleep(ctx, retryDelay)
-			continue
-		case src.ID == 0:
-			continue // removed since it was queued
-		}
-
 		// A hold (organising moves files) has the turn until it lets go; the
 		// request waits, and the changes made meanwhile are found as usual.
 		select {
 		case ix.scanTurn <- struct{}{}:
 		case <-ctx.Done():
 			return
+		}
+		// What to scan is read with the turn in hand: a source removed, or a
+		// setting changed, during a long hold must not be scanned as it was.
+		src, videos, err := ix.scanSettings(ctx, req)
+		switch {
+		case ctx.Err() != nil:
+			<-ix.scanTurn
+			return
+		case err != nil:
+			<-ix.scanTurn
+			// Scanning with a wrong guess (videos off) would drop every video.
+			slog.Error("can't read what to scan; retrying", "err", err)
+			ix.queueScan(req)
+			sleep(ctx, retryDelay)
+			continue
+		case src.ID == 0:
+			<-ix.scanTurn
+			continue // removed since it was queued
 		}
 		if ix.onScanTurn != nil {
 			ix.onScanTurn()

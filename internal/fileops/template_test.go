@@ -59,6 +59,12 @@ func TestTemplatesThatCannotWorkAreRefusedWithTheRuleTheyBreak(t *testing.T) {
 		{"an empty folder name", "{Year}//{Name}"},
 		{"a trailing slash", "{Year}/{Name}/"},
 		{"the extension spelt out", "{Year}/{Name}.{Ext}"},
+		{"a hidden folder", ".hidden/{Name}"},
+		{"a hidden folder inside", "{Year}/.cache/{Name}"},
+		{"a dollar folder", "$Recycle.Bin/{Name}"},
+		{"a dollar name before a token", "${Year}/{Name}"},
+		{"the system folder", "{Year}/System Volume Information/{Name}"},
+		{"the system folder in other case", "system volume information/{Name}"},
 		{"too long", strings.Repeat("a", maxTemplateLen+1)},
 	} {
 		t.Run(c.name, func(t *testing.T) {

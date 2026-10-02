@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf16"
 
 	"lumen/internal/core"
+	"lumen/internal/scanner"
 	"lumen/internal/store"
 )
 
@@ -125,7 +127,7 @@ const (
 // plan decides the destination of one file. inPlace reports a file that is
 // already where the template puts it.
 func (p *planner) plan(tmpl Template, f store.OrganiseFile) (move store.OrganiseMove, inPlace bool) {
-	move = store.OrganiseMove{FileID: f.FileID, AssetID: f.AssetID, From: f.Path, State: core.MovePlanned}
+	move = store.OrganiseMove{FileID: f.FileID, AssetID: f.AssetID, Root: f.Root, From: f.Path, State: core.MovePlanned}
 	skip := func(reason string) (store.OrganiseMove, bool) {
 		move.State, move.Error = core.MoveSkipped, reason
 		return move, false
@@ -154,17 +156,31 @@ func (p *planner) plan(tmpl Template, f store.OrganiseFile) (move store.Organise
 		if key == own {
 			return move, true // it is already here (under the name a collision gave it, perhaps)
 		}
-		if p.taken(key, candidate) {
+		// A photo never lands beside a sidecar that is not its own, and its own
+		// sidecar's new name must be free too: both names are checked.
+		side := sidecarOf(candidate)
+		if p.taken(key, candidate) || p.taken(core.Fold(side), side) {
 			continue
 		}
 		move.To, move.Renamed = candidate, n > 1
 		break
 	}
 
+	hasSidecar, _ := exists(sidecarOf(f.Path))
+	longest := move.To
+	if hasSidecar {
+		longest = sidecarOf(move.To)
+	}
 	switch {
-	case len(utf16.Encode([]rune(move.To))) > maxPathLen:
+	case len(utf16.Encode([]rune(longest))) > maxPathLen:
 		return skip(ReasonTooLong)
 	case !p.folderUsable(f.Root, dir):
+		return skip(ReasonNotAFolder)
+	}
+	// A name the scanner skips (a hidden or system folder that already
+	// exists) would lose the file at the next full scan. The scanner's own
+	// rule decides.
+	if _, _, excluded := scanner.Exclusion(f.Root, move.To, nil); excluded {
 		return skip(ReasonNotAFolder)
 	}
 	info, err := os.Lstat(f.Path)
@@ -179,15 +195,11 @@ func (p *planner) plan(tmpl Template, f store.OrganiseFile) (move store.Organise
 		return skip(ReasonChanged)
 	}
 	move.Size, move.MTime = info.Size(), info.ModTime().UnixNano()
-	if present, _ := exists(sidecarOf(f.Path)); present {
-		// The photo moves either way; its sidecar stays if its new name is taken.
-		if taken, _ := exists(sidecarOf(move.To)); taken {
-			move.Sidecar, move.Error = store.SidecarKept, ReasonSidecarTaken
-		} else {
-			move.Sidecar = store.SidecarPlanned
-		}
+	if hasSidecar {
+		move.Sidecar = store.SidecarPlanned
 	}
 	p.reserved[core.Fold(move.To)] = true
+	p.reserved[core.Fold(sidecarOf(move.To))] = true
 	return move, false
 }
 
@@ -243,4 +255,31 @@ func (p *planner) dirState(dir string) dirState {
 // which may be blocked ones.
 func describe(m store.OrganiseMove) string {
 	return fmt.Sprintf("move %d of asset %d", m.Seq, m.AssetID)
+}
+
+// reasonOf is what a failure is called in a move's row, which the UI shows:
+// Windows's own words for what went wrong, without the paths that
+// *os.PathError and *os.LinkError add (the row says which file it is).
+func reasonOf(err error) string {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err.Error()
+	}
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		return linkErr.Err.Error()
+	}
+	return err.Error()
+}
+
+// kindOf is the type of an error, for a log line that must not carry a path.
+func kindOf(err error) string { return fmt.Sprintf("%T", err) }
+
+// errnoOf is the operating system's code for a failure, 0 if it has none.
+func errnoOf(err error) int {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return int(errno)
+	}
+	return 0
 }

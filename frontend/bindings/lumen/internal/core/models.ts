@@ -615,6 +615,11 @@ export interface OrganisePlan {
      * files already where the template puts them
      */
     "inPlace": number;
+
+    /**
+     * moves that take an XMP sidecar (IMG_1.jpg.xmp) along
+     */
+    "sidecars": number;
 }
 
 /**
@@ -641,6 +646,12 @@ export interface OrganiseRun {
     "state": OrganiseRunState;
     "moved": number;
     "total": number;
+
+    /**
+     * SidecarsKept is how many XMP sidecars stayed behind because something
+     * was at their new name.
+     */
+    "sidecarsKept": number;
 }
 
 /**

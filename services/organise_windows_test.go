@@ -533,3 +533,105 @@ func TestThePreviewCountsSidecarsAndARunMovesThemWithTheirPhotos(t *testing.T) {
 	l.wantFile("IMG_1.jpg.xmp", true)
 	l.wantFile("2024", false)
 }
+
+// failAllJobs makes every metadata job fail as many times as the queue allows,
+// as a stage does that reads a file at the moment it moves.
+func (l *organiseLibrary) failAllJobs() {
+	l.t.Helper()
+	for range store.MaxAttempts {
+		jobs, err := l.st.PendingJobs(l.t.Context(), core.StageMetadata, nil, 100)
+		check(l.t, err)
+		var results []store.MetadataResult
+		for _, j := range jobs {
+			results = append(results, store.MetadataResult{AssetID: j.AssetID, Err: "the system cannot find the file"})
+		}
+		check(l.t, l.st.SaveMetadata(l.t.Context(), "v1", results))
+	}
+}
+
+func (l *organiseLibrary) pendingMetadata() int {
+	l.t.Helper()
+	jobs, err := l.st.PendingJobs(l.t.Context(), core.StageMetadata, nil, 100)
+	check(l.t, err)
+	return len(jobs)
+}
+
+func TestARunAndItsUndoQueueTheFailedJobsOfTheFilesTheyMovedAgain(t *testing.T) {
+	l := newOrganiseLibrary(t)
+	ctx := t.Context()
+	l.add("IMG_1.jpg", 10, time.Date(2024, time.August, 5, 12, 0, 0, 0, time.UTC))
+	l.add("IMG_2.jpg", 20, time.Date(2024, time.August, 6, 12, 0, 0, 0, time.UTC))
+	l.failAllJobs()
+	if n := l.pendingMetadata(); n != 0 {
+		t.Fatalf("%d jobs still pending after failing them", n)
+	}
+	plan, err := l.s.PlanOrganise(ctx, "{Year}/{Name}", 0)
+	check(t, err)
+	check(t, l.s.StartOrganise(ctx, plan.RunID))
+	l.waitState(plan.RunID, core.OrganiseDone)
+	eventually(t, "the failed jobs to be queued again after the run", func() bool { return l.pendingMetadata() == 2 })
+
+	l.failAllJobs()
+	check(t, l.s.UndoOrganise(ctx, plan.RunID))
+	l.waitState(plan.RunID, core.OrganiseUndone)
+	eventually(t, "the failed jobs to be queued again after the undo", func() bool { return l.pendingMetadata() == 2 })
+}
+
+// eventually polls cond until it holds or a few seconds pass.
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestNoRunIsTakenOnceShutdownHasBegun(t *testing.T) {
+	l := newOrganiseLibrary(t)
+	ctx := t.Context()
+	l.add("IMG_1.jpg", 10, time.Date(2024, time.August, 5, 12, 0, 0, 0, time.UTC))
+	plan, err := l.s.PlanOrganise(ctx, "{Year}/{Name}", 0)
+	check(t, err)
+	check(t, l.s.ServiceShutdown())
+	if err := l.s.StartOrganise(ctx, plan.RunID); !errors.Is(err, ErrOrganiseStopping) {
+		t.Fatalf("a start after shutdown = %v, want ErrOrganiseStopping", err)
+	}
+	if err := l.s.UndoOrganise(ctx, plan.RunID); !errors.Is(err, ErrOrganiseStopping) {
+		t.Fatalf("an undo after shutdown = %v, want ErrOrganiseStopping", err)
+	}
+	l.wantFile("IMG_1.jpg", true)
+	// The refusal leaves nothing claimed or registered: a second shutdown returns at once.
+	check(t, l.s.ServiceShutdown())
+}
+
+func TestARunInDoubtIsSettledByTheIndexerBeforeItsFirstScanWithoutTheServiceStarting(t *testing.T) {
+	l := newOrganiseLibrary(t)
+	ctx := t.Context()
+	assetID := l.add("IMG_1.jpg", 10, time.Date(2024, time.August, 5, 12, 0, 0, 0, time.UTC))
+	plan, err := l.s.PlanOrganise(ctx, "{Year}/{Name}", 0)
+	check(t, err)
+	// The process died with the move journaled and the file moved.
+	check(t, l.st.SetOrganiseRunState(ctx, plan.RunID, core.OrganiseRunning))
+	check(t, l.st.JournalOrganiseMove(ctx, plan.RunID, 1, core.MovePlanned, core.MoveMoving, ""))
+	check(t, os.MkdirAll(l.path("2024"), 0o750))
+	check(t, os.Rename(l.path("IMG_1.jpg"), l.path("2024/IMG_1.jpg")))
+
+	// The next start: a service over the indexer (as main builds them), and the
+	// indexer starting. Nobody calls ServiceStartup.
+	fresh := NewLibraryService(l.st, l.ix, nil)
+	t.Cleanup(func() { check(t, fresh.ServiceShutdown()) })
+	l.ix.Start(ctx)
+	t.Cleanup(l.ix.Stop)
+	eventually(t, "the run to be settled", func() bool {
+		runs, err := fresh.OrganiseRuns(ctx)
+		check(t, err)
+		return len(runs) == 1 && runs[0].State == core.OrganiseDone && runs[0].Moved == 1
+	})
+	d, err := l.st.AssetDetail(ctx, assetID, false)
+	check(t, err)
+	if !slices.Equal(d.Paths, []string{l.path("2024/IMG_1.jpg")}) {
+		t.Fatalf("paths = %v, want the library to follow the file", d.Paths)
+	}
+}

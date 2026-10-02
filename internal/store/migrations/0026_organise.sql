@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS organise_moves (
   seq       INTEGER NOT NULL,
   file_id   INTEGER,
   asset_id  INTEGER NOT NULL,
+  root      TEXT    NOT NULL DEFAULT '',  -- the source folder the file moves inside
   from_path TEXT    NOT NULL,
   to_path   TEXT    NOT NULL,
   size      INTEGER NOT NULL DEFAULT 0,

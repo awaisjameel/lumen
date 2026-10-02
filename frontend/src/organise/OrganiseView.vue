@@ -76,8 +76,12 @@ function reasonText(move: OrganiseMove): string {
       return t('organise.reason.taken')
     case OrganiseReason.TooLong:
       return t('organise.reason.too_long')
-    default:
+    case OrganiseReason.NotAFolder:
       return t('organise.reason.not_a_folder')
+    case OrganiseReason.SidecarTaken:
+      return t('organise.reason.sidecar_taken')
+    default:
+      return error
   }
 }
 
@@ -214,6 +218,7 @@ const canUndo = (run: OrganiseRun) =>
           <li v-if="toMove">{{ t('organise.willMove', { n: toMove }) }}</li>
           <li v-if="plan.inPlace">{{ t('organise.inPlace', { n: plan.inPlace }) }}</li>
           <li v-if="plan.renamed">{{ t('organise.renamed', { n: plan.renamed }) }}</li>
+          <li v-if="plan.sidecars">{{ t('organise.sidecars', { n: plan.sidecars }) }}</li>
           <li v-if="skipped">{{ t('organise.skipped', { n: skipped }) }}</li>
         </ul>
         <p v-if="!plan.moves.length" class="muted">{{ t('organise.nothing') }}</p>
@@ -244,6 +249,9 @@ const canUndo = (run: OrganiseRun) =>
                 ><span aria-hidden="true">→</span> {{ move.to }}
                 <span v-if="move.renamed" class="tag">{{ t('organise.renamedTag') }}</span>
               </span>
+              <span v-if="move.state !== OrganiseMoveState.MoveSkipped && move.error" class="path note">{{
+                reasonText(move)
+              }}</span>
             </div>
           </div>
         </div>
@@ -269,6 +277,7 @@ const canUndo = (run: OrganiseRun) =>
               <strong>{{ when(run.createdAt) }}</strong>
               <small
                 >{{ t(stateText(run.state)) }} · {{ t('organise.runMoved', { moved: run.moved, total: run.total }) }} ·
+                <template v-if="run.sidecarsKept">{{ t('organise.runKept', { n: run.sidecarsKept }) }} · </template>
                 {{ run.template }}</small
               >
             </div>
@@ -387,6 +396,11 @@ const canUndo = (run: OrganiseRun) =>
 
 .move.left .reason {
   color: var(--danger);
+}
+
+.note {
+  color: var(--text-2);
+  font-size: 12px;
 }
 
 .tag {

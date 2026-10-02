@@ -144,16 +144,16 @@ func (r *Runner) moveForward(ctx context.Context, runID int64, m store.OrganiseM
 	case errors.Is(err, fs.ErrNotExist):
 		return r.Store.SetOrganiseMove(ctx, runID, m.Seq, core.MoveSkipped, ReasonMissing)
 	case err != nil:
-		return r.Store.SetOrganiseMove(ctx, runID, m.Seq, core.MoveFailed, err.Error())
+		return r.Store.SetOrganiseMove(ctx, runID, m.Seq, core.MoveFailed, reasonOf(err))
 	case info.Size() != m.Size || info.ModTime().UnixNano() != m.MTime:
 		return r.Store.SetOrganiseMove(ctx, runID, m.Seq, core.MoveSkipped, ReasonChanged)
 	}
-	reason, fatal := dirs.ensure(ctx, filepath.Dir(m.To))
+	reason, fatal := dirs.ensure(ctx, filepath.Dir(m.To), m.Root)
 	if fatal != nil {
 		return fatal
 	}
 	if reason != nil {
-		return r.Store.SetOrganiseMove(ctx, runID, m.Seq, core.MoveFailed, reason.Error())
+		return r.Store.SetOrganiseMove(ctx, runID, m.Seq, core.MoveFailed, reasonOf(reason))
 	}
 
 	// A sidecar beside the photo goes with it, as part of this one move; the
@@ -176,8 +176,8 @@ func (r *Runner) moveForward(ctx context.Context, runID int64, m store.OrganiseM
 	case errors.Is(moveErr, ErrExists):
 		return r.Store.SetOrganiseMove(settle, runID, m.Seq, core.MoveSkipped, ReasonTaken)
 	case moveErr != nil:
-		slog.Warn("organise: move a file", "err", moveErr, "move", describe(m))
-		return r.Store.SetOrganiseMove(settle, runID, m.Seq, core.MoveFailed, moveErr.Error())
+		slog.Warn("organise: move a file", "kind", kindOf(moveErr), "errno", errnoOf(moveErr), "move", describe(m))
+		return r.Store.SetOrganiseMove(settle, runID, m.Seq, core.MoveFailed, reasonOf(moveErr))
 	}
 	if r.stopsAt(afterMove, m.Seq) {
 		return errCrashed
@@ -201,7 +201,7 @@ func carry(src, dst, done string) store.OrganiseSidecar {
 	present, err := exists(src)
 	switch {
 	case err != nil:
-		return store.OrganiseSidecar{State: store.SidecarKept, Reason: err.Error()}
+		return store.OrganiseSidecar{State: store.SidecarKept, Reason: reasonOf(err)}
 	case !present:
 		return store.OrganiseSidecar{}
 	}
@@ -211,7 +211,7 @@ func carry(src, dst, done string) store.OrganiseSidecar {
 	case errors.Is(err, ErrExists):
 		return store.OrganiseSidecar{State: store.SidecarKept, Reason: ReasonSidecarTaken}
 	default:
-		return store.OrganiseSidecar{State: store.SidecarKept, Reason: err.Error()}
+		return store.OrganiseSidecar{State: store.SidecarKept, Reason: reasonOf(err)}
 	}
 }
 
@@ -285,17 +285,28 @@ func (r *Runner) moveBack(ctx context.Context, runID int64, m store.OrganiseMove
 	keep := func(reason string) error { // the file stays put; the row says why
 		return r.Store.SetOrganiseMove(ctx, runID, m.Seq, core.MoveMoved, reason)
 	}
-	if _, err := os.Lstat(m.To); errors.Is(err, fs.ErrNotExist) {
+	// Only the file Lumen moved goes back. Since the run, the file may have
+	// moved on (another run), and something else may be at its place: a
+	// stranger's file must never be carried off to the old folder.
+	switch info, err := os.Lstat(m.To); {
+	case errors.Is(err, fs.ErrNotExist):
 		return keep(ReasonMissing)
-	} else if err != nil {
-		return keep(err.Error())
+	case err != nil:
+		return keep(reasonOf(err))
+	case info.Size() != m.Size || info.ModTime().UnixNano() != m.MTime:
+		return keep(ReasonChanged)
 	}
-	reason, fatal := dirs.ensure(ctx, filepath.Dir(m.From))
+	if here, err := r.Store.OrganiseFileAt(ctx, m.AssetID, m.To); err != nil {
+		return err
+	} else if !here {
+		return keep(ReasonMissing) // the library has no such file there any more
+	}
+	reason, fatal := dirs.ensure(ctx, filepath.Dir(m.From), m.Root)
 	if fatal != nil {
 		return fatal
 	}
 	if reason != nil {
-		return keep(reason.Error())
+		return keep(reasonOf(reason))
 	}
 
 	if err := r.Store.JournalOrganiseMove(ctx, runID, m.Seq, core.MoveMoved, core.MoveUndoing, m.Sidecar); err != nil {
@@ -310,8 +321,8 @@ func (r *Runner) moveBack(ctx context.Context, runID int64, m store.OrganiseMove
 	case errors.Is(moveErr, ErrExists):
 		return r.Store.SetOrganiseMove(settle, runID, m.Seq, core.MoveMoved, ReasonTaken)
 	case moveErr != nil:
-		slog.Warn("organise: put a file back", "err", moveErr, "move", describe(m))
-		return r.Store.SetOrganiseMove(settle, runID, m.Seq, core.MoveMoved, moveErr.Error())
+		slog.Warn("organise: put a file back", "kind", kindOf(moveErr), "errno", errnoOf(moveErr), "move", describe(m))
+		return r.Store.SetOrganiseMove(settle, runID, m.Seq, core.MoveMoved, reasonOf(moveErr))
 	}
 	if r.stopsAt(afterMove, m.Seq) {
 		return errCrashed
@@ -377,6 +388,22 @@ func (r *Runner) Recover(ctx context.Context, runID int64) error {
 			}
 		case atOrigin && !atTarget:
 			err = r.Store.SetOrganiseMove(ctx, runID, m.Seq, restart, "")
+		case atOrigin && atTarget && m.State == core.MoveUndoing:
+			// An undo cut short with something at the old place. If the file
+			// there is the one that went back it is finished; otherwise the
+			// way is taken, as when no crash came between: the file stays
+			// moved, the reason is recorded, and the run can be undone again.
+			if sameFile(target, m) {
+				side := store.OrganiseSidecar{State: m.Sidecar}
+				if sidecarMoves {
+					side, err = settleSidecar(sidecarOf(origin), sidecarOf(target), sidecarDone)
+				}
+				if err == nil {
+					err = r.Store.FinishOrganiseMove(ctx, runID, m, origin, target, resting, side)
+				}
+			} else {
+				err = r.Store.SetOrganiseMove(ctx, runID, m.Seq, restart, ReasonTaken)
+			}
 		case atOrigin && atTarget:
 			err = r.Store.SetOrganiseMove(ctx, runID, m.Seq, core.MoveFailed, "a file is at both the old and the new place")
 		default:
@@ -467,7 +494,7 @@ func (r *Runner) removeEmptyDirs(ctx context.Context, runID int64) {
 				slog.Warn("organise: forget a folder it made", "err", err)
 			}
 		default:
-			slog.Debug("organise: keep a folder it made", "err", err) // not empty, most likely
+			slog.Debug("organise: keep a folder it made", "errno", errnoOf(err)) // not empty, most likely
 		}
 	}
 }
@@ -485,11 +512,18 @@ type dirMaker struct {
 // ensure makes dir and its missing parents. reason is why a folder could not
 // be made (the move fails, the run goes on); fatal is a journal failure,
 // which stops the run, since a folder made without a record could not be undone.
-func (d *dirMaker) ensure(ctx context.Context, dir string) (reason, fatal error) {
+func (d *dirMaker) ensure(ctx context.Context, dir, root string) (reason, fatal error) {
 	var missing []string
 	for cur := dir; ; {
 		key := core.Fold(cur)
 		if d.known[key] {
+			break
+		}
+		if root != "" && key == core.Fold(root) {
+			// The source folder is where the library already is. It may be a
+			// junction or a link to the real folder, which Lstat does not
+			// call a folder; it is not Lumen's to create or to question.
+			d.known[key] = true
 			break
 		}
 		info, err := os.Lstat(cur)

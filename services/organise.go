@@ -24,6 +24,9 @@ var ErrOrganiseBusy = errors.New("files are already being organised")
 // nothing to undo).
 var ErrOrganiseState = errors.New("that run cannot be started or undone now")
 
+// ErrOrganiseStopping means Lumen is closing, and no new run is taken.
+var ErrOrganiseStopping = errors.New("the app is closing")
+
 // recovering is the place a startup recovery takes in organiser.active: no
 // run has this id.
 const recovering = -1
@@ -36,6 +39,7 @@ type organiser struct {
 	ctx    context.Context
 	stop   context.CancelFunc
 	wg     sync.WaitGroup
+	closed bool // shutdown has begun: no run or recovery is taken any more
 	// emit sends progress to the UI (the app's event when nil); a test's can
 	// listen instead.
 	emit func(core.OrganiseProgress)
@@ -56,11 +60,27 @@ func (o *organiser) lifetime() context.Context {
 func (o *organiser) claim(runID int64) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.closed {
+		return ErrOrganiseStopping
+	}
 	if o.active != 0 {
 		return ErrOrganiseBusy
 	}
 	o.active = runID
 	return nil
+}
+
+// track registers a goroutine that shutdown must wait for, or says shutdown
+// has begun and it must not start. The registration is made under the lock
+// that closes the door, so a goroutine is never added after Wait began.
+func (o *organiser) track() (done func(), ok bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closed {
+		return nil, false
+	}
+	o.wg.Add(1)
+	return o.wg.Done, true
 }
 
 func (o *organiser) release() {
@@ -75,12 +95,23 @@ func (o *organiser) release() {
 // It waits for nothing the window needs, so it works in the background.
 func (s *LibraryService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
 	life := s.organise.lifetime()
-	s.organise.wg.Go(func() {
-		if err := s.recoverOrganise(life); err != nil && life.Err() == nil {
-			slog.Error("settle interrupted organise runs", "err", err)
-		}
-	})
+	if done, ok := s.organise.track(); ok {
+		go func() {
+			defer done()
+			s.settleOrganise(life)
+		}()
+	}
 	return nil
+}
+
+// settleOrganise is recoverOrganise for a goroutine, logging what fails. The
+// indexer runs it before its first scan (see NewLibraryService), and
+// ServiceStartup runs it again for an indexer that was started by then: it
+// finds nothing left to settle.
+func (s *LibraryService) settleOrganise(ctx context.Context) {
+	if err := s.recoverOrganise(ctx); err != nil && ctx.Err() == nil {
+		slog.Error("settle interrupted organise runs", "err", err)
+	}
 }
 
 // ServiceShutdown stops a run in progress (it ends failed, so it can be
@@ -88,6 +119,7 @@ func (s *LibraryService) ServiceStartup(_ context.Context, _ application.Service
 func (s *LibraryService) ServiceShutdown() error {
 	s.organise.lifetime() // so that there is a stop to call
 	s.organise.mu.Lock()
+	s.organise.closed = true
 	stop := s.organise.stop
 	s.organise.mu.Unlock()
 	stop()
@@ -274,9 +306,14 @@ func (s *LibraryService) begin(ctx context.Context, runID int64, op organiseOp) 
 	if err := s.store.SetOrganiseRunState(ctx, runID, op.started); err != nil {
 		return err
 	}
+	done, ok := s.organise.track()
+	if !ok {
+		return ErrOrganiseStopping
+	}
 	life := s.organise.lifetime()
 	handed = true
-	s.organise.wg.Go(func() {
+	go func() {
+		defer done()
 		defer s.organise.release()
 		s.sendOrganiseProgress(core.OrganiseProgress{RunID: runID, State: op.started, Total: op.todo(counts)})
 		unhold, err := s.holdScans(life)
@@ -290,11 +327,27 @@ func (s *LibraryService) begin(ctx context.Context, runID int64, op organiseOp) 
 		if err := op.work(life, s.runner(), runID); err != nil && life.Err() == nil {
 			slog.Error("organise run stopped", "run", runID, "err", err)
 		}
-		if s.ix != nil {
-			s.ix.LibraryChanged(core.Changes{Assets: true}) // the files' paths changed
-		}
-	})
+		s.afterOrganise(life, runID)
+	}()
 	return nil
+}
+
+// afterOrganise tells the rest of Lumen that files have moved: the paths
+// changed, and a stage that read a file just as it moved failed its job
+// through no fault of the file, so those assets' failed jobs run again.
+func (s *LibraryService) afterOrganise(ctx context.Context, runID int64) {
+	if s.ix == nil {
+		return
+	}
+	s.ix.LibraryChanged(core.Changes{Assets: true})
+	assets, err := s.store.OrganiseMovedAssets(ctx, runID)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Error("list the assets an organise run moved", "err", err)
+		}
+		return
+	}
+	s.ix.RetryFailedOf(ctx, assets)
 }
 
 // OrganiseRuns lists the runs that have started, newest first.

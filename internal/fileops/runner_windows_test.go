@@ -5,7 +5,9 @@ package fileops
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,7 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/windows"
+
 	"lumen/internal/core"
+	"lumen/internal/scanner"
 	"lumen/internal/store"
 )
 
@@ -920,5 +925,271 @@ func TestRecoveryNeverReplacesASidecarAtBothPlaces(t *testing.T) {
 	h.wantFile(l.path("2024/IMG_2.jpg.xmp"), "someone else's")
 	if m := h.moves()[1]; m.State != core.MoveMoved || m.Sidecar != store.SidecarKept || m.Error != ReasonSidecarTaken {
 		t.Fatalf("move = %+v, want moved with the sidecar kept", m)
+	}
+}
+
+// scanAgain runs a full scan of the library's source, as the indexer does
+// after a run, and says what it made of the library.
+func scanAgain(t *testing.T, l library) scanner.Result {
+	t.Helper()
+	sc := &scanner.Scanner{Store: l.st, HashWorkers: 2}
+	res, err := sc.Scan(l.ctx, l.src, "", scanner.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func TestAFullScanAfterARunLosesNothingEvenWhenValuesLookLikeNamesTheScannerSkips(t *testing.T) {
+	l := newLibrary(t)
+	a := l.add("a.jpg", "a", day(2024, time.May, 1))
+	l.setEventName(a, "$Recycle.Bin")
+	l.setCamera(a, "System Volume Information")
+	b := l.add("b.jpg", "b", day(2025, time.May, 1))
+	l.setEventName(b, ".hidden trip")
+	h := l.start("{Event}/{Camera}/{Name}")
+	h.mustRun()
+	if res := scanAgain(t, l); res.Seen != 2 || res.Removed != 0 || res.Changed != 0 {
+		t.Fatalf("scan after the run: %+v, want both files seen and nothing removed", res)
+	}
+	if n, err := l.st.CountVisible(l.ctx); err != nil || n != 2 {
+		t.Fatalf("visible photos after the scan = %d, %v; want 2", n, err)
+	}
+}
+
+func TestAnExistingHiddenFolderIsNotMovedInto(t *testing.T) {
+	l := newLibrary(t)
+	l.add("a.jpg", "a", day(2024, time.May, 1))
+	l.add("b.jpg", "b", day(2025, time.May, 1))
+	if err := os.Mkdir(l.path("2024"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	name, err := windows.UTF16PtrFromString(l.path("2024"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetFileAttributes(name, windows.FILE_ATTRIBUTE_HIDDEN); err != nil {
+		t.Fatal(err)
+	}
+	h := l.start("{Year}/{Name}")
+	moves := h.plan.Moves
+	if len(moves) != 2 || moves[0].State != core.MoveSkipped || moves[0].Error != ReasonNotAFolder || moves[1].State != core.MovePlanned {
+		t.Fatalf("plan = %+v, want the move into the hidden folder skipped and the other planned", moves)
+	}
+	h.mustRun()
+	h.wantFile(l.path("a.jpg"), "a")
+	h.wantFile(l.path("2025/b.jpg"), "b")
+	if res := scanAgain(t, l); res.Removed != 0 {
+		t.Fatalf("a scan after the run removed %d files", res.Removed)
+	}
+}
+
+// junction makes a directory junction at link to target, or skips the test
+// where Windows will not allow it.
+func junction(t *testing.T, link, target string) {
+	t.Helper()
+	if out, err := exec.CommandContext(t.Context(), "cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+		t.Skipf("cannot make a junction here: %v: %s", err, out)
+	}
+}
+
+func TestASourceThatIsAJunctionIsOrganisedAndUndoneInsideItself(t *testing.T) {
+	l := newLibrary(t)
+	target := filepath.Join(t.TempDir(), "RealPhotos")
+	if err := os.Mkdir(target, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "Pictures")
+	junction(t, link, target)
+	src := l.addSource(link)
+	l.addTo(src, link, "IMG_1.jpg", "one", day(2024, time.August, 5))
+	l.addTo(src, link, "sub/IMG_2.jpg", "two", day(2025, time.August, 5))
+
+	h := l.start("{Year}/{Name}")
+	if len(h.plan.Moves) != 2 || h.plan.Moves[0].State != core.MovePlanned {
+		t.Fatalf("plan = %+v", h.plan.Moves)
+	}
+	h.mustRun()
+	h.wantFile(filepath.Join(target, "2024", "IMG_1.jpg"), "one")
+	h.wantFile(filepath.Join(target, "2025", "IMG_2.jpg"), "two")
+	h.wantFile(filepath.Join(link, "2024", "IMG_1.jpg"), "one")
+	if h.runState() != core.OrganiseDone {
+		t.Fatalf("run state = %s, want done", h.runState())
+	}
+	for _, m := range h.moves() {
+		if m.State != core.MoveMoved {
+			t.Fatalf("a move did not happen: %+v", m)
+		}
+	}
+	h.mustUndo()
+	h.wantFile(filepath.Join(target, "IMG_1.jpg"), "one")
+	h.wantFile(filepath.Join(target, "sub", "IMG_2.jpg"), "two")
+	h.wantNoFile(filepath.Join(target, "2024"))
+	if !exist(link) {
+		t.Fatal("the source folder itself is gone")
+	}
+	if h.runState() != core.OrganiseUndone {
+		t.Fatalf("run state after undo = %s", h.runState())
+	}
+}
+
+func TestUndoLeavesAlonePlacesWhereAnotherRunOrAStrangerPutAFile(t *testing.T) {
+	l := newLibrary(t)
+	a := l.add("A.jpg", "alpha", day(2024, time.May, 1))
+	first := l.start("{Year}/{Name}") // A.jpg -> 2024\A.jpg
+	first.mustRun()
+	second := l.start("{Month}/{Name}") // 2024\A.jpg -> 05\A.jpg
+	second.mustRun()
+	l.write(l.path("2024/A.jpg"), "a stranger's file at the first run's destination")
+
+	first.mustUndo()
+	first.wantFile(l.path("2024/A.jpg"), "a stranger's file at the first run's destination")
+	first.wantFile(l.path("05/A.jpg"), "alpha")
+	first.wantNoFile(l.path("A.jpg"))
+	if m := first.moves()[0]; m.State != core.MoveMoved || m.Error != ReasonChanged {
+		t.Fatalf("first run's move = %+v, want it left moved with reason %q", m, ReasonChanged)
+	}
+	if first.runState() != core.OrganiseDone {
+		t.Fatalf("first run state = %s, want done (still undoable)", first.runState())
+	}
+	if got := first.libraryPaths(a); !equalStrings(got, []string{l.path("05/A.jpg")}) {
+		t.Fatalf("library paths = %q, the file is where the second run put it", got)
+	}
+
+	// With the stranger gone and the second run undone, the first can be undone.
+	if err := os.Remove(l.path("2024/A.jpg")); err != nil { // the test's own scratch file
+		t.Fatal(err)
+	}
+	second.mustUndo()
+	first.mustUndo()
+	first.wantFile(l.path("A.jpg"), "alpha")
+	if first.runState() != core.OrganiseUndone {
+		t.Fatalf("first run state = %s, want undone", first.runState())
+	}
+}
+
+func TestUndoLeavesAFileThatTheLibraryNoLongerHoldsAtItsPlace(t *testing.T) {
+	l, assets := threePhotos(t)
+	h := l.start("{Year}/{Name}")
+	h.mustRun()
+	// The library no longer has the first photo's file where the run put it,
+	// so it is not the run's to move.
+	var gone int64
+	for _, f := range l.snapshot(0).Files {
+		if f.AssetID == assets[0] {
+			gone = f.FileID
+		}
+	}
+	if err := l.st.RemoveFiles(l.ctx, []int64{gone}); err != nil {
+		t.Fatal(err)
+	}
+	h.mustUndo()
+	h.wantFile(l.path("2024/IMG_1.jpg"), "one")
+	if m := h.moves()[0]; m.State != core.MoveMoved || m.Error != ReasonMissing {
+		t.Fatalf("move = %+v, want it left moved with reason %q", m, ReasonMissing)
+	}
+	h.wantFile(l.path("IMG_2.jpg"), "two")
+}
+
+func TestACrashDuringUndoFollowedByAFileAtTheOldPlaceLeavesTheRunUndoable(t *testing.T) {
+	l, _ := threePhotos(t)
+	h := l.start("{Year}/{Name}")
+	h.mustRun()
+	h.crashAtTheSecondMove(afterJournal)
+	if err := h.runner.Undo(l.ctx, h.run); !errors.Is(err, errCrashed) {
+		t.Fatalf("undo = %v, want the injected crash", err)
+	}
+	l.write(l.path("IMG_2.jpg"), "someone put this at the old place")
+	h.restart()
+	if m := h.moves()[1]; m.State != core.MoveMoved || m.Error != ReasonTaken {
+		t.Fatalf("move in doubt = %+v, want it moved with reason %q", m, ReasonTaken)
+	}
+	if h.runState() != core.OrganiseDone {
+		t.Fatalf("run state = %s, want done (not undone while a file is still moved)", h.runState())
+	}
+	h.mustUndo()
+	h.wantFile(l.path("IMG_2.jpg"), "someone put this at the old place")
+	h.wantFile(l.path("2024/IMG_2.jpg"), "two")
+	h.wantFile(l.path("IMG_1.jpg"), "one")
+	if h.runState() != core.OrganiseDone {
+		t.Fatalf("run state = %s, want done while the way is blocked", h.runState())
+	}
+	if err := os.Remove(l.path("IMG_2.jpg")); err != nil { // the test's own scratch file
+		t.Fatal(err)
+	}
+	h.mustUndo()
+	h.wantFile(l.path("IMG_2.jpg"), "two")
+	if h.runState() != core.OrganiseUndone {
+		t.Fatalf("run state = %s, want undone", h.runState())
+	}
+}
+
+func TestAStaleLibraryRowAtTheDestinationDoesNotWedgeTheRun(t *testing.T) {
+	l, assets := threePhotos(t)
+	h := l.start("{Year}/{Name}")
+	// After the preview a row appears for a path the run is about to use, for
+	// a file that is not on disk.
+	stale := store.IngestItem{SourceID: l.src.ID, Path: l.path("2024/IMG_1.jpg"), Size: 5, MTime: 1,
+		Hash: []byte("a ghost"), Kind: core.KindPhoto, Ext: ".jpg", TakenAt: 1_700_000_000, DateFrom: core.DateFromFile}
+	if _, err := l.st.Ingest(l.ctx, []store.IngestItem{stale}); err != nil {
+		t.Fatal(err)
+	}
+	h.mustRun()
+	if h.runState() != core.OrganiseDone {
+		t.Fatalf("run state = %s, want done", h.runState())
+	}
+	h.wantFile(l.path("2024/IMG_1.jpg"), "one")
+	if got := h.libraryPaths(assets[0]); !equalStrings(got, []string{l.path("2024/IMG_1.jpg")}) {
+		t.Fatalf("library paths = %q", got)
+	}
+	if m := h.moves()[0]; m.State != core.MoveMoved {
+		t.Fatalf("move = %+v", m)
+	}
+}
+
+// textLog is a slog handler that keeps what was logged, to look for paths.
+type textLog struct {
+	mu   sync.Mutex
+	text strings.Builder
+}
+
+func (*textLog) Enabled(context.Context, slog.Level) bool { return true }
+func (h *textLog) WithAttrs([]slog.Attr) slog.Handler     { return h }
+func (h *textLog) WithGroup(string) slog.Handler          { return h }
+func (h *textLog) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.text.WriteString(r.Message)
+	r.Attrs(func(a slog.Attr) bool {
+		h.text.WriteString(" " + a.Key + "=" + a.Value.String())
+		return true
+	})
+	h.text.WriteString("\n")
+	return nil
+}
+
+func TestAFailedMoveIsLoggedWithoutAnyPathAndRecordedWithoutThem(t *testing.T) {
+	l, _ := threePhotos(t)
+	h := l.start("{Year}/{Name}")
+	// The folder is not made, so the move fails: Windows names both paths in its error.
+	h.runner.mkdir = func(string) error { return nil }
+	logged := &textLog{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(logged))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	h.mustRun()
+
+	logged.mu.Lock()
+	text := logged.text.String()
+	logged.mu.Unlock()
+	if !strings.Contains(text, "organise: move a file") {
+		t.Fatalf("the failure was not logged: %q", text)
+	}
+	if strings.Contains(text, l.root) || strings.Contains(text, "IMG_1") || strings.Contains(text, filepath.Base(l.root)) {
+		t.Fatalf("a path reached the log:\n%s", text)
+	}
+	m := h.moves()[0]
+	if m.State != core.MoveFailed || m.Error == "" || strings.Contains(m.Error, l.root) {
+		t.Fatalf("move = %+v, want failed with Windows's words and no path", m)
 	}
 }

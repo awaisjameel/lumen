@@ -86,6 +86,7 @@ const plan = (moves: OrganiseMove[], extra: Partial<OrganisePlan> = {}): Organis
   moves,
   renamed: 0,
   inPlace: 0,
+  sidecars: 0,
   ...extra,
 })
 const run = (id: number, state: OrganiseRunState, moved: number, total: number): OrganiseRun => ({
@@ -95,6 +96,7 @@ const run = (id: number, state: OrganiseRunState, moved: number, total: number):
   state,
   moved,
   total,
+  sidecarsKept: 0,
 })
 
 // The list's scroller is 320 px high and each row 60 (the view's own height).
@@ -397,4 +399,31 @@ it('lists past runs, resumes a stopped one and undoes a finished one after askin
   await w.findAll('.runs button')[1]?.trigger('click')
   await flushPromises()
   expect(engine.undoOrganise).toHaveBeenCalledWith(8)
+})
+
+it('says how many sidecars move with their photos, and why one stays behind', async () => {
+  vi.mocked(engine.planOrganise).mockResolvedValue(
+    plan([planned(1), { ...planned(2), error: OrganiseReason.SidecarTaken }], { sidecars: 2 }),
+  )
+  const w = await open()
+  await button(w, 'Preview the moves')?.trigger('click')
+  await flushPromises()
+  expect(w.get('.summary').text()).toContain('2 sidecar files (.xmp) will move with their photos.')
+  const rows = w.findAll('.move')
+  expect(rows[0]?.find('.note').exists()).toBe(false)
+  expect(rows[1]?.get('.note').text()).toBe(
+    'The photo moves, but its .xmp sidecar stays because something is already at its new name.',
+  )
+  expect(rows[1]?.text()).toContain('moves to')
+})
+
+it('says how many sidecars stayed behind in a past run', async () => {
+  vi.mocked(engine.organiseRuns).mockResolvedValue([
+    { ...run(8, OrganiseRunState.OrganiseDone, 20, 20), sidecarsKept: 3 },
+    run(7, OrganiseRunState.OrganiseDone, 5, 5),
+  ])
+  const w = await open()
+  const items = w.findAll('.runs li')
+  expect(items[0]?.text()).toContain('3 sidecars stayed behind')
+  expect(items[1]?.text()).not.toContain('stayed behind')
 })

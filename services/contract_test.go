@@ -111,7 +111,7 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 	}
 	reasons := quoted(`(?s)export const OrganiseReason = \{(.*?)\} as const`)
 	wantReasons := []string{fileops.ReasonMissing, fileops.ReasonNotVisible, fileops.ReasonBlockedFolder, fileops.ReasonChanged,
-		fileops.ReasonTaken, fileops.ReasonTooLong, fileops.ReasonNotAFolder}
+		fileops.ReasonTaken, fileops.ReasonTooLong, fileops.ReasonNotAFolder, fileops.ReasonSidecarTaken}
 	if !slices.Equal(reasons, wantReasons) {
 		t.Errorf("bridge OrganiseReason = %v, engine has %v", reasons, wantReasons)
 	}

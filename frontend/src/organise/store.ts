@@ -30,7 +30,7 @@ export const useOrganise = defineStore('organise', () => {
   const sources = shallowRef<Source[]>([])
   const plan = shallowRef<OrganisePlan | null>(null)
   const runs = shallowRef<OrganiseRun[]>([])
-  const progress = ref<OrganiseProgress | null>(null)
+  const progress = shallowRef<OrganiseProgress | null>(null)
   const example = shallowRef<Example | null>(null)
   const planning = ref(false)
   const error = ref('') // why the last thing the user asked for failed
@@ -119,12 +119,19 @@ export const useOrganise = defineStore('organise', () => {
   ) {
     error.value = ''
     lastAction.value = action
+    // The run is shown as started before the call is answered: it may move
+    // every file, and say so with its last event, before the answer arrives,
+    // and the answer must not take the page back to the start.
+    const before = progress.value
+    const seed: OrganiseProgress = { runId, state: started, done: 0, total }
+    progress.value = seed
     try {
       await call()
-      progress.value = { runId, state: started, done: 0, total }
       plan.value = null
     } catch (e) {
       error.value = errorText(e)
+      // Nothing started: undo the seed, unless an event has replaced it.
+      if (progress.value === seed) progress.value = before
     }
     await loadRuns()
   }
@@ -159,6 +166,11 @@ export const useOrganise = defineStore('organise', () => {
   }
 
   function onProgress(p: OrganiseProgress) {
+    const current = progress.value
+    // A run's last event stands: a late event of it that says it is still
+    // going (events can arrive out of order) must not bring it back to life.
+    // Asking again (resume, undo) starts afresh with a seed of its own.
+    if (current?.runId === p.runId && !working(current.state) && working(p.state)) return
     progress.value = p
     if (!working(p.state)) void loadRuns()
   }

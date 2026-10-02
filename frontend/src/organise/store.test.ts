@@ -50,6 +50,7 @@ const plan = (moves: OrganiseMove[]): OrganisePlan => ({
   moves,
   renamed: 0,
   inPlace: 3,
+  sidecars: 0,
 })
 
 const run = (id: number, state: OrganiseRunState, moved: number, total: number): OrganiseRun => ({
@@ -59,6 +60,7 @@ const run = (id: number, state: OrganiseRunState, moved: number, total: number):
   state,
   moved,
   total,
+  sidecarsKept: 0,
 })
 
 const detail = (placeId: number, camera = ''): AssetDetail => ({
@@ -280,4 +282,71 @@ it('lists only enabled folders to choose from', async () => {
   const organise = useOrganise()
   await organise.loadSources()
   expect(organise.sources.map((s) => s.id)).toEqual([1])
+})
+
+it('does not let the answer to a start undo the run’s end event that arrived before it', async () => {
+  vi.mocked(engine.planOrganise).mockResolvedValue(plan([move(1, OrganiseMoveState.MovePlanned)]))
+  let answer: () => void = () => undefined
+  vi.mocked(engine.startOrganise).mockReturnValue(
+    new Promise<void>((resolve) => {
+      answer = resolve
+    }),
+  )
+  const organise = useOrganise()
+  await organise.preview()
+  const starting = organise.start()
+  // The run moved its one file and ended before the call was answered.
+  emit({ runId: 7, state: OrganiseRunState.OrganiseDone, done: 1, total: 1 })
+  answer()
+  await starting
+  expect(organise.progress).toEqual({ runId: 7, state: OrganiseRunState.OrganiseDone, done: 1, total: 1 })
+  expect(organise.busy).toBe(false)
+})
+
+it('shows a run as started the moment it is asked for, and takes that back if the engine refuses', async () => {
+  vi.mocked(engine.planOrganise).mockResolvedValue(plan([move(1, OrganiseMoveState.MovePlanned)]))
+  let refuse: (e: Error) => void = () => undefined
+  vi.mocked(engine.startOrganise).mockReturnValue(
+    new Promise<void>((_resolve, reject) => {
+      refuse = reject
+    }),
+  )
+  const organise = useOrganise()
+  await organise.preview()
+  const starting = organise.start()
+  expect(organise.progress).toEqual({ runId: 7, state: OrganiseRunState.OrganiseRunning, done: 0, total: 1 })
+  expect(organise.busy).toBe(true)
+  refuse(new Error('busy', { cause: { code: ErrorCode.OrganiseBusy } }))
+  await starting
+  expect(organise.progress).toBeNull()
+  expect(organise.busy).toBe(false)
+})
+
+it('keeps what an event said while a refused start was being answered', async () => {
+  vi.mocked(engine.planOrganise).mockResolvedValue(plan([move(1, OrganiseMoveState.MovePlanned)]))
+  let refuse: (e: Error) => void = () => undefined
+  vi.mocked(engine.startOrganise).mockReturnValue(
+    new Promise<void>((_resolve, reject) => {
+      refuse = reject
+    }),
+  )
+  const organise = useOrganise()
+  await organise.preview()
+  const starting = organise.start()
+  emit({ runId: 3, state: OrganiseRunState.OrganiseRunning, done: 5, total: 9 }) // another run, still going
+  refuse(new Error('busy', { cause: { code: ErrorCode.OrganiseBusy } }))
+  await starting
+  expect(organise.progress).toEqual({ runId: 3, state: OrganiseRunState.OrganiseRunning, done: 5, total: 9 })
+})
+
+it('ignores a late event saying a run is still going once its end has arrived, until it is asked for again', async () => {
+  const organise = useOrganise()
+  emit({ runId: 7, state: OrganiseRunState.OrganiseDone, done: 4, total: 4 })
+  emit({ runId: 7, state: OrganiseRunState.OrganiseRunning, done: 3, total: 4 })
+  expect(organise.progress?.state).toBe(OrganiseRunState.OrganiseDone)
+  expect(organise.busy).toBe(false)
+
+  await organise.undo(run(7, OrganiseRunState.OrganiseDone, 4, 4))
+  emit({ runId: 7, state: OrganiseRunState.OrganiseUndoing, done: 1, total: 4 })
+  expect(organise.progress).toEqual({ runId: 7, state: OrganiseRunState.OrganiseUndoing, done: 1, total: 4 })
 })

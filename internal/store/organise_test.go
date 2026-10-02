@@ -427,3 +427,92 @@ func TestOrganiseTablesFollowTheirRunWhenItIsDeleted(t *testing.T) {
 		t.Fatalf("%d journal rows outlived their run", n)
 	}
 }
+
+func TestFinishingAMoveDropsAStaleRowAtItsNewPathSoTheCommitNeverWedges(t *testing.T) {
+	f := newOrganiseFixture(t)
+	// A row for a file that is not on disk holds the path the move is taking.
+	check(t, errOf(f.st.Ingest(f.ctx, []IngestItem{item(f.src.ID, `C:\Photos\2023\11\beach1.jpg`, "a ghost")})))
+	var ghost, fileID int64
+	check(t, f.st.r.QueryRowContext(f.ctx, "SELECT asset_id FROM files WHERE path = ?", `C:\Photos\2023\11\beach1.jpg`).Scan(&ghost))
+	check(t, f.st.r.QueryRowContext(f.ctx, "SELECT id FROM files WHERE path = ?", `C:\Photos\beach1.jpg`).Scan(&fileID))
+
+	move := OrganiseMove{FileID: fileID, AssetID: f.ids["beach1"], From: `C:\Photos\beach1.jpg`, To: `C:\Photos\2023\11\beach1.jpg`,
+		Size: 6, MTime: 1, State: core.MovePlanned}
+	moves := []OrganiseMove{move}
+	run, err := f.st.SaveOrganisePlan(f.ctx, "t", moves)
+	check(t, err)
+	move.Seq = moves[0].Seq
+	check(t, f.st.JournalOrganiseMove(f.ctx, run, move.Seq, core.MovePlanned, core.MoveMoving, ""))
+	check(t, f.st.FinishOrganiseMove(f.ctx, run, move, move.From, move.To, core.MoveMoved, OrganiseSidecar{}))
+
+	detail, err := f.st.AssetDetail(f.ctx, f.ids["beach1"], false)
+	check(t, err)
+	if !slices.Equal(detail.Paths, []string{`C:\Photos\2023\11\beach1.jpg`}) {
+		t.Fatalf("the moved asset's paths = %v", detail.Paths)
+	}
+	var missing bool
+	check(t, f.st.r.QueryRowContext(f.ctx, "SELECT missing_since IS NOT NULL FROM assets WHERE id = ?", ghost).Scan(&missing))
+	if !missing {
+		t.Fatal("the asset of the stale row, which has no other file, was not marked missing")
+	}
+}
+
+func TestPastRunsCountTheSidecarsThatStayedBehind(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	moves := movesOf(`C:\a`, `C:\b`, `C:\c`, `C:\d`, `C:\e`, `C:\f`)
+	run, err := st.SaveOrganisePlan(ctx, "t", moves)
+	check(t, err)
+	for seq, side := range map[int]OrganiseSidecar{
+		1: {State: SidecarMoved, From: `C:\a.xmp`, To: `C:\b.xmp`},
+		2: {State: SidecarKept, Reason: "sidecar_taken"},
+		3: {State: SidecarKept, Reason: "sidecar_taken"},
+	} {
+		m := moves[seq-1]
+		m.Seq = seq
+		check(t, st.JournalOrganiseMove(ctx, run, seq, core.MovePlanned, core.MoveMoving, SidecarPlanned))
+		check(t, st.FinishOrganiseMove(ctx, run, m, m.From, m.To, core.MoveMoved, side))
+	}
+	check(t, st.SetOrganiseRunState(ctx, run, core.OrganiseDone))
+	runs, err := st.OrganiseRuns(ctx)
+	check(t, err)
+	if len(runs) != 1 || runs[0].SidecarsKept != 2 || runs[0].Moved != 3 {
+		t.Fatalf("runs = %+v, want 3 moved with 2 sidecars kept", runs)
+	}
+	assets, err := st.OrganiseMovedAssets(ctx, run)
+	check(t, err)
+	if !slices.Equal(assets, []int64{1, 2, 3}) {
+		t.Fatalf("moved assets = %v, want 1, 2, 3", assets)
+	}
+}
+
+func TestRetryFailedOfRequeuesTheFailedJobsOfTheGivenAssetsOnly(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	src, err := st.AddSource(ctx, `C:\Media`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(src.ID, `C:\Media\a.jpg`, "a"), item(src.ID, `C:\Media\b.jpg`, "b")})))
+	for range MaxAttempts {
+		jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 10)
+		check(t, err)
+		var results []MetadataResult
+		for _, j := range jobs {
+			results = append(results, MetadataResult{AssetID: j.AssetID, Err: "the file was not there"})
+		}
+		check(t, st.SaveMetadata(ctx, "v1", results))
+	}
+	if jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 10); err != nil || len(jobs) != 0 {
+		t.Fatalf("jobs still pending after %d failures: %+v, %v", MaxAttempts, jobs, err)
+	}
+	n, err := st.RetryFailedOf(ctx, []int64{1})
+	check(t, err)
+	if n == 0 {
+		t.Fatal("nothing was requeued")
+	}
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 10)
+	check(t, err)
+	if len(jobs) != 1 || jobs[0].AssetID != 1 {
+		t.Fatalf("pending after the retry = %+v, want only asset 1", jobs)
+	}
+	if n, err := st.RetryFailedOf(ctx, nil); err != nil || n != 0 {
+		t.Fatalf("retry of no assets = %d, %v", n, err)
+	}
+}

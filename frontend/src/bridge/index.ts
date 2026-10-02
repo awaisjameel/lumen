@@ -150,6 +150,7 @@ export const OrganiseReason = {
   Taken: 'taken',
   TooLong: 'too_long',
   NotAFolder: 'not_a_folder',
+  SidecarTaken: 'sidecar_taken',
 } as const
 export type OrganiseReason = (typeof OrganiseReason)[keyof typeof OrganiseReason]
 /** The pattern attribute of a PIN field: PIN_MIN_LEN to PIN_MAX_LEN digits. */

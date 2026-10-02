@@ -8,6 +8,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"lumen/internal/scanner"
 )
 
 // ErrInvalidTemplate means a folder scheme cannot be used: the wrapped text
@@ -188,6 +190,11 @@ func parseComponent(comp string) ([]segment, error) {
 	if !hasToken(segs) && isReserved(comp) {
 		return nil, fmt.Errorf("%q is a name Windows keeps for devices", comp)
 	}
+	// A folder the scanner leaves out would hide the files moved into it: the
+	// next full scan would forget them. The rule is the scanner's own.
+	if first := segs[0]; !first.token && scanner.SkipName(first.text) || !hasToken(segs) && scanner.SkipName(comp) {
+		return nil, fmt.Errorf("%q is a name Lumen does not look in (names starting with . or $ are hidden)", comp)
+	}
 	return segs, nil
 }
 
@@ -302,8 +309,8 @@ func safeName(name, ext string) string {
 	if name == "" {
 		return fallbackName
 	}
-	if isReserved(name + ext) {
-		return "_" + name
+	if isReserved(name+ext) || scanner.SkipName(name) {
+		return "_" + name // a name the scanner skips would lose the file at the next scan
 	}
 	return name
 }

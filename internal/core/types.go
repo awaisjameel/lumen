@@ -153,6 +153,9 @@ type OrganiseRun struct {
 	State     OrganiseRunState `json:"state"`
 	Moved     int              `json:"moved"`
 	Total     int              `json:"total"`
+	// SidecarsKept is how many XMP sidecars stayed behind because something
+	// was at their new name.
+	SidecarsKept int `json:"sidecarsKept"`
 }
 
 // OrganiseProgress is a run's progress, sent while it moves or undoes files.

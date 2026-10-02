@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lumen/internal/core"
+	"lumen/internal/scanner"
 	"lumen/internal/store"
 )
 
@@ -480,28 +481,116 @@ func TestPlanOnlyReadsTheDisk(t *testing.T) {
 	}
 }
 
-func TestPlanCountsTheSidecarsThatMoveWithTheirPhotosAndLeavesAnObstructedOneBehind(t *testing.T) {
+func TestPlanCountsTheSidecarsThatMoveWithTheirPhotos(t *testing.T) {
 	l := newLibrary(t)
 	l.add("a.jpg", "a", day(2024, time.May, 1))
 	l.add("b.jpg", "b", day(2024, time.May, 2))
-	l.add("c.jpg", "c", day(2024, time.May, 3))
-	l.add("d.jpg", "d", day(2024, time.May, 4))
+	l.add("d.jpg", "d", day(2024, time.May, 3))
 	l.write(l.path("a.jpg.xmp"), "a's sidecar")
 	l.write(l.path("b.jpg.XMP"), "b's sidecar, in capitals") // the file system folds case
-	l.write(l.path("c.jpg.xmp"), "c's sidecar")
-	l.write(l.path("2024/c.jpg.xmp"), "someone else's sidecar")
 	l.write(l.path("d.xmp"), "not d's sidecar: its name lacks the extension")
 	p := l.plan("{Year}/{Name}")
 	if p.Sidecars != 2 {
 		t.Fatalf("sidecars = %d, want 2 (a's and b's)", p.Sidecars)
 	}
-	want := []string{store.SidecarPlanned, store.SidecarPlanned, store.SidecarKept, ""}
+	want := []string{store.SidecarPlanned, store.SidecarPlanned, ""}
 	for i, m := range p.Moves {
 		if m.Sidecar != want[i] {
 			t.Errorf("move %d sidecar = %q, want %q", i, m.Sidecar, want[i])
 		}
 	}
-	if p.Moves[2].Error != ReasonSidecarTaken || p.Moves[2].State != core.MovePlanned {
-		t.Errorf("c: %+v, want the photo planned and the sidecar's reason recorded", p.Moves[2])
+}
+
+func TestPlanNeverPutsAPhotoBesideASidecarThatIsNotItsOwnNorTakesItsSidecarsName(t *testing.T) {
+	l := newLibrary(t)
+	l.add("c.jpg", "c", day(2024, time.May, 1))
+	l.add("d.jpg", "d", day(2024, time.May, 2))
+	l.write(l.path("c.jpg.xmp"), "c's sidecar")
+	l.write(l.path("2024/c.jpg.xmp"), "someone else's sidecar, with no photo beside it")
+	l.write(l.path("2024/d.JPG.xmp"), "a foreign sidecar in another case, for a photo that is not here")
+	p := l.plan("{Year}/{Name}")
+	got := l.destinations(p.Moves)
+	if want := []string{"2024/c (2).jpg", "2024/d (2).jpg"}; !equalStrings(got, want) {
+		t.Fatalf("destinations = %q, want %q", got, want)
 	}
+	if p.Moves[0].Sidecar != store.SidecarPlanned || p.Moves[1].Sidecar != "" {
+		t.Errorf("sidecars = %q, %q; want c's planned and d without", p.Moves[0].Sidecar, p.Moves[1].Sidecar)
+	}
+	if p.Sidecars != 1 || p.Renamed != 2 {
+		t.Errorf("sidecars %d, renamed %d; want 1 and 2", p.Sidecars, p.Renamed)
+	}
+}
+
+func TestPlanReservesTheSidecarNameOfEveryPlannedPhoto(t *testing.T) {
+	l := newLibrary(t)
+	// Two photos that would both be IMG_1.jpg: the second must not take the
+	// first's sidecar name either, nor may it be a name whose sidecar the
+	// first has reserved.
+	l.add("x/IMG_1.jpg", "one", day(2024, time.May, 1))
+	l.add("y/IMG_1.jpg", "two", day(2024, time.May, 2))
+	l.write(l.path("x/IMG_1.jpg.xmp"), "one's sidecar")
+	l.write(l.path("y/IMG_1.jpg.xmp"), "two's sidecar")
+	p := l.plan("{Year}/{Name}")
+	if got := l.destinations(p.Moves); !equalStrings(got, []string{"2024/IMG_1.jpg", "2024/IMG_1 (2).jpg"}) || p.Sidecars != 2 {
+		t.Fatalf("destinations = %q with %d sidecars", got, p.Sidecars)
+	}
+}
+
+func TestPlanCountsTheSidecarsNameInTheLengthOfAPath(t *testing.T) {
+	l := newLibrary(t)
+	long := strings.Repeat("e", 70)
+	l.add("a.jpg", "a", day(2024, time.May, 1))
+	l.add("b.jpg", "b", day(2024, time.May, 2))
+	// root\pad\long\a.jpg is exactly the longest path Windows allows here.
+	room := maxPathLen - (len(l.root) + 1 + 1 + len(long) + 1 + len("a.jpg"))
+	pad := strings.Repeat("p", max(room, 0))
+	template := pad + "/" + long + "/{Name}"
+	l.write(l.path("a.jpg.xmp"), "a's sidecar")
+	p := l.plan(template)
+	if len(p.Moves) != 2 {
+		t.Fatalf("moves = %+v", p.Moves)
+	}
+	if p.Moves[0].State != core.MoveSkipped || p.Moves[0].Error != ReasonTooLong {
+		t.Errorf("the photo whose sidecar name passes the limit = %+v, want skipped %q", p.Moves[0], ReasonTooLong)
+	}
+	if p.Moves[1].State != core.MovePlanned {
+		t.Errorf("the photo without a sidecar fits and = %+v, want planned", p.Moves[1])
+	}
+}
+
+func TestPlanGivesNoFolderOrFileANameTheScannerSkips(t *testing.T) {
+	l := newLibrary(t)
+	a := l.add("a.jpg", "a", day(2024, time.May, 1))
+	l.setEventName(a, "$Recycle.Bin")
+	l.setCamera(a, "System Volume Information")
+	b := l.add("b.jpg", "b", day(2025, time.May, 1))
+	l.setEventName(b, ".hidden trip")
+	c := l.add("c.jpg", "c", day(2026, time.May, 1))
+	l.setEventName(c, "..")
+	p := l.plan("{Event}/{Camera}/{Name}")
+	got := l.destinations(p.Moves)
+	want := []string{
+		"_$Recycle.Bin/_System Volume Information/a.jpg",
+		"hidden trip/Unknown camera/b.jpg",
+		"Unknown event/Unknown camera/c.jpg",
+	}
+	if !equalStrings(got, want) {
+		t.Fatalf("destinations = %q, want %q", got, want)
+	}
+	for _, m := range p.Moves {
+		if rel, _ := filepath.Rel(l.root, m.To); scannerSkips(rel) {
+			t.Errorf("%s would lose the file at the next scan", rel)
+		}
+	}
+}
+
+// scannerSkips reports whether the scanner would leave out any part of the
+// relative path.
+func scannerSkips(rel string) bool {
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if scanner.SkipName(part) {
+			return true
+		}
+	}
+	return false
 }

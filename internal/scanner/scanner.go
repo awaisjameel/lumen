@@ -268,6 +268,11 @@ func skipName(name string) bool {
 		strings.EqualFold(name, "System Volume Information")
 }
 
+// SkipName is skipName for fileops: organising must never give a file or a
+// folder a name the next full scan would leave out, which would make the
+// library forget the file.
+func SkipName(name string) bool { return skipName(name) }
+
 func withinAny(path string, dirs []string) bool {
 	for _, d := range dirs {
 		if core.IsWithin(path, d) {

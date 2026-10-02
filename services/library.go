@@ -86,7 +86,13 @@ func NewLibraryService(st *store.Store, ix *index.Indexer, gate *BlockGate) *Lib
 	if gate == nil {
 		gate = &BlockGate{}
 	}
-	return &LibraryService{store: st, ix: ix, now: time.Now, gate: gate}
+	s := &LibraryService{store: st, ix: ix, now: time.Now, gate: gate}
+	if ix != nil {
+		// Files an interrupted organise run left half-moved are settled
+		// before the first scan could find them so.
+		ix.BeforeFirstScan(s.settleOrganise)
+	}
+	return s
 }
 
 // Sources lists the folders in the library.
