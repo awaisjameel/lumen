@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { engine, THUMB_CACHE_DEFAULT_MB, THUMB_CACHE_MAX_MB, THUMB_CACHE_MIN_MB } from '../bridge'
 import type * as Bridge from '../bridge'
 import { useLibrary } from '../library/store'
+import { t } from '../shared/i18n'
 import SettingsView from './SettingsView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -29,6 +30,15 @@ beforeEach(() => {
 })
 afterEach(() => vi.useRealTimers())
 
+// The battery toggle, found by its label: other checkboxes (the OCR toggle)
+// follow it in the AI section.
+function batteryBox(wrapper: ReturnType<typeof mount>) {
+  return wrapper
+    .findAll('label')
+    .find((label) => label.text().includes(t('settings.aiOnBattery')))
+    ?.find('input[type="checkbox"]')
+}
+
 it.each(['videos', 'aiOnBattery'] as const)(
   'serializes %s saves across remounts and ignores an older failure',
   async (key) => {
@@ -45,15 +55,15 @@ it.each(['videos', 'aiOnBattery'] as const)(
         }),
       )
       .mockResolvedValueOnce()
-    const selector = key === 'videos' ? '.toggle input' : 'input[type="checkbox"]'
+    const selector = '.toggle input'
     const first = mount(SettingsView)
-    const firstBox = key === 'videos' ? first.get(selector) : first.findAll(selector).at(-1)
+    const firstBox = key === 'videos' ? first.get(selector) : batteryBox(first)
     if (!firstBox) throw new Error('missing settings checkbox')
     await firstBox.setValue(true)
     first.unmount()
     const next = mount(SettingsView)
     try {
-      const nextBox = key === 'videos' ? next.get(selector) : next.findAll(selector).at(-1)
+      const nextBox = key === 'videos' ? next.get(selector) : batteryBox(next)
       if (!nextBox) throw new Error('missing settings checkbox')
       await nextBox.setValue(false)
       expect(save).toHaveBeenCalledExactlyOnceWith(true)
