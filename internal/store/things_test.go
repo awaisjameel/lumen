@@ -17,7 +17,9 @@ import (
 func downgradeToV18(t *testing.T, st *Store) {
 	t.Helper()
 	ctx := context.Background()
-	for _, trigger := range []string{"event_tag_added", "event_tag_changed", "event_tag_deleted", "event_member_added",
+	// Migration 0023's trigger on blocks reads event_tags, so it goes too: a
+	// version 18 library has no such trigger, and the replay makes it again.
+	for _, trigger := range []string{"block_event_target_removed", "event_tag_added", "event_tag_changed", "event_tag_deleted", "event_member_added",
 		"event_member_deleted", "event_dirty_asset_added", "event_dirty_asset_deleted", "event_dirty_asset_changed",
 		"event_member_moved"} {
 		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER "+trigger)))

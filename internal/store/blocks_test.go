@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -272,6 +273,53 @@ func TestUpgradeConvertsUserHiddenLabelsButNotSink(t *testing.T) {
 	}
 	if blocked, err := st.IsBlocked(ctx, core.BlockTag, 2); err != nil || blocked {
 		t.Fatalf("sink converted to block: %v, %v", blocked, err)
+	}
+}
+
+func TestUpgradeRebuildsBlocksAndKeepsTheirTriggers(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "library.db")
+	db, err := sql.Open(driverName, path+"?_foreign_keys=1")
+	check(t, err)
+	names, err := fs.Glob(migrationFS, "migrations/*.sql")
+	check(t, err)
+	for _, name := range names {
+		// Numbers have gaps, so the schema version is read from the name.
+		version, err := strconv.Atoi(strings.SplitN(filepath.Base(name), "_", 2)[0])
+		check(t, err)
+		if version >= 23 {
+			break
+		}
+		body, err := migrationFS.ReadFile(name)
+		check(t, err)
+		tx, err := db.BeginTx(ctx, nil)
+		check(t, err)
+		_, err = tx.ExecContext(ctx, string(body))
+		check(t, err)
+		_, err = tx.ExecContext(ctx, "PRAGMA user_version = "+fmt.Sprint(version))
+		check(t, err)
+		check(t, tx.Commit())
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO people(id, name, created_at) VALUES (1, 'Ali', 1);
+		INSERT INTO blocks(kind, target_id, mode, name, created_at) VALUES ('person', 1, 'photos', 'Ali', 1);
+		INSERT INTO blocks(kind, path, mode, name, created_at) VALUES ('folder', 'C:\Private', 'photos', 'Private', 1);`)
+	check(t, err)
+	check(t, db.Close())
+	st, err := Open(path)
+	check(t, err)
+	defer st.Close()
+	blocks, err := st.Blocks(ctx)
+	check(t, err)
+	if len(blocks) != 2 {
+		t.Fatalf("blocks after the rebuild = %+v, want the person and the folder", blocks)
+	}
+	check(t, errOf(st.w.ExecContext(ctx, `INSERT INTO blocks(kind, target_id, mode, name, created_at)
+		VALUES ('event', 7, 'photos', 'Trip', 1), ('face', 8, 'label', 'Face', 1)`)))
+	// Migration 0014's triggers on people read blocks by name: they must still
+	// find the rebuilt table.
+	check(t, errOf(st.w.ExecContext(ctx, "DELETE FROM people WHERE id = 1")))
+	if blocked, err := st.IsBlocked(ctx, core.BlockPerson, 1); err != nil || blocked {
+		t.Fatalf("a removed person is still blocked: %v, %v", blocked, err)
 	}
 }
 
