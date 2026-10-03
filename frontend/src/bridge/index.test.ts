@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { CancellablePromise } from '@wailsio/runtime'
-import { LibraryService, SearchService } from '../../bindings/lumen/services'
-import { engine, ErrorCode } from './index'
+import { LibraryService, SearchService, SystemService } from '../../bindings/lumen/services'
+import { engine, ErrorCode, logUIError } from './index'
 import { errorText } from '../shared/errors'
 
 vi.mock('../../bindings/lumen/services', () => ({
@@ -13,7 +13,20 @@ vi.mock('../../bindings/lumen/services', () => ({
   MediaService: {},
   PeopleService: {},
   SearchService: { VisibleAssets: vi.fn() },
+  SystemService: { LogUIError: vi.fn() },
 }))
+
+it('cannot recursively report either a synchronous or asynchronous logging failure', async () => {
+  vi.mocked(SystemService.LogUIError)
+    .mockImplementationOnce(() => {
+      throw new Error('runtime unavailable')
+    })
+    .mockReturnValueOnce(CancellablePromise.reject(new Error('logging unavailable')))
+  logUIError({ message: 'first', stack: '', where: 'window' })
+  logUIError({ message: 'second', stack: '', where: 'vue' })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(SystemService.LogUIError).toHaveBeenCalledTimes(2)
+})
 
 it('normalizes an empty visible subset and passes cancellation to the engine', async () => {
   const controller = new AbortController()

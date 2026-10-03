@@ -43,6 +43,7 @@ step "go: govulncheck" "$T/govulncheck" "${GO[@]}"
 step "frontend: vue-tsc, eslint, prettier" npm --prefix frontend run -s check
 step "frontend: regression tests" npm --prefix frontend run -s test
 step "python: ruff" bash -c "'$T/ruff' check --quiet && '$T/ruff' format --check --quiet"
+step "installer: payload cleanup regressions" python scripts/installer_payload_test.py
 step "shell: shellcheck" "$T/shellcheck" -x scripts/*.sh
 
 if [ ${#failed[@]} -gt 0 ]; then

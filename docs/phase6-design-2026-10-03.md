@@ -12,12 +12,12 @@ for behaviour.
 
 The product owner settled the plan's open questions on 3 October 2026:
 
-| # | Question | Decision |
-| --- | --- | --- |
-| 1 | Updates (plan §7: "auto-update, to decide: must be opt-in") | **No network at all.** Lumen never makes a request. Settings shows the version and the releases page; the user installs a new version themselves. |
-| 2 | Install location | **Per user**: `%LOCALAPPDATA%\Programs\Lumen`, no administrator prompt. |
-| 3 | WebView2 runtime on a PC without it | **Bundle Microsoft's offline standalone runtime installer** (~210 MB), so installing never needs the internet either. |
-| 4 | Politeness defaults | **Pause for full screen or games: on. Pause when the PC is busy: on.** "Index only when idle" is an Advanced setting, off by default (plan §6). |
+| #   | Question                                                    | Decision                                                                                                                                          |
+| --- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Updates (plan §7: "auto-update, to decide: must be opt-in") | **No network at all.** Lumen never makes a request. Settings shows the version and the releases page; the user installs a new version themselves. |
+| 2   | Install location                                            | **Per user**: `%LOCALAPPDATA%\Programs\Lumen`, no administrator prompt.                                                                           |
+| 3   | WebView2 runtime on a PC without it                         | **Bundle Microsoft's offline standalone runtime installer** (~210 MB), so installing never needs the internet either.                             |
+| 4   | Politeness defaults                                         | **Pause for full screen or games: on. Pause when the PC is busy: on.** "Index only when idle" is an Advanced setting, off by default (plan §6).   |
 
 Code signing needs a certificate, which does not exist yet (plan §8, risks).
 The build signs when one is configured and says so when it is not; nothing
@@ -45,6 +45,7 @@ type pc interface {
 ```
 
 The Windows sampler (`pc_windows.go`) uses:
+
 - `GetSystemPowerStatus` (moved from `power_windows.go`).
 - `SHQueryUserNotificationState`: busy, Direct3D full screen, presentation
   mode or a full-screen Store app counts as full screen, unless the
@@ -61,12 +62,13 @@ The Windows sampler (`pc_windows.go`) uses:
 `pc_other.go` reports mains power, no full screen, no input and no load.
 
 **Rules** (`politeness.go`, pure, unit-tested with a fake `pc`):
+
 - Poll every 5 s (`pcPoll`); battery used to be read every 20 s and is
   as cheap as the rest.
-- *Busy*: other programs' share of all CPU time, averaged over the last 30 s
+- _Busy_: other programs' share of all CPU time, averaged over the last 30 s
   (6 samples), is at least 70 %; it stays busy until that average falls to
   50 % or less. The hysteresis stops it flapping at the line.
-- *Away*: no input for 5 minutes (`awayAfter`).
+- _Away_: no input for 5 minutes (`awayAfter`).
 - The indexer keeps what it observed (`fullScreen`, `busy`, `away`) and the
   three settings, and derives one reason, in this order: full screen, busy,
   then idle-only-while-not-away. `held(stage)` becomes
@@ -100,21 +102,22 @@ the WebView console, which nobody sees.
 
 **`internal/diag`** (new package: crash reports, the problem report, and the
 PC's description both use):
-- `Open(dataDir, version)` looks in `DataDir\crashes`. A non-empty
+
+- `New(dataDir, version)` describes `DataDir\crashes`; `Start(now)` opens it. A non-empty
   `pending.txt` left by the last run is kept as `crash-<time>.txt` and
   remembered as "the last run crashed"; an empty one (a clean exit, power cut
   or Task Manager) is removed.
-- `Arm()` creates `pending.txt` with a header (version, start time,
+- `Start(now)` creates `pending.txt` with a header (version, start time,
   Windows version) and hands it to `debug.SetCrashOutput`; the returned
   disarm, run when `run` returns, stops that and removes the file. It is armed
   after `application.New`, so a second Lumen, which hands over to the first
   and exits inside `New`, never truncates the first one's file.
-- `RecordPanic(details)` writes `panic-<time>.txt` for a panic Wails
+- `RecordPanic(err, stack, now)` writes `panic-<time>-<suffix>.txt` for a panic Wails
   recovered in a bound method (`application.Options.PanicHandler`); the call
   fails with Wails' runtime error and Lumen keeps running. Without the
   handler, Wails' default exits the app.
 - Reports are pruned to the newest 20.
-- `WriteReport(w, info)` writes a zip: `lumen.log`, `lumen.old.log`, the
+- `WriteReport(ctx, w, info)` writes a zip: `lumen.log`, `lumen.old.log`, the
   crash reports, and `system.txt` (version, Windows version, CPU, threads,
   memory, graphics adapters, the AI device, library counts, schema version,
   settings). It holds no thumbnails or library data; the logs do name files
@@ -123,6 +126,7 @@ PC's description both use):
   registry's CPU and display adapter names, `GlobalMemoryStatusEx`).
 
 **`services.SystemService`** (registered through `service()` like the rest):
+
 - `About() core.About`: version, data folder, releases page, and whether
   the last run crashed. The version is Lumen.exe's own version resource as
   Explorer shows it: its ProductVersion string, found through the resource's
@@ -136,6 +140,7 @@ PC's description both use):
   truncated and rate-limited (30 a minute, then one "dropped" line).
 
 **The UI:**
+
 - `shared/errors.ts`' `logError` also sends the failure to the engine's log,
   through the bridge's `logUIError` (never itself logged on failure, so it
   cannot loop).
@@ -164,6 +169,7 @@ installer does not carry `deps/runtime`."
 
 **Tools and inputs, from `scripts/deps.sh`** (pinned and checked like
 everything else there):
+
 - NSIS 3.13 (`deps/tools/nsis`), a build tool that never ships.
 - WebView2's standalone x64 runtime installer (`deps/installer/`), at its
   pinned SHA-256 (Microsoft's link moves with each release; the pin is the
@@ -182,6 +188,7 @@ into `build/windows/info.json` (the exe's version resource) and
 fails if they drift.
 
 **`build/windows/nsis/project.nsi`**, Lumen's own:
+
 - Per-user scope (decision 2), x64 only (the bundled DLLs are x64),
   Windows 10 or later.
 - **zlib, not LZMA.** Model weights are most of the payload and neither
@@ -192,9 +199,11 @@ fails if they drift.
 - Pages: welcome, folder, install, finish ("Start Lumen" and "Add a desktop
   shortcut", unticked).
 - Files: `Lumen.exe`, everything in `deps/runtime` (DLLs, `ffmpeg\`,
-  `models\`) and `THIRD_PARTY_NOTICES.txt`. An upgrade first removes the
-  previous DLLs, `ffmpeg\` and `models\`, so no stale DLL or model is left
-  beside a new one.
+  `models\`) and `THIRD_PARTY_NOTICES.txt`. The payload macro generated by
+  `scripts/installer_payload.py` extracts the runtime files and records them
+  in `.lumen-runtime-files.txt`. Upgrades and uninstall remove only those
+  recorded files, then empty runtime directories. Unrelated files stay.
+  An installation without an inventory keeps untracked runtime files.
 - Lumen must not be running while it is replaced or removed: the installer
   and uninstaller check that `Lumen.exe` can be opened for writing and
   otherwise ask the user to close it (Retry/Cancel; silent mode fails).
@@ -237,12 +246,15 @@ The first run (plan §2) and every view with nothing to show were reviewed in
 the real app on fresh scratch libraries, during the first scan and after it.
 Every view already had an empty state (`shared/EmptyState`), and Things and
 People say when the AI is unavailable. Fixed:
+
 - While the first scan runs, the empty grid said "Looking for photos…" with
   the hint for a library that has none ("Add a folder in Settings…"); it now
   says photos appear as Lumen finds them.
-- The Welcome screen compared folders with `toLowerCase`, which folds A–Z
-  only; it now compares as Windows does, case-insensitively in every script
-  ("ÉTÉ" is "été") and accent-sensitively. Welcome had no tests; it has now.
+- The Welcome screen now uses `LibraryService.SourcePathKey`, which applies
+  the library's existing `core.Fold` and path cleaning. Case variants such as
+  "ÉTÉ" and "été" match, while distinct composed and decomposed names stay
+  separate. Locale collation must not decide which folders are shown.
+  Welcome had no tests; it has now.
 - Failures nothing caught now tell the user and reach the log (P2).
 
 ## P5 — Performance pass

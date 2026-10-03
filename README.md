@@ -166,7 +166,7 @@ frontend/src/duplicates  exact-copy and similar-photo review, best copy pre-sele
 frontend/src/trash   Trash actions and Undo
 frontend/src/organise  the organise-on-disk template, preview, progress and undo
 frontend/src/about   Settings → About Lumen, and the notice after a crash
-scripts/             deps.sh (native dependencies), prepare_models.py, env.sh, lint.sh, build_places.py, notices.py
+scripts/             deps.sh (native dependencies), prepare_models.py, env.sh, lint.sh, build_places.py, notices.py, installer_payload.py
 docs/                audits (dated records), the blocking note, the Phase 5 and 6 designs, GeoNames provenance, the beta guide
 build/windows/nsis   the installer (project.nsi; wails_tools.nsh is generated from build/config.yml)
 spikes/              Phase 0 experiments (own Go module; models in spikes/.cache)

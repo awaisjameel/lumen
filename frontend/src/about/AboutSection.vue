@@ -52,7 +52,7 @@ function saveReport() {
     </div>
     <p class="muted hint">{{ t('about.reportHint') }}</p>
     <p v-if="savedTo" class="muted" role="status">{{ t('about.saved', { path: savedTo }) }}</p>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="error || about.loadError" class="error" role="alert">{{ error || about.loadError }}</p>
     <p class="muted credit">
       {{ t('about.places') }}
       <a href="#" @click.prevent="run(() => engine.openLink(Link.LinkGeoNames))">GeoNames</a>

@@ -70,7 +70,7 @@ def module_licence(folder: Path) -> str:
 
 def go_licence() -> tuple[str, str]:
     """Go's version and its licence (the standard library is in every binary)."""
-    version, goroot = go("env", "GOVERSION", "GOROOT").split()
+    version, goroot = go("env", "GOVERSION", "GOROOT").splitlines()
     return version, (Path(goroot) / "LICENSE").read_text(encoding="utf-8").strip()
 
 

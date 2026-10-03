@@ -125,6 +125,13 @@ func (s *Store) Close() error {
 	return s.w.Close()
 }
 
+// SchemaVersion is the applied migration version, for a local problem report.
+func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
+	var version int
+	err := s.r.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version)
+	return version, err
+}
+
 // migrate applies every embedded migration newer than PRAGMA user_version.
 // Files are named NNNN_description.sql; NNNN becomes the schema version.
 func (s *Store) migrate(ctx context.Context) error {

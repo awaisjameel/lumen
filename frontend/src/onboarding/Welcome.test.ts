@@ -10,6 +10,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   engine: {
     suggestedFolders: vi.fn<() => Promise<string[]>>(),
+    sourcePathKey: vi.fn<(path: string) => Promise<string>>(),
     pickFolder: vi.fn<() => Promise<string>>(),
     addSources: vi.fn<(paths: string[]) => Promise<Bridge.Source[]>>(),
   },
@@ -19,6 +20,10 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.mocked(engine.suggestedFolders).mockReset().mockResolvedValue(['C:\\Users\\me\\Pictures', 'D:\\DCIM'])
   vi.mocked(engine.pickFolder).mockReset().mockResolvedValue('')
+  // These fixtures have no multi-rune folding or alternate separators.
+  vi.mocked(engine.sourcePathKey)
+    .mockReset()
+    .mockImplementation((path) => Promise.resolve(path.toLowerCase()))
   vi.mocked(engine.addSources).mockReset().mockResolvedValue([])
 })
 
@@ -66,4 +71,16 @@ it('says why the folders could not be added, and waits with nothing chosen', asy
   await w.get('.start').trigger('click')
   await flushPromises()
   expect(w.get('[role="alert"]').text()).toBe('That folder can’t be found.')
+})
+
+it('keeps distinct names that locale collation equates, using the library’s keys', async () => {
+  vi.mocked(engine.suggestedFolders).mockResolvedValue(['D:\\Photos\\é'])
+  vi.mocked(engine.sourcePathKey).mockResolvedValueOnce('d:\\photos\\É').mockResolvedValueOnce('d:\\photos\\E\u0301')
+  vi.mocked(engine.pickFolder).mockResolvedValueOnce('D:\\Photos\\e\u0301')
+  const w = mount(Welcome)
+  await flushPromises()
+  await w.get('.add').trigger('click')
+  await flushPromises()
+  expect(paths(w)).toEqual(['D:\\Photos\\é', 'D:\\Photos\\e\u0301'])
+  w.unmount()
 })

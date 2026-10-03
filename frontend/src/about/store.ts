@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import { engine } from '../bridge'
 import type { About } from '../bridge'
-import { logError } from '../shared/errors'
+import { errorText, logError } from '../shared/errors'
 
 /**
  * Lumen's own details (Settings → About Lumen), read once, and whether its
@@ -10,6 +10,7 @@ import { logError } from '../shared/errors'
  */
 export const useAbout = defineStore('about', () => {
   const about = shallowRef<About | null>(null)
+  const loadError = ref('')
   let loading: Promise<void> | null = null
 
   /** Reads the details, once; a failed read is tried again next time. */
@@ -17,9 +18,11 @@ export const useAbout = defineStore('about', () => {
     loading ??= engine.about().then(
       (a) => {
         about.value = a
+        loadError.value = ''
       },
       (e: unknown) => {
         loading = null
+        loadError.value = errorText(e)
         logError(e)
       },
     )
@@ -34,18 +37,20 @@ export const useAbout = defineStore('about', () => {
   }
 
   const savingReport = ref(false)
+  let saving: Promise<string> | null = null
   /**
    * Asks where to save a problem report and saves it there: where it went,
    * or "" if the user cancelled. A failure rejects, for the caller to say.
    */
-  async function saveReport(): Promise<string> {
+  function saveReport(): Promise<string> {
+    if (saving) return saving
     savingReport.value = true
-    try {
-      return await engine.saveProblemReport()
-    } finally {
+    saving = engine.saveProblemReport().finally(() => {
       savingReport.value = false
-    }
+      saving = null
+    })
+    return saving
   }
 
-  return { about, load, crashNotice, dismissCrash, savingReport, saveReport }
+  return { about, loadError, load, crashNotice, dismissCrash, savingReport, saveReport }
 })

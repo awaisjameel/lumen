@@ -258,6 +258,7 @@ function queueBlockSession(action: () => Promise<void>): Promise<void> {
 export const engine = {
   sources: async (): Promise<Source[]> => (await LibraryService.Sources()) ?? [],
   suggestedFolders: async (): Promise<string[]> => (await LibraryService.SuggestedFolders()) ?? [],
+  sourcePathKey: (path: string): Promise<string> => LibraryService.SourcePathKey(path),
   /** The folder the user picked, or "" if they closed the picker. */
   pickFolder: (): Promise<string> => LibraryService.PickFolder(),
   addSources: async (paths: string[]): Promise<Source[]> => (await LibraryService.AddSources(paths)) ?? [],
@@ -418,7 +419,9 @@ export const engine = {
  * see it. It never fails: a failure to log has nowhere left to go.
  */
 export function logUIError(e: UIError): void {
-  SystemService.LogUIError(e).catch(() => undefined)
+  void Promise.resolve()
+    .then(() => SystemService.LogUIError(e))
+    .catch(() => undefined)
 }
 
 // The engine's events (services.EventProgress, EventLibraryChanged, EventOrganiseProgress),

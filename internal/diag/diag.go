@@ -30,7 +30,7 @@ const pendingName = "pending.txt"
 // after it is the runtime's account of a crash.
 const headerEnd = "---\n"
 
-// ErrArmed is Arm called while crash reports are already being taken: the
+// ErrArmed is Start called while crash reports are already being taken: the
 // runtime has one crash output per process.
 var ErrArmed = errors.New("crash reports are already being taken")
 
@@ -56,14 +56,22 @@ func New(dataDir, version string) *Reports {
 func (r *Reports) Dir() string { return r.dir }
 
 // Start keeps the report a crashed last run left, if any, then has the Go
-// runtime write the account of a crash of this run (Arm). Call stop when
+// runtime write the account of a crash of this run. Call stop when
 // Lumen exits cleanly.
 func (r *Reports) Start(now time.Time) (stop func(), err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.armed {
+		return nil, ErrArmed
+	}
 	if err := os.MkdirAll(r.dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create crash report folder: %w", err)
 	}
-	r.keepLastCrash()
-	return r.arm(now)
+	r.lastCrash = ""
+	if err := r.keepLastCrashLocked(); err != nil {
+		return nil, err // never truncate a crash report that could not be kept
+	}
+	return r.armLocked(now)
 }
 
 // LastCrash is the name of the report the last run left when it crashed, ""
@@ -74,25 +82,24 @@ func (r *Reports) LastCrash() string {
 	return r.lastCrash
 }
 
-// keepLastCrash turns a pending file with a crash in it into a report. One
+// keepLastCrashLocked turns a pending file with a crash in it into a report. One
 // with only Lumen's header (the PC lost power, or Lumen was ended from Task
-// Manager) has nothing to say and goes.
-func (r *Reports) keepLastCrash() {
+// Manager) has nothing to say and goes. Call with mu held.
+func (r *Reports) keepLastCrashLocked() error {
 	pending := filepath.Join(r.dir, pendingName)
 	b, err := os.ReadFile(pending)
 	if errors.Is(err, os.ErrNotExist) {
-		return
+		return nil
 	}
 	if err != nil {
-		slog.Warn("read last run's crash output", "err", err)
-		return
+		return fmt.Errorf("read last run's crash output: %w", err)
 	}
-	_, crash, _ := bytes.Cut(b, []byte(headerEnd))
+	_, crash, header := bytes.Cut(b, []byte(headerEnd))
+	if !header {
+		crash = b // preserve output whose header was incomplete
+	}
 	if len(bytes.TrimSpace(crash)) == 0 {
-		if err := os.Remove(pending); err != nil {
-			slog.Warn("remove last run's crash output", "err", err)
-		}
-		return
+		return os.Remove(pending)
 	}
 	at := time.Now()
 	if fi, err := os.Stat(pending); err == nil {
@@ -100,25 +107,18 @@ func (r *Reports) keepLastCrash() {
 	}
 	name := reportName("crash", at)
 	if err := os.Rename(pending, filepath.Join(r.dir, name)); err != nil {
-		slog.Warn("keep last run's crash report", "err", err)
-		return
+		return fmt.Errorf("keep last run's crash report: %w", err)
 	}
 	slog.Warn("lumen crashed last time; report kept", "report", name)
-	r.mu.Lock()
 	r.lastCrash = name
-	r.mu.Unlock()
 	r.prune()
+	return nil
 }
 
-// arm creates the pending file with a header saying what was running, and
+// armLocked creates the pending file with a header saying what was running, and
 // hands it to the runtime. The runtime keeps its own handle, so the file is
-// closed here; stop takes the handle back and removes the file.
-func (r *Reports) arm(now time.Time) (stop func(), err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.armed {
-		return nil, ErrArmed
-	}
+// closed here; stop takes the handle back and removes the file. Call with mu held.
+func (r *Reports) armLocked(now time.Time) (stop func(), err error) {
 	pending := filepath.Join(r.dir, pendingName)
 	f, err := os.OpenFile(pending, os.O_CREATE|os.O_TRUNC|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -137,7 +137,9 @@ func (r *Reports) arm(now time.Time) (stop func(), err error) {
 		return nil, fmt.Errorf("take crash reports: %w", err)
 	}
 	r.armed = true
-	return func() {
+	return sync.OnceFunc(func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
 		if err := debug.SetCrashOutput(nil, debug.CrashOptions{}); err != nil {
 			slog.Warn("stop taking crash reports", "err", err)
 			return
@@ -145,10 +147,8 @@ func (r *Reports) arm(now time.Time) (stop func(), err error) {
 		if err := os.Remove(pending); err != nil {
 			slog.Warn("remove crash output", "err", err)
 		}
-		r.mu.Lock()
 		r.armed = false
-		r.mu.Unlock()
-	}, nil
+	}), nil
 }
 
 // RecordPanic keeps a report of a panic that was recovered (Wails recovers
@@ -164,7 +164,19 @@ func (r *Reports) RecordPanic(err error, stack string, now time.Time) {
 		slog.Error("keep panic report", "err", werr)
 		return
 	}
-	if werr := os.WriteFile(filepath.Join(r.dir, name), []byte(text), 0o600); werr != nil {
+	// Two recovered panics can have the same timestamp. Exclusive creation
+	// keeps both, including when calls from the UI fail concurrently.
+	f, werr := os.CreateTemp(r.dir, strings.TrimSuffix(name, ".txt")+"-*.txt")
+	if werr != nil {
+		slog.Error("keep panic report", "err", werr)
+		return
+	}
+	_, werr = f.WriteString(text)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		_ = os.Remove(f.Name()) // discard this call's incomplete report
 		slog.Error("keep panic report", "err", werr)
 		return
 	}

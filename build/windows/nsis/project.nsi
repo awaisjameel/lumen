@@ -23,8 +23,19 @@ Unicode true
     !endif
 !macroend
 !insertmacro LUMEN_REQUIRE LUMEN_RUNTIME
+!insertmacro LUMEN_REQUIRE LUMEN_PAYLOAD
 !insertmacro LUMEN_REQUIRE LUMEN_NOTICES
 !insertmacro LUMEN_REQUIRE LUMEN_WEBVIEW2
+!include "${LUMEN_PAYLOAD}"
+!define LUMEN_INVENTORY ".lumen-runtime-files.txt"
+
+!macro LUMEN_PAYLOAD_CHECK
+    ${If} ${Errors}
+        FileClose $R9
+        SetErrorLevel 4
+        Abort "Lumen's runtime files or inventory could not be written. Run Setup again."
+    ${EndIf}
+!macroend
 
 # Where new versions are published: services.ReleasesURL, which
 # TestInstallerNamesTheReleasesPage keeps this in step with.
@@ -139,18 +150,92 @@ Function HasWebView2
     ${EndIf}
 FunctionEnd
 
+# The previous install's inventory is the only authority for runtime cleanup.
+# Paths must stay inside $INSTDIR, have no wildcards, and cross no junction or
+# symbolic link. Directories are removed only when empty.
+!macro LUMEN_REMOVE_RUNTIME prefix
+Function ${prefix}RemoveRuntime
+    ${IfNot} ${FileExists} "$INSTDIR\${LUMEN_INVENTORY}"
+        Return
+    ${EndIf}
+    ClearErrors
+    FileOpen $R0 "$INSTDIR\${LUMEN_INVENTORY}" r
+    IfErrors failed
+    GetFullPathName $R5 "$INSTDIR\"
+    StrLen $R6 $R5
+    next:
+    ClearErrors
+    FileReadUTF16LE $R0 $R1
+    IfErrors done
+    StrCpy $R7 $R1 1
+    StrCpy $R2 $R1 2 -2
+    StrCmp $R2 "$\r$\n" 0 invalid
+    StrCpy $R2 $R1 -2 1
+    StrCmp $R2 "" invalid
+    StrCpy $R8 0
+    checkChars:
+    StrCpy $R4 $R2 1 $R8
+    StrCmp $R4 "" checkedChars
+    StrCmp $R4 "*" invalid
+    StrCmp $R4 "?" invalid
+    StrCmp $R4 ":" invalid
+    IntOp $R8 $R8 + 1
+    Goto checkChars
+    checkedChars:
+    GetFullPathName $R3 "$INSTDIR\$R2"
+    StrCpy $R4 $R3 $R6
+    StrCmp $R4 $R5 0 invalid
+    StrCpy $R8 $R3
+    checkLinks:
+    System::Call 'kernel32::GetFileAttributesW(w R8) i.R4'
+    StrCmp $R4 -1 noLink
+    IntOp $R4 $R4 & 0x400 ; FILE_ATTRIBUTE_REPARSE_POINT
+    StrCmp $R4 0 0 invalid
+    noLink:
+    ${GetParent} "$R8" $R8
+    StrLen $R4 $R8
+    IntCmp $R4 $R6 checkedLinks checkedLinks checkLinks
+    checkedLinks:
+    StrCmp $R7 "D" directory
+    StrCmp $R7 "F" 0 invalid
+    ClearErrors
+    Delete "$R3"
+    IfErrors invalid
+    Goto next
+    directory:
+    RMDir "$R3" ; non-empty directories hold files Setup did not put there
+    Goto next
+    invalid:
+    FileClose $R0
+    Goto failed
+    done:
+    FileClose $R0
+    Delete "$INSTDIR\${LUMEN_INVENTORY}"
+    Return
+    failed:
+    MessageBox MB_ICONSTOP "Lumen's previous runtime could not be removed safely. Check the install folder and try again." /SD IDOK
+    SetErrorLevel 4
+    Quit
+FunctionEnd
+!macroend
+!insertmacro LUMEN_REMOVE_RUNTIME ""
+!insertmacro LUMEN_REMOVE_RUNTIME "un."
+
 Section "Lumen"
     !insertmacro wails.setShellContext
     Call LumenClosed
 
     SetOutPath $INSTDIR
-    # An upgrade first removes the last version's runtime, so no old DLL or
-    # model stays beside the new Lumen.exe.
-    Delete "$INSTDIR\*.dll"
-    RMDir /r "$INSTDIR\ffmpeg"
-    RMDir /r "$INSTDIR\models"
+    Call RemoveRuntime
     !insertmacro wails.files
-    File /r "${LUMEN_RUNTIME}\*.*"
+    ClearErrors
+    FileOpen $R9 "$INSTDIR\${LUMEN_INVENTORY}" w
+    ${If} ${Errors}
+        SetErrorLevel 4
+        Abort "Lumen's runtime inventory could not be written."
+    ${EndIf}
+    !insertmacro LUMEN_RUNTIME_FILES
+    FileClose $R9
     File "${LUMEN_NOTICES}"
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -180,6 +265,7 @@ Section "WebView2"
     ${If} $0 != 1
         MessageBox MB_ICONSTOP "Lumen is installed, but the Microsoft Edge WebView2 Runtime it needs could not be (error $1). Run Setup again, or install the runtime from https://developer.microsoft.com/microsoft-edge/webview2/" /SD IDOK
         SetErrorLevel 3
+        Abort
     ${EndIf}
 SectionEnd
 
@@ -201,13 +287,11 @@ FunctionEnd
 Section "uninstall"
     !insertmacro wails.setShellContext
     Call un.LumenClosed
+    Call un.RemoveRuntime
 
     # Only what Setup put there: a folder chosen by hand may hold other files.
     Delete "$INSTDIR\${PRODUCT_EXECUTABLE}"
-    Delete "$INSTDIR\*.dll"
     Delete "$INSTDIR\THIRD_PARTY_NOTICES.txt"
-    RMDir /r "$INSTDIR\ffmpeg"
-    RMDir /r "$INSTDIR\models"
     Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
     Delete "$DESKTOP\${INFO_PRODUCTNAME}.lnk"
 

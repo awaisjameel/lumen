@@ -114,11 +114,13 @@ tasks:
     cmds:
       - '{{if .SIGN_THUMBPRINT}}signtool {{.SIGNTOOL_ARGS}} "{{fromSlash (printf "%s/%s/%s.exe" .ROOT_DIR .BIN_DIR .APP_NAME)}}"{{else}}echo "No SIGN_THUMBPRINT: building an unsigned installer."{{end}}'
       - python "{{.ROOT_DIR}}/scripts/notices.py" "{{.ROOT_DIR}}/{{.BIN_DIR}}/THIRD_PARTY_NOTICES.txt"
+      - python "{{.ROOT_DIR}}/scripts/installer_payload.py" "{{.ROOT_DIR}}/deps/runtime" "{{.ROOT_DIR}}/{{.BIN_DIR}}/lumen-runtime.nsh"
       # NSIS's File wants Windows paths.
       - >-
         "{{.MAKENSIS}}" -V2
         "-DARG_WAILS_AMD64_BINARY={{fromSlash (printf "%s/%s/%s.exe" .ROOT_DIR .BIN_DIR .APP_NAME)}}"
         "-DLUMEN_RUNTIME={{fromSlash (printf "%s/deps/runtime" .ROOT_DIR)}}"
+        "-DLUMEN_PAYLOAD={{fromSlash (printf "%s/%s/lumen-runtime.nsh" .ROOT_DIR .BIN_DIR)}}"
         "-DLUMEN_NOTICES={{fromSlash (printf "%s/%s/THIRD_PARTY_NOTICES.txt" .ROOT_DIR .BIN_DIR)}}"
         "-DLUMEN_WEBVIEW2={{fromSlash .WEBVIEW2}}"
         {{if .SIGN_THUMBPRINT}}"-DLUMEN_SIGN=signtool {{.SIGNTOOL_ARGS}} \"%1\""{{end}}

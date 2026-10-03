@@ -6,6 +6,7 @@ import type * as Bridge from '../bridge'
 import { t } from '../shared/i18n'
 import AboutSection from './AboutSection.vue'
 import CrashNotice from './CrashNotice.vue'
+import { useAbout } from './store'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -31,6 +32,31 @@ beforeEach(() => {
   vi.mocked(engine.openNotices).mockReset().mockResolvedValue()
   vi.mocked(engine.openLogFolder).mockReset().mockResolvedValue()
   vi.mocked(engine.saveProblemReport).mockReset().mockResolvedValue('')
+})
+
+it('shares one report save across callers and remains busy until it finishes', async () => {
+  let finish: ((path: string) => void) | undefined
+  vi.mocked(engine.saveProblemReport).mockImplementation(() => new Promise<string>((resolve) => (finish = resolve)))
+  const store = useAbout()
+  const first = store.saveReport()
+  const second = store.saveReport()
+  expect(engine.saveProblemReport).toHaveBeenCalledOnce()
+  expect(store.savingReport).toBe(true)
+  finish?.('report.zip')
+  expect(await first).toBe('report.zip')
+  expect(await second).toBe('report.zip')
+  expect(store.savingReport).toBe(false)
+})
+
+it('shows an About read failure and retries on the next load', async () => {
+  vi.mocked(engine.about).mockRejectedValueOnce(new Error('about unavailable'))
+  const section = mount(AboutSection)
+  await flushPromises()
+  expect(section.get('[role="alert"]').text()).toContain('about unavailable')
+  await useAbout().load()
+  expect(section.find('[role="alert"]').exists()).toBe(false)
+  expect(section.text()).toContain('Version 0.9.0')
+  section.unmount()
 })
 
 it('shows the version and where new ones are, opening it only when clicked', async () => {

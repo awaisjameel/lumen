@@ -439,6 +439,14 @@ export function ShowInFolder(id: number, path: string): $CancellablePromise<void
 }
 
 /**
+ * SourcePathKey is the key source folders are compared by in the library.
+ * Onboarding uses it too, so locale collation cannot hide distinct folders.
+ */
+export function SourcePathKey(path: string): $CancellablePromise<string> {
+    return $Call.ByID(524753998, path);
+}
+
+/**
  * Sources lists the folders in the library.
  */
 export function Sources(): $CancellablePromise<core$0.Source[] | null> {

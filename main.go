@@ -58,7 +58,6 @@ func run() error {
 	if err := paths.Ensure(); err != nil {
 		return err
 	}
-	setupLogging(paths)
 	lowerPriority()
 	index.CountOwnPrograms() // before the window starts WebView2
 	version := diag.Version()
@@ -94,6 +93,7 @@ func run() error {
 			WebviewUserDataPath:   webviewDataPath(paths),
 		},
 	})
+	setupLogging(paths) // only the first instance may open or rotate this library's log
 	slog.Info("lumen starting", "version", version, "data", paths.DataDir, "runtime", paths.Runtime, "libvips", vips.Version())
 	// Only now, past the hand-over to a running Lumen: a second one must not
 	// take over the first one's crash output.

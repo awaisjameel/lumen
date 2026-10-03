@@ -3,6 +3,7 @@ package diag
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -108,6 +109,40 @@ func TestOneRunTakesCrashReportsOnce(t *testing.T) {
 	if _, err := r.Start(time.Now()); !errors.Is(err, ErrArmed) {
 		t.Fatalf("second start = %v, want ErrArmed", err)
 	}
+	if _, err := os.Stat(filepath.Join(r.Dir(), pendingName)); err != nil {
+		t.Fatalf("second start disturbed the active crash output: %v", err)
+	}
+}
+
+func TestAnIncompleteCrashHeaderIsKept(t *testing.T) {
+	r := New(t.TempDir(), "1.0.0")
+	check(t, os.MkdirAll(r.Dir(), 0o750))
+	check(t, os.WriteFile(filepath.Join(r.Dir(), pendingName), []byte("panic: incomplete header\n"), 0o600))
+	stop, err := r.Start(time.Now())
+	check(t, err)
+	defer stop()
+	if r.LastCrash() == "" {
+		t.Fatal("incomplete crash output was discarded")
+	}
+}
+
+func TestACrashThatCannotBeKeptIsNeverTruncated(t *testing.T) {
+	r := New(t.TempDir(), "1.0.0")
+	check(t, os.MkdirAll(r.Dir(), 0o750))
+	pending := filepath.Join(r.Dir(), pendingName)
+	content := []byte(r.headerLocked() + headerEnd + "panic: keep this\n")
+	check(t, os.WriteFile(pending, content, 0o600))
+	fi, err := os.Stat(pending)
+	check(t, err)
+	check(t, os.Mkdir(filepath.Join(r.Dir(), reportName("crash", fi.ModTime())), 0o750))
+	if _, err := r.Start(time.Now()); err == nil {
+		t.Fatal("a crash report could be renamed over a directory")
+	}
+	b, err := os.ReadFile(pending)
+	check(t, err)
+	if !bytes.Equal(b, content) {
+		t.Fatalf("failed start truncated crash output: %q", b)
+	}
 }
 
 func TestOnlyTheNewestReportsAreKept(t *testing.T) {
@@ -121,11 +156,58 @@ func TestOnlyTheNewestReportsAreKept(t *testing.T) {
 	if len(names) != keepReports {
 		t.Fatalf("%d reports kept, want %d", len(names), keepReports)
 	}
-	if want := reportName("panic", start.Add((keepReports+4)*time.Minute)); names[0] != want {
+	if want := strings.TrimSuffix(reportName("panic", start.Add((keepReports+4)*time.Minute)), ".txt") + "-"; !strings.HasPrefix(names[0], want) {
 		t.Fatalf("newest report = %s, want %s", names[0], want)
 	}
-	if oldest := reportName("panic", start.Add(5*time.Minute)); names[len(names)-1] != oldest {
+	if oldest := strings.TrimSuffix(reportName("panic", start.Add(5*time.Minute)), ".txt") + "-"; !strings.HasPrefix(names[len(names)-1], oldest) {
 		t.Fatalf("oldest report kept = %s, want %s", names[len(names)-1], oldest)
+	}
+}
+
+func TestPanicsAtTheSameTimeKeepSeparateReports(t *testing.T) {
+	r := New(t.TempDir(), "1.0.0")
+	now := time.Now()
+	for range 5 {
+		r.RecordPanic(errors.New("boom"), "stack", now)
+	}
+	names, err := r.Files()
+	check(t, err)
+	if len(names) != 5 {
+		t.Fatalf("simultaneous panics kept %d reports, want 5", len(names))
+	}
+}
+
+func TestAnOldStopCannotDisarmANewerRun(t *testing.T) {
+	r := New(t.TempDir(), "1.0.0")
+	stop, err := r.Start(time.Now())
+	check(t, err)
+	stop()
+	stopNew, err := r.Start(time.Now())
+	check(t, err)
+	defer stopNew()
+	stop()
+	if _, err := os.Stat(filepath.Join(r.Dir(), pendingName)); err != nil {
+		t.Fatalf("old stop disturbed the new crash output: %v", err)
+	}
+}
+
+type cancelWriter struct {
+	bytes.Buffer
+	cancel context.CancelFunc
+}
+
+func (w *cancelWriter) Write(p []byte) (int, error) {
+	w.cancel()
+	return w.Buffer.Write(p)
+}
+
+func TestAProblemReportStopsWhenItsContextIsCancelled(t *testing.T) {
+	r := New(t.TempDir(), "1.0.0")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	w := &cancelWriter{cancel: cancel}
+	if err := r.WriteReport(ctx, w, Report{About: strings.Repeat("system", 5000)}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("report interrupted while writing = %v, want cancellation", err)
 	}
 }
 
@@ -150,7 +232,7 @@ func TestAProblemReportHoldsTheLogsAndReportsAndSkipsWhatIsMissing(t *testing.T)
 	log := filepath.Join(dir, "lumen.log")
 	check(t, os.WriteFile(log, []byte("level=INFO msg=hello\n"), 0o600))
 	var buf bytes.Buffer
-	check(t, r.WriteReport(&buf, Report{About: "Lumen 1.0.0\n", Logs: []string{filepath.Join(dir, "lumen.old.log"), log}}))
+	check(t, r.WriteReport(t.Context(), &buf, Report{About: "Lumen 1.0.0\n", Logs: []string{filepath.Join(dir, "lumen.old.log"), log}}))
 
 	z, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
 	check(t, err)

@@ -421,6 +421,16 @@ func TestCPUThreadsSettingShowsTheMachineAndIsStoredClamped(t *testing.T) {
 	check(t, NewLibraryService(l.st, nil, nil).SetCPUThreads(ctx, 2))
 }
 
+func TestOnboardingUsesTheLibrarysFolderKeys(t *testing.T) {
+	s := NewLibraryService(nil, nil, nil)
+	if s.SourcePathKey(`D:\Photos\ÉTÉ\..\Été`) != s.SourcePathKey(`d:\photos\été`) {
+		t.Fatal("folder keys did not clean the path and fold its case")
+	}
+	if s.SourcePathKey(`D:\Photos\é`) == s.SourcePathKey("D:\\Photos\\e\u0301") {
+		t.Fatal("folder keys merged distinct Unicode file names")
+	}
+}
+
 func TestIndexingGivesWayByDefaultAndTheSettingsApplyAtOnce(t *testing.T) {
 	ctx := t.Context()
 	l := newShownLibrary(t, 1)

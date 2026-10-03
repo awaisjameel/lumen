@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -105,26 +106,35 @@ func (s *SystemService) SaveProblemReport(ctx context.Context) (string, error) {
 	return path, nil
 }
 
-// writeProblemReport writes the report to path, leaving nothing there if it
-// fails.
-func (s *SystemService) writeProblemReport(ctx context.Context, path string) (err error) {
+// writeProblemReport publishes a complete report in one rename. A failed or
+// cancelled save leaves an existing destination exactly as it was.
+func (s *SystemService) writeProblemReport(ctx context.Context, path string) error {
 	about, err := s.describe(ctx)
 	if err != nil {
 		return err
 	}
-	f, err := os.Create(path)
+	f, err := os.CreateTemp(filepath.Dir(path), ".lumen-report-*.zip")
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if cerr := f.Close(); err == nil {
-			err = cerr
-		}
-		if err != nil {
-			_ = os.Remove(path)
-		}
-	}()
-	return s.reports.WriteReport(f, diag.Report{About: about, Logs: []string{s.paths.OldLog, s.paths.Log}})
+	defer func() { _ = os.Remove(f.Name()) }() // only the temporary file this call created
+	err = s.reports.WriteReport(ctx, f, diag.Report{About: about, Logs: []string{s.paths.OldLog, s.paths.Log}})
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return fmt.Errorf("write problem report: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), path); err != nil {
+		return fmt.Errorf("save problem report: %w", err)
+	}
+	return nil
 }
 
 // describe is a problem report's system.txt: which Lumen, the PC, how
@@ -134,6 +144,11 @@ func (s *SystemService) describe(ctx context.Context) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Lumen %s\nReport made %s\n\n", s.version, s.now().Format(time.RFC3339))
 	b.WriteString(diag.System().String())
+	version, err := s.lib.store.SchemaVersion(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read library schema version: %w", err)
+	}
+	fmt.Fprintf(&b, "\nLibrary schema version: %d\n", version)
 	p := s.lib.Progress(ctx)
 	fmt.Fprintf(&b, "\nAI device: %s\nAI error: %s\nFaces error: %s\n", p.AI.Device, p.AI.Error, p.AI.FacesError)
 	fmt.Fprintf(&b, "Items: %d\nWaiting: metadata %d, thumbnails %d, photos %d, faces %d, videos %d, text %d\n",

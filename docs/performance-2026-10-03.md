@@ -17,19 +17,24 @@ library. **Harness:** `D:\tmp\phase6\perf` (`index.mjs`, `perf.mjs`,
 
 ## Targets
 
-| Metric | Target | Measured | |
-| --- | --- | --- | --- |
-| Cold start to a usable grid | < 2 s | 1.0–1.1 s; low-end 0.7–0.8 s | met |
-| Grid scroll | 60 fps | 60 fps, p95 frame 16.9 ms, 1 frame over 33 ms in 5 s; low-end 57 fps, p95 18.3 ms, none over 33 ms | met |
-| Search | < 300 ms | 120–200 ms once the text model is loaded; the first search of a session loads it (1.2–1.8 s); a repeated query 6–9 ms | met after the first |
-| Idle memory | < 500 MB | 454 MB (Lumen 87 MB, WebView2 366 MB); 1,135 MB while the text model is loaded, for 5 minutes after a search; back to 475 MB once it unloads | met at idle |
-| Browsable library (metadata and thumbnails) | ~minutes for 100k | 3,000 in 55 s on mains: about 30 minutes per 100k | close |
-| Full AI index, 100k photos | a few hours | 3,000 in 264 s on the integrated GPU: about 2.5 hours per 100k | met |
+| Metric                                      | Target            | Measured                                                                                                                                     |                          |
+| ------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| Cold start to a usable grid                 | < 2 s             | 1.0–1.1 s; low-end 0.7–0.8 s                                                                                                                 | met                      |
+| Grid scroll                                 | 60 fps            | 60 fps, p95 frame 16.9 ms, 1 frame over 33 ms in 5 s; low-end 57 fps, p95 18.3 ms, none over 33 ms                                           | met                      |
+| Search                                      | < 300 ms          | 120–200 ms once the text model is loaded; the first search of a session loads it (1.2–1.8 s); a repeated query 6–9 ms                        | met after the first      |
+| Idle memory                                 | < 500 MB          | 454 MB (Lumen 87 MB, WebView2 366 MB); 1,135 MB while the text model is loaded, for 5 minutes after a search; back to 475 MB once it unloads | met at idle              |
+| Browsable library (metadata and thumbnails) | ~minutes for 100k | 3,000 in 55 s on mains: linear estimate of about 30 minutes per 100k                                                                         | scale acceptance pending |
+| Full AI index, 100k photos                  | a few hours       | 3,000 in 264 s on the integrated GPU: linear estimate of about 2.5 hours per 100k                                                            | scale acceptance pending |
 
 "Cold start" is the time from starting Lumen.exe to the first thumbnail
 decoded in the grid, the median of three starts with the library's files in
 the OS cache. Memory is the working set of Lumen.exe and its WebView2
 processes.
+
+The 100,000-photo figures are extrapolations from 3,000 photos. They do not
+measure database, cache, memory or throughput behaviour at that scale. The
+low-end profile uses this same laptop; separate low-end hardware acceptance
+also remains open.
 
 ## Indexing throughput
 
@@ -37,10 +42,10 @@ A fresh scratch library indexing the 3,000 photos, with indexing's default
 share of the processor (half the threads, below normal priority, FFmpeg
 and the GPU rested as the 2 October politeness fix set them):
 
-| Run | Scan | Browsable | Full AI index |
-| --- | --- | --- | --- |
-| On mains power, files in the OS cache | 2 s | 55 s (55 photos/s) | 264 s |
-| On battery, first read of the files | 27 s | 334 s | 612 s (with 1,301 more photos added during the run) |
+| Run                                   | Scan | Browsable          | Full AI index                                       |
+| ------------------------------------- | ---- | ------------------ | --------------------------------------------------- |
+| On mains power, files in the OS cache | 2 s  | 55 s (55 photos/s) | 264 s                                               |
+| On battery, first read of the files   | 27 s | 334 s              | 612 s (with 1,301 more photos added during the run) |
 
 On battery the laptop's power plan slows the processor several times over,
 and the first run read 3.7 GB from disk. On mains, 100,000 such photos would

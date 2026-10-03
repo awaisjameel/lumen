@@ -108,6 +108,23 @@ func TestCountersGoingBackAreIgnored(t *testing.T) {
 	}
 }
 
+func TestAnUnavailableLoadReadingReleasesTheBusyHold(t *testing.T) {
+	m := loadMeter{busy: true, primed: true, n: busyWindow}
+	o := observe(&fakePC{noTimes: true}, &m)
+	if o.busy || m.primed || m.n != 0 {
+		t.Fatalf("unavailable load retained a stale hold: %+v, %+v", o, m)
+	}
+}
+
+func TestAnOwnCounterResetDiscardsTheOldLoadWindow(t *testing.T) {
+	m := loadMeter{busy: true, primed: true, n: busyWindow,
+		last: cpuTimes{total: 10 * time.Second, busy: 9 * time.Second, own: 5 * time.Second}}
+	m.add(cpuTimes{total: 11 * time.Second, busy: 10 * time.Second, own: time.Second})
+	if m.busy || m.n != 0 {
+		t.Fatalf("counter reset retained a stale window: %+v", m)
+	}
+}
+
 func TestWaitingNamesTheFirstHoldTheUserAskedFor(t *testing.T) {
 	all := pcState{pauseFullScreen: true, pauseBusy: true, idleOnly: true}
 	for _, c := range []struct {

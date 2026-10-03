@@ -15,6 +15,9 @@ var (
 	procGetSystemTimes               = kernel32.NewProc("GetSystemTimes")
 	procGetTickCount64               = kernel32.NewProc("GetTickCount64")
 	procGetLastInputInfo             = windows.NewLazySystemDLL("user32.dll").NewProc("GetLastInputInfo")
+	procGetWindowRect                = windows.NewLazySystemDLL("user32.dll").NewProc("GetWindowRect")
+	procMonitorFromWindow            = windows.NewLazySystemDLL("user32.dll").NewProc("MonitorFromWindow")
+	procGetMonitorInfo               = windows.NewLazySystemDLL("user32.dll").NewProc("GetMonitorInfoW")
 	procSHQueryUserNotificationState = windows.NewLazySystemDLL("shell32.dll").NewProc("SHQueryUserNotificationState")
 )
 
@@ -41,7 +44,7 @@ func (systemPC) onBattery() bool {
 
 // The shell's QUERY_USER_NOTIFICATION_STATE values that mean something fills
 // the screen: a full-screen app or game (busy, Direct3D), presentation mode,
-// or a Store app in full screen.
+// or a Store app (whose window bounds must also be checked).
 const (
 	qunsBusy                 = 2
 	qunsRunningD3DFullScreen = 3
@@ -67,7 +70,42 @@ func (systemPC) fullScreen() bool {
 		pid == windows.GetCurrentProcessId() {
 		return false
 	}
-	return true
+	return state != qunsApp || foregroundCoversMonitor()
+}
+
+// windowRect is Windows' RECT.
+type windowRect struct {
+	left, top, right, bottom int32
+}
+
+// monitorInfo is Windows' MONITORINFO.
+type monitorInfo struct {
+	size          uint32
+	monitor, work windowRect
+	flags         uint32
+}
+
+// covers reports whether a window covers the whole monitor, including the
+// area normally occupied by the taskbar. Negative monitor coordinates work too.
+func (r windowRect) covers(m windowRect) bool {
+	return m.right > m.left && m.bottom > m.top &&
+		r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
+}
+
+// QUNS_APP says only that a Store app is running. A windowed Store app must
+// not hold indexing: verify that its foreground window fills its monitor.
+func foregroundCoversMonitor() bool {
+	w := windows.GetForegroundWindow()
+	var rect windowRect
+	if ok, _, _ := procGetWindowRect.Call(uintptr(w), uintptr(unsafe.Pointer(&rect))); ok == 0 {
+		return false
+	}
+	monitor, _, _ := procMonitorFromWindow.Call(uintptr(w), 2) // MONITOR_DEFAULTTONEAREST
+	info := monitorInfo{size: uint32(unsafe.Sizeof(monitorInfo{}))}
+	if ok, _, _ := procGetMonitorInfo.Call(monitor, uintptr(unsafe.Pointer(&info))); ok == 0 {
+		return false
+	}
+	return rect.covers(info.monitor)
 }
 
 // lastInputInfo is Windows' LASTINPUTINFO.

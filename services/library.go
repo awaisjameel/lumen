@@ -151,6 +151,12 @@ func (s *LibraryService) PickFolder() (string, error) {
 	return path, err
 }
 
+// SourcePathKey is the key source folders are compared by in the library.
+// Onboarding uses it too, so locale collation cannot hide distinct folders.
+func (*LibraryService) SourcePathKey(path string) string {
+	return core.Fold(filepath.Clean(path))
+}
+
 // AddSources adds folders and starts scanning them, all or none: a folder
 // that doesn't exist fails the call before any is added. Folders already
 // inside the library are skipped; if that leaves nothing to add, the call

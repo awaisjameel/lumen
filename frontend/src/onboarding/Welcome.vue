@@ -8,7 +8,7 @@ import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 
 const lib = useLibrary()
-const folders = ref<{ path: string; on: boolean }[]>([])
+const folders = ref<{ path: string; key: string; on: boolean }[]>([])
 const loaded = ref(false)
 const busy = ref(false)
 const error = ref('')
@@ -16,18 +16,18 @@ const error = ref('')
 onMounted(async () => {
   const suggested = await orFallback(engine.suggestedFolders(), [])
   // A folder picked while the suggestions were being found stays.
-  for (const path of suggested) add(path)
+  for (const path of suggested) await add(path)
   loaded.value = true
 })
 
 const chosen = computed(() => folders.value.filter((f) => f.on).map((f) => f.path))
 
-// Windows tells folders apart by more than their case, in any script ("ÉTÉ"
-// is "été", "Ete" is another); the engine also skips a folder already in the
-// library.
-function add(path: string) {
-  if (!folders.value.some((f) => f.path.localeCompare(path, undefined, { sensitivity: 'accent' }) === 0)) {
-    folders.value.push({ path, on: true })
+// Use the library's path key, including its Unicode case folding and path
+// cleaning. Locale collation also equates some distinct file names.
+async function add(path: string) {
+  const key = await engine.sourcePathKey(path)
+  if (!folders.value.some((f) => f.key === key)) {
+    folders.value.push({ path, key, on: true })
   }
 }
 
@@ -35,7 +35,7 @@ async function addFolder() {
   error.value = ''
   try {
     const path = await engine.pickFolder()
-    if (path) add(path)
+    if (path) await add(path)
   } catch (e) {
     error.value = errorText(e)
   }

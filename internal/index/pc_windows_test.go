@@ -57,3 +57,21 @@ func TestTheRealPCCanBeRead(t *testing.T) {
 	_ = p.onBattery()
 	_ = p.fullScreen()
 }
+
+func TestFullScreenBoundsExcludeAWindowedOrMaximisedStoreApp(t *testing.T) {
+	monitor := windowRect{left: -1920, top: 0, right: 0, bottom: 1080}
+	for _, c := range []struct {
+		name string
+		rect windowRect
+		want bool
+	}{
+		{"windowed", windowRect{left: -1600, top: 100, right: -200, bottom: 900}, false},
+		{"maximised with taskbar", windowRect{left: -1920, top: 0, right: 0, bottom: 1040}, false},
+		{"full screen", monitor, true},
+		{"full screen with window borders", windowRect{left: -1928, top: -8, right: 8, bottom: 1088}, true},
+	} {
+		if got := c.rect.covers(monitor); got != c.want {
+			t.Errorf("%s covers monitor = %t, want %t", c.name, got, c.want)
+		}
+	}
+}

@@ -88,6 +88,8 @@ func observe(p pc, load *loadMeter) pcObservation {
 	o := pcObservation{onBattery: p.onBattery(), fullScreen: p.fullScreen(), away: p.sinceInput() >= AwayAfter}
 	if t, ok := p.cpuTimes(); ok {
 		load.add(t)
+	} else {
+		*load = loadMeter{} // an unavailable reading must not hold indexing indefinitely
 	}
 	o.busy = load.busy
 	return o
@@ -109,7 +111,11 @@ func (m *loadMeter) add(t cpuTimes) {
 	last, primed := m.last, m.primed
 	m.last, m.primed = t, true
 	total := t.total - last.total
-	if !primed || total <= 0 {
+	if total <= 0 || t.busy < last.busy || t.own < last.own {
+		*m = loadMeter{last: t, primed: true}
+		return
+	}
+	if !primed {
 		return // nothing to compare with, or the counters went back
 	}
 	others := (t.busy - last.busy) - (t.own - last.own)
