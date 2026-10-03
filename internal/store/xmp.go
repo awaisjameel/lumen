@@ -301,6 +301,16 @@ func (s *Store) SaveXMP(ctx context.Context, c XMPChanges) error {
 	})
 }
 
+// XMPOwned lists up to limit of the sidecars Lumen wrote, every one it has a
+// record of, with a Row above after, in Row order. It is what deleting them
+// all reads.
+func (s *Store) XMPOwned(ctx context.Context, after int64, limit int) ([]XMPOrphan, error) {
+	return queryAll(ctx, s.r, func(r *sql.Rows) (o XMPOrphan, err error) {
+		err = r.Scan(&o.Row, &o.Path, &o.Hash)
+		return o, err
+	}, `SELECT rowid, path, hash FROM xmp_exports WHERE rowid > ?1 ORDER BY rowid LIMIT ?2`, after, limit)
+}
+
 // XMPOrphan is a sidecar Lumen wrote that is no longer beside any file of the
 // library, and whose photo is gone or may not be shown any more.
 type XMPOrphan struct {

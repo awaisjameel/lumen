@@ -835,3 +835,184 @@ func TestLumensTemporarySidecarNamesDoNotStartAScan(t *testing.T) {
 		t.Fatalf("queued %v, want the other name", ix.pendingFS)
 	}
 }
+
+// binRecycler stands in for fileops.Recycle: a file it is given moves into
+// bin, so a test can see what went and that it was not destroyed. A path in
+// keep is answered Kept, as for a drive without a Recycle Bin.
+type binRecycler struct {
+	bin  string
+	keep map[string]bool
+	got  []string
+}
+
+func (r *binRecycler) recycle(_ context.Context, paths []string) ([]fileops.Outcome, error) {
+	out := make([]fileops.Outcome, len(paths))
+	for i, p := range paths {
+		r.got = append(r.got, p)
+		out[i] = fileops.Outcome{Path: p, Status: fileops.Recycled}
+		if r.keep[p] {
+			out[i].Status = fileops.Kept
+			continue
+		}
+		switch err := os.Rename(p, filepath.Join(r.bin, filepath.Base(p))); {
+		case errors.Is(err, os.ErrNotExist):
+			out[i].Status = fileops.Gone
+		case err != nil:
+			out[i].Status, out[i].Err = fileops.Failed, err
+		}
+	}
+	return out, nil
+}
+
+func (f *xmpFixture) newBin(t *testing.T) *binRecycler {
+	t.Helper()
+	return &binRecycler{bin: t.TempDir(), keep: map[string]bool{}}
+}
+
+func (f *xmpFixture) xmpOn(t *testing.T) bool {
+	t.Helper()
+	on, err := f.st.Bool(t.Context(), core.SettingXMP, false)
+	check(t, err)
+	return on
+}
+
+func TestDeleteXMPRecyclesEverySidecarLumenWroteTurnsTheSettingOffAndTouchesNothingElse(t *testing.T) {
+	f := newXMPFixture(t)
+	ctx := t.Context()
+	check(t, f.st.SetFavourite(ctx, f.c, true))
+	if res := f.export(t); res.Written != 3 {
+		t.Fatalf("export = %+v, want three sidecars", res)
+	}
+	note := filepath.Join(f.dir, "notes.xmp") // not a sidecar of Lumen's
+	check(t, os.WriteFile(note, []byte("mine"), 0o600))
+	wroteA := readFile(t, f.sidecarA)
+	bin := f.newBin(t)
+
+	res, err := f.ix.DeleteXMP(ctx, bin.recycle)
+	if err != nil || res != (core.XMPDelete{Deleted: 3}) {
+		t.Fatalf("delete = %+v, %v; want three deleted", res, err)
+	}
+	for _, sidecar := range []string{f.sidecarA, f.sidecarB, f.sidecarC} {
+		if fileExists(sidecar) {
+			t.Errorf("%s is still there", sidecar)
+		}
+		if f.recordedHash(t, strings.TrimSuffix(sidecar, ".xmp")) != nil {
+			t.Errorf("%s is still recorded as Lumen's", sidecar)
+		}
+	}
+	if got := readFile(t, filepath.Join(bin.bin, "a.jpg.xmp")); got != wroteA {
+		t.Errorf("the bin holds %q for a, want what Lumen wrote", got)
+	}
+	if f.xmpOn(t) {
+		t.Error("XMP export is still on: the next pass would write them all again")
+	}
+	if got := readFile(t, note); got != "mine" {
+		t.Errorf("the user's own file = %q", got)
+	}
+	for path, body := range f.original {
+		info, err := os.Stat(path)
+		check(t, err)
+		if got := readFile(t, path); got != string(body) || !info.ModTime().Equal(originalMTime) {
+			t.Errorf("original %s was touched", path)
+		}
+	}
+	entries, err := os.ReadDir(f.dir)
+	check(t, err)
+	if len(entries) != 4 { // the three originals and the note
+		t.Errorf("the folder holds %d files, want 4", len(entries))
+	}
+
+	// A second time there is nothing to do.
+	if res, err := f.ix.DeleteXMP(ctx, bin.recycle); err != nil || res != (core.XMPDelete{}) {
+		t.Fatalf("second delete = %+v, %v; want nothing", res, err)
+	}
+	if len(bin.got) != 3 {
+		t.Errorf("the recycler was given %v, want the three sidecars once", bin.got)
+	}
+}
+
+func TestDeleteXMPLeavesASidecarSomeoneEditedOrThatLumenNeverWrote(t *testing.T) {
+	f := newXMPFixture(t)
+	ctx := t.Context()
+	check(t, f.st.SetFavourite(ctx, f.c, true))
+	check(t, os.WriteFile(f.sidecarC, []byte("theirs"), 0o600)) // another program's, there first
+	if res := f.export(t); res != (core.XMPExport{Written: 2, Skipped: 1}) {
+		t.Fatalf("export = %+v", res)
+	}
+	edited := readFile(t, f.sidecarA) + "<!-- my note -->"
+	check(t, os.WriteFile(f.sidecarA, []byte(edited), 0o600))
+	bin := f.newBin(t)
+
+	res, err := f.ix.DeleteXMP(ctx, bin.recycle)
+	if err != nil || res != (core.XMPDelete{Deleted: 1, Kept: 1}) {
+		t.Fatalf("delete = %+v, %v; want b deleted and the edited a kept", res, err)
+	}
+	if got := readFile(t, f.sidecarA); got != edited {
+		t.Errorf("the edited sidecar = %q", got)
+	}
+	if got := readFile(t, f.sidecarC); got != "theirs" {
+		t.Errorf("the foreign sidecar = %q", got)
+	}
+	if fileExists(f.sidecarB) {
+		t.Error("Lumen's untouched sidecar is still there")
+	}
+	if !slices.Equal(bin.got, []string{f.sidecarB}) {
+		t.Errorf("the recycler was given %v, want only %s", bin.got, f.sidecarB)
+	}
+}
+
+func TestDeleteXMPForgetsASidecarThatIsGoneAndKeepsOneTheBinWouldNotTake(t *testing.T) {
+	f := newXMPFixture(t)
+	ctx := t.Context()
+	f.export(t)
+	check(t, os.Remove(f.sidecarA)) // the user deleted it themselves
+	bin := f.newBin(t)
+	bin.keep[f.sidecarB] = true
+
+	res, err := f.ix.DeleteXMP(ctx, bin.recycle)
+	if err != nil || res != (core.XMPDelete{Kept: 1}) {
+		t.Fatalf("delete = %+v, %v; want one kept", res, err)
+	}
+	if f.recordedHash(t, f.pathA) != nil {
+		t.Error("the sidecar that was gone is still recorded")
+	}
+	// The one that stayed is still Lumen's: asking again, with a bin that takes it, deletes it.
+	delete(bin.keep, f.sidecarB)
+	if res, err := f.ix.DeleteXMP(ctx, bin.recycle); err != nil || res != (core.XMPDelete{Deleted: 1}) {
+		t.Fatalf("second delete = %+v, %v; want the kept one deleted", res, err)
+	}
+}
+
+func TestAfterDeleteXMPNoPassWritesUntilItIsTurnedOnAgain(t *testing.T) {
+	f := newXMPFixture(t)
+	ctx := t.Context()
+	f.export(t)
+	bin := f.newBin(t)
+	if _, err := f.ix.DeleteXMP(ctx, bin.recycle); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ix.ExportXMPNow(ctx); !errors.Is(err, ErrXMPOff) {
+		t.Fatalf("Export now after deleting = %v, want ErrXMPOff", err)
+	}
+	if res := f.pass(t); res != (core.XMPExport{}) || fileExists(f.sidecarA) {
+		t.Fatalf("a pass after deleting = %+v; it must write nothing", res)
+	}
+	check(t, f.ix.SetXMP(ctx, true))
+	if res := f.export(t); res.Written != 2 || !fileExists(f.sidecarA) || !fileExists(f.sidecarB) {
+		t.Fatalf("export after turning it on again = %+v, want both written anew", res)
+	}
+}
+
+func TestDeleteXMPDoesNothingOnceItsContextHasEnded(t *testing.T) {
+	f := newXMPFixture(t)
+	f.export(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	bin := f.newBin(t)
+	if _, err := f.ix.DeleteXMP(ctx, bin.recycle); !errors.Is(err, context.Canceled) {
+		t.Fatalf("delete with an ended context = %v, want context.Canceled", err)
+	}
+	if !fileExists(f.sidecarA) || !fileExists(f.sidecarB) || len(bin.got) != 0 {
+		t.Fatalf("sidecars were recycled after the context ended: %v", bin.got)
+	}
+}

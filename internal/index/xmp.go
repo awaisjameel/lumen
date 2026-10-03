@@ -145,6 +145,105 @@ func (ix *Indexer) exportNow(ctx context.Context, opts xmpOptions) (core.XMPExpo
 	return ix.exportXMP(ctx, opts)
 }
 
+// Recycler is fileops.Recycle: it moves files to the Recycle Bin and says what
+// happened to each.
+type Recycler func(ctx context.Context, paths []string) ([]fileops.Outcome, error)
+
+// DeleteXMP turns XMP sidecars off and moves every sidecar Lumen wrote to the
+// Recycle Bin (recycle; nil means fileops.Recycle), so the user can take back
+// everything Lumen put in their folders. Only a file Lumen has a record of,
+// and that is still byte for byte what it wrote, goes: one edited since, and
+// one the bin would not take, stays where it is and is counted as kept. It
+// runs even while indexing is paused, because the user asked for it. Stop
+// cancels it and waits for it; what went to the bin by then is forgotten
+// either way.
+func (ix *Indexer) DeleteXMP(ctx context.Context, recycle Recycler) (core.XMPDelete, error) {
+	if recycle == nil {
+		recycle = fileops.Recycle
+	}
+	// Off first: a pass that is running stops at its next batch, and none
+	// starts to write the sidecars again.
+	if err := ix.SetXMP(ctx, false); err != nil {
+		return core.XMPDelete{}, err
+	}
+	ctx, done, err := ix.joinLifetime(ctx)
+	if err != nil {
+		return core.XMPDelete{}, err
+	}
+	defer done()
+	var res core.XMPDelete
+	for after := int64(0); ; {
+		next, more, err := ix.deleteXMPBatch(ctx, recycle, after, &res)
+		if err != nil || !more {
+			return res, err
+		}
+		after = next
+	}
+}
+
+// deleteXMPBatch recycles one batch of the sidecars recorded after the row
+// after, holding the exporter's turn so that no pass writes meanwhile. more
+// is false when there are none further.
+func (ix *Indexer) deleteXMPBatch(ctx context.Context, recycle Recycler, after int64, res *core.XMPDelete) (next int64, more bool, err error) {
+	if err := ix.xmp.acquire(ctx); err != nil {
+		return 0, false, err
+	}
+	defer ix.xmp.release()
+	owned, err := ix.store.XMPOwned(ctx, after, xmpBatch)
+	if err != nil {
+		return 0, false, fmt.Errorf("read the sidecars to delete: %w", err)
+	}
+	if len(owned) == 0 {
+		return 0, false, nil
+	}
+	var changes store.XMPChanges
+	var paths []string
+	logged := 0
+	for _, o := range owned {
+		switch state, err := fileops.CheckSidecar(o.Path, o.Hash); state {
+		case fileops.SidecarSame:
+			paths = append(paths, o.Path)
+		case fileops.SidecarGone:
+			changes.Forget = append(changes.Forget, o.Path)
+		default: // edited since, or unreadable: it stays, and so does its record
+			res.Kept++
+			if err != nil && logged < 10 {
+				logged++
+				slog.Warn("check xmp sidecar", "path", o.Path, "err", err)
+			}
+		}
+	}
+	var recycleErr error
+	if len(paths) > 0 {
+		var outcomes []fileops.Outcome
+		outcomes, recycleErr = recycle(ctx, paths)
+		for _, out := range outcomes {
+			switch out.Status {
+			case fileops.Recycled:
+				res.Deleted++
+				changes.Forget = append(changes.Forget, out.Path)
+			case fileops.Gone:
+				changes.Forget = append(changes.Forget, out.Path)
+			case fileops.Kept, fileops.Failed:
+				res.Kept++
+				if out.Err != nil && logged < 10 {
+					logged++
+					slog.Warn("recycle xmp sidecar", "path", out.Path, "err", out.Err)
+				}
+			}
+		}
+	}
+	// What went to the bin is forgotten even when shutting down, or its record
+	// would outlive the file.
+	if err := ix.store.SaveXMP(context.WithoutCancel(ctx), changes); err != nil {
+		return 0, false, fmt.Errorf("forget the sidecars deleted: %w", err)
+	}
+	if recycleErr != nil {
+		return 0, false, fmt.Errorf("move the sidecars to the Recycle Bin: %w", recycleErr)
+	}
+	return owned[len(owned)-1].Row, true, nil
+}
+
 // joinLifetime makes work a caller asked for part of the indexer's: ctx also
 // ends when the indexer is stopped, and Stop waits until done is called. An
 // indexer that has not been started (a test's) leaves ctx as it is.

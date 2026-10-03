@@ -616,6 +616,23 @@ const en = {
   'settings.xmpResult': 'Wrote {written}, {unchanged} already up to date, {skipped} left alone.',
   'settings.xmpSkippedHint':
     'Left alone means another program made the file, it was edited after Lumen wrote it, or Lumen couldn’t write it (a read-only folder or a locked file).',
+  'settings.xmpDelete': 'Delete Lumen’s sidecar files…',
+  'settings.xmpDeleting': 'Deleting…',
+  'settings.xmpDeleteHint':
+    'Takes back every sidecar file Lumen wrote. Your photos, and sidecar files from other programs, are not touched.',
+  'settings.xmpDeleteTitle': 'Delete Lumen’s sidecar files?',
+  'settings.xmpDeleteText':
+    'Lumen turns sidecar files off and moves every .xmp file it wrote to the Recycle Bin. A file that was changed after Lumen wrote it stays where it is, and so do your photos and files from other programs.',
+  'settings.xmpDeleteOk': 'Move to Recycle Bin',
+  'settings.xmpDeleted': {
+    one: 'Moved 1 sidecar file to the Recycle Bin.',
+    other: 'Moved {n} sidecar files to the Recycle Bin.',
+  },
+  'settings.xmpDeletedNone': 'There were no sidecar files from Lumen to delete.',
+  'settings.xmpKept': {
+    one: '1 was left alone: it was changed after Lumen wrote it, or it couldn’t go to the Recycle Bin.',
+    other: '{n} were left alone: they were changed after Lumen wrote them, or they couldn’t go to the Recycle Bin.',
+  },
 } as const satisfies Record<string, Message>
 
 export type MessageKey = keyof typeof en

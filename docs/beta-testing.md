@@ -4,13 +4,13 @@ Thank you for trying Lumen before its first release. Lumen is a photo
 gallery for Windows that organises your photos and videos with AI that runs
 on your own PC. Nothing is uploaded: Lumen never connects to the internet.
 
-This beta is version 0.9.0. It is meant to be used on your real photos, so
+This beta is version 0.9.1. It is meant to be used on your real photos, so
 that we learn how it copes with years of camera rolls, WhatsApp images,
 screenshots and phone backups.
 
 ## Installing
 
-1. Run `Lumen-0.9.0-x64-setup.exe`. It installs Lumen for you alone, in
+1. Run `Lumen-0.9.1-x64-setup.exe`. It installs Lumen for you alone, in
    `%LOCALAPPDATA%\Programs\Lumen`, without asking for administrator rights.
 2. Windows may say it protected your PC, because this beta is not signed
    yet. Choose **More info**, then **Run anyway**.
@@ -32,7 +32,8 @@ folders when you use one of these, each of which asks first:
 - **Organise files on disk** (Settings) shows every move before it makes
   any, and can undo them.
 - **XMP sidecar files** (Settings, off by default) writes small `.xmp` files
-  beside your photos.
+  beside your photos. **Delete Lumen's sidecar files**, beside it, moves
+  every one Lumen wrote to the Recycle Bin.
 
 ## What to try
 

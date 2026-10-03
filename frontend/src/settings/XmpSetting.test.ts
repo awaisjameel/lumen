@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { engine, ErrorCode } from '../bridge'
 import type * as Bridge from '../bridge'
 import { useLibrary } from '../library/store'
+import { question } from '../shared/confirm'
 import XmpSetting from './XmpSetting.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -11,6 +12,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   engine: {
     setXMP: vi.fn<(on: boolean) => Promise<void>>(),
     exportXMPNow: vi.fn<() => Promise<Bridge.XMPExport>>(),
+    deleteXMP: vi.fn<() => Promise<Bridge.XMPDelete>>(),
   },
 }))
 
@@ -18,7 +20,29 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.mocked(engine.setXMP).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.exportXMPNow).mockReset().mockResolvedValue({ written: 0, unchanged: 0, skipped: 0 })
+  vi.mocked(engine.deleteXMP).mockReset().mockResolvedValue({ deleted: 0, kept: 0 })
+  question.value = null
 })
+
+type Box = ReturnType<typeof mount>
+
+const exportButton = (box: Box) => box.findAll('button').find((b) => b.text().startsWith('Export'))
+
+function deleteButton(box: Box) {
+  const button = box.findAll('button').at(-1)
+  if (!button) throw new Error('there is no delete button')
+  return button
+}
+
+/** Clicks the delete button and answers the question it asks. */
+async function askToDelete(box: Box, yes: boolean) {
+  await deleteButton(box).trigger('click')
+  expect(question.value?.title).toBe('Delete Lumen’s sidecar files?')
+  expect(question.value?.text).toContain('Recycle Bin')
+  expect(question.value?.ok).toBe('Move to Recycle Bin')
+  question.value?.answer(yes)
+  await flushPromises()
+}
 
 it('is off until the user turns it on, says what it does and offers no export', () => {
   const box = mount(XmpSetting)
@@ -26,7 +50,7 @@ it('is off until the user turns it on, says what it does and offers no export', 
   expect(box.text()).toContain('Write XMP sidecar files beside my photos')
   expect(box.text()).toContain('never changes your photos')
   expect(box.text()).toContain('leaves out anything you have blocked')
-  expect(box.find('button').exists()).toBe(false)
+  expect(exportButton(box)).toBeUndefined()
 })
 
 it('reflects the saved setting and offers Export now while it is on', () => {
@@ -42,7 +66,7 @@ it('saves the choice and shows Export now once it is on', async () => {
   await box.get('input').setValue(true)
   expect(engine.setXMP).toHaveBeenCalledExactlyOnceWith(true)
   expect(lib.settings.xmp).toBe(true)
-  expect(box.find('button').exists()).toBe(true)
+  expect(exportButton(box)).toBeDefined()
 })
 
 it('saves clicks in order, ending with the last', async () => {
@@ -71,7 +95,7 @@ it('puts the box back and says why when the save fails', async () => {
   await flushPromises()
   expect(lib.settings.xmp).toBe(false)
   expect(lib.settingsError).toContain('the database is locked')
-  expect(box.find('button').exists()).toBe(false)
+  expect(exportButton(box)).toBeUndefined()
 })
 
 it('exports now and reports what was written, left up to date and left alone', async () => {
@@ -119,7 +143,7 @@ it('hides the last result when it is turned off', async () => {
   expect(box.find('[role="status"]').exists()).toBe(true)
   await box.get('input').setValue(false)
   expect(box.find('[role="status"]').exists()).toBe(false)
-  expect(box.find('button').exists()).toBe(false)
+  expect(exportButton(box)).toBeUndefined()
 })
 
 it('explains an export refused because the setting is off', async () => {
@@ -132,4 +156,83 @@ it('explains an export refused because the setting is off', async () => {
   await box.get('button').trigger('click')
   await flushPromises()
   expect(lib.settingsError).toBe('XMP sidecar files are turned off. Turn them on in Settings first.')
+})
+
+it('offers to delete Lumen’s sidecar files whether the setting is on or off', () => {
+  const box = mount(XmpSetting)
+  expect(deleteButton(box).text()).toBe('Delete Lumen’s sidecar files…')
+  expect(box.text()).toContain('sidecar files from other programs, are not touched')
+  useLibrary().settings.xmp = true
+  expect(deleteButton(mount(XmpSetting)).text()).toBe('Delete Lumen’s sidecar files…')
+})
+
+it('deletes nothing unless the user confirms', async () => {
+  useLibrary().settings.xmp = true
+  const box = mount(XmpSetting)
+  await askToDelete(box, false)
+  expect(engine.deleteXMP).not.toHaveBeenCalled()
+  expect(engine.setXMP).not.toHaveBeenCalled()
+  expect(useLibrary().settings.xmp).toBe(true)
+})
+
+it('turns the setting off, deletes and says how many went to the Recycle Bin', async () => {
+  const lib = useLibrary()
+  lib.settings.xmp = true
+  const order: string[] = []
+  vi.mocked(engine.setXMP).mockImplementationOnce((on) => {
+    order.push(`set ${on}`)
+    return Promise.resolve()
+  })
+  vi.mocked(engine.deleteXMP).mockImplementationOnce(() => {
+    order.push('delete')
+    return Promise.resolve({ deleted: 4073, kept: 0 })
+  })
+  const box = mount(XmpSetting)
+  await askToDelete(box, true)
+  expect(order).toEqual(['set false', 'delete'])
+  expect(lib.settings.xmp).toBe(false)
+  expect(box.get('input').element.checked).toBe(false)
+  expect(exportButton(box)).toBeUndefined()
+  expect(box.get('[role="status"]').text()).toBe('Moved 4,073 sidecar files to the Recycle Bin.')
+})
+
+it('says which sidecar files were left alone, and when there were none to delete', async () => {
+  vi.mocked(engine.deleteXMP).mockResolvedValueOnce({ deleted: 1, kept: 2 })
+  const box = mount(XmpSetting)
+  await askToDelete(box, true)
+  expect(box.get('[role="status"]').text()).toContain('Moved 1 sidecar file to the Recycle Bin.')
+  expect(box.get('[role="status"]').text()).toContain('2 were left alone: they were changed after Lumen wrote them')
+
+  await askToDelete(box, true)
+  expect(box.get('[role="status"]').text()).toBe('There were no sidecar files from Lumen to delete.')
+})
+
+it('disables the controls while it deletes, and shows a failure', async () => {
+  const lib = useLibrary()
+  lib.settings.xmp = true
+  let fail: (e: Error) => void = () => {
+    throw new Error('the delete has not started')
+  }
+  vi.mocked(engine.deleteXMP).mockReturnValueOnce(new Promise((_resolve, reject) => (fail = reject)))
+  const box = mount(XmpSetting)
+  await askToDelete(box, true)
+  expect(deleteButton(box).attributes('disabled')).toBeDefined()
+  expect(deleteButton(box).text()).toBe('Deleting…')
+  expect(box.get('input').attributes('disabled')).toBeDefined()
+  fail(new Error('the Recycle Bin is not available'))
+  await flushPromises()
+  expect(deleteButton(box).attributes('disabled')).toBeUndefined()
+  expect(box.get('input').attributes('disabled')).toBeUndefined()
+  expect(lib.settingsError).toContain('the Recycle Bin is not available')
+})
+
+it('does not delete when the setting could not be turned off', async () => {
+  const lib = useLibrary()
+  lib.settings.xmp = true
+  vi.mocked(engine.setXMP).mockRejectedValueOnce(new Error('the database is locked'))
+  const box = mount(XmpSetting)
+  await askToDelete(box, true)
+  expect(engine.deleteXMP).not.toHaveBeenCalled()
+  expect(lib.settings.xmp).toBe(true)
+  expect(lib.settingsError).toContain('the database is locked')
 })

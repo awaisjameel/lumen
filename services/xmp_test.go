@@ -101,3 +101,56 @@ func TestExportXMPNowReportsWhatItWroteLeftAndSkipped(t *testing.T) {
 		t.Fatalf("the foreign sidecar = %q, %v", b, err)
 	}
 }
+
+func TestDeleteXMPTurnsItOffAndRecyclesWhatLumenWrote(t *testing.T) {
+	ctx := t.Context()
+	paths := core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	dir := t.TempDir()
+	src, err := st.AddSource(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	photo := filepath.Join(dir, "a.jpg")
+	if err := os.WriteFile(photo, []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Ingest(ctx, []store.IngestItem{{SourceID: src.ID, Path: photo, Size: 1, MTime: 1, Hash: []byte("a"),
+		Kind: core.KindPhoto, Ext: ".jpg", TakenAt: 1_700_000_000, DateFrom: core.DateFromFile}}); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetFavourite(ctx, jobs[0].AssetID, true); err != nil {
+		t.Fatal(err)
+	}
+	rec := &fakeRecycler{}
+	svc := NewLibraryService(st, index.New(st, paths, nil, index.Models{}, quietEvents{}), nil)
+	svc.recycle = rec.recycle
+	if err := svc.SetXMP(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := svc.ExportXMPNow(ctx); err != nil || res.Written != 1 {
+		t.Fatalf("export = %+v, %v; want one written", res, err)
+	}
+
+	res, err := svc.DeleteXMP(ctx)
+	if err != nil || res != (core.XMPDelete{Deleted: 1}) {
+		t.Fatalf("delete = %+v, %v; want one deleted", res, err)
+	}
+	if rec.called() != 1 {
+		t.Fatalf("the recycler was called %d times, want once", rec.called())
+	}
+	if s, err := svc.Settings(ctx); err != nil || s.XMP {
+		t.Fatalf("settings = %+v, %v; want XMP off after deleting", s, err)
+	}
+	if res, err := svc.DeleteXMP(ctx); err != nil || res != (core.XMPDelete{}) {
+		t.Fatalf("second delete = %+v, %v; want nothing left to delete", res, err)
+	}
+}

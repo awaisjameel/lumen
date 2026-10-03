@@ -140,6 +140,14 @@ export function DeleteFromDisk(ids: number[] | null): $CancellablePromise<core$0
 }
 
 /**
+ * DeleteXMP turns XMP sidecars off and moves every sidecar Lumen wrote, and
+ * that nobody has edited since, to the Recycle Bin.
+ */
+export function DeleteXMP(): $CancellablePromise<core$0.XMPDelete> {
+    return $Call.ByID(124293899);
+}
+
+/**
  * DuplicateGroups returns exact file copies and likely similar photos for review.
  */
 export function DuplicateGroups(): $CancellablePromise<core$0.DuplicateGroup[] | null> {

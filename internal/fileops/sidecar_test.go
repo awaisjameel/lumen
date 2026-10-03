@@ -217,3 +217,30 @@ func TestOnlyLumensTemporaryNamesAreSidecarTemps(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckSidecarTellsLumensOwnFromAnEditedOrMissingOneAndChangesNothing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "IMG_1.jpg.xmp")
+	wrote := SidecarHash([]byte("v1"))
+	if got, err := CheckSidecar(path, wrote); err != nil || got != SidecarGone {
+		t.Fatalf("CheckSidecar of a missing file = %v, %v; want gone", got, err)
+	}
+	if err := os.WriteFile(path, []byte("v1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := CheckSidecar(path, wrote); err != nil || got != SidecarSame {
+		t.Fatalf("CheckSidecar of what Lumen wrote = %v, %v; want same", got, err)
+	}
+	if err := os.WriteFile(path, []byte("v1 and a note"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := CheckSidecar(path, wrote); err != nil || got != SidecarEdited {
+		t.Fatalf("CheckSidecar of an edited file = %v, %v; want edited", got, err)
+	}
+	if got := mustRead(t, path); got != "v1 and a note" {
+		t.Fatalf("the file now holds %q", got)
+	}
+	if n := names(t, dir); len(n) != 1 {
+		t.Fatalf("folder holds %v, want only the sidecar", n)
+	}
+}

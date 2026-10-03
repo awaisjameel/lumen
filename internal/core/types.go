@@ -125,6 +125,12 @@ type XMPExport struct {
 	Skipped   int `json:"skipped"`   // sidecars Lumen did not write, or that someone edited since: left alone
 }
 
+// XMPDelete is what deleting Lumen's sidecars did.
+type XMPDelete struct {
+	Deleted int `json:"deleted"` // sidecars moved to the Recycle Bin
+	Kept    int `json:"kept"`    // sidecars edited since Lumen wrote them, or that could not be recycled: left alone
+}
+
 // OrganiseRunState is where a run of moves stands.
 type OrganiseRunState string
 

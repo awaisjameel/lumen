@@ -39,6 +39,7 @@ import type {
   OrganisePlan as RawOrganisePlan,
   OrganiseProgress,
   OrganiseRun,
+  XMPDelete,
   XMPExport,
   AlbumRule,
   AssetDetail as RawAssetDetail,
@@ -107,6 +108,7 @@ export type {
   Tag,
   UIError,
   View,
+  XMPDelete,
   XMPExport,
 }
 
@@ -324,6 +326,8 @@ export const engine = {
   setXMP: (on: boolean): Promise<void> => LibraryService.SetXMP(on),
   /** Writes every out-of-date XMP sidecar now. */
   exportXMPNow: (): Promise<XMPExport> => LibraryService.ExportXMPNow(),
+  /** Turns XMP sidecars off and moves the ones Lumen wrote to the Recycle Bin. */
+  deleteXMP: (): Promise<XMPDelete> => LibraryService.DeleteXMP(),
 
   /** Previews a template's moves (source 0: every source), saved as a planned run. */
   planOrganise: async (template: string, sourceID: number): Promise<OrganisePlan> => {

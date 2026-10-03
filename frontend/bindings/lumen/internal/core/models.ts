@@ -1199,6 +1199,21 @@ export interface Working {
 }
 
 /**
+ * XMPDelete is what deleting Lumen's sidecars did.
+ */
+export interface XMPDelete {
+    /**
+     * sidecars moved to the Recycle Bin
+     */
+    "deleted": number;
+
+    /**
+     * sidecars edited since Lumen wrote them, or that could not be recycled: left alone
+     */
+    "kept": number;
+}
+
+/**
  * XMPExport is what an export pass did.
  */
 export interface XMPExport {

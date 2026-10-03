@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"math"
 	"slices"
@@ -422,5 +423,37 @@ func TestXMPOrphansAreSidecarsBesideNoFileWhosePhotoIsGoneOrNotShown(t *testing.
 	check(t, f.st.r.QueryRowContext(f.ctx, "SELECT count(*) FROM xmp_exports").Scan(&kept))
 	if kept != 3 {
 		t.Fatalf("%d records, want 3: deleting an asset must not drop its record", kept)
+	}
+}
+
+func TestXMPOwnedPagesThroughEverySidecarLumenRecorded(t *testing.T) {
+	f := newXMPFixture(t)
+	ctx := t.Context()
+	check(t, f.st.SaveXMP(ctx, XMPChanges{
+		Records: []XMPRecord{
+			{AssetID: f.a, Path: `C:\p\a.jpg.xmp`, Hash: []byte{1}},
+			{AssetID: f.b, Path: `C:\p\b.jpg.xmp`, Hash: []byte{2}},
+			{AssetID: f.b, Path: `C:\old\b.jpg.xmp`, Hash: []byte{3}}, // left behind by a move
+		},
+		Skips: []XMPSkip{{Path: `C:\p\c.jpg.xmp`, XMPStamp: XMPStamp{Size: 5, MTime: 6}}}, // someone else's: never listed
+	}))
+	var paths []string
+	var hashes []byte
+	for after := int64(0); ; {
+		page, err := f.st.XMPOwned(ctx, after, 2)
+		check(t, err)
+		if len(page) == 0 {
+			break
+		}
+		for _, o := range page {
+			paths, hashes, after = append(paths, o.Path), append(hashes, o.Hash...), o.Row
+		}
+	}
+	if want := []string{`C:\p\a.jpg.xmp`, `C:\p\b.jpg.xmp`, `C:\old\b.jpg.xmp`}; !slices.Equal(paths, want) || !bytes.Equal(hashes, []byte{1, 2, 3}) {
+		t.Fatalf("owned = %v %v, want %v with hashes 1 2 3", paths, hashes, want)
+	}
+	check(t, f.st.SaveXMP(ctx, XMPChanges{Forget: paths}))
+	if page, err := f.st.XMPOwned(ctx, 0, 10); err != nil || len(page) != 0 {
+		t.Fatalf("after forgetting them all, owned = %v, %v", page, err)
 	}
 }

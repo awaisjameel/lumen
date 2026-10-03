@@ -27,6 +27,9 @@ import (
 //     left exactly as it is. The hash is checked when the call starts and
 //     again, after the new bytes are safely on disk, immediately before the
 //     rename.
+//   - A sidecar is deleted only when the user asks for all of Lumen's to go,
+//     only while it is still byte for byte what Lumen wrote (CheckSidecar),
+//     and only by moving it to the Recycle Bin (Recycle).
 //   - The photo or video the sidecar describes is never opened.
 
 // SidecarTempSuffix ends the name of the temporary file a sidecar is written
@@ -43,7 +46,7 @@ func IsSidecarTemp(path string) bool {
 // Sidecar says what WriteSidecar did.
 type Sidecar int
 
-// The outcomes of WriteSidecar and ReviseSidecar.
+// The outcomes of WriteSidecar, ReviseSidecar and CheckSidecar.
 const (
 	// SidecarFailed is what comes with an error: the file is as it was.
 	SidecarFailed Sidecar = iota
@@ -86,6 +89,23 @@ func WriteSidecar(ctx context.Context, path string, data, wrote []byte) (Sidecar
 // never creates one, and reports SidecarGone if the file is missing.
 func ReviseSidecar(ctx context.Context, path string, data, wrote []byte) (Sidecar, error) {
 	return writeSidecar(ctx, path, data, wrote, false, nil)
+}
+
+// CheckSidecar looks at the sidecar at path without changing it: SidecarSame
+// if it is still byte for byte what Lumen wrote there (wrote, a SidecarHash),
+// SidecarEdited if it differs, SidecarGone if there is no file. Only a sidecar
+// that is the same may be recycled as Lumen's own.
+func CheckSidecar(path string, wrote []byte) (Sidecar, error) {
+	have, err := hashFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return SidecarGone, nil
+	case err != nil:
+		return SidecarFailed, err
+	case !bytes.Equal(have, wrote):
+		return SidecarEdited, nil
+	}
+	return SidecarSame, nil
 }
 
 // writeSidecar is the work of both. between, if set, runs after the new bytes

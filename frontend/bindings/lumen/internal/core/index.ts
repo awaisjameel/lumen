@@ -57,5 +57,6 @@ export type {
     Video,
     View,
     Working,
+    XMPDelete,
     XMPExport
 } from "./models.js";
