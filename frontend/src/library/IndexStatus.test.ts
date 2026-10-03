@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { Device, engine, FailReason } from '../bridge'
+import { Device, engine, FailReason, WaitReason } from '../bridge'
 import type { Progress } from '../bridge'
 import { useLibrary } from './store'
 import IndexStatus from './IndexStatus.vue'
@@ -22,6 +22,7 @@ const idle: Progress = {
   skipped: 0,
   paused: false,
   onBattery: false,
+  waiting: WaitReason.WaitNone,
   ai: { device: Device.DeviceCPU, error: '', facesError: '' },
 }
 
@@ -68,6 +69,19 @@ it('lists what runs now, then what waits its turn', () => {
 
 it('names the work that waits when nothing runs', () => {
   expect(label(show({ ocr: 12 }))).toBe('Reading text in your photos')
+})
+
+it.each([
+  [WaitReason.WaitFullScreen, 'Waiting while a full-screen app is open', 'when the game, video or presentation closes'],
+  [WaitReason.WaitBusy, 'Waiting while your PC is busy', 'when your other programs quieten down'],
+  [WaitReason.WaitIdle, 'Waiting until you’re away', 'while you’re away from your PC'],
+])('gives way to the PC (%s), naming why and what waits', (waiting, text, note) => {
+  const status = show({ thumbnail: 40, embedding: 300, waiting })
+  expect(label(status)).toBe(text)
+  expect(status.text()).toContain('40 left') // the work held back
+  expect(status.find('.queue .note').text()).toContain(note)
+  // With nothing left to do, there is nothing to wait for.
+  expect(label(show({ waiting }))).toBe('Up to date')
 })
 
 it('waits for mains power, and says so in the list', () => {

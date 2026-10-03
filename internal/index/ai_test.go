@@ -79,7 +79,7 @@ func TestIndexerFindsPhotosByDescription(t *testing.T) {
 	}
 	engine := search.NewEngine(st, m)
 	engine.Start(ctx)
-	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{Search: engine}, &fakeEvents{})
+	ix := quiet(New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{Search: engine}, &fakeEvents{}))
 	ix.Start(ctx)
 	defer func() {
 		cancel()
@@ -186,7 +186,7 @@ func TestVideoAIUsesOnePassAndRetriesOnlyTheFailedStage(t *testing.T) {
 			engine := search.NewEngine(st, m)
 			engine.Start(ctx)
 			defer engine.Close()
-			ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{Search: engine, People: people.NewEngine(st, fm)}, &fakeEvents{})
+			ix := quiet(New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{Search: engine, People: people.NewEngine(st, fm)}, &fakeEvents{}))
 			defer ix.encoder.release()
 			defer ix.faces.release()
 			openFaces := ix.faces.open
@@ -303,7 +303,7 @@ func TestVideoAIBackoffLetsTheHealthyStageDrain(t *testing.T) {
 			engine := search.NewEngine(st, m)
 			engine.Start(ctx)
 			defer engine.Close()
-			ix := New(st, paths, nil, Models{Search: engine, People: people.NewEngine(st, fm)}, &fakeEvents{})
+			ix := quiet(New(st, paths, nil, Models{Search: engine, People: people.NewEngine(st, fm)}, &fakeEvents{}))
 			defer ix.encoder.release()
 			defer ix.faces.release()
 			attempts := 0
@@ -429,7 +429,7 @@ func TestIndexerFindsPeople(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := people.NewEngine(st, fm)
-	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{People: engine}, &fakeEvents{})
+	ix := quiet(New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{People: engine}, &fakeEvents{}))
 	ix.Start(ctx)
 	defer func() {
 		cancel()

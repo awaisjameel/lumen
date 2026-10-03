@@ -57,7 +57,15 @@ A Windows-first desktop photo gallery that organises large libraries with on-dev
 
 Design and decisions for the last part of Phase 5 are in [docs/phase5-design-2026-10-01.md](docs/phase5-design-2026-10-01.md); the original blocking scope is in [the blocking note](docs/blocking-phase5-2026-09-30.md).
 
-**Phase 6 (polish and ship v1) is next:** the installer (see `task package` below), onboarding and empty states, crash logs kept locally, a performance pass against the plan's targets on low-end hardware, then a beta with real users' libraries. Pausing indexing for full-screen apps, and an "index only when idle" setting, are part of the performance pass. Today indexing pauses by hand, and the AI stages pause on battery (a setting allows them). Indexing always runs below normal priority on the share of the CPU set in Settings.
+**Phase 6 (polish and ship v1) is working; the beta (0.9.0) is next:**
+
+- **Installer** (`task package`): `bin\Lumen-0.9.0-x64-setup.exe` (872 MB, about a minute to install) installs Lumen per user, in `%LOCALAPPDATA%\Programs\Lumen`, with no administrator prompt. It carries the runtime folder (DLLs, FFmpeg, models) and Microsoft's standalone WebView2 runtime, which it installs only on a PC without one, so installing never needs the internet. It refuses to replace or remove a running Lumen. The uninstaller removes only what Setup put there, and asks whether to remove the library too (no by default; a silent uninstall keeps it). The installer and Lumen.exe are signed when a certificate is configured; there is none yet.
+- **No network, still**: Lumen never checks for updates. Settings → About Lumen shows the version and the releases page, which opens in the browser only when clicked.
+- **Politeness**: besides the manual pause and waiting for mains power, indexing waits while a game, full-screen video or presentation is in front, and while other programs keep the processor above 70 % for 30 seconds (until they fall to 50 %). Both are on by default. Advanced: index only while the user is away (no input for 5 minutes). Lumen's own work never counts as "other programs": the process and everything it starts share one Windows job, whose processor time is measured. The sidebar status says why indexing waits.
+- **Crash reports and diagnostics, local only**: a crash's account from the Go runtime is kept in `crashes\` beside the library, and the next start says Lumen closed unexpectedly. A panic in a call from the UI is kept as a report and the app runs on. The UI's own failures reach `lumen.log`, rate-limited, and an unexpected one tells the user. Settings → About Lumen opens the log folder and saves a problem report (the log, crash reports and a description of the PC and library, no photos), which the user may choose to share.
+- **Notices**: `THIRD_PARTY_NOTICES.txt` beside Lumen.exe (Settings → About Lumen → Licences) is generated from the build itself (`scripts/notices.py`): the native components and models `deps.sh` pins, the Go modules linked into Lumen.exe and the packages bundled into the UI, each with its licence text.
+- **Performance pass** ([docs/performance-2026-10-03.md](docs/performance-2026-10-03.md)), measured in the real app: cold start to a usable grid in about a second, 60 fps scrolling, searches in 120–200 ms once the text model is loaded, 454 MB in all when idle. On mains power 3,000 photos are browsable in 55 s and fully understood in 264 s on the integrated GPU, with indexing on half the processor.
+- Onboarding, empty states and the beta guide for testers ([docs/beta-testing.md](docs/beta-testing.md)). Design and decisions: [docs/phase6-design-2026-10-03.md](docs/phase6-design-2026-10-03.md).
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
@@ -75,7 +83,7 @@ Then, once, from Git Bash:
 scripts/deps.sh   # ~1.2 GB of downloads, pinned and checked, into deps/ (git-ignored)
 ```
 
-It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2, the YuNet and SFace face models, the PP-OCRv5 text detector and English recogniser, and the linters (into `deps/tools/`), then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8, which takes it from 565 to 369 MB while agreeing with the original at cosine ≥ 0.9996, and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`. Nothing is ever downloaded at run time.
+It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2, the YuNet and SFace face models, the PP-OCRv5 text detector and English recogniser, the linters and NSIS (into `deps/tools/`), and the WebView2 runtime the installer carries (into `deps/installer/`), keeps each shipped component's licence text (in `deps/licenses/`), then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8, which takes it from 565 to 369 MB while agreeing with the original at cosine ≥ 0.9996, and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`. Nothing is ever downloaded at run time.
 
 Check with `wails3 doctor`.
 
@@ -110,7 +118,7 @@ npm run test                 # Vitest: async store, viewer and settings regressi
 
 Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates, which only build for their own platforms.
 
-`task package` (the Wails template's NSIS installer) is not usable yet: the installer does not carry `deps/runtime`. The installer is the first part of Phase 6. The template's Docker and server tasks are left out of `Taskfile.yml`: Lumen needs cgo with the Windows libvips.
+`wails3 task package` builds Lumen and its installer, `bin\Lumen-<version>-x64-setup.exe` (build/windows/nsis/project.nsi, with the NSIS that `deps.sh` pins), after writing `bin\THIRD_PARTY_NOTICES.txt`. To sign Lumen.exe, the installer and the uninstaller, pass `SIGN_THUMBPRINT=` (a code-signing certificate in the Windows certificate store, where a hardware token's or a signing service's appears) and `TIMESTAMP_SERVER=`, with the Windows SDK's `signtool` on `PATH`. The version is set once, in `build/config.yml`; after changing it, run `wails3 task common:update:build-assets` (`TestVersionsAgree` fails until then). The template's Docker, server and MSIX tasks are left out of `Taskfile.yml`: Lumen needs cgo with the Windows libvips, and its installer must carry the runtime folder.
 
 Before moving between implementation phases, also regenerate the bindings with
 `wails3 generate bindings -f '-tags production' -clean=true -ts -i` (as the build does), check `git diff -- frontend/bindings`, and run
@@ -142,13 +150,14 @@ internal/ai          ONNX Runtime sessions, SigLIP 2 image/text encoders, tokeni
 internal/search      in-memory int8 vector index, search, Things vocabulary and tagging
 internal/people      face clustering (incremental, constrained by the user's corrections), names in searches
 internal/places      offline reverse geocoding: the bundled GeoNames cities (cities.tsv.gz)
-internal/index       background pipeline: scan loop, stage workers (OCR, XMP export, cache eviction too), model loading, CPU budget, battery, events
+internal/index       background pipeline: scan loop, stage workers (OCR, XMP export, cache eviction too), model loading, CPU budget, politeness (battery, full screen, busy PC, idle), events
 internal/fileops     every change to files in the user's folders: Recycle Bin, organise plans and journalled moves, sidecars
+internal/diag        crash reports (the runtime's crash output, recovered panics), the problem report, the PC's description, Lumen's version
 internal/signin      Windows sign-in check for a forgotten PIN (Windows Hello, or the account password)
 internal/xmp         the XMP sidecar packet (pure Go)
 internal/parallel    the worker pool loops run on
 internal/testenv     finds deps/runtime for tests, skipping cleanly without it
-services/            Wails services (Library, Search, People, Media), the block gate, the loopback video server, error codes
+services/            Wails services (Library, Search, People, Media, System), the block gate, the loopback video server, error codes
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/{library,search,things,people,onboarding,settings,shared}   UI by feature
 frontend/src/albums  manual and smart album browser and rule editor
@@ -156,8 +165,10 @@ frontend/src/{places,events}   GPS places and automatic event groups
 frontend/src/duplicates  exact-copy and similar-photo review, best copy pre-selected
 frontend/src/trash   Trash actions and Undo
 frontend/src/organise  the organise-on-disk template, preview, progress and undo
-scripts/             deps.sh (native dependencies), prepare_models.py, env.sh, lint.sh, build_places.py
-docs/                audits (dated records), the blocking note, the Phase 5 design, GeoNames provenance
+frontend/src/about   Settings → About Lumen, and the notice after a crash
+scripts/             deps.sh (native dependencies), prepare_models.py, env.sh, lint.sh, build_places.py, notices.py, installer_payload.py
+docs/                audits (dated records), the blocking note, the Phase 5 and 6 designs, GeoNames provenance, the beta guide
+build/windows/nsis   the installer (project.nsi; wails_tools.nsh is generated from build/config.yml)
 spikes/              Phase 0 experiments (own Go module; models in spikes/.cache)
 ```
 
@@ -190,4 +201,7 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **AI models ship beside `Lumen.exe`** (`models\` in the runtime folder), read-only from the installer, rather than in the per-user app-data folder; the database and thumbnail cache are in `%LOCALAPPDATA%\Lumen`.
 - **Text in images is in v1**, not "Later", and only for photos the AI sorts as screenshots or documents. It is searched with SQLite FTS4, which go-sqlite3 includes by default; FTS5 would need a build tag on every build and test.
 - **Removing files goes to the Windows Recycle Bin**, never a permanent delete, and only after the user confirms. Duplicates pre-select the best copy (the plan's "quality/best-shot picking" for copies), but nothing moves until the user confirms.
-- **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). Trim it when packaging the installer (Phase 6), after the video decoder and encoder set is finalized.
+- **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). Trimming it needs a from-source LGPL build of FFmpeg, a toolchain of its own; packed in the installer the stock build is 63 MB of its 872 MB. Revisit if the installer's size matters more than that build.
+- **No updates in the app** (decided 3 October 2026): the plan left auto-update open, as opt-in. Lumen makes no network request at all; Settings shows the releases page.
+- **Installed per user** (decided 3 October 2026), not in Program Files: the library is per user already, and installing or updating needs no administrator.
+- **The installer carries the WebView2 runtime** (decided 3 October 2026, about 200 MB in it) rather than Wails' downloading bootstrapper, so installing needs no internet either.

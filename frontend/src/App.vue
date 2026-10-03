@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
+import CrashNotice from './about/CrashNotice.vue'
 import IndexStatus from './library/IndexStatus.vue'
 import { useLibrary } from './library/store'
 import Welcome from './onboarding/Welcome.vue'
@@ -69,6 +70,7 @@ onMounted(() => lib.init().catch((e: unknown) => (failed.value = errorText(e))))
   <BlockDialog />
   <Notice />
   <TrashUndo />
+  <CrashNotice />
 </template>
 
 <style scoped>

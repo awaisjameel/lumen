@@ -122,7 +122,7 @@ func TestTheOCRStageReadsOnlyScreenshotsAndDocumentsOnceTheUserTurnsItOn(t *test
 		natureW: {line("never read")},
 	}}
 	var loads atomic.Int32
-	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{}))
 	openFake(ix, reader, &loads)
 	ix.Start(ctx)
 	defer func() {
@@ -235,7 +235,7 @@ func waitForText(t *testing.T, st *store.Store, query string, want int) {
 // OCR is AI work: it waits for mains power and for the user's pause, and
 // frees its models while it waits.
 func TestPauseAndBatteryHoldTheOCRStageAndFreeItsModels(t *testing.T) {
-	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
 	if ix.held(core.StageOCR) {
 		t.Fatal("OCR is held with nothing holding it")
 	}
@@ -275,7 +275,7 @@ func TestPauseAndBatteryHoldTheOCRStageAndFreeItsModels(t *testing.T) {
 }
 
 func TestOCRKeepsItsOwnVersionAndRequeuesOnlyItself(t *testing.T) {
-	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
 	v, ok := ix.version[core.StageOCR]
 	if !ok || v.Photo != ai.OCRVersion || v.Photo == "" {
 		t.Fatalf("OCR stage version = %+v, want %q", v, ai.OCRVersion)
@@ -291,7 +291,7 @@ func TestOCRSortsFailuresIntoPhotosAndModels(t *testing.T) {
 	ctx := t.Context()
 	dir := t.TempDir()
 	paths := core.PathsIn(t.TempDir())
-	ix := New(nil, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{})
+	ix := quiet(New(nil, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{}))
 	reader := &fakeReader{text: map[int][]ai.OCRLine{300: {line("fine")}}, fail: map[int]error{
 		310: ai.ErrBadOutput, 320: ai.ErrBadImage,
 	}}
@@ -330,7 +330,7 @@ func TestOCRSortsFailuresIntoPhotosAndModels(t *testing.T) {
 }
 
 func TestOCRModelsThatWontLoadFailTheBatchWithoutMarkingPhotos(t *testing.T) {
-	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
 	// The default opener, on a runtime without the OCR models.
 	rs, err := ix.doOCR(t.Context(), []store.JobItem{{AssetID: 1, Path: "x.png", Kind: core.KindPhoto}})
 	if err == nil || rs != nil {
@@ -394,7 +394,7 @@ func ocrIndexerLibrary(t *testing.T, names ...string) (*store.Store, core.Paths,
 func TestProgressSaysOCRWaitsForMainsPowerEvenWithoutOtherAI(t *testing.T) {
 	ctx := t.Context()
 	st, paths, jobs, shots := ocrIndexerLibrary(t, "a")
-	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{}, &fakeEvents{}))
 	ix.onBattery = true
 	if p := ix.Progress(ctx); p.OnBattery {
 		t.Fatal("no AI is waiting, yet progress says it waits for mains power")
@@ -431,7 +431,7 @@ func TestFetchSkipsPhotosThatStoppedBeingScreenshotsAndFindsTheNext(t *testing.T
 	if err := st.UntagAsset(ctx, newest, shots); err != nil { // the user says it is not one
 		t.Fatal(err)
 	}
-	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{}, &fakeEvents{}))
 	got, err := ix.fetchOCR(ctx, 1)
 	if err != nil || len(got) != 1 || got[0].AssetID != older {
 		t.Fatalf("fetch = %+v, %v; want the older photo, after the rejected one was dropped", got, err)

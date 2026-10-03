@@ -35,7 +35,7 @@ func TestVideoCancellationStopsSamplingAndLeavesJobsPending(t *testing.T) {
 	if err != nil || len(jobs) != 2 {
 		t.Fatalf("jobs = %v, %v", jobs, err)
 	}
-	ix := New(st, paths, nil, Models{People: people.NewEngine(st, ai.FaceModel{})}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{People: people.NewEngine(st, ai.FaceModel{})}, &fakeEvents{}))
 	ix.faces = &model[*ai.Faces]{
 		open:   func() (*ai.Faces, error) { return &ai.Faces{}, nil },
 		close:  func(*ai.Faces) {},

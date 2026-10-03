@@ -22,6 +22,29 @@ export interface AI {
 }
 
 /**
+ * About is what Settings → About Lumen shows.
+ */
+export interface About {
+    "version": string;
+
+    /**
+     * DataDir holds the library, its thumbnails, the log and crash reports.
+     */
+    "dataDir": string;
+
+    /**
+     * ReleasesURL is where new versions are published. Lumen itself never
+     * visits it: the user opens it, in their browser, if they wish.
+     */
+    "releasesURL": string;
+
+    /**
+     * LastRunCrashed says the last run ended in a crash, which left a report.
+     */
+    "lastRunCrashed": boolean;
+}
+
+/**
  * Album is a manual collection or a saved rule with its current visible count and cover.
  */
 export interface Album {
@@ -602,6 +625,28 @@ export enum Kind {
 };
 
 /**
+ * Link is a page outside Lumen that the user can open in their browser.
+ */
+export enum Link {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The links.
+     *
+     * new versions
+     */
+    LinkReleases = "releases",
+
+    /**
+     * where place names come from (CC BY 4.0 asks for the credit)
+     */
+    LinkGeoNames = "geonames",
+};
+
+/**
  * OrganiseMove is one file's move, planned or made.
  */
 export interface OrganiseMove {
@@ -862,6 +907,12 @@ export interface Progress {
      * AI work is waiting for mains power
      */
     "onBattery": boolean;
+
+    /**
+     * Waiting is why every stage waits for the PC, though not paused:
+     * WaitNone when nothing holds them.
+     */
+    "waiting": WaitReason;
     "ai": AI;
 }
 
@@ -925,6 +976,14 @@ export interface Settings {
     "cpuThreads": number;
     "maxCPUThreads": number;
     "defaultCPUThreads": number;
+
+    /**
+     * What indexing waits for (SettingPauseFullScreen, SettingPauseBusy,
+     * SettingIdleOnly).
+     */
+    "pauseFullScreen": boolean;
+    "pauseBusy": boolean;
+    "idleOnly": boolean;
 }
 
 /**
@@ -1015,6 +1074,20 @@ export enum TagSource {
 };
 
 /**
+ * UIError is a failure in the UI, for Lumen's log.
+ */
+export interface UIError {
+    "message": string;
+    "stack": string;
+
+    /**
+     * Where is what caught it: the UI's own error handler, a listener, or a
+     * view that logged a failure it worked around.
+     */
+    "where": string;
+}
+
+/**
  * Video is what the details panel and the player need to know about a video.
  */
 export interface Video {
@@ -1067,6 +1140,37 @@ export interface View {
      */
     "event"?: number;
 }
+
+/**
+ * WaitReason is what indexing gives way to, as the user's settings ask.
+ * Scanning goes on meanwhile, as it does while paused: it is cheap.
+ */
+export enum WaitReason {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The reasons, in the order they are checked.
+     */
+    WaitNone = "",
+
+    /**
+     * a game, full-screen video or presentation is in front
+     */
+    WaitFullScreen = "full_screen",
+
+    /**
+     * other programs keep the processor busy
+     */
+    WaitBusy = "busy",
+
+    /**
+     * indexing runs only while the user is away
+     */
+    WaitIdle = "idle",
+};
 
 /**
  * Working says which stages are at work right now. A stage with files left

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
+import AboutSection from '../about/AboutSection.vue'
 import OcrSetting from './OcrSetting.vue'
 import XmpSetting from './XmpSetting.vue'
 import {
+  AWAY_MINUTES,
   BlockKind,
   Device,
   engine,
@@ -223,6 +225,24 @@ onBeforeUnmount(saveConfidence)
             <input type="checkbox" :checked="lib.progress?.paused" @change="lib.setPaused(checked($event))" />
             <span>{{ t('settings.pause') }}</span>
           </label>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              :checked="lib.settings.pauseFullScreen"
+              @change="lib.savePauseFullScreen(checked($event))"
+            />
+            <span>
+              {{ t('settings.pauseFullScreen') }}
+              <small class="muted">{{ t('settings.pauseFullScreenHint') }}</small>
+            </span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" :checked="lib.settings.pauseBusy" @change="lib.savePauseBusy(checked($event))" />
+            <span>
+              {{ t('settings.pauseBusy') }}
+              <small class="muted">{{ t('settings.pauseBusyHint') }}</small>
+            </span>
+          </label>
           <div v-if="lib.settings.maxCPUThreads > 1" class="slider">
             <label for="cpu-threads">{{
               t('settings.threads', { n: threadsShown, max: lib.settings.maxCPUThreads })
@@ -243,6 +263,16 @@ onBeforeUnmount(saveConfidence)
               <span>{{ t('settings.threadsMore') }}</span>
             </div>
           </div>
+          <details class="advanced">
+            <summary>{{ t('settings.advanced') }}</summary>
+            <label class="toggle">
+              <input type="checkbox" :checked="lib.settings.idleOnly" @change="lib.saveIdleOnly(checked($event))" />
+              <span>
+                {{ t('settings.idleOnly') }}
+                <small class="muted">{{ t('settings.idleOnlyHint', { n: AWAY_MINUTES }) }}</small>
+              </span>
+            </label>
+          </details>
         </section>
 
         <section>
@@ -333,6 +363,11 @@ onBeforeUnmount(saveConfidence)
           <h2>{{ t('settings.privacy') }}</h2>
           <p class="muted hint"><Icon name="lock" :size="16" /> {{ t('settings.privacyText') }}</p>
           <RouterLink to="/settings/blocked" class="btn">{{ t('blocked.title') }}</RouterLink>
+        </section>
+
+        <section>
+          <h2>{{ t('about.title') }}</h2>
+          <AboutSection />
         </section>
       </div>
     </div>

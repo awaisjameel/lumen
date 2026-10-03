@@ -349,6 +349,10 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   display: grid;
+  /* Bound the shared image/video cell to the stage. Auto tracks can grow
+     to the original's intrinsic size before percentage heights resolve. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   place-items: center;
 }
 .media img,

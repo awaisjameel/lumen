@@ -1,6 +1,12 @@
-import { expect, it } from 'vitest'
-import { ErrorCode } from '../bridge'
-import { errorText } from './errors'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ErrorCode, logUIError } from '../bridge'
+import type * as Bridge from '../bridge'
+import { errorText, logError, notice, reportUnexpected } from './errors'
+
+vi.mock('../bridge', async (importOriginal) => ({
+  ...(await importOriginal<typeof Bridge>()),
+  logUIError: vi.fn<(e: Bridge.UIError) => void>(),
+}))
 
 /** A failed engine call, as the Wails runtime rejects it. */
 function failure(message: string, code?: string): Error {
@@ -24,4 +30,55 @@ it('shows the message of other failures, and of codes it does not know', () => {
   expect(errorText(failure('disk full'))).toBe('Something went wrong: disk full')
   expect(errorText(failure('odd', 'not_a_code'))).toBe('Something went wrong: odd')
   expect(errorText('plain')).toBe('Something went wrong: plain')
+})
+
+describe('failures reach Lumen’s log', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(logUIError).mockClear()
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    notice.value = ''
+  })
+
+  it('logs a failure once a minute at most, however often it repeats', () => {
+    for (let i = 0; i < 5; i++) logError(new Error('day failed to load'))
+    expect(logUIError).toHaveBeenCalledExactlyOnceWith({
+      message: 'Error: day failed to load',
+      stack: expect.stringContaining('day failed to load') as unknown,
+      where: 'logError',
+    })
+    vi.advanceTimersByTime(60_000)
+    logError(new Error('day failed to load'))
+    expect(logUIError).toHaveBeenCalledTimes(2)
+  })
+
+  it('names the engine’s code, and logs what isn’t an Error as text', () => {
+    logError(failure('someone already has that name', ErrorCode.PersonExists))
+    logError('plain')
+    expect(vi.mocked(logUIError).mock.calls.map(([e]) => e.message)).toEqual([
+      'Error: someone already has that name (person_exists)',
+      'plain',
+    ])
+  })
+
+  it('says something went wrong when a bug surfaces, unless asked only to log it', () => {
+    reportUnexpected(new TypeError('x is undefined'), 'vue: render function')
+    expect(notice.value).toBe('Something went wrong. Lumen saved the details in its log.')
+    expect(logUIError).toHaveBeenCalledWith(expect.objectContaining({ where: 'vue: render function' }))
+    notice.value = ''
+    reportUnexpected('ResizeObserver loop completed with undelivered notifications', 'window', false)
+    expect(notice.value).toBe('')
+    expect(logUIError).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores a read the UI cancelled', async () => {
+    const { CancelError } = await vi.importActual<{ CancelError: new (message: string) => Error }>('@wailsio/runtime')
+    reportUnexpected(new CancelError('superseded'), 'promise')
+    expect(logUIError).not.toHaveBeenCalled()
+    expect(notice.value).toBe('')
+  })
 })

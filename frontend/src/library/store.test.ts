@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, watch } from 'vue'
-import { Device, engine, Filter, onLibraryChanged, onProgress, startMedia } from '../bridge'
+import { Device, engine, Filter, onLibraryChanged, onProgress, startMedia, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Errors from '../shared/errors'
 import type { Changes, DayBucket, DayItems, Progress, SearchResults } from '../bridge'
@@ -61,6 +61,7 @@ const progress: Progress = {
   skipped: 0,
   paused: false,
   onBattery: false,
+  waiting: WaitReason.WaitNone,
   ai: { device: Device.DeviceCPU, error: '', facesError: '' },
 }
 
@@ -89,6 +90,9 @@ beforeEach(() => {
     cpuThreads: 10,
     maxCPUThreads: 20,
     defaultCPUThreads: 10,
+    pauseFullScreen: true,
+    pauseBusy: true,
+    idleOnly: false,
   })
   vi.mocked(engine.progress).mockReset().mockResolvedValue(progress)
   vi.mocked(startMedia).mockReset().mockResolvedValue(undefined)

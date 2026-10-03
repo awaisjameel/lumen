@@ -4,7 +4,13 @@
 
 import { CancelError, Events } from '@wailsio/runtime'
 import type { CancellablePromise } from '@wailsio/runtime'
-import { LibraryService, MediaService, PeopleService, SearchService } from '../../bindings/lumen/services'
+import {
+  LibraryService,
+  MediaService,
+  PeopleService,
+  SearchService,
+  SystemService,
+} from '../../bindings/lumen/services'
 import {
   AlbumKind,
   BlockKind,
@@ -15,13 +21,16 @@ import {
   FailReason,
   Filter,
   Kind,
+  Link,
   OrganiseMoveState,
   OrganiseRunState,
   Playback,
   TagKind,
   TagSource,
+  WaitReason,
 } from '../../bindings/lumen/internal/core'
 import type {
+  About,
   Album,
   Block,
   BlockChange,
@@ -52,6 +61,7 @@ import type {
   Settings,
   Source,
   Tag,
+  UIError,
   View,
 } from '../../bindings/lumen/internal/core'
 
@@ -65,13 +75,16 @@ export {
   FailReason,
   Filter,
   Kind,
+  Link,
   OrganiseMoveState,
   OrganiseRunState,
   Playback,
   TagKind,
   TagSource,
+  WaitReason,
 }
 export type {
+  About,
   Album,
   AlbumRule,
   Block,
@@ -92,6 +105,7 @@ export type {
   Settings,
   Source,
   Tag,
+  UIError,
   View,
   XMPExport,
 }
@@ -141,6 +155,7 @@ export const PIN_COOLDOWN_SECONDS = 30 // services.pinCooldown: the wait after t
 export const THUMB_CACHE_DEFAULT_MB = 2048 // core.ThumbCacheDefaultMB
 export const THUMB_CACHE_MIN_MB = 256 // core.ThumbCacheMinMB
 export const THUMB_CACHE_MAX_MB = 102400 // core.ThumbCacheMaxMB
+export const AWAY_MINUTES = 5 // index.AwayAfter: no input this long and idle-only indexing runs
 export const ORGANISE_DEFAULT_TEMPLATE = '{Year}/{Month}/{Event}/{Name}' // fileops.DefaultTemplate
 /** The tokens an organise scheme may hold, in the order the editor offers them (fileops.Tokens). */
 export const ORGANISE_TOKENS = ['Year', 'Month', 'MonthName', 'Day', 'Event', 'Place', 'Camera', 'Name', 'Ext'] as const
@@ -243,6 +258,7 @@ function queueBlockSession(action: () => Promise<void>): Promise<void> {
 export const engine = {
   sources: async (): Promise<Source[]> => (await LibraryService.Sources()) ?? [],
   suggestedFolders: async (): Promise<string[]> => (await LibraryService.SuggestedFolders()) ?? [],
+  sourcePathKey: (path: string): Promise<string> => LibraryService.SourcePathKey(path),
   /** The folder the user picked, or "" if they closed the picker. */
   pickFolder: (): Promise<string> => LibraryService.PickFolder(),
   addSources: async (paths: string[]): Promise<Source[]> => (await LibraryService.AddSources(paths)) ?? [],
@@ -295,6 +311,9 @@ export const engine = {
   settings: (): Promise<Settings> => LibraryService.Settings(),
   setVideos: (on: boolean): Promise<void> => LibraryService.SetVideos(on),
   setAIOnBattery: (on: boolean): Promise<void> => LibraryService.SetAIOnBattery(on),
+  setPauseFullScreen: (on: boolean): Promise<void> => LibraryService.SetPauseFullScreen(on),
+  setPauseBusy: (on: boolean): Promise<void> => LibraryService.SetPauseBusy(on),
+  setIdleOnly: (on: boolean): Promise<void> => LibraryService.SetIdleOnly(on),
   setTagConfidence: (v: number): Promise<void> => LibraryService.SetTagConfidence(v),
   setEventGapHours: (hours: number): Promise<void> => LibraryService.SetEventGapHours(hours),
   setThumbCacheMB: (mb: number): Promise<void> => LibraryService.SetThumbCacheMB(mb),
@@ -385,6 +404,24 @@ export const engine = {
   setPersonCover: (id: number, face: number): Promise<void> => PeopleService.SetPersonCover(id, face),
   rejectFaces: (person: number, faces: number[]): Promise<void> => PeopleService.RejectFaces(person, faces),
   nameFaces: (faces: number[], name: string): Promise<number> => PeopleService.NameFaces(faces, name),
+
+  about: (): Promise<About> => SystemService.About(),
+  /** Opens a page outside Lumen in the user's browser; Lumen itself makes no request. */
+  openLink: (link: Link): Promise<void> => SystemService.OpenLink(link),
+  openNotices: (): Promise<void> => SystemService.OpenNotices(),
+  openLogFolder: (): Promise<void> => SystemService.OpenLogFolder(),
+  /** Asks where, then saves a problem report there; "" if the user cancelled. */
+  saveProblemReport: (): Promise<string> => SystemService.SaveProblemReport(),
+}
+
+/**
+ * Writes a failure in the UI to the engine's log, which has no other way to
+ * see it. It never fails: a failure to log has nowhere left to go.
+ */
+export function logUIError(e: UIError): void {
+  void Promise.resolve()
+    .then(() => SystemService.LogUIError(e))
+    .catch(() => undefined)
 }
 
 // The engine's events (services.EventProgress, EventLibraryChanged, EventOrganiseProgress),

@@ -11,6 +11,8 @@ export default defineConfig({
   },
   // The UI only ever runs in WebView2, which is evergreen Chromium, so ship
   // modern CSS and JS as written (e.g. light-dark() needs Chromium 123).
-  build: { target: 'chrome123' },
+  // The licence of every package bundled into the UI, for the notices that
+  // ship with Lumen (scripts/notices.py reads it).
+  build: { target: 'chrome123', license: { fileName: '.vite/license.json' } },
   plugins: [vue(), wails('./bindings')],
 })

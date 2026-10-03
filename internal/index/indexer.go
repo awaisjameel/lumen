@@ -37,8 +37,6 @@ const (
 	// being recorded into a folder changes it all the time).
 	debounce    = 2 * time.Second
 	debounceMax = 30 * time.Second
-	// powerPoll is how often the power source is checked.
-	powerPoll = 20 * time.Second
 	// modelIdle is how long a model stays loaded without work. Loading one
 	// takes a second or two, so short gaps shouldn't unload it.
 	modelIdle = time.Minute
@@ -69,6 +67,7 @@ type Indexer struct {
 	search *search.Engine // nil when search can't run (see aiError)
 	people *people.Engine // nil when faces can't be recognised (see facesError)
 	events Events
+	pc     pc // what the PC is doing, for pcLoop
 
 	scanWake  chan struct{}
 	scanReqs  []scanRequest // protected by mu, at most one pending request per source
@@ -98,22 +97,21 @@ type Indexer struct {
 
 	rescanMu sync.Mutex // one RescanAll at a time, so the watchers match the sources
 
-	mu          sync.Mutex
-	resume      chan struct{} // closed (and replaced) whenever a hold may have lifted
-	focus       *store.TimeRange
-	paused      bool
-	onBattery   bool
-	aiOnBattery bool // the user lets AI work continue on battery
-	aiDevice    core.Device
-	aiError     string
-	facesError  string
-	scanning    bool
-	scanPath    string          // the folder the running scan looks through
-	scanSeen    int             // the media files it has found so far
-	pendingFS   map[string]bool // changed paths waiting for the debounce
-	fsSince     time.Time       // when the oldest of them arrived
-	fsDue       time.Time       // the next flush's deadline (mu)
-	watchStop   context.CancelFunc
+	mu         sync.Mutex
+	resume     chan struct{} // closed (and replaced) whenever a hold may have lifted
+	focus      *store.TimeRange
+	paused     bool
+	pcState    // what else holds the stages: battery, full screen, a busy PC, idle-only (politeness.go)
+	aiDevice   core.Device
+	aiError    string
+	facesError string
+	scanning   bool
+	scanPath   string          // the folder the running scan looks through
+	scanSeen   int             // the media files it has found so far
+	pendingFS  map[string]bool // changed paths waiting for the debounce
+	fsSince    time.Time       // when the oldest of them arrived
+	fsDue      time.Time       // the next flush's deadline (mu)
+	watchStop  context.CancelFunc
 
 	// Set by whoever changes things and cleared by reportLoop, which only then
 	// recomputes progress, so an idle library costs no queries.
@@ -136,7 +134,7 @@ type scanRequest struct {
 // New builds an indexer. Call Start to begin work.
 func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Events) *Indexer {
 	ix := &Indexer{
-		store: st, paths: paths, cache: cache, search: m.Search, people: m.People, events: ev,
+		store: st, paths: paths, cache: cache, search: m.Search, people: m.People, events: ev, pc: systemPC{},
 		scanWake:  make(chan struct{}, 1),
 		scanTurn:  make(chan struct{}, 1),
 		wakeMeta:  make(chan struct{}, 1),
@@ -318,11 +316,7 @@ const (
 func (ix *Indexer) Start(ctx context.Context) {
 	ctx, ix.cancel = context.WithCancel(ctx)
 	ix.rootCtx = ctx
-	on, err := ix.store.Bool(ctx, core.SettingAIOnBattery, false)
-	if err != nil {
-		slog.Error("read settings", "err", err)
-	}
-	ix.aiOnBattery, ix.onBattery = on, onBattery()
+	ix.loadPCSettings(ctx)
 	threads, err := ix.store.CPUThreads(ctx)
 	if err != nil {
 		slog.Error("read settings", "err", err)
@@ -432,7 +426,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 		})
 	}
 	ix.run(func() { ix.reportLoop(ctx) })
-	ix.run(func() { ix.powerLoop(ctx) })
+	ix.run(func() { ix.pcLoop(ctx) })
 	ix.run(func() { ix.thumbCacheLoop(ctx) })
 	ix.run(func() { ix.xmpLoop(ctx) })
 	ix.run(func() { ix.fsLoop(ctx, ix.flushFSChanges) })
@@ -580,12 +574,12 @@ func (ix *Indexer) SetCPUThreads(n int) {
 	slog.Info("indexing threads changed", "threads", n)
 }
 
-// SetAIOnBattery lets the AI keep working on battery power, or not.
-func (ix *Indexer) SetAIOnBattery(on bool) { ix.setHold(func() { ix.aiOnBattery = on }) }
-
 // setHold changes what holds work back, then wakes every waiting worker to
-// re-check.
+// re-check. Without an indexer (a service under test) there is nothing to hold.
 func (ix *Indexer) setHold(change func()) {
+	if ix == nil {
+		return
+	}
 	ix.mu.Lock()
 	change()
 	close(ix.resume)
@@ -594,10 +588,11 @@ func (ix *Indexer) setHold(change func()) {
 	ix.stale.Store(true)
 }
 
-// held reports whether a stage must wait: everything waits while paused, and
-// the AI waits on battery unless the user allows it. Call with mu held.
+// held reports whether a stage must wait: everything waits while paused or
+// while the PC needs it to (see pcState.waiting), and the AI waits on
+// battery unless the user allows it. Call with mu held.
 func (ix *Indexer) held(stage core.Stage) bool {
-	return ix.paused || (stage.AI() && ix.onBattery && !ix.aiOnBattery)
+	return ix.paused || ix.waiting() != core.WaitNone || (stage.AI() && ix.aiWaitsForMains())
 }
 
 // waitTurn blocks while stage is held, meanwhile freeing its model (if
@@ -620,27 +615,6 @@ func (ix *Indexer) waitTurn(ctx context.Context, stage core.Stage, m releaser) b
 		case <-resume:
 		case <-ctx.Done():
 			return false
-		}
-	}
-}
-
-// powerLoop follows the power source, so AI work waits while on battery.
-func (ix *Indexer) powerLoop(ctx context.Context) {
-	t := time.NewTicker(powerPoll)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-		now := onBattery()
-		ix.mu.Lock()
-		was := ix.onBattery
-		ix.mu.Unlock()
-		if now != was {
-			slog.Info("power source changed", "battery", now)
-			ix.setHold(func() { ix.onBattery = now })
 		}
 	}
 }
@@ -1039,7 +1013,8 @@ func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 	p := core.Progress{
 		Scanning: ix.scanning, ScanPath: ix.scanPath, ScanSeen: ix.scanSeen, Paused: ix.paused,
 		Working:   ix.workingNow(),
-		OnBattery: ix.onBattery && !ix.aiOnBattery, // narrowed below to the AI that is there
+		OnBattery: ix.aiWaitsForMains(), // narrowed below to the AI that is there
+		Waiting:   ix.waiting(),
 		AI:        core.AI{Device: ix.aiDevice, Error: ix.aiError, FacesError: ix.facesError},
 	}
 	ix.mu.Unlock()

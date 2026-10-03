@@ -78,6 +78,12 @@ func newOrganiseLibrary(t *testing.T) *organiseLibrary {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Indexing must not give way to whatever else this PC is running.
+	for _, key := range []string{core.SettingPauseFullScreen, core.SettingPauseBusy} {
+		if err := st.SetBool(t.Context(), key, false); err != nil {
+			t.Fatal(err)
+		}
+	}
 	ix := index.New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), index.Models{}, quietEvents{})
 	l := &organiseLibrary{t: t, st: st, ix: ix, root: root, src: src}
 	l.s = NewLibraryService(st, ix, nil)

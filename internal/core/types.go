@@ -78,7 +78,15 @@ const (
 	SettingOCR           = "ocr_enabled"        // bool: read text in screenshots and documents (off by default)
 	SettingXMP           = "xmp_enabled"        // bool: write XMP sidecars beside photos (off by default)
 	SettingCPUThreads    = "cpu_threads"        // int: CPU threads indexing may keep busy (unset: DefaultCPUThreads)
+	// What indexing gives way to, besides battery power (see WaitReason).
+	SettingPauseFullScreen = "pause_full_screen" // bool: wait while a game or full-screen app is in front (on by default)
+	SettingPauseBusy       = "pause_busy"        // bool: wait while other programs keep the PC busy (on by default)
+	SettingIdleOnly        = "idle_only"         // bool: index only while the user is away (off by default)
 )
+
+// DefaultOn reports whether an on/off setting is on until the user turns it
+// off. Every other one starts off.
+func DefaultOn(key string) bool { return key == SettingPauseFullScreen || key == SettingPauseBusy }
 
 // MaxCPUThreads is the most CPU threads indexing may be given: the machine's.
 func MaxCPUThreads() int { return runtime.NumCPU() }
@@ -103,6 +111,11 @@ type Settings struct {
 	CPUThreads        int `json:"cpuThreads"`
 	MaxCPUThreads     int `json:"maxCPUThreads"`
 	DefaultCPUThreads int `json:"defaultCPUThreads"`
+	// What indexing waits for (SettingPauseFullScreen, SettingPauseBusy,
+	// SettingIdleOnly).
+	PauseFullScreen bool `json:"pauseFullScreen"`
+	PauseBusy       bool `json:"pauseBusy"`
+	IdleOnly        bool `json:"idleOnly"`
 }
 
 // XMPExport is what an export pass did.
@@ -627,8 +640,23 @@ type Progress struct {
 	Skipped   int     `json:"skipped"`
 	Paused    bool    `json:"paused"`
 	OnBattery bool    `json:"onBattery"` // AI work is waiting for mains power
-	AI        AI      `json:"ai"`
+	// Waiting is why every stage waits for the PC, though not paused:
+	// WaitNone when nothing holds them.
+	Waiting WaitReason `json:"waiting"`
+	AI      AI         `json:"ai"`
 }
+
+// WaitReason is what indexing gives way to, as the user's settings ask.
+// Scanning goes on meanwhile, as it does while paused: it is cheap.
+type WaitReason string
+
+// The reasons, in the order they are checked.
+const (
+	WaitNone       WaitReason = ""
+	WaitFullScreen WaitReason = "full_screen" // a game, full-screen video or presentation is in front
+	WaitBusy       WaitReason = "busy"        // other programs keep the processor busy
+	WaitIdle       WaitReason = "idle"        // indexing runs only while the user is away
+)
 
 // Working says which stages are at work right now. A stage with files left
 // but not at work is waiting: for an earlier stage to finish them, for mains
@@ -780,3 +808,33 @@ func ContentType(ext string) string {
 	}
 	return "application/octet-stream"
 }
+
+// About is what Settings → About Lumen shows.
+type About struct {
+	Version string `json:"version"`
+	// DataDir holds the library, its thumbnails, the log and crash reports.
+	DataDir string `json:"dataDir"`
+	// ReleasesURL is where new versions are published. Lumen itself never
+	// visits it: the user opens it, in their browser, if they wish.
+	ReleasesURL string `json:"releasesURL"`
+	// LastRunCrashed says the last run ended in a crash, which left a report.
+	LastRunCrashed bool `json:"lastRunCrashed"`
+}
+
+// UIError is a failure in the UI, for Lumen's log.
+type UIError struct {
+	Message string `json:"message"`
+	Stack   string `json:"stack"`
+	// Where is what caught it: the UI's own error handler, a listener, or a
+	// view that logged a failure it worked around.
+	Where string `json:"where"`
+}
+
+// Link is a page outside Lumen that the user can open in their browser.
+type Link string
+
+// The links.
+const (
+	LinkReleases Link = "releases" // new versions
+	LinkGeoNames Link = "geonames" // where place names come from (CC BY 4.0 asks for the credit)
+)

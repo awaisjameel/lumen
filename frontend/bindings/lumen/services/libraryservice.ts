@@ -353,12 +353,36 @@ export function SetFavourite(id: number, fav: boolean): $CancellablePromise<void
 }
 
 /**
+ * SetIdleOnly makes indexing run only while the user is away from the PC,
+ * or whenever nothing else holds it (the default).
+ */
+export function SetIdleOnly(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3830660555, on);
+}
+
+/**
  * SetOCR turns reading the text in screenshots and documents on or off.
  * Turning it on queues the photos it applies to; turning it off stops the
  * work, and text already read stays searchable.
  */
 export function SetOCR(on: boolean): $CancellablePromise<void> {
     return $Call.ByID(2726961037, on);
+}
+
+/**
+ * SetPauseBusy makes indexing wait while other programs keep the PC busy
+ * (the default), or not.
+ */
+export function SetPauseBusy(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2914848398, on);
+}
+
+/**
+ * SetPauseFullScreen makes indexing wait while a game or full-screen app is
+ * in front (the default), or not.
+ */
+export function SetPauseFullScreen(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1734549170, on);
 }
 
 /**
@@ -412,6 +436,14 @@ export function Settings(): $CancellablePromise<core$0.Settings> {
  */
 export function ShowInFolder(id: number, path: string): $CancellablePromise<void> {
     return $Call.ByID(2897613311, id, path);
+}
+
+/**
+ * SourcePathKey is the key source folders are compared by in the library.
+ * Onboarding uses it too, so locale collation cannot hide distinct folders.
+ */
+export function SourcePathKey(path: string): $CancellablePromise<string> {
+    return $Call.ByID(524753998, path);
 }
 
 /**

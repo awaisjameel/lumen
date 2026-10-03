@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"lumen/internal/core"
+	"lumen/internal/diag"
 	"lumen/internal/store"
 	"lumen/services"
 )
@@ -236,5 +238,98 @@ func TestServiceErrorsCarryTheirCodes(t *testing.T) {
 	}
 	if string(cause) != `{"code":"invalid_pin"}` {
 		t.Errorf("cause = %s, want the invalid_pin code", cause)
+	}
+
+	// The system service is registered the same way.
+	lib := services.NewLibraryService(st, nil, nil)
+	sys := services.NewSystemService(lib, diag.New(t.TempDir(), "test"), core.PathsIn(t.TempDir()), "test")
+	if err := b.Add(service(sys, application.ServiceOptions{})); err != nil {
+		t.Fatal(err)
+	}
+	m = b.Get(&application.CallOptions{MethodName: "lumen/services.SystemService.OpenLink"})
+	if m == nil {
+		t.Fatal("OpenLink is not bound")
+	}
+	_, err = m.Call(t.Context(), []json.RawMessage{json.RawMessage(`"nowhere"`)})
+	if !errors.As(err, &cerr) {
+		t.Fatalf("error %T: %v", err, err)
+	}
+	if cause, _ := json.Marshal(cerr.Cause); string(cause) != `{"code":"not_found"}` {
+		t.Errorf("cause = %s, want the not_found code", cause)
+	}
+}
+
+func TestARecoveredPanicIsKeptAsAReport(t *testing.T) {
+	reports := diag.New(t.TempDir(), "test")
+	recordPanics(reports)(&application.PanicDetails{
+		Error: errors.New("boom"), StackTrace: "short", FullStackTrace: "goroutine 7 [running]", Time: time.Now(),
+	})
+	names, err := reports.Files()
+	if err != nil || len(names) != 1 || !strings.HasPrefix(names[0], "panic-") {
+		t.Fatalf("reports = %v (%v), want one panic report", names, err)
+	}
+	b, err := os.ReadFile(filepath.Join(reports.Dir(), names[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "panic: boom") || !strings.Contains(string(b), "goroutine 7 [running]") {
+		t.Fatalf("report = %s", b)
+	}
+}
+
+// readRepoFile reads a file of the repository by its slash path.
+func readRepoFile(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.FromSlash(name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// Lumen's version is set once, in build/config.yml. The files Wails generates
+// from it (wails3 task common:update:build-assets) give it to Lumen.exe and
+// the installer, so they must not drift from it.
+func TestVersionsAgree(t *testing.T) {
+	m := regexp.MustCompile(`(?m)^info:\n(?:[ \t]+.*\n)*?[ \t]+version: "([^"]+)"`).FindStringSubmatch(readRepoFile(t, "build/config.yml"))
+	if m == nil {
+		t.Fatal("build/config.yml has no info.version")
+	}
+	want := m[1]
+	var info struct {
+		Fixed struct {
+			FileVersion string `json:"file_version"`
+		} `json:"fixed"`
+		Info map[string]struct{ ProductVersion string } `json:"info"`
+	}
+	if err := json.Unmarshal([]byte(readRepoFile(t, "build/windows/info.json")), &info); err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]string{
+		"info.json file_version":   info.Fixed.FileVersion,
+		"info.json ProductVersion": info.Info["0000"].ProductVersion,
+	}
+	for name, re := range map[string]string{
+		"build/windows/nsis/wails_tools.nsh": `!define INFO_PRODUCTVERSION "([^"]+)"`,
+		"build/windows/wails.exe.manifest":   `<assemblyIdentity [^>]*version="([^"]+)"`,
+	} {
+		if m := regexp.MustCompile(re).FindStringSubmatch(readRepoFile(t, name)); m != nil {
+			found[name] = m[1]
+		} else {
+			found[name] = "(none)"
+		}
+	}
+	for name, got := range found {
+		if got != want {
+			t.Errorf("%s = %q, build/config.yml says %q: run wails3 task common:update:build-assets", name, got, want)
+		}
+	}
+}
+
+// The installer's Add/Remove Programs entry links the releases page the
+// About section shows.
+func TestInstallerNamesTheReleasesPage(t *testing.T) {
+	if !strings.Contains(readRepoFile(t, "build/windows/nsis/project.nsi"), `!define LUMEN_RELEASES "`+services.ReleasesURL+`"`) {
+		t.Fatalf("project.nsi's LUMEN_RELEASES is not services.ReleasesURL (%s)", services.ReleasesURL)
 	}
 }

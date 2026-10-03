@@ -91,7 +91,7 @@ func TestUpgradeRemakesOnlyThumbnailsThatChange(t *testing.T) {
 	if _, err := st.AddSource(ctx, photos); err != nil {
 		t.Fatal(err)
 	}
-	ix := New(st, paths, cache, Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, cache, Models{}, &fakeEvents{}))
 	ix.Start(ctx)
 	waitIdle(t, ix, 3)
 	before := photosByName(t, st)
@@ -108,7 +108,7 @@ func TestUpgradeRemakesOnlyThumbnailsThatChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	ix = New(st, paths, cache, Models{}, &fakeEvents{})
+	ix = quiet(New(st, paths, cache, Models{}, &fakeEvents{}))
 	ix.Start(ctx)
 	defer ix.Stop()
 	waitFor(t, "the P3 photo is remade", func() bool { return photosByName(t, st)["p3.jpg"].Thumb > before["p3.jpg"].Thumb })
@@ -135,7 +135,7 @@ func TestFacesFoundBeforeTheAnalysisChangeStandWhereNoneWere(t *testing.T) {
 	if _, err := st.AddSource(ctx, photos); err != nil {
 		t.Fatal(err)
 	}
-	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{}))
 	ix.Start(ctx)
 	waitIdle(t, ix, 3)
 	ix.Stop()
@@ -147,7 +147,7 @@ func TestFacesFoundBeforeTheAnalysisChangeStandWhereNoneWere(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ix = New(st, paths, nil, Models{People: people.NewEngine(st, ai.FaceModel{Version: "sface-test"})}, &fakeEvents{})
+	ix = quiet(New(st, paths, nil, Models{People: people.NewEngine(st, ai.FaceModel{Version: "sface-test"})}, &fakeEvents{}))
 	before := ix.facesBeforeAnalysis()
 	var items []store.JobItem
 	for name, it := range byName {
@@ -202,7 +202,7 @@ func TestVideoQueuesMergeInCaptureOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	ix := New(st, paths, nil, Models{Search: search.NewEngine(st, ai.Model{}), People: people.NewEngine(st, ai.FaceModel{})}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{Search: search.NewEngine(st, ai.Model{}), People: people.NewEngine(st, ai.FaceModel{})}, &fakeEvents{}))
 	got, err := ix.fetchVideos(ctx, 2)
 	if err != nil || len(got) != 2 || got[0].TakenAt != 200 || got[1].TakenAt != 100 {
 		t.Fatalf("video order = %v, %v", got, err)
@@ -292,7 +292,7 @@ func TestUpgradeRequeuesVideoMetadata(t *testing.T) {
 	if err := st.SaveMetadata(ctx, old, []store.MetadataResult{{AssetID: jobs[0].AssetID}}); err != nil {
 		t.Fatal(err)
 	}
-	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{}, &fakeEvents{}))
 	if n, err := st.RequeueVersions(ctx, map[core.Stage]store.StageVersion{core.StageMetadata: ix.version[core.StageMetadata]}); err != nil || n != 1 {
 		t.Fatalf("requeued metadata = %d, %v", n, err)
 	}
@@ -316,7 +316,7 @@ func TestAnalysisTwoFacesStandOnlyForUnchangedLargePhotos(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := ai.FaceModel{Version: "sface-test", DetectSize: 640}
-	ix := New(st, paths, nil, Models{People: people.NewEngine(st, m)}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{People: people.NewEngine(st, m)}, &fakeEvents{}))
 	if ix.version[core.StageFaces].LegacyPhoto != "" {
 		t.Fatal("face upgrades must check pixels before adopting old output")
 	}

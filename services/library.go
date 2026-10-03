@@ -151,6 +151,12 @@ func (s *LibraryService) PickFolder() (string, error) {
 	return path, err
 }
 
+// SourcePathKey is the key source folders are compared by in the library.
+// Onboarding uses it too, so locale collation cannot hide distinct folders.
+func (*LibraryService) SourcePathKey(path string) string {
+	return core.Fold(filepath.Clean(path))
+}
+
 // AddSources adds folders and starts scanning them, all or none: a folder
 // that doesn't exist fails the call before any is added. Folders already
 // inside the library are skipped; if that leaves nothing to add, the call
@@ -358,13 +364,21 @@ func (s *LibraryService) SetPaused(paused bool) { s.ix.SetPaused(paused) }
 
 // Settings returns the user's settings.
 func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
-	videos, err := s.store.Bool(ctx, core.SettingVideos, false)
-	if err != nil {
-		return core.Settings{}, err
-	}
-	battery, err := s.store.Bool(ctx, core.SettingAIOnBattery, false)
-	if err != nil {
-		return core.Settings{}, err
+	var set core.Settings
+	for key, to := range map[string]*bool{
+		core.SettingVideos:          &set.Videos,
+		core.SettingAIOnBattery:     &set.AIOnBattery,
+		core.SettingOCR:             &set.OCR,
+		core.SettingXMP:             &set.XMP,
+		core.SettingPauseFullScreen: &set.PauseFullScreen,
+		core.SettingPauseBusy:       &set.PauseBusy,
+		core.SettingIdleOnly:        &set.IdleOnly,
+	} {
+		on, err := s.store.Bool(ctx, key, core.DefaultOn(key))
+		if err != nil {
+			return core.Settings{}, err
+		}
+		*to = on
 	}
 	conf, err := tagConfidence(ctx, s.store)
 	if err != nil {
@@ -378,18 +392,13 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 	if err != nil {
 		return core.Settings{}, err
 	}
-	ocr, err := s.store.Bool(ctx, core.SettingOCR, false)
-	if err != nil {
-		return core.Settings{}, err
-	}
-	xmp, err := s.store.Bool(ctx, core.SettingXMP, false)
-	if err != nil {
-		return core.Settings{}, err
-	}
 	threads, err := s.store.CPUThreads(ctx)
-	return core.Settings{Videos: videos, AIOnBattery: battery, TagConfidence: conf, EventGapHours: gap,
-		ThumbCacheMB: cacheMB, OCR: ocr, XMP: xmp,
-		CPUThreads: threads, MaxCPUThreads: core.MaxCPUThreads(), DefaultCPUThreads: core.DefaultCPUThreads()}, err
+	if err != nil {
+		return core.Settings{}, err
+	}
+	set.TagConfidence, set.EventGapHours, set.ThumbCacheMB = conf, gap, cacheMB
+	set.CPUThreads, set.MaxCPUThreads, set.DefaultCPUThreads = threads, core.MaxCPUThreads(), core.DefaultCPUThreads()
+	return set, nil
 }
 
 // SetCPUThreads sets how many CPU threads indexing may keep busy, held to
@@ -412,10 +421,33 @@ func (s *LibraryService) SetEventGapHours(ctx context.Context, hours int) error 
 // SetAIOnBattery lets the AI keep working on battery power (it waits for
 // mains power by default).
 func (s *LibraryService) SetAIOnBattery(ctx context.Context, on bool) error {
-	if err := s.store.SetBool(ctx, core.SettingAIOnBattery, on); err != nil {
+	return s.setHold(ctx, core.SettingAIOnBattery, on, s.ix.SetAIOnBattery)
+}
+
+// SetPauseFullScreen makes indexing wait while a game or full-screen app is
+// in front (the default), or not.
+func (s *LibraryService) SetPauseFullScreen(ctx context.Context, on bool) error {
+	return s.setHold(ctx, core.SettingPauseFullScreen, on, s.ix.SetPauseFullScreen)
+}
+
+// SetPauseBusy makes indexing wait while other programs keep the PC busy
+// (the default), or not.
+func (s *LibraryService) SetPauseBusy(ctx context.Context, on bool) error {
+	return s.setHold(ctx, core.SettingPauseBusy, on, s.ix.SetPauseBusy)
+}
+
+// SetIdleOnly makes indexing run only while the user is away from the PC,
+// or whenever nothing else holds it (the default).
+func (s *LibraryService) SetIdleOnly(ctx context.Context, on bool) error {
+	return s.setHold(ctx, core.SettingIdleOnly, on, s.ix.SetIdleOnly)
+}
+
+// setHold stores a setting that holds indexing back, then applies it at once.
+func (s *LibraryService) setHold(ctx context.Context, key string, on bool, apply func(bool)) error {
+	if err := s.store.SetBool(ctx, key, on); err != nil {
 		return err
 	}
-	s.ix.SetAIOnBattery(on)
+	apply(on)
 	return nil
 }
 

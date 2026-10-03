@@ -10,7 +10,9 @@
 #   deps/cache/     downloads
 #   deps/vips/      libvips headers and import library (for cgo)
 #   deps/runtime/   exactly what ships beside Lumen.exe (DLLs, ffmpeg/, models/)
-#   deps/tools/     development tools: golangci-lint, deadcode, govulncheck, ruff, shellcheck
+#   deps/licenses/  the licence texts of what ships, for scripts/notices.py
+#   deps/installer/ what only the installer carries: the WebView2 runtime
+#   deps/tools/     development tools: golangci-lint, deadcode, govulncheck, ruff, shellcheck, NSIS
 #
 # The last step copies deps/runtime into bin/ (hard links, so it's instant).
 set -euo pipefail
@@ -18,7 +20,7 @@ cd "$(dirname "$0")/.."
 ROOT=$PWD
 D=$ROOT/deps
 RT=$D/runtime
-mkdir -p "$D/cache" "$RT/ffmpeg" "$D/src/siglip2" "$D/src/faces"
+mkdir -p "$D/cache" "$RT/ffmpeg" "$D/src/siglip2" "$D/src/faces" "$D/licenses"
 
 # get URL FILE SHA256: download to deps/cache/FILE unless it is already there
 # with the right hash.
@@ -40,6 +42,8 @@ if [ ! -f "$D/vips/lib/libvips.lib" ]; then
   unzip -q "$D/cache/vips.zip" -d "$D" && mv "$D/vips-dev-8.18" "$D/vips"
 fi
 cp -u "$D/vips/bin/libvips-42.dll" "$RT/"
+cp -u "$D/vips/LICENSE" "$D/licenses/libvips.LICENSE.txt"
+cp -u "$D/vips/versions.json" "$D/licenses/libvips.versions.json" # the libraries built into the DLL
 
 # ONNX Runtime 1.24.4, the last release with a DirectML build (onnxruntime_go
 # v1.27.0 matches it), and DirectML 1.15.4.
@@ -49,6 +53,10 @@ get https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsof
   directml.nupkg 4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9
 [ -f "$RT/onnxruntime.dll" ] || unzip -q -o -j "$D/cache/ort-dml.nupkg" 'runtimes/win-x64/native/*.dll' -d "$RT"
 [ -f "$RT/DirectML.dll" ] || unzip -q -o -j "$D/cache/directml.nupkg" 'bin/x64-win/DirectML.dll' -d "$RT"
+unzip -p "$D/cache/ort-dml.nupkg" LICENSE >"$D/licenses/onnxruntime.LICENSE.txt"
+unzip -p "$D/cache/ort-dml.nupkg" ThirdPartyNotices.txt >"$D/licenses/onnxruntime.ThirdPartyNotices.txt"
+unzip -p "$D/cache/directml.nupkg" LICENSE.txt >"$D/licenses/directml.LICENSE.txt"
+unzip -p "$D/cache/directml.nupkg" ThirdPartyNotices.txt >"$D/licenses/directml.ThirdPartyNotices.txt"
 
 # FFmpeg 9.0 (LGPL, shared). Only ffmpeg.exe, ffprobe.exe and the libraries
 # they load ship. BtbN prunes old autobuilds: if this 404s, pin a newer one
@@ -58,6 +66,7 @@ get https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-26
 if [ ! -f "$RT/ffmpeg/ffmpeg.exe" ] || [ ! -f "$RT/ffmpeg/ffprobe.exe" ]; then
   unzip -q -o -j "$D/cache/ffmpeg.zip" '*/bin/ffmpeg.exe' '*/bin/ffprobe.exe' '*/bin/*.dll' '*/LICENSE.txt' -d "$RT/ffmpeg"
 fi
+cp -u "$RT/ffmpeg/LICENSE.txt" "$D/licenses/ffmpeg.LICENSE.txt"
 
 # SigLIP 2 base (Apache-2.0): fp16 ONNX towers and the Gemma tokenizer.
 HF=https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/ba1f3b0843f24bc5417d38e19c37b287d719b2f4
@@ -77,6 +86,8 @@ get $YUNET/LICENSE face-yunet.LICENSE c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e
 get $SFACE/face_recognition_sface_2021dec.onnx face-sface.onnx 0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79
 get $SFACE/LICENSE face-sface.LICENSE cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
 for f in yunet.onnx yunet.LICENSE sface.onnx sface.LICENSE; do ln -f "$D/cache/face-$f" "$D/src/faces/$f"; done
+cp -u "$D/cache/face-yunet.LICENSE" "$D/licenses/yunet.LICENSE.txt"
+cp -u "$D/cache/face-sface.LICENSE" "$D/licenses/sface.LICENSE.txt" # Apache-2.0, as SigLIP 2's and PP-OCRv5's
 
 # OCR (an optional add-on, off by default): the PP-OCRv5 mobile text detector
 # and the English PP-OCRv5 recogniser in ONNX, both Apache-2.0 (their model
@@ -134,6 +145,25 @@ goinstall() {
 goinstall golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 goinstall deadcode golang.org/x/tools/cmd/deadcode@v0.50.0
 goinstall govulncheck golang.org/x/vuln/cmd/govulncheck@v1.8.0
+
+# The installer (task package): NSIS 3.13 builds it, and Microsoft's
+# standalone WebView2 runtime installer goes inside it, so a PC without
+# WebView2 needs no internet to install Lumen. Microsoft's link
+# (https://go.microsoft.com/fwlink/?linkid=2124701) always serves the newest
+# runtime; the file pinned here is the one it served on 3 October 2026. When
+# Microsoft retires it, fetch the link, check the file is signed by
+# Microsoft (PowerShell: Get-AuthenticodeSignature), and pin its URL and hash.
+get https://downloads.sourceforge.net/project/nsis/NSIS%203/3.13/nsis-3.13.zip \
+  nsis-3.13.zip ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8
+if ! "$T/nsis/makensis.exe" -VERSION 2>/dev/null | grep -q '^v3.13$'; then
+  rm -rf "$T/nsis" "$T/nsis-3.13"
+  unzip -q "$D/cache/nsis-3.13.zip" -d "$T" && mv "$T/nsis-3.13" "$T/nsis"
+fi
+WV2=https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d7548c8b-0dc9-4e81-87dd-a346cc9b73a5
+get $WV2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe \
+  webview2-x64.exe f6df8e4bc857786ff641cd01da1449169eaf8236c936ced485ea61685ba4da40
+mkdir -p "$D/installer"
+ln -f "$D/cache/webview2-x64.exe" "$D/installer/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
 
 # Stage the runtime beside the executable (hard links: no copies of 700 MB).
 mkdir -p "$ROOT/bin"
