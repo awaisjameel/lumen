@@ -77,7 +77,7 @@ func newThumbFixture(tb testing.TB, n int, wanted ...int64) *thumbFixture {
 			tb.Fatal(err)
 		}
 	}
-	return &thumbFixture{st: st, cache: cache, ix: New(st, paths, cache, Models{}, &fakeEvents{})}
+	return &thumbFixture{st: st, cache: cache, ix: quiet(New(st, paths, cache, Models{}, &fakeEvents{}))}
 }
 
 // thumbDecoder makes a thumbnail pair of fixed bytes, as a rebuild would.
@@ -219,7 +219,7 @@ func TestThumbCacheLoopMeasuresThenTrimsWhenTheCapChanges(t *testing.T) {
 	f := newThumbFixture(t, 6)
 	// A restart: a new cache over the same folder knows nothing of its size.
 	restarted := media.NewCache(f.cache.Dir, media.Decoders{})
-	ix := New(f.st, core.PathsIn(t.TempDir()), restarted, Models{}, &fakeEvents{})
+	ix := quiet(New(f.st, core.PathsIn(t.TempDir()), restarted, Models{}, &fakeEvents{}))
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {

@@ -103,7 +103,7 @@ func newXMPFixture(t *testing.T) *xmpFixture {
 	f.aliFace = faces[0].ID
 	f.ali, err = st.NameFaces(ctx, []int64{f.aliFace}, "Ali")
 	check(t, err)
-	f.ix = New(st, paths, nil, Models{}, &fakeEvents{})
+	f.ix = quiet(New(st, paths, nil, Models{}, &fakeEvents{}))
 	check(t, st.SetXMP(ctx, true))
 	return f
 }
@@ -750,7 +750,7 @@ func TestABackgroundPassDoesNotTryAForeignSidecarAgainUntilItChangesOrExportNowI
 		t.Fatalf("second pass = %+v, %d tries of a; want a not tried again", res, calls[f.sidecarA])
 	}
 	// A new Lumen process keeps what was remembered.
-	again := New(f.st, core.PathsIn(t.TempDir()), nil, Models{}, &fakeEvents{})
+	again := quiet(New(f.st, core.PathsIn(t.TempDir()), nil, Models{}, &fakeEvents{}))
 	if _, err := again.exportXMP(t.Context(), xmpOptions{write: calls.write}); err != nil || calls[f.sidecarA] != 1 {
 		t.Fatalf("after a restart: %d tries of a, %v; want still one", calls[f.sidecarA], err)
 	}
@@ -822,7 +822,7 @@ func TestExportRespectsABlockThatCommitsWhileABatchIsBeingWritten(t *testing.T) 
 }
 
 func TestLumensTemporarySidecarNamesDoNotStartAScan(t *testing.T) {
-	ix := New(nil, core.PathsIn(t.TempDir()), nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.PathsIn(t.TempDir()), nil, Models{}, &fakeEvents{}))
 	ix.rootCtx = t.Context()
 	dir := t.TempDir()
 	ix.onFSChange(filepath.Join(dir, "IMG_1.jpg.xmp.0a1b2c3d4e5f.lumen-tmp")) // renamed away already: it no longer exists

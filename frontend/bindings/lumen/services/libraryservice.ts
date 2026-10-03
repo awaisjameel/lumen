@@ -353,12 +353,36 @@ export function SetFavourite(id: number, fav: boolean): $CancellablePromise<void
 }
 
 /**
+ * SetIdleOnly makes indexing run only while the user is away from the PC,
+ * or whenever nothing else holds it (the default).
+ */
+export function SetIdleOnly(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3830660555, on);
+}
+
+/**
  * SetOCR turns reading the text in screenshots and documents on or off.
  * Turning it on queues the photos it applies to; turning it off stops the
  * work, and text already read stays searchable.
  */
 export function SetOCR(on: boolean): $CancellablePromise<void> {
     return $Call.ByID(2726961037, on);
+}
+
+/**
+ * SetPauseBusy makes indexing wait while other programs keep the PC busy
+ * (the default), or not.
+ */
+export function SetPauseBusy(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2914848398, on);
+}
+
+/**
+ * SetPauseFullScreen makes indexing wait while a game or full-screen app is
+ * in front (the default), or not.
+ */
+export function SetPauseFullScreen(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1734549170, on);
 }
 
 /**

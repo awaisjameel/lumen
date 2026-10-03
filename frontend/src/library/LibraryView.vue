@@ -362,7 +362,7 @@ const emptyText = computed((): [string, string] => {
       : s.view.filter === Filter.FilterVideos
         ? ['videos.empty', 'videos.emptyHint']
         : lib.progress?.scanning
-          ? ['library.emptyScanning', 'library.emptyHint']
+          ? ['library.emptyScanning', 'library.emptyScanningHint']
           : ['library.empty', 'library.emptyHint']
   return [t(keys[0]), t(keys[1])]
 })

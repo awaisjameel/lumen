@@ -25,7 +25,7 @@ func TestFaceModelUpgradeTakesFaceBlockAnchorPhotosFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := ai.FaceModel{Version: "sface-test", DetectSize: 640}
-	ix := New(st, paths, nil, Models{People: people.NewEngine(st, m)}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{People: people.NewEngine(st, m)}, &fakeEvents{}))
 
 	// Five photos, the oldest holding the face that gets blocked.
 	var ids []int64

@@ -4,7 +4,7 @@
 // it, or focusing it, lists everything at work, what comes next, and why the
 // files that couldn't be read failed.
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId } from 'vue'
-import { engine, FailReason } from '../bridge'
+import { engine, FailReason, WaitReason } from '../bridge'
 import type { FailureGroup } from '../bridge'
 import { fileName } from '../shared/format'
 import { t } from '../shared/i18n'
@@ -28,15 +28,22 @@ const groups = computed(() =>
     { head: t('status.next'), tasks: next.value },
   ].filter((g) => g.tasks.length),
 )
-// The stages wait while paused; a scan goes on (it is cheap).
+// The stages wait while paused, or while the PC needs them to (a game in
+// front, a busy processor, the user at the PC in idle-only mode); a scan goes
+// on (it is cheap).
 const paused = computed(() => !!p.value?.paused && next.value.length > 0)
+const waiting = computed(() => {
+  const reason = p.value?.waiting ?? WaitReason.WaitNone
+  return !paused.value && next.value.length > 0 ? reason : WaitReason.WaitNone
+})
 const onBattery = computed(() => !!p.value?.onBattery && next.value.some((task) => isAI(task.kind)))
-// What the card is about: the work waiting while paused, else the lead.
-const shown = computed(() => (paused.value ? next.value[0] : lead(list.value)))
+// What the card is about: the work held back, else the lead.
+const shown = computed(() => (paused.value || waiting.value ? next.value[0] : lead(list.value)))
 
 const label = computed(() => {
   const task = shown.value
   if (paused.value) return t('status.paused')
+  if (waiting.value) return t(`status.wait.${waiting.value}`)
   if (!task) return t('status.upToDate')
   if (!task.now && onBattery.value && isAI(task.kind)) return t('status.battery')
   return name(task)
@@ -144,6 +151,7 @@ function open() {
         </ul>
       </template>
       <p v-if="paused" class="note">{{ t('status.pausedNote') }}</p>
+      <p v-else-if="waiting" class="note">{{ t(`status.waitNote.${waiting}`) }}</p>
       <p v-else-if="onBattery" class="note">{{ t('status.batteryNote') }}</p>
       <section v-if="p.errors" class="failures" :class="{ apart: list.length }">
         <p class="head">{{ t('status.failed') }}</p>

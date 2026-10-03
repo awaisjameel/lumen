@@ -2,10 +2,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { engine, Filter, onLibraryChanged } from '../bridge'
+import { Device, engine, Filter, onLibraryChanged, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
-import type { Changes, Event } from '../bridge'
+import type { Changes, Event, Progress } from '../bridge'
 import LibraryView from './LibraryView.vue'
+import { useLibrary } from './store'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -17,6 +18,25 @@ vi.mock('../bridge', async (importOriginal) => ({
 }))
 
 let changed!: (changes: Changes) => void
+const progressIdle: Progress = {
+  scanning: false,
+  scanPath: '',
+  scanSeen: 0,
+  total: 0,
+  metadata: 0,
+  thumbnail: 0,
+  embedding: 0,
+  faces: 0,
+  videos: 0,
+  ocr: 0,
+  working: { metadata: false, thumbnail: false, embedding: false, faces: false, videos: false, ocr: false },
+  errors: 0,
+  skipped: 0,
+  paused: false,
+  onBattery: false,
+  waiting: WaitReason.WaitNone,
+  ai: { device: Device.DeviceCPU, error: '', facesError: '' },
+}
 const event = (id: number, name: string): Event => ({
   id,
   name,
@@ -119,5 +139,26 @@ it('shows the empty Trash with its own message and no toolbar', async () => {
     expect.objectContaining({ filter: Filter.FilterTrash }),
     expect.anything(),
   )
+  wrapper.unmount()
+})
+
+it('says it is looking while the first scan runs, and that nothing was found once it ends', async () => {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/', name: 'library', component: LibraryView, meta: { filter: Filter.FilterAll } }],
+  })
+  await router.push('/')
+  const pinia = createPinia()
+  const wrapper = mount(LibraryView, { global: { plugins: [pinia, router], stubs: { SearchBox: true } } })
+  await flushPromises()
+  const lib = useLibrary(pinia)
+  lib.progress = { ...progressIdle, scanning: true }
+  await flushPromises()
+  expect(wrapper.text()).toContain('Looking for photos…')
+  expect(wrapper.text()).toContain('Your photos and videos appear here as Lumen finds them.')
+  lib.progress = progressIdle
+  await flushPromises()
+  expect(wrapper.text()).toContain('No photos here yet')
+  expect(wrapper.text()).toContain('Add a folder in Settings')
   wrapper.unmount()
 })

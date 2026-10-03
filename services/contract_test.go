@@ -13,6 +13,7 @@ import (
 
 	"lumen/internal/core"
 	"lumen/internal/fileops"
+	"lumen/internal/index"
 	"lumen/internal/search"
 	"lumen/internal/store"
 )
@@ -58,6 +59,7 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"THUMB_CACHE_DEFAULT_MB":    core.ThumbCacheDefaultMB,
 		"THUMB_CACHE_MIN_MB":        core.ThumbCacheMinMB,
 		"THUMB_CACHE_MAX_MB":        core.ThumbCacheMaxMB,
+		"AWAY_MINUTES":              float64(index.AwayAfter / time.Minute),
 	} {
 		if got := constant(name); got != want {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)

@@ -26,7 +26,7 @@ func TestIndexerTakesTheThreadsSettingAtStartAndAtOnce(t *testing.T) {
 	if _, err := st.SetCPUThreads(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
-	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{}))
 	size := func() int {
 		ix.cpu.mu.Lock()
 		defer ix.cpu.mu.Unlock()

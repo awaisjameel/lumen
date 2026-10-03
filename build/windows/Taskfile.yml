@@ -4,12 +4,13 @@ includes:
   common: ../Taskfile.yml
 
 vars:
-  # Signing configuration - edit these values for your project
-  # SIGN_CERTIFICATE: "path/to/certificate.pfx"
-  # SIGN_THUMBPRINT: "certificate-thumbprint"  # Alternative to SIGN_CERTIFICATE
-  # TIMESTAMP_SERVER: "http://timestamp.digicert.com"
-  #
-  # Password is stored securely in system keychain. Run: wails3 setup signing
+  # Signing (task package): set SIGN_THUMBPRINT to a code-signing certificate
+  # in your Windows certificate store (where a hardware token's or a cloud
+  # signing service's certificate appears), and TIMESTAMP_SERVER, e.g.
+  #   wails3 task package SIGN_THUMBPRINT=... TIMESTAMP_SERVER=http://timestamp.digicert.com
+  # The Windows SDK's signtool must be on PATH: it signs Lumen.exe, and NSIS
+  # runs it on the installer and the uninstaller. Without a thumbprint, the
+  # installer is built unsigned, and says so.
 
   # Docker image for cross-compilation with CGO (used when CGO_ENABLED=1 on non-Windows)
   CROSS_IMAGE: wails-cross
@@ -99,14 +100,36 @@ tasks:
         sh: 'wails3 tool docker-mounts'
 
   package:
-    summary: Packages the application
+    summary: Builds Lumen's installer, bin/Lumen-<version>-x64-setup.exe, signed when a certificate is set (see vars)
+    dir: build/windows/nsis
+    deps:
+      - task: build
+    preconditions:
+      - sh: '[ -f "{{.MAKENSIS}}" ] && [ -f "{{.WEBVIEW2}}" ] && [ -f "{{.ROOT_DIR}}/deps/licenses/libvips.LICENSE.txt" ]'
+        msg: "Run scripts/deps.sh (Git Bash) once: it fetches NSIS, the WebView2 runtime the installer carries, and the licences."
+      - sh: '[ "{{.ARCH}}" = "amd64" ]'
+        msg: "Lumen's installer is x64 only, as its DLLs are."
+      - sh: '{{if .SIGN_THUMBPRINT}}command -v signtool >/dev/null{{else}}true{{end}}'
+        msg: "Signing needs the Windows SDK's signtool on PATH."
     cmds:
-      - task: '{{if eq (.FORMAT | default "nsis") "msix"}}create:msix:package{{else}}create:nsis:installer{{end}}'
-        vars:
-          INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
+      - '{{if .SIGN_THUMBPRINT}}signtool {{.SIGNTOOL_ARGS}} "{{fromSlash (printf "%s/%s/%s.exe" .ROOT_DIR .BIN_DIR .APP_NAME)}}"{{else}}echo "No SIGN_THUMBPRINT: building an unsigned installer."{{end}}'
+      - python "{{.ROOT_DIR}}/scripts/notices.py" "{{.ROOT_DIR}}/{{.BIN_DIR}}/THIRD_PARTY_NOTICES.txt"
+      # NSIS's File wants Windows paths.
+      - >-
+        "{{.MAKENSIS}}" -V2
+        "-DARG_WAILS_AMD64_BINARY={{fromSlash (printf "%s/%s/%s.exe" .ROOT_DIR .BIN_DIR .APP_NAME)}}"
+        "-DLUMEN_RUNTIME={{fromSlash (printf "%s/deps/runtime" .ROOT_DIR)}}"
+        "-DLUMEN_NOTICES={{fromSlash (printf "%s/%s/THIRD_PARTY_NOTICES.txt" .ROOT_DIR .BIN_DIR)}}"
+        "-DLUMEN_WEBVIEW2={{fromSlash .WEBVIEW2}}"
+        {{if .SIGN_THUMBPRINT}}"-DLUMEN_SIGN=signtool {{.SIGNTOOL_ARGS}} \"%1\""{{end}}
+        project.nsi
     vars:
-      FORMAT: '{{.FORMAT | default "nsis"}}'
-      INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
+      ARCH: '{{.ARCH | default ARCH}}'
+      MAKENSIS: '{{.ROOT_DIR}}/deps/tools/nsis/makensis.exe'
+      WEBVIEW2: '{{.ROOT_DIR}}/deps/installer/MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
+      # signtool picks the certificate from the user's store by its thumbprint.
+      # NSIS puts each file it signs in for %1 (the uninstaller is a .tmp file).
+      SIGNTOOL_ARGS: 'sign /fd SHA256 /sha1 {{.SIGN_THUMBPRINT}}{{if .TIMESTAMP_SERVER}} /tr {{.TIMESTAMP_SERVER}} /td SHA256{{end}}'
 
   generate:syso:
     summary: Generates Windows `.syso` file
@@ -116,85 +139,6 @@ tasks:
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
 
-  create:nsis:installer:
-    summary: Creates an NSIS installer
-    dir: build/windows/nsis
-    deps:
-      - task: build
-    preconditions:
-      - sh: '[ "{{.INSTALL_SCOPE}}" = "user" ] || [ "{{.INSTALL_SCOPE}}" = "machine" ]'
-        msg: "INSTALL_SCOPE must be 'user' or 'machine', got '{{.INSTALL_SCOPE}}'"
-    cmds:
-      # Create the Microsoft WebView2 bootstrapper if it doesn't exist
-      - wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"
-      - |
-        {{if eq OS "windows"}}
-        makensis {{if eq .INSTALL_SCOPE "user"}}-DWAILS_INSTALL_SCOPE=user -DREQUEST_EXECUTION_LEVEL=user {{end}}-DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe" project.nsi
-        {{else}}
-        makensis {{if eq .INSTALL_SCOPE "user"}}-DWAILS_INSTALL_SCOPE=user -DREQUEST_EXECUTION_LEVEL=user {{end}}-DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" project.nsi
-        {{end}}
-    vars:
-      ARCH: '{{.ARCH | default ARCH}}'
-      ARG_FLAG: '{{if eq .ARCH "amd64"}}AMD64{{else}}ARM64{{end}}'
-      INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
-
-  create:msix:package:
-    summary: Creates an MSIX package
-    deps:
-      - task: build
-    cmds:
-      - |-
-        wails3 tool msix \
-          --config "{{.ROOT_DIR}}/build/config.yml" \
-          --name "{{.APP_NAME}}.exe" \
-          --executable "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" \
-          --arch "{{.ARCH}}" \
-          --out "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}-{{.ARCH}}.msix" \
-          {{if .CERT_PATH}}--cert "{{.CERT_PATH}}"{{end}} \
-          {{if .PUBLISHER}}--publisher "{{.PUBLISHER}}"{{end}} \
-          {{if eq .USE_MSIX_TOOL "true"}}--use-msix-tool{{else}}--use-makeappx{{end}}
-    vars:
-      ARCH: '{{.ARCH | default ARCH}}'
-      CERT_PATH: '{{.CERT_PATH | default ""}}'
-      PUBLISHER: '{{.PUBLISHER | default ""}}'
-      USE_MSIX_TOOL: '{{.USE_MSIX_TOOL | default "false"}}'
-
-  install:msix:tools:
-    summary: Installs tools required for MSIX packaging
-    cmds:
-      - wails3 tool msix-install-tools
-
   run:
     cmds:
       - '{{.BIN_DIR}}/{{.APP_NAME}}.exe'
-
-  sign:
-    summary: Signs the Windows executable
-    desc: |
-      Signs the .exe with an Authenticode certificate.
-      Set SIGN_CERTIFICATE or SIGN_THUMBPRINT to override the certificate
-      configured globally via `wails3 setup` (~/.config/wails/defaults.yaml).
-      Password is retrieved from system keychain (run: wails3 setup signing)
-    deps:
-      - task: build
-    cmds:
-      # Certificate vars are optional: if unset, `wails3 tool sign` falls back to
-      # the certificate configured globally via `wails3 setup`.
-      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.exe" {{if .SIGN_CERTIFICATE}}--certificate "{{.SIGN_CERTIFICATE}}"{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint "{{.SIGN_THUMBPRINT}}"{{end}} {{if .TIMESTAMP_SERVER}}--timestamp "{{.TIMESTAMP_SERVER}}"{{end}}
-
-  sign:installer:
-    summary: Signs the NSIS installer
-    desc: |
-      Creates and signs the NSIS installer.
-      Set SIGN_CERTIFICATE or SIGN_THUMBPRINT to override the certificate
-      configured globally via `wails3 setup` (~/.config/wails/defaults.yaml).
-      Password is retrieved from system keychain (run: wails3 setup signing)
-    deps:
-      - task: create:nsis:installer
-        vars:
-          INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
-    vars:
-      INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
-      ARCH: '{{.ARCH | default ARCH}}' # project.nsi writes bin/lumen-<arch>-installer.exe
-    cmds:
-      - wails3 tool sign --input "bin/lumen-{{.ARCH}}-installer.exe" {{if .SIGN_CERTIFICATE}}--certificate "{{.SIGN_CERTIFICATE}}"{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint "{{.SIGN_THUMBPRINT}}"{{end}} {{if .TIMESTAMP_SERVER}}--timestamp "{{.TIMESTAMP_SERVER}}"{{end}}

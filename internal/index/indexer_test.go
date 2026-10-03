@@ -42,7 +42,7 @@ func TestReportLoopLogsVisibilityReadFailures(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	// A cancelled read is normal shutdown and must not become a background error.
-	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{}, &fakeEvents{}))
 	ix.reportLoop(ctx)
 	if logs.Len() != 0 {
 		t.Fatalf("shutdown was logged as a failure: %s", logs.String())
@@ -56,7 +56,7 @@ func TestReportLoopLogsVisibilityReadFailures(t *testing.T) {
 }
 
 func TestFilesystemDebounceDoesNotExtendPastItsMaximum(t *testing.T) {
-	ix := New(nil, core.PathsIn(t.TempDir()), nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.PathsIn(t.TempDir()), nil, Models{}, &fakeEvents{}))
 	ix.rootCtx = t.Context()
 	ix.pendingFS["older.jpg"] = true
 	ix.fsSince = time.Now().Add(-debounceMax)
@@ -67,7 +67,7 @@ func TestFilesystemDebounceDoesNotExtendPastItsMaximum(t *testing.T) {
 }
 
 func TestStopWaitsForAnActiveFilesystemFlush(t *testing.T) {
-	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
 	ix.rootCtx, ix.cancel = context.WithCancel(t.Context())
 	started, release := make(chan struct{}), make(chan struct{})
 	ix.run(func() {
@@ -103,7 +103,7 @@ func TestStopWaitsForAnActiveFilesystemFlush(t *testing.T) {
 }
 
 func TestStopCancelsAPendingFilesystemFlush(t *testing.T) {
-	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
 	ix.rootCtx, ix.cancel = context.WithCancel(t.Context())
 	var flushes atomic.Int32
 	ix.run(func() { ix.fsLoop(ix.rootCtx, func() { flushes.Add(1) }) })
@@ -130,7 +130,7 @@ func TestDeletedDottedFolderTriggersReconciliation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{}, &fakeEvents{}))
 	ix.rootCtx, ix.cancel = context.WithCancel(t.Context())
 	defer ix.Stop()
 	ix.onFSChange(filepath.Join(photos, "Trip.v1"))
@@ -145,7 +145,7 @@ func TestDeletedDottedFolderTriggersReconciliation(t *testing.T) {
 }
 
 func TestScanQueueCoalescesWithoutDroppingSources(t *testing.T) {
-	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
 	for id := int64(1); id <= 300; id++ {
 		ix.queueScan(scanRequest{sourceID: id, under: `C:\Photos\one`})
 		ix.queueScan(scanRequest{sourceID: id, under: `C:\Photos\two`})
@@ -233,7 +233,7 @@ func TestIndexerEndToEnd(t *testing.T) {
 
 	ev := &fakeEvents{}
 	cache := media.NewCache(paths.ThumbDir, media.Decoders{})
-	ix := New(st, paths, cache, Models{}, ev)
+	ix := quiet(New(st, paths, cache, Models{}, ev))
 	ix.Start(ctx)
 	defer ix.Stop()
 
@@ -344,7 +344,7 @@ func TestHoldScansWaitsForARunningScanAndKeepsNewOnesFromStartingUntilReleased(t
 	}
 	writeJPEG(t, filepath.Join(photos, "first.jpg"), 40, 30, color.RGBA{R: 1})
 
-	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{}, &fakeEvents{}))
 	var scans atomic.Int32
 	started, letGo := make(chan struct{}), make(chan struct{})
 	ix.onScanTurn = func() {
@@ -409,7 +409,7 @@ func TestHoldScansWaitsForARunningScanAndKeepsNewOnesFromStartingUntilReleased(t
 }
 
 func TestHoldScansGivesUpWhenItsContextEnds(t *testing.T) {
-	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
 	release, err := ix.HoldScans(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -422,7 +422,7 @@ func TestHoldScansGivesUpWhenItsContextEnds(t *testing.T) {
 	}
 	cancelled, stop := context.WithCancel(t.Context())
 	stop()
-	other := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	other := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
 	if _, err := other.HoldScans(cancelled); !errors.Is(err, context.Canceled) {
 		t.Fatalf("a hold with an ended context returned %v, want the cancellation", err)
 	}
@@ -442,7 +442,7 @@ func TestAScanWaitingForAHoldReadsWhatToScanOnlyAfterTheHoldEnds(t *testing.T) {
 	}
 	writeJPEG(t, filepath.Join(photos, "first.jpg"), 40, 30, color.RGBA{R: 1})
 
-	ix := New(st, paths, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, nil, Models{}, &fakeEvents{}))
 	var scans atomic.Int32
 	ix.onScanTurn = func() { scans.Add(1) }
 	loopCtx, stop := context.WithCancel(ctx)
@@ -495,7 +495,7 @@ func TestWorkRegisteredBeforeTheFirstScanRunsBeforeAnyScanStarts(t *testing.T) {
 	}
 	writeJPEG(t, filepath.Join(photos, "first.jpg"), 40, 30, color.RGBA{R: 1})
 
-	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{})
+	ix := quiet(New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{}, &fakeEvents{}))
 	var settled, scannedTooSoon atomic.Bool
 	ix.BeforeFirstScan(func(context.Context) {
 		time.Sleep(300 * time.Millisecond) // long enough for a scan to start if it could

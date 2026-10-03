@@ -11,15 +11,18 @@ export {
     FailReason,
     Filter,
     Kind,
+    Link,
     OrganiseMoveState,
     OrganiseRunState,
     Playback,
     TagKind,
-    TagSource
+    TagSource,
+    WaitReason
 } from "./models.js";
 
 export type {
     AI,
+    About,
     Album,
     AlbumRule,
     AssetDetail,
@@ -50,6 +53,7 @@ export type {
     Settings,
     Source,
     Tag,
+    UIError,
     Video,
     View,
     Working,

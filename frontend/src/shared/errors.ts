@@ -1,5 +1,15 @@
 import { shallowRef } from 'vue'
-import { ErrorCode, errorCode, MAX_NAME_LEN, PIN_COOLDOWN_SECONDS, PIN_MAX_LEN, PIN_MIN_LEN } from '../bridge'
+import {
+  ErrorCode,
+  errorCode,
+  isCancelled,
+  logUIError,
+  MAX_NAME_LEN,
+  PIN_COOLDOWN_SECONDS,
+  PIN_MAX_LEN,
+  PIN_MIN_LEN,
+} from '../bridge'
+import type { UIError } from '../bridge'
 import { t } from './i18n'
 import type { MessageKey } from './i18n'
 
@@ -57,10 +67,46 @@ export function errorText(e: unknown): string {
 /**
  * For failures in work the user didn't directly ask for (loading a day,
  * prioritising what's on screen): the UI retries on its own, so they go to
- * the console rather than interrupting.
+ * the console and Lumen's log rather than interrupting.
  */
 export function logError(e: unknown): void {
   console.error(e)
+  toEngineLog(e, 'logError')
+}
+
+/**
+ * For failures nothing else caught (a bug): logged, and, when notify is
+ * set, the app-wide notice says something went wrong. Cancelled reads are
+ * not failures.
+ */
+export function reportUnexpected(e: unknown, where: string, notify = true): void {
+  if (isCancelled(e)) return
+  console.error(e)
+  toEngineLog(e, where)
+  if (notify) showNotice(t('error.unexpected'))
+}
+
+/** A failure as Lumen's log records it. */
+function describeError(e: unknown, where: string): UIError {
+  if (!(e instanceof Error)) return { message: String(e), stack: '', where }
+  const code = errorCode(e)
+  return { message: `${e.name}: ${e.message}${code ? ` (${code})` : ''}`, stack: e.stack ?? '', where }
+}
+
+// The same failure from the same place is sent to the log once a minute at
+// most: a view retrying every second would otherwise fill it.
+const REPEAT_MS = 60_000
+const sentAt = new Map<string, number>()
+
+function toEngineLog(e: unknown, where: string): void {
+  const report = describeError(e, where)
+  const key = `${where}\n${report.message}`
+  const now = Date.now()
+  const last = sentAt.get(key)
+  if (last !== undefined && now - last < REPEAT_MS) return
+  if (sentAt.size > 100) sentAt.clear()
+  sentAt.set(key, now)
+  logUIError(report)
 }
 
 /** Await p; if it fails, log why and use fallback instead. */
@@ -83,7 +129,12 @@ let noticeTimer = 0
  */
 export function reportError(e: unknown): void {
   logError(e)
-  notice.value = errorText(e)
+  showNotice(errorText(e))
+}
+
+/** Shows text in the app-wide notice for a few seconds. */
+function showNotice(text: string): void {
+  notice.value = text
   clearTimeout(noticeTimer)
   noticeTimer = window.setTimeout(() => (notice.value = ''), 6000)
 }

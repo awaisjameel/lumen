@@ -421,6 +421,34 @@ func TestCPUThreadsSettingShowsTheMachineAndIsStoredClamped(t *testing.T) {
 	check(t, NewLibraryService(l.st, nil, nil).SetCPUThreads(ctx, 2))
 }
 
+func TestIndexingGivesWayByDefaultAndTheSettingsApplyAtOnce(t *testing.T) {
+	ctx := t.Context()
+	l := newShownLibrary(t, 1)
+	ix := index.New(l.st, core.PathsIn(t.TempDir()), l.cache, index.Models{}, quietEvents{})
+	s := NewLibraryService(l.st, ix, nil)
+	got, err := s.Settings(ctx)
+	if err != nil || !got.PauseFullScreen || !got.PauseBusy || got.IdleOnly {
+		t.Fatalf("settings = %+v (%v), want full screen and busy on, idle-only off", got, err)
+	}
+	// Idle-only holds at once: the user is at the PC while the test runs.
+	check(t, s.SetIdleOnly(ctx, true))
+	if p := s.Progress(ctx); p.Waiting != core.WaitIdle {
+		t.Fatalf("idle-only on: waiting = %q, want %q", p.Waiting, core.WaitIdle)
+	}
+	check(t, s.SetPauseFullScreen(ctx, false))
+	check(t, s.SetPauseBusy(ctx, false))
+	check(t, s.SetIdleOnly(ctx, false))
+	if p := s.Progress(ctx); p.Waiting != core.WaitNone {
+		t.Fatalf("every hold off: waiting = %q", p.Waiting)
+	}
+	got, err = s.Settings(ctx)
+	if err != nil || got.PauseFullScreen || got.PauseBusy || got.IdleOnly {
+		t.Fatalf("settings after turning them off = %+v (%v)", got, err)
+	}
+	// Without an indexer (as in other tests) the settings are still stored.
+	check(t, NewLibraryService(l.st, nil, nil).SetPauseBusy(ctx, true))
+}
+
 func TestThumbCacheBytesIsTheCachesRunningTotal(t *testing.T) {
 	l := newShownLibrary(t, 2)
 	want := int64(2 * (len("small thumbnail") + len("large thumbnail") + len("sprite")))

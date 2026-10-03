@@ -39,9 +39,6 @@ tasks:
     cmds:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
 
-  # The template's Docker and server tasks are left out: Lumen needs cgo with
-  # the Windows libvips (deps/), which neither build can have.
-  install:msix:tools:
-    summary: Installs tools required for Windows MSIX packaging
-    cmds:
-      - task: windows:install:msix:tools
+  # The template's Docker, server and MSIX tasks are left out: Lumen needs cgo
+  # with the Windows libvips (deps/), which neither build can have, and its
+  # installer is NSIS (task package), which carries the runtime folder.

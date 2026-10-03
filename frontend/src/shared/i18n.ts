@@ -215,6 +215,12 @@ const en = {
   'status.next': 'Next',
   'status.pausedNote': 'Everything waits until you resume.',
   'status.batteryNote': 'The AI waits for mains power.',
+  'status.wait.full_screen': 'Waiting while a full-screen app is open',
+  'status.wait.busy': 'Waiting while your PC is busy',
+  'status.wait.idle': 'Waiting until you’re away',
+  'status.waitNote.full_screen': 'Indexing goes on when the game, video or presentation closes.',
+  'status.waitNote.busy': 'Indexing goes on when your other programs quieten down.',
+  'status.waitNote.idle': 'Indexing runs while you’re away from your PC, as Settings asks.',
   'status.pause': 'Pause',
   'status.resume': 'Resume',
   'status.aiOff': 'Search is off',
@@ -232,6 +238,7 @@ const en = {
   'status.items': { one: '1 item', other: '{n} items' },
 
   'library.emptyScanning': 'Looking for photos…',
+  'library.emptyScanningHint': 'Your photos and videos appear here as Lumen finds them.',
   'library.empty': 'No photos here yet',
   'library.emptyHint': 'Add a folder in Settings, or check that your folders contain photos.',
   'favourites.empty': 'No favourites yet',
@@ -304,6 +311,13 @@ const en = {
     'Off by default because indexing videos takes more time. All processing stays on this computer.',
   'settings.indexing': 'Background work',
   'settings.pause': 'Pause indexing',
+  'settings.pauseFullScreen': 'Wait while a game or full-screen app is open',
+  'settings.pauseFullScreenHint': 'Indexing pauses during games, full-screen videos and presentations.',
+  'settings.pauseBusy': 'Wait while my PC is busy',
+  'settings.pauseBusyHint': 'Indexing pauses while your other programs keep the processor busy.',
+  'settings.idleOnly': 'Index only while I’m away',
+  'settings.idleOnlyHint':
+    'Indexing waits until the keyboard and mouse have been still for {n} minutes, so new photos take longer to appear.',
   'settings.threads': 'Processor threads for indexing: {n} of {max}',
   'settings.threadsHint':
     '{n} by default. More threads index faster; fewer leave more for your other programs. Lumen always gives way to them, and a change applies at once.',
@@ -335,6 +349,22 @@ const en = {
   'settings.privacyText':
     'Lumen works entirely on this computer. It makes no network connections and collects no data.',
 
+  'about.title': 'About Lumen',
+  'about.version': 'Version {version}',
+  'about.updates':
+    'Lumen never looks for new versions itself: it makes no network connections. New versions are published at',
+  'about.openLogs': 'Open log folder',
+  'about.saveReport': 'Save a problem report…',
+  'about.saving': 'Saving…',
+  'about.licences': 'Licences',
+  'about.reportHint':
+    'A problem report holds Lumen’s log, any crash reports and a description of this PC. It stays on this PC unless you share it. The log names files and folders, so look it over first.',
+  'about.saved': 'Saved to {path}',
+  'about.places': 'Place names come from',
+  'about.placesLicence': '(CC BY 4.0).',
+  'about.crashed': 'Lumen closed unexpectedly last time.',
+  'about.crashedHint': 'A crash report was saved on this PC. You can save a problem report to share it.',
+
   'common.cancel': 'Cancel',
   'common.close': 'Close',
   'common.dismiss': 'Dismiss',
@@ -343,6 +373,7 @@ const en = {
   'common.labelValue': '{label}: {value}',
 
   'error.generic': 'Something went wrong: {msg}',
+  'error.unexpected': 'Something went wrong. Lumen saved the details in its log.',
   'error.notFound': 'That isn’t there any more: it may have been deleted, or its file moved away.',
   'error.noAI': 'The on-device AI isn’t available on this computer.',
   'error.invalidName': 'A name must be 1 to {max} characters.',

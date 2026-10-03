@@ -1,33 +1,23 @@
 <script setup lang="ts">
 // The XMP sidecar toggle and its "Export now" button. Off by default; while
 // it is on, Lumen keeps the sidecars up to date in the background, and the
-// button runs a full pass at once and says what it did.
+// button runs a full pass at once and says what it did. Its saves are queued
+// in the library store, so they stay in order across remounts.
 import { ref } from 'vue'
 import { engine } from '../bridge'
 import type { XMPExport } from '../bridge'
 import { useLibrary } from '../library/store'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
-import { latestSave } from '../shared/latestSave'
-import type { LatestSave } from '../shared/latestSave'
 
 const lib = useLibrary()
 const result = ref<XMPExport | null>(null)
 const exporting = ref(false)
 
-// Made at the first click, when the settings have loaded, so a failed save
-// puts back what the engine really holds.
-let save: LatestSave<boolean> | null = null
 function toggle(e: Event) {
   if (!(e.target instanceof HTMLInputElement)) return
-  save ??= latestSave(engine.setXMP, lib.settings.xmp, {
-    rollback: (value) => (lib.settings.xmp = value),
-    failed: (err) => (lib.settingsError = errorText(err)),
-  })
-  lib.settings.xmp = e.target.checked
-  lib.settingsError = ''
-  if (!lib.settings.xmp) result.value = null
-  void save(e.target.checked)
+  if (!e.target.checked) result.value = null
+  void lib.saveXMP(e.target.checked)
 }
 
 async function exportNow() {

@@ -14,6 +14,9 @@ type Paths struct {
 	DataDir  string // %LOCALAPPDATA%\Lumen
 	DBPath   string // DataDir\library.db
 	ThumbDir string // DataDir\thumbs
+	// Log is Lumen's log, OldLog the one before it (see main's rotatingLog).
+	// Both stay on this PC.
+	Log, OldLog string
 	// Runtime holds what ships beside Lumen.exe: ONNX Runtime and DirectML
 	// DLLs, ffmpeg\ and models\ (deps/runtime in development).
 	Runtime string
@@ -77,6 +80,8 @@ func PathsIn(dir string) Paths {
 		DataDir:  dir,
 		DBPath:   filepath.Join(dir, "library.db"),
 		ThumbDir: filepath.Join(dir, "thumbs"),
+		Log:      filepath.Join(dir, "lumen.log"),
+		OldLog:   filepath.Join(dir, "lumen.old.log"),
 	}
 }
 
@@ -95,6 +100,10 @@ func (p Paths) SigLIP() string { return p.runtimeFile("models", "siglip2") }
 // Faces is the folder holding the face models, YuNet and SFace ("" if there
 // is no runtime folder).
 func (p Paths) Faces() string { return p.runtimeFile("models", "faces") }
+
+// Notices is the licence notices of what ships with Lumen, beside Lumen.exe
+// ("" if there is no runtime folder).
+func (p Paths) Notices() string { return p.runtimeFile("THIRD_PARTY_NOTICES.txt") }
 
 // OCR is the folder holding the text models, PP-OCRv5's detector and
 // English recogniser ("" if there is no runtime folder).

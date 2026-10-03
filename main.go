@@ -17,12 +17,14 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	windowevents "github.com/wailsapp/wails/v3/pkg/events"
 
 	"lumen/internal/ai"
 	"lumen/internal/core"
+	"lumen/internal/diag"
 	"lumen/internal/index"
 	"lumen/internal/media"
 	"lumen/internal/media/vips"
@@ -58,6 +60,9 @@ func run() error {
 	}
 	setupLogging(paths)
 	lowerPriority()
+	index.CountOwnPrograms() // before the window starts WebView2
+	version := diag.Version()
+	reports := diag.New(paths.DataDir, version)
 
 	// The application comes first: a second copy of Lumen must hand over to
 	// the running one before it touches the database (two would fight over
@@ -67,6 +72,7 @@ func run() error {
 		Name:         "Lumen",
 		Description:  "Local, private AI photo gallery",
 		MarshalError: services.MarshalError, // for errors outside bound methods; see service
+		PanicHandler: recordPanics(reports),
 		Assets: application.AssetOptions{
 			Handler:        spa(application.AssetFileServerFS(assets)),
 			DisableLogging: true, // thousands of thumbnail requests
@@ -88,7 +94,14 @@ func run() error {
 			WebviewUserDataPath:   webviewDataPath(paths),
 		},
 	})
-	slog.Info("lumen starting", "data", paths.DataDir, "runtime", paths.Runtime, "libvips", vips.Version())
+	slog.Info("lumen starting", "version", version, "data", paths.DataDir, "runtime", paths.Runtime, "libvips", vips.Version())
+	// Only now, past the hand-over to a running Lumen: a second one must not
+	// take over the first one's crash output.
+	if stop, err := reports.Start(time.Now()); err != nil {
+		slog.Error("crash reports unavailable", "err", err)
+	} else {
+		defer stop()
+	}
 
 	st, err := store.Open(paths.DBPath)
 	if err != nil {
@@ -109,9 +122,11 @@ func run() error {
 	events := &services.Emitter{App: app}
 	ix := index.New(st, paths, cache, models, events)
 
+	lib := services.NewLibraryService(st, ix, gate)
 	for _, svc := range []application.Service{
 		service(&background{ix: ix, search: models.Search, cache: cache, stream: stream}, application.ServiceOptions{}),
-		service(services.NewLibraryService(st, ix, gate), application.ServiceOptions{}),
+		service(lib, application.ServiceOptions{}),
+		service(services.NewSystemService(lib, reports, paths, version), application.ServiceOptions{}),
 		service(services.NewSearchService(st, models.Search, models.People != nil, ix), application.ServiceOptions{}),
 		service(services.NewPeopleService(st, models.People), application.ServiceOptions{}),
 		service(services.NewMediaService(st, cache, stream, gate), application.ServiceOptions{Route: "/media"}),
@@ -135,6 +150,16 @@ func run() error {
 	window.Store(w)
 
 	return app.Run()
+}
+
+// recordPanics handles a panic Wails recovered in a call from the UI: the
+// call fails and Lumen runs on, with the bug logged and kept as a report.
+// (Wails' default handler ends the app.)
+func recordPanics(reports *diag.Reports) func(*application.PanicDetails) {
+	return func(d *application.PanicDetails) {
+		slog.Error("recovered panic", "err", d.Error, "stack", d.StackTrace)
+		reports.RecordPanic(d.Error, d.FullStackTrace, d.Time)
+	}
 }
 
 // instanceID is what makes a second Lumen hand over to the first: one per
@@ -320,7 +345,7 @@ const maxLogSize = 10 << 20
 // stays open until the process exits, so even the final error from run is
 // recorded.
 func setupLogging(paths core.Paths) {
-	log, err := openLog(filepath.Join(paths.DataDir, "lumen.log"), filepath.Join(paths.DataDir, "lumen.old.log"), maxLogSize)
+	log, err := openLog(paths.Log, paths.OldLog, maxLogSize)
 	if err != nil {
 		slog.Warn("no log file; logging to stderr only", "err", err)
 		return

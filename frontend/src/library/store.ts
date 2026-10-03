@@ -84,77 +84,47 @@ export const useLibrary = defineStore('library', () => {
     cpuThreads: 0,
     maxCPUThreads: 0,
     defaultCPUThreads: 0,
+    pauseFullScreen: true,
+    pauseBusy: true,
+    idleOnly: false,
   })
   const settingsError = ref('')
-  let eventGapSave: LatestSave<number> | null = null
   let confidenceSave: LatestSave<number> | null = null
-  let videosSave: LatestSave<boolean> | null = null
-  let batterySave: LatestSave<boolean> | null = null
-  let thumbCacheSave: LatestSave<number> | null = null
-  let threadsSave: LatestSave<number> | null = null
-  let ocrSave: LatestSave<boolean> | null = null
   const settingFailed = (e: unknown) => (settingsError.value = errorText(e))
 
-  function saveVideos(on: boolean) {
-    videosSave ??= latestSave(engine.setVideos, settings.value.videos, {
-      rollback: (value) => (settings.value.videos = value),
-      failed: settingFailed,
-    })
-    settings.value.videos = on
-    settingsError.value = ''
-    return videosSave(on)
+  /**
+   * A save for one setting: it shows the new value at once, saves the newest
+   * one asked for (see latestSave), and on failure puts back the last saved
+   * and says why. saved runs after a save that is still the newest.
+   */
+  function settingSave<K extends keyof Settings>(
+    key: K,
+    save: (value: Settings[K]) => Promise<void>,
+    saved?: () => unknown,
+  ): (value: Settings[K]) => Promise<void> {
+    let queue: LatestSave<Settings[K]> | null = null
+    return (value) => {
+      queue ??= latestSave(save, settings.value[key], {
+        saved,
+        rollback: (last) => (settings.value[key] = last),
+        failed: settingFailed,
+      })
+      settings.value[key] = value
+      settingsError.value = ''
+      return queue(value)
+    }
   }
 
-  function saveAIOnBattery(on: boolean) {
-    batterySave ??= latestSave(engine.setAIOnBattery, settings.value.aiOnBattery, {
-      rollback: (value) => (settings.value.aiOnBattery = value),
-      failed: settingFailed,
-    })
-    settings.value.aiOnBattery = on
-    settingsError.value = ''
-    return batterySave(on)
-  }
-
-  function saveOCR(on: boolean) {
-    ocrSave ??= latestSave(engine.setOCR, settings.value.ocr, {
-      rollback: (value) => (settings.value.ocr = value),
-      failed: settingFailed,
-    })
-    settings.value.ocr = on
-    settingsError.value = ''
-    return ocrSave(on)
-  }
-
-  function saveEventGap(hours: number) {
-    eventGapSave ??= latestSave(engine.setEventGapHours, settings.value.eventGapHours, {
-      saved: () => refresh(),
-      rollback: (value) => (settings.value.eventGapHours = value),
-      failed: settingFailed,
-    })
-    settings.value.eventGapHours = hours
-    settingsError.value = ''
-    return eventGapSave(hours)
-  }
-
-  function saveThumbCacheMB(mb: number) {
-    thumbCacheSave ??= latestSave(engine.setThumbCacheMB, settings.value.thumbCacheMB, {
-      rollback: (value) => (settings.value.thumbCacheMB = value),
-      failed: settingFailed,
-    })
-    settings.value.thumbCacheMB = mb
-    settingsError.value = ''
-    return thumbCacheSave(mb)
-  }
-
-  function saveCPUThreads(n: number) {
-    threadsSave ??= latestSave(engine.setCPUThreads, settings.value.cpuThreads, {
-      rollback: (value) => (settings.value.cpuThreads = value),
-      failed: settingFailed,
-    })
-    settings.value.cpuThreads = n
-    settingsError.value = ''
-    return threadsSave(n)
-  }
+  const saveVideos = settingSave('videos', engine.setVideos)
+  const saveAIOnBattery = settingSave('aiOnBattery', engine.setAIOnBattery)
+  const savePauseFullScreen = settingSave('pauseFullScreen', engine.setPauseFullScreen)
+  const savePauseBusy = settingSave('pauseBusy', engine.setPauseBusy)
+  const saveIdleOnly = settingSave('idleOnly', engine.setIdleOnly)
+  const saveOCR = settingSave('ocr', engine.setOCR)
+  const saveXMP = settingSave('xmp', engine.setXMP)
+  const saveEventGap = settingSave('eventGapHours', engine.setEventGapHours, () => refresh())
+  const saveThumbCacheMB = settingSave('thumbCacheMB', engine.setThumbCacheMB)
+  const saveCPUThreads = settingSave('cpuThreads', engine.setCPUThreads)
 
   function confidenceQueue() {
     confidenceSave ??= latestSave(engine.setTagConfidence, settings.value.tagConfidence, {
@@ -698,7 +668,11 @@ export const useLibrary = defineStore('library', () => {
     settingsError,
     saveVideos,
     saveAIOnBattery,
+    savePauseFullScreen,
+    savePauseBusy,
+    saveIdleOnly,
     saveOCR,
+    saveXMP,
     saveEventGap,
     saveThumbCacheMB,
     saveCPUThreads,

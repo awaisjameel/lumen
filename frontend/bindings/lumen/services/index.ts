@@ -5,9 +5,11 @@ import * as LibraryService from "./libraryservice.js";
 import * as MediaService from "./mediaservice.js";
 import * as PeopleService from "./peopleservice.js";
 import * as SearchService from "./searchservice.js";
+import * as SystemService from "./systemservice.js";
 export {
     LibraryService,
     MediaService,
     PeopleService,
-    SearchService
+    SearchService,
+    SystemService
 };

@@ -91,7 +91,7 @@ func TestFacesDoNotStartDetectionAfterCancellation(t *testing.T) {
 func TestCancelledStageDoesNotFetchMoreJobs(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
 	fetches := 0
 	runStage(ctx, ix, stage[int]{
 		fetch: func(context.Context, int) ([]store.JobItem, error) {
@@ -107,7 +107,7 @@ func TestCancelledStageDoesNotFetchMoreJobs(t *testing.T) {
 func TestStageIsAtWorkFromItsBatchUntilItRunsOut(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	ix := New(nil, core.Paths{}, nil, Models{}, &fakeEvents{})
+	ix := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
 	working := func() core.Working { ix.mu.Lock(); defer ix.mu.Unlock(); return ix.workingNow() }
 	var during, paused core.Working
 	var fetches atomic.Int32

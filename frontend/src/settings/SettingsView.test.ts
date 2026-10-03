@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { engine, THUMB_CACHE_DEFAULT_MB, THUMB_CACHE_MAX_MB, THUMB_CACHE_MIN_MB } from '../bridge'
+import { AWAY_MINUTES, engine, THUMB_CACHE_DEFAULT_MB, THUMB_CACHE_MAX_MB, THUMB_CACHE_MIN_MB } from '../bridge'
 import type * as Bridge from '../bridge'
 import { useLibrary } from '../library/store'
 import { t } from '../shared/i18n'
@@ -13,10 +13,19 @@ vi.mock('../bridge', async (importOriginal) => ({
     setTagConfidence: vi.fn<() => Promise<void>>().mockResolvedValue(),
     setVideos: vi.fn<() => Promise<void>>(),
     setAIOnBattery: vi.fn<() => Promise<void>>(),
+    setPauseFullScreen: vi.fn<(on: boolean) => Promise<void>>(),
+    setPauseBusy: vi.fn<(on: boolean) => Promise<void>>(),
+    setIdleOnly: vi.fn<(on: boolean) => Promise<void>>(),
     setEventGapHours: vi.fn<(hours: number) => Promise<void>>(),
     setThumbCacheMB: vi.fn<(mb: number) => Promise<void>>(),
     setCPUThreads: vi.fn<(n: number) => Promise<void>>(),
     thumbCacheBytes: vi.fn<() => Promise<number>>(),
+    about: vi.fn<() => Promise<Bridge.About>>().mockResolvedValue({
+      version: '0.9.0',
+      dataDir: 'C:/Lumen',
+      releasesURL: 'https://github.com/awaisjameel/lumen/releases',
+      lastRunCrashed: false,
+    }),
   },
 }))
 
@@ -26,19 +35,25 @@ beforeEach(() => {
   vi.mocked(engine.setEventGapHours).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setVideos).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setAIOnBattery).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setPauseFullScreen).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setPauseBusy).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setIdleOnly).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setThumbCacheMB).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setCPUThreads).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.thumbCacheBytes).mockReset().mockResolvedValue(0)
 })
 afterEach(() => vi.useRealTimers())
 
-// The battery toggle, found by its label: other checkboxes (the OCR toggle)
-// follow it in the AI section.
-function batteryBox(wrapper: ReturnType<typeof mount>) {
+// A toggle, found by its label: the sections hold several.
+function toggle(wrapper: ReturnType<typeof mount>, text: string) {
   return wrapper
     .findAll('label')
-    .find((label) => label.text().includes(t('settings.aiOnBattery')))
+    .find((label) => label.text().includes(text))
     ?.find('input[type="checkbox"]')
+}
+
+function batteryBox(wrapper: ReturnType<typeof mount>) {
+  return toggle(wrapper, t('settings.aiOnBattery'))
 }
 
 it.each(['videos', 'aiOnBattery'] as const)(
@@ -80,20 +95,48 @@ it.each(['videos', 'aiOnBattery'] as const)(
   },
 )
 
-it.each(['videos', 'aiOnBattery'] as const)(
+it.each(['videos', 'aiOnBattery', 'idleOnly'] as const)(
   'rolls back the latest failed %s save to the last persisted value',
   async (key) => {
     setActivePinia(createPinia())
     const lib = useLibrary()
-    const save = vi.mocked(key === 'videos' ? engine.setVideos : engine.setAIOnBattery)
-    save.mockResolvedValueOnce().mockRejectedValueOnce(new Error('latest toggle failed'))
-    const set = key === 'videos' ? lib.saveVideos : lib.saveAIOnBattery
+    const saves = {
+      videos: [engine.setVideos, lib.saveVideos],
+      aiOnBattery: [engine.setAIOnBattery, lib.saveAIOnBattery],
+      idleOnly: [engine.setIdleOnly, lib.saveIdleOnly],
+    } as const
+    const [engineSave, set] = saves[key]
+    vi.mocked(engineSave).mockResolvedValueOnce().mockRejectedValueOnce(new Error('latest toggle failed'))
     await set(true)
     await set(false)
     expect(lib.settings[key]).toBe(true)
     expect(lib.settingsError).toContain('latest toggle failed')
   },
 )
+
+it('gives way to full-screen apps and a busy PC by default, and saves each switch', async () => {
+  setActivePinia(createPinia())
+  const wrapper = mount(SettingsView)
+  try {
+    const fullScreen = toggle(wrapper, t('settings.pauseFullScreen'))
+    const busy = toggle(wrapper, t('settings.pauseBusy'))
+    const idle = toggle(wrapper, t('settings.idleOnly'))
+    if (!fullScreen || !busy || !idle) throw new Error('missing a background work switch')
+    expect(
+      [fullScreen, busy, idle].map((box) => box.element instanceof HTMLInputElement && box.element.checked),
+    ).toEqual([true, true, false])
+    expect(wrapper.text()).toContain(t('settings.idleOnlyHint', { n: AWAY_MINUTES }))
+    await fullScreen.setValue(false)
+    await busy.setValue(false)
+    await idle.setValue(true)
+    await flushPromises()
+    expect(engine.setPauseFullScreen).toHaveBeenCalledExactlyOnceWith(false)
+    expect(engine.setPauseBusy).toHaveBeenCalledExactlyOnceWith(false)
+    expect(engine.setIdleOnly).toHaveBeenCalledExactlyOnceWith(true)
+  } finally {
+    wrapper.unmount()
+  }
+})
 
 it('keeps a newer slider input when the previous save fails before its debounce fires', async () => {
   vi.useFakeTimers()

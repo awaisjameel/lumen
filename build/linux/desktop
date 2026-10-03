@@ -3,11 +3,11 @@ Version=1.0
 Name=Lumen
 Comment=Local, private AI photo gallery
 # The Exec line includes %u to pass the URL to the application
-Exec=/usr/local/bin/lumen %u
+Exec=/usr/local/bin/Lumen %u
 Terminal=false
 Type=Application
-Icon=lumen
+Icon=Lumen
 Categories=Utility;
-StartupWMClass=lumen
+StartupWMClass=Lumen
 
  

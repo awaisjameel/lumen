@@ -140,7 +140,7 @@ func TestFaceLookalikeThresholdOnTheFaceCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := people.NewEngine(st, fm)
-	ix := New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{People: engine}, &fakeEvents{})
+	ix := quiet(New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), Models{People: engine}, &fakeEvents{}))
 	ix.Start(ctx)
 	defer func() {
 		cancel()

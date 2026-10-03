@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+// watchWait is how long a test waits for the watcher. A change arrives in
+// milliseconds, but on a loaded machine (the whole race suite in parallel)
+// it took over 5 s twice; waiting longer costs nothing when it passes.
+const watchWait = 30 * time.Second
+
 func TestWatchReportsChangesAndReleasesHandle(t *testing.T) {
 	dir := t.TempDir()
 	got := make(chan string, 16)
@@ -23,7 +28,7 @@ func TestWatchReportsChangesAndReleasesHandle(t *testing.T) {
 	if err := os.WriteFile(want, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	timeout := time.After(5 * time.Second)
+	timeout := time.After(watchWait)
 	for seen := false; !seen; {
 		select {
 		case p := <-got:
@@ -40,7 +45,7 @@ func TestWatchReportsChangesAndReleasesHandle(t *testing.T) {
 		if err != nil {
 			t.Errorf("cancelled watch returned %v, want nil", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(watchWait):
 		t.Fatal("watch did not release its handle after cancel")
 	}
 }
