@@ -26,6 +26,9 @@ const (
 	geoNamesURL = "https://www.geonames.org/"
 )
 
+// linkURLs is where each core.Link leads. A page not listed is never opened.
+var linkURLs = map[core.Link]string{core.LinkReleases: ReleasesURL, core.LinkGeoNames: geoNamesURL}
+
 // How much the UI may write to the log: a view failing on every frame must
 // not fill it.
 const (
@@ -60,8 +63,8 @@ func (s *SystemService) About() core.About {
 
 // OpenLink opens one of the pages outside Lumen in the user's browser.
 func (s *SystemService) OpenLink(link core.Link) error {
-	url := map[core.Link]string{core.LinkReleases: ReleasesURL, core.LinkGeoNames: geoNamesURL}[link]
-	if url == "" {
+	url, ok := linkURLs[link]
+	if !ok {
 		return fmt.Errorf("%w: no page %q", store.ErrNotFound, link)
 	}
 	return application.Get().Browser.OpenURL(url)
@@ -69,8 +72,8 @@ func (s *SystemService) OpenLink(link core.Link) error {
 
 // OpenNotices opens the licence notices of what ships with Lumen.
 func (s *SystemService) OpenNotices() error {
-	name := s.paths.Notices()
-	if fi, err := os.Stat(name); name == "" || err != nil || fi.IsDir() {
+	name := s.paths.Notices() // "" without a runtime folder, which Stat fails on too
+	if fi, err := os.Stat(name); err != nil || fi.IsDir() {
 		return fmt.Errorf("%w: the licence notices are not beside Lumen.exe", store.ErrNotFound)
 	}
 	return application.Get().Browser.OpenFile(name)
@@ -125,7 +128,8 @@ func (s *SystemService) writeProblemReport(ctx context.Context, path string) (er
 }
 
 // describe is a problem report's system.txt: which Lumen, the PC, how
-// indexing stands and the settings. It names no file or folder.
+// indexing stands and the settings. It names none of the library's files or
+// folders, nor where Lumen keeps its data.
 func (s *SystemService) describe(ctx context.Context) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Lumen %s\nReport made %s\n\n", s.version, s.now().Format(time.RFC3339))

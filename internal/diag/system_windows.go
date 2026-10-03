@@ -3,6 +3,7 @@ package diag
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"unsafe"
 
@@ -73,7 +74,7 @@ type memoryStatusEx struct {
 
 // System describes this PC. A part that can't be read is left empty.
 func System() PC {
-	pc := PC{Windows: windowsVersion(), Threads: threads()}
+	pc := PC{Windows: windowsVersion(), Threads: runtime.NumCPU()}
 	if k, err := registry.OpenKey(registry.LOCAL_MACHINE, `HARDWARE\DESCRIPTION\System\CentralProcessor\0`,
 		registry.QUERY_VALUE); err == nil {
 		name, _, _ := k.GetStringValue("ProcessorNameString")

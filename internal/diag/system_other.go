@@ -11,4 +11,4 @@ func Version() string { return devVersion }
 func windowsVersion() string { return "" }
 
 // System describes this PC; off Windows, only what Go knows.
-func System() PC { return PC{Threads: threads(), CPU: runtime.GOARCH} }
+func System() PC { return PC{Threads: runtime.NumCPU(), CPU: runtime.GOARCH} }

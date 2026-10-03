@@ -430,7 +430,8 @@ func TestIndexingGivesWayByDefaultAndTheSettingsApplyAtOnce(t *testing.T) {
 	if err != nil || !got.PauseFullScreen || !got.PauseBusy || got.IdleOnly {
 		t.Fatalf("settings = %+v (%v), want full screen and busy on, idle-only off", got, err)
 	}
-	// Idle-only holds at once: the user is at the PC while the test runs.
+	// Idle-only holds at once: an indexer that hasn't started has taken no
+	// look at the PC, so it has not seen the user away.
 	check(t, s.SetIdleOnly(ctx, true))
 	if p := s.Progress(ctx); p.Waiting != core.WaitIdle {
 		t.Fatalf("idle-only on: waiting = %q, want %q", p.Waiting, core.WaitIdle)

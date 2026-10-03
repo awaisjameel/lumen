@@ -22,8 +22,9 @@ onMounted(async () => {
 
 const chosen = computed(() => folders.value.filter((f) => f.on).map((f) => f.path))
 
-// Windows folders differ only by more than case, in any script ("ÉTÉ" is
-// "été"); the engine also skips a folder already in the library.
+// Windows tells folders apart by more than their case, in any script ("ÉTÉ"
+// is "été", "Ete" is another); the engine also skips a folder already in the
+// library.
 function add(path: string) {
   if (!folders.value.some((f) => f.path.localeCompare(path, undefined, { sensitivity: 'accent' }) === 0)) {
     folders.value.push({ path, on: true })

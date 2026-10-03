@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -22,8 +21,6 @@ func versionString(major, minor, patch, build uint32) string {
 	}
 	return fmt.Sprintf("%d.%d.%d.%d", major, minor, patch, build)
 }
-
-func threads() int { return runtime.NumCPU() }
 
 // PC describes the computer Lumen runs on, for a problem report.
 type PC struct {
@@ -47,7 +44,7 @@ func (p PC) String() string {
 // Report is what a problem report holds besides the crash reports.
 type Report struct {
 	// About is system.txt: which Lumen, on which PC, and how its library
-	// stands. It names no file or folder.
+	// stands. It names none of the library's files or folders.
 	About string
 	// Logs are the log files, oldest first. One that isn't there is left out.
 	Logs []string
