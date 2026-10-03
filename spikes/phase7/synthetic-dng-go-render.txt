@@ -1,0 +1,4 @@
+=== RUN   TestRender
+MEASURE {"ac_line_status":1,"battery_percent":65,"decode_resize_ms":5.281,"file":"synthetic-cfa.dng","jpeg_encode_ms":0.533,"mode":"render","ms":5.814,"orientation":1,"output_bytes":438,"output_h":48,"output_w":64,"peak_commit_bytes":53276672,"peak_ws_bytes":16605184,"recorded_at":"2026-10-04T01:09:56+05:00","side":4096,"source_h":48,"source_w":64}
+--- PASS: TestRender (0.01s)
+PASS

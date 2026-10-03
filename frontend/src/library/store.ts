@@ -20,11 +20,6 @@ import type { LatestSave } from '../shared/latestSave'
 import { deleteFromDisk } from '../trash/actions'
 import { showTrashUndo } from '../trash/undo'
 
-const ZOOM_KEY = 'lumen.zoom'
-export const ZOOM_MIN = 96
-export const ZOOM_MAX = 320
-const ZOOM_DEFAULT = 168
-
 /** The single group search results live in (they have no days). */
 export const RESULTS = 'results'
 
@@ -51,16 +46,6 @@ export interface Sel {
 
 /** What a search found beyond its items. */
 type SearchInfo = Omit<SearchResults, 'items'>
-
-function loadZoom(): number {
-  try {
-    const v = Number(localStorage.getItem(ZOOM_KEY))
-    if (v >= ZOOM_MIN && v <= ZOOM_MAX) return v
-  } catch {
-    /* default below */
-  }
-  return ZOOM_DEFAULT
-}
 
 /**
  * Library state: the groups (days, or one group of search results) for the
@@ -182,7 +167,6 @@ export const useLibrary = defineStore('library', () => {
   const selected = ref<Sel | null>(null)
   const viewer = ref<Sel | null>(null)
   const showDetails = ref(false)
-  const zoom = ref(loadZoom())
 
   const total = computed(() => buckets.value.reduce((n, b) => n + b.count, 0))
   const selectedItem = computed(() => itemAt(selected.value))
@@ -533,15 +517,6 @@ export const useLibrary = defineStore('library', () => {
     if (!shown) viewer.value = null
   }
 
-  function setZoom(v: number) {
-    zoom.value = v
-    try {
-      localStorage.setItem(ZOOM_KEY, String(v))
-    } catch {
-      /* not critical */
-    }
-  }
-
   /**
    * Flip an asset's favourite flag: shown at once, put back if the engine
    * refuses. Clicks on one asset take turns, so the flag always ends as the
@@ -637,7 +612,7 @@ export const useLibrary = defineStore('library', () => {
 
   /** Move an asset to the Trash, which offers to undo it. */
   async function moveToTrash(p: Sel) {
-    if (await removeFromView(p, () => engine.trashAssets([p.id]))) showTrashUndo([p.id])
+    if (await removeFromView(p, () => engine.trashAssets([p.id]))) showTrashUndo([p.id], restoreAssets)
   }
 
   /** Take the trashed asset at p out of the Trash. */
@@ -688,7 +663,6 @@ export const useLibrary = defineStore('library', () => {
     selected,
     viewer,
     showDetails,
-    zoom,
     total,
     selectedItem,
     viewerItem,
@@ -707,7 +681,6 @@ export const useLibrary = defineStore('library', () => {
     setScope,
     attach,
     detach,
-    setZoom,
     toggleFavourite,
     setPaused,
     sourcesChanged,

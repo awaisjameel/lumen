@@ -60,6 +60,18 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"THUMB_CACHE_MIN_MB":        core.ThumbCacheMinMB,
 		"THUMB_CACHE_MAX_MB":        core.ThumbCacheMaxMB,
 		"AWAY_MINUTES":              float64(index.AwayAfter / time.Minute),
+		"TEXT_SCALE_MIN":            core.TextScaleMin,
+		"TEXT_SCALE_MAX":            core.TextScaleMax,
+		"TEXT_SCALE_DEFAULT":        core.TextScaleDefault,
+		"TILE_SIZE_MIN":             core.TileSizeMin,
+		"TILE_SIZE_MAX":             core.TileSizeMax,
+		"TILE_SIZE_DEFAULT":         core.TileSizeDefault,
+		"SIDEBAR_WIDTH_MIN":         core.SidebarWidthMin,
+		"SIDEBAR_WIDTH_MAX":         core.SidebarWidthMax,
+		"SIDEBAR_WIDTH_DEFAULT":     core.SidebarWidthDefault,
+		"INSPECTOR_WIDTH_MIN":       core.InspectorWidthMin,
+		"INSPECTOR_WIDTH_MAX":       core.InspectorWidthMax,
+		"INSPECTOR_WIDTH_DEFAULT":   core.InspectorWidthDefault,
 	} {
 		if got := constant(name); got != want {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)

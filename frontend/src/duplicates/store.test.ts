@@ -43,12 +43,13 @@ beforeEach(() => {
 it('clears cached duplicate paths immediately after a block and keeps them cleared if the refresh fails', async () => {
   const duplicates = useDuplicates()
   await duplicates.load()
-  let fail!: (reason: Error) => void
+  let fail: ((reason: Error) => void) | undefined
   vi.mocked(engine.duplicateGroups).mockReturnValueOnce(new Promise((_resolve, reject) => (fail = reject)))
   const changed = showBlocksChanged()
   expect(duplicates.list).toEqual([])
   expect(duplicates.loaded).toBe(false)
   const rejected = expect(changed).rejects.toThrow('read failed')
+  if (!fail) throw new Error('the duplicate read did not start')
   fail(new Error('read failed'))
   await rejected
   expect(useDuplicates().list).toEqual([])
@@ -56,13 +57,14 @@ it('clears cached duplicate paths immediately after a block and keeps them clear
 })
 
 it('supersedes an initial duplicate read that was pending when visibility changed', async () => {
-  let finish!: (value: DuplicateGroup[]) => void
+  let finish: ((value: DuplicateGroup[]) => void) | undefined
   vi.mocked(engine.duplicateGroups)
     .mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
     .mockResolvedValueOnce([])
   const duplicates = useDuplicates()
   const initial = duplicates.load()
   const changed = showBlocksChanged()
+  if (!finish) throw new Error('the duplicate read did not start')
   finish(groups)
   await Promise.all([initial, changed])
   expect(duplicates.list).toEqual([])

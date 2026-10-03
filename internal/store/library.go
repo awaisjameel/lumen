@@ -311,12 +311,13 @@ func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.
 	var duration sql.NullInt64
 	var videoCodec, audioCodec sql.NullString
 	var lat, lon sql.NullFloat64
+	var thumb int64
 	err := q.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
 		CASE WHEN `+placeBlocked("assets.place_id")+` THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
-		duration_ms, video_codec, audio_codec
+		duration_ms, video_codec, audio_codec, thumb_version
 		FROM assets WHERE id = ? AND `+servableOf(unlocked), id).
 		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.PlaceID, &d.Favourite,
-			&duration, &videoCodec, &audioCodec)
+			&duration, &videoCodec, &audioCodec, &thumb)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -327,11 +328,12 @@ func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.
 	if lat.Valid && lon.Valid {
 		d.Lat, d.Lon = &lat.Float64, &lon.Float64
 	}
-	d.WebNative = core.WebNative(d.Ext)
+	var play core.Playback
 	if d.Kind == core.KindVideo {
-		d.Video = &core.Video{Duration: duration.Int64, Codec: videoCodec.String, Audio: audioCodec.String,
-			Play: core.PlaybackOf(d.Ext, videoCodec.String, audioCodec.String)}
+		play = core.PlaybackOf(d.Ext, videoCodec.String, audioCodec.String)
+		d.Video = &core.Video{Duration: duration.Int64, Codec: videoCodec.String, Audio: audioCodec.String, Play: play}
 	}
+	d.Caps = core.CapsOf(d.Kind, d.Ext, thumb != 0, play)
 
 	rows, err := q.QueryContext(ctx, "SELECT path, size FROM files WHERE asset_id = ? ORDER BY path", id)
 	if err != nil {

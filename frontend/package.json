@@ -21,14 +21,18 @@
     "check": "vue-tsc --noEmit && eslint . --max-warnings 0 && prettier --check ."
   },
   "dependencies": {
+    "@iconify/vue": "^5.0.3",
+    "@nuxt/ui": "^4.11.2",
     "@tanstack/vue-virtual": "^3.13.39",
     "@wailsio/runtime": "3.0.0-beta.26",
     "pinia": "^4.0.3",
+    "tailwindcss": "^4.3.3",
     "vue": "^3.5.43",
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@iconify-json/lucide": "^1.2.137",
     "@vitejs/plugin-vue": "^6.0.9",
     "@vue/eslint-config-typescript": "14.9.0",
     "@vue/test-utils": "2.5.1",

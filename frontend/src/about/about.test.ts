@@ -1,12 +1,15 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
+import { mountInApp } from '../shared/testing'
 import { engine, ErrorCode, Link } from '../bridge'
 import type * as Bridge from '../bridge'
 import { t } from '../shared/i18n'
 import AboutSection from './AboutSection.vue'
 import CrashNotice from './CrashNotice.vue'
 import { useAbout } from './store'
+
+enableAutoUnmount(afterEach)
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -50,7 +53,7 @@ it('shares one report save across callers and remains busy until it finishes', a
 
 it('shows an About read failure and retries on the next load', async () => {
   vi.mocked(engine.about).mockRejectedValueOnce(new Error('about unavailable'))
-  const section = mount(AboutSection)
+  const section = mountInApp(AboutSection)
   await flushPromises()
   expect(section.get('[role="alert"]').text()).toContain('about unavailable')
   await useAbout().load()
@@ -60,22 +63,22 @@ it('shows an About read failure and retries on the next load', async () => {
 })
 
 it('shows the version and where new ones are, opening it only when clicked', async () => {
-  const section = mount(AboutSection)
+  const section = mountInApp(AboutSection)
   await flushPromises()
   expect(section.text()).toContain('Version 0.9.0')
   expect(engine.openLink).not.toHaveBeenCalled()
-  const link = section.findAll('a').find((a) => a.text() === RELEASES)
+  const link = section.findAll('button').find((a) => a.text() === RELEASES)
   if (!link) throw new Error('no releases link')
   await link.trigger('click')
   expect(engine.openLink).toHaveBeenCalledExactlyOnceWith(Link.LinkReleases)
-  const credit = section.findAll('a').find((a) => a.text() === 'GeoNames')
+  const credit = section.findAll('button').find((a) => a.text() === 'GeoNames')
   await credit?.trigger('click')
   expect(engine.openLink).toHaveBeenLastCalledWith(Link.LinkGeoNames)
 })
 
 it('saves a problem report where the user chose, and says so', async () => {
   vi.mocked(engine.saveProblemReport).mockResolvedValue('C:/Users/me/Desktop/Lumen problem report.zip')
-  const section = mount(AboutSection)
+  const section = mountInApp(AboutSection)
   const save = section.findAll('button').find((b) => b.text() === t('about.saveReport'))
   await save?.trigger('click')
   await flushPromises()
@@ -83,7 +86,7 @@ it('saves a problem report where the user chose, and says so', async () => {
 })
 
 it('says nothing when the user cancels, and why when a call fails', async () => {
-  const section = mount(AboutSection)
+  const section = mountInApp(AboutSection)
   const button = (text: string) => section.findAll('button').find((b) => b.text().includes(text))
   await button(t('about.saveReport'))?.trigger('click')
   await flushPromises()
@@ -101,24 +104,43 @@ it('says nothing when the user cancels, and why when a call fails', async () => 
 })
 
 it('says nothing after a clean run', async () => {
-  const notice = mount(CrashNotice)
+  const notice = mountInApp(CrashNotice)
   await flushPromises()
-  expect(notice.find('.crash').exists()).toBe(false)
+  expect(notice.find('[data-crash]').exists()).toBe(false)
 })
 
 it('says once that the last run crashed, offers a report, and goes when dismissed', async () => {
   vi.mocked(engine.about).mockResolvedValue(about(true))
   vi.mocked(engine.saveProblemReport).mockResolvedValue('C:/report.zip')
-  const notice = mount(CrashNotice)
+  const notice = mountInApp(CrashNotice)
   await flushPromises()
-  expect(notice.get('.crash').text()).toContain('Lumen closed unexpectedly last time.')
-  await notice.get('.crash .btn').trigger('click')
+  expect(notice.get('[data-crash]').text()).toContain('Lumen closed unexpectedly last time.')
+  await notice.get('[data-crash-report]').trigger('click')
   await flushPromises()
   expect(notice.get('[role="status"]').text()).toBe('Saved to C:/report.zip')
-  await notice.get('.icon-btn').trigger('click')
-  expect(notice.find('.crash').exists()).toBe(false)
+  await notice.get('[data-crash-dismiss]').trigger('click')
+  expect(notice.find('[data-crash]').exists()).toBe(false)
   // The details are read once, for the notice and the About section alike.
-  mount(AboutSection)
+  mountInApp(AboutSection)
   await flushPromises()
   expect(engine.about).toHaveBeenCalledOnce()
+})
+
+it('keeps the crash notice through report cancellation and failure, and allows a retry', async () => {
+  vi.mocked(engine.about).mockResolvedValue(about(true))
+  const notice = mountInApp(CrashNotice)
+  await flushPromises()
+  await notice.get('[data-crash-report]').trigger('click')
+  await flushPromises()
+  expect(notice.find('[data-crash]').exists()).toBe(true)
+  expect(notice.find('[role="status"]').exists()).toBe(false)
+  vi.mocked(engine.saveProblemReport).mockRejectedValueOnce(new Error('report unavailable'))
+  await notice.get('[data-crash-report]').trigger('click')
+  await flushPromises()
+  expect(notice.get('[data-crash]').text()).toContain('report unavailable')
+  vi.mocked(engine.saveProblemReport).mockResolvedValueOnce('C:/retry.zip')
+  await notice.get('[data-crash-report]').trigger('click')
+  await flushPromises()
+  expect(notice.get('[role="status"]').text()).toBe('Saved to C:/retry.zip')
+  expect(notice.text()).not.toContain('report unavailable')
 })

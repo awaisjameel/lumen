@@ -19,8 +19,3 @@ export function ownsArrows(e: KeyboardEvent): boolean {
   const el = e.target
   return isTyping(e) || (el instanceof HTMLInputElement && el.type === 'range') || el instanceof HTMLMediaElement
 }
-
-/** Whether a modal (the viewer, a confirmation) covers the page, so page shortcuts must wait. */
-export function modalOpen(): boolean {
-  return document.querySelector('[aria-modal="true"], dialog[open]') !== null
-}

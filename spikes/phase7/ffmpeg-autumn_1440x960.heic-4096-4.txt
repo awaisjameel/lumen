@@ -1,0 +1,32 @@
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\Downloads\Lumen\spikes\.cache\heic\autumn_1440x960.heic':
+  Metadata:
+    major_brand     : mif1
+    minor_version   : 0
+    compatible_brands: mif1heic
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0[0x3ea]: Video: hevc (Main) (hvc1 / 0x31637668), yuv420p(tv), 1440x960, 1 fps, 1 tbr, 1 tbn (default)
+    Metadata:
+      title           : HEVC Image
+  Stream #0:1[0x3ed]: Video: hevc (Main) (hvc1 / 0x31637668), yuv420p(tv), 240x160, 1 fps, 1 tbr, 1 tbn
+    Metadata:
+      title           : HEVC Image
+Stream mapping:
+  Stream #0:0 -> #0:0 (hevc (native) -> mjpeg (native))
+Output #0, image2, to 'D:\Downloads\Lumen\spikes\phase7\ffmpeg-autumn_1440x960.heic-4096.jpg':
+  Metadata:
+    major_brand     : mif1
+    minor_version   : 0
+    compatible_brands: mif1heic
+    encoder         : Lavf63.1.102
+  Stream #0:0: Video: mjpeg, yuv420p(pc, progressive), 1440x960, q=2-31, 200 kb/s, 1 fps, 1 tbn (default)
+    Metadata:
+      encoder         : Lavc63.1.102 mjpeg
+      title           : HEVC Image
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/200000 buffer size: 0 vbv_delay: N/A
+[image2 @ 0000020940ebda80] The specified filename 'D:\Downloads\Lumen\spikes\phase7\ffmpeg-autumn_1440x960.heic-4096.jpg' does not contain an image sequence pattern or a pattern is invalid.
+[image2 @ 0000020940ebda80] Use a pattern such as %03d for an image sequence or use the -update option (with -frames:v 1 if needed) to write a single image.
+[out#0/image2 @ 0000020942e6fe00] video:588KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+frame=    1 fps=0.0 q=2.0 Lsize=N/A time=00:00:01.00 bitrate=N/A speed=18.4x elapsed=0:00:00.05    
+bench: utime=0.016s stime=0.047s rtime=0.055s
+bench: maxrss=36348KiB

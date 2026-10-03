@@ -1,12 +1,19 @@
+import type * as Router from 'vue-router'
+import { defineComponent, h, nextTick, ref } from 'vue'
+import { mountInApp } from '../shared/testing'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises } from '@vue/test-utils'
 import { engine, ErrorCode, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Person } from '../bridge'
 import PersonHeader from './PersonHeader.vue'
 
-vi.mock('vue-router', () => ({ useRouter: () => ({ replace: vi.fn() }) }))
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof Router>()),
+  useRouter: () => ({ replace: vi.fn() }),
+}))
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
@@ -34,7 +41,7 @@ const person = (id: number, name: string): Person => ({
     byUser: false,
   },
 })
-let wrapper: ReturnType<typeof mount> | undefined
+let wrapper: ReturnType<typeof mountInApp> | undefined
 afterEach(() => {
   wrapper?.unmount()
   vi.useRealTimers()
@@ -42,15 +49,18 @@ afterEach(() => {
 
 it('discards an earlier person response after navigating away and back', async () => {
   setActivePinia(createPinia())
-  let finish!: (value: Person) => void
+  let finish: ((value: Person) => void) | undefined
   vi.mocked(engine.person)
     .mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
     .mockImplementation((id) => Promise.resolve(person(id, 'Current name')))
-  wrapper = mount(PersonHeader, { props: { id: 1 }, global: { stubs: { RouterLink: true } } })
-  await wrapper.setProps({ id: 2 })
+  wrapper = mountHeader()
+  headerId.value = 2
+  await nextTick()
   await flushPromises()
-  await wrapper.setProps({ id: 1 })
+  headerId.value = 1
+  await nextTick()
   await flushPromises()
+  if (!finish) throw new Error('The first person read did not start')
   finish(person(1, 'Stale name'))
   await flushPromises()
   expect(wrapper.text()).toContain('Current name')
@@ -67,7 +77,7 @@ it('keeps a rename failure on screen while the person reloads around it', async 
   })
   vi.mocked(engine.person).mockReset().mockResolvedValue(person(1, 'Ali'))
   vi.mocked(engine.namePerson).mockRejectedValue(new Error('blocked', { cause: { code: ErrorCode.BlockedName } }))
-  wrapper = mount(PersonHeader, { props: { id: 1 }, global: { stubs: { RouterLink: true } } })
+  wrapper = mountHeader()
   await flushPromises()
   await wrapper.get('button.name').trigger('click')
   await flushPromises()
@@ -81,7 +91,8 @@ it('keeps a rename failure on screen while the person reloads around it', async 
   await flushPromises()
   expect(engine.person).toHaveBeenCalledTimes(2)
   expect(wrapper.get('[role="alert"]').text()).toBe(failure)
-  await wrapper.setProps({ id: 2 })
+  headerId.value = 2
+  await nextTick()
   await flushPromises()
   expect(wrapper.find('[role="alert"]').exists()).toBe(false)
 })
@@ -91,7 +102,7 @@ it('accepts a full emoji name and leaves an overlong name in the editor with val
   vi.mocked(engine.person).mockReset().mockResolvedValue(person(1, 'Ali'))
   vi.mocked(engine.namePerson).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.people).mockResolvedValue([])
-  wrapper = mount(PersonHeader, { props: { id: 1 }, global: { stubs: { RouterLink: true } } })
+  wrapper = mountHeader()
   await flushPromises()
   await wrapper.get('button.name').trigger('click')
   await flushPromises()
@@ -116,7 +127,7 @@ it('waits for a rename to finish before allowing another rename', async () => {
   vi.mocked(engine.namePerson)
     .mockReset()
     .mockReturnValue(new Promise((resolve) => (finish = resolve)))
-  wrapper = mount(PersonHeader, { attachTo: document.body, props: { id: 1 }, global: { stubs: { RouterLink: true } } })
+  wrapper = mountHeader()
   await flushPromises()
   await wrapper.get('button.name').trigger('click')
   await wrapper.get('input').setValue('Sara')
@@ -133,3 +144,24 @@ it('waits for a rename to finish before allowing another rename', async () => {
   await wrapper.get('button.name').trigger('click')
   expect(wrapper.find('input').exists()).toBe(true)
 })
+
+const headerId = ref(1)
+function mountHeader() {
+  headerId.value = 1
+  const Host = defineComponent({ setup: () => () => h(PersonHeader, { id: headerId.value }) })
+  return mountInApp(Host, { plugins: [testRouter()] })
+}
+
+function testRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { template: '<div />' } },
+      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
+        name,
+        path: `/${name}/:id?`,
+        component: { template: '<div />' },
+      })),
+    ],
+  })
+}

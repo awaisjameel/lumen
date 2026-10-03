@@ -577,8 +577,8 @@ type AssetDetail struct {
 	Paths     []string   `json:"paths"`
 	Size      int64      `json:"size"`
 	Ext       string     `json:"ext"`
-	WebNative bool       `json:"webNative"` // a photo the WebView can show directly
-	Video     *Video     `json:"video"`     // nil for photos
+	Caps      MediaCaps  `json:"caps"`  // what can be done with it (see CapsOf)
+	Video     *Video     `json:"video"` // nil for photos
 }
 
 // Video is what the details panel and the player need to know about a video.

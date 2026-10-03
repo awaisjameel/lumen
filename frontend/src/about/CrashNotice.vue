@@ -4,7 +4,9 @@
 import { onMounted, ref } from 'vue'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
-import Icon from '../shared/Icon.vue'
+import UAlert from '@nuxt/ui/components/Alert.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import { icons } from '../design/icons'
 import { useAbout } from './store'
 
 const about = useAbout()
@@ -24,54 +26,48 @@ async function saveReport() {
 </script>
 
 <template>
-  <div v-if="about.crashNotice" class="crash" role="alert">
-    <Icon name="info" :size="18" />
-    <div class="text">
-      <p>{{ t('about.crashed') }}</p>
-      <p v-if="savedTo" class="muted" role="status">{{ t('about.saved', { path: savedTo }) }}</p>
-      <p v-else class="muted">{{ t('about.crashedHint') }}</p>
-      <p v-if="error" class="error">{{ error }}</p>
-    </div>
-    <button v-if="!savedTo" class="btn" :disabled="about.savingReport" @click="saveReport">
-      {{ about.savingReport ? t('about.saving') : t('about.saveReport') }}
-    </button>
-    <button class="icon-btn" :title="t('common.dismiss')" :aria-label="t('common.dismiss')" @click="about.dismissCrash">
-      <Icon name="close" :size="16" />
-    </button>
+  <div v-if="about.crashNotice" class="crash-notice" data-crash>
+    <UAlert :title="t('about.crashed')" :icon="icons.info" color="neutral" variant="outline" role="alert" close>
+      <template #description
+        ><p v-if="savedTo" class="lumen-selectable break-words" role="status">
+          {{ t('about.saved', { path: savedTo }) }}
+        </p>
+        <p v-else>{{ t('about.crashedHint') }}</p>
+        <p v-if="error" class="text-error">{{ error }}</p></template
+      >
+      <template #actions
+        ><UButton
+          v-if="!savedTo"
+          data-crash-report
+          :disabled="about.savingReport"
+          :loading="about.savingReport"
+          :icon="icons.bug"
+          @click="saveReport"
+          >{{ about.savingReport ? t('about.saving') : t('about.saveReport') }}</UButton
+        ></template
+      >
+      <template #close
+        ><UButton
+          data-crash-dismiss
+          :icon="icons.close"
+          :aria-label="t('common.dismiss')"
+          color="neutral"
+          variant="ghost"
+          square
+          @click="about.dismissCrash" /></template
+    ></UAlert>
   </div>
 </template>
-
 <style scoped>
-.crash {
+.crash-notice {
   position: fixed;
-  top: 16px;
+  top: 1rem;
   left: 50%;
-  z-index: 60;
+  z-index: calc(var(--lumen-z-viewer) + 1);
   transform: translateX(-50%);
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  width: max-content;
-  max-width: min(600px, calc(100vw - 32px));
-  padding: 12px 12px 12px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  background: var(--surface);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  width: min(38rem, calc(100vw - 2rem));
 }
-
-.crash > svg {
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--accent);
-}
-
-.text p {
+p {
   margin: 0;
-}
-
-.text p + p {
-  margin-top: 2px;
-  font-size: 12px;
 }
 </style>

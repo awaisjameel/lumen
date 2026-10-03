@@ -2,6 +2,8 @@
 // A name box that suggests people already named: pick one, or type a new
 // name and press Enter. Emits the name either way (the engine finds or
 // creates the person).
+import UInput from '@nuxt/ui/components/Input.vue'
+import UPopover from '@nuxt/ui/components/Popover.vue'
 import { computed, ref, useId, watch } from 'vue'
 import { engine, MAX_NAME_LEN } from '../bridge'
 import type { Person } from '../bridge'
@@ -44,92 +46,82 @@ function onKey(e: KeyboardEvent) {
     open.value = false
   }
 }
+// Suggestions must leave focus in the combobox so its arrow and Enter keys keep working.
+function preventFocus(e: Event) {
+  e.preventDefault()
+}
 </script>
 
 <template>
   <div class="picker" @focusout="open = false">
-    <input
-      v-model="text"
-      role="combobox"
-      aria-autocomplete="list"
-      :aria-controls="`${id}-list`"
-      :aria-expanded="open && options.length > 0"
-      :aria-activedescendant="open && active >= 0 ? `${id}-${active}` : undefined"
-      :aria-label="placeholder"
-      :placeholder="placeholder"
-      :aria-invalid="nameTooLong(text) || undefined"
-      spellcheck="false"
-      autocomplete="off"
-      @focus="open = true"
-      @input="open = true"
-      @keydown="onKey"
-    />
-    <p v-if="nameTooLong(text)" class="error" role="alert">{{ t('error.invalidName', { max: MAX_NAME_LEN }) }}</p>
-    <ul v-if="open && options.length" :id="`${id}-list`" class="menu" role="listbox" @mousedown.prevent>
-      <li
-        v-for="(p, i) in options"
-        :id="`${id}-${i}`"
-        :key="p.id"
-        role="option"
-        :aria-selected="active === i"
-        :class="{ active: active === i }"
-        @mouseenter="active = i"
-        @click="pick(p.name)"
-      >
-        <FaceThumb :face="p.cover" :size="24" round />
-        <span class="name">{{ p.name }}</span>
-      </li>
-    </ul>
+    <UPopover
+      :open="open && options.length > 0"
+      :content="{ onOpenAutoFocus: preventFocus, onCloseAutoFocus: preventFocus }"
+      :ui="{ content: 'min-w-52 max-w-80' }"
+      @update:open="open = $event"
+    >
+      <template #anchor>
+        <UInput
+          v-model="text"
+          class="w-full"
+          role="combobox"
+          aria-autocomplete="list"
+          :aria-controls="`${id}-list`"
+          :aria-expanded="open && options.length > 0"
+          :aria-activedescendant="open && active >= 0 ? `${id}-${active}` : undefined"
+          :aria-label="placeholder"
+          :placeholder="placeholder"
+          :aria-invalid="nameTooLong(text) || undefined"
+          spellcheck="false"
+          autocomplete="off"
+          @focus="open = true"
+          @input="open = true"
+          @keydown="onKey"
+        />
+      </template>
+      <template #content>
+        <ul :id="`${id}-list`" class="suggestions" role="listbox" @mousedown.prevent>
+          <li
+            v-for="(p, i) in options"
+            :id="`${id}-${i}`"
+            :key="p.id"
+            role="option"
+            :aria-selected="active === i"
+            :class="{ active: active === i }"
+            @mouseenter="active = i"
+            @click="pick(p.name)"
+          >
+            <FaceThumb :face="p.cover" :size="24" round /><span class="truncate">{{ p.name }}</span>
+          </li>
+        </ul>
+      </template>
+    </UPopover>
+    <p v-if="nameTooLong(text)" class="text-xs text-error" role="alert">
+      {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
+    </p>
   </div>
 </template>
 
 <style scoped>
 .picker {
-  position: relative;
+  min-width: 0;
 }
-input {
-  width: 100%;
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--surface-2);
-  color: var(--text);
-  font-size: 12px;
-  outline: none;
-}
-input:focus {
-  border-color: var(--accent);
-}
-.menu {
-  position: absolute;
-  top: 34px;
-  left: 0;
-  right: 0;
-  z-index: 30;
+.suggestions {
   margin: 0;
-  padding: 4px;
+  padding: 0.25rem;
   list-style: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  background: var(--surface);
-  box-shadow: var(--shadow);
 }
-.menu li {
+.suggestions li {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: var(--radius-s);
+  gap: 0.5rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--ui-radius);
   cursor: pointer;
 }
-.menu li.active {
-  background: var(--surface-hover);
-}
-.name {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.suggestions li.active {
+  background: var(--ui-bg-elevated);
+  outline: 1px solid var(--ui-primary);
 }
 </style>

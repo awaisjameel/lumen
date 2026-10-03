@@ -4,29 +4,50 @@
 // pick); its Review button lists what would happen and does nothing until the
 // user confirms. Similar photos go to Lumen's Trash, and the extra files of
 // exact copies to the Recycle Bin.
+import UAlert from '@nuxt/ui/components/Alert.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UModal from '@nuxt/ui/components/Modal.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { DuplicateKind, engine, THUMB_LARGE, thumbUrl } from '../bridge'
 import type { DuplicateGroup, DuplicateItem } from '../bridge'
 import SearchBox from '../search/SearchBox.vue'
-import EmptyState from '../shared/EmptyState.vue'
-import { errorText, notice } from '../shared/errors'
-import { bytes, fileName } from '../shared/format'
-import Icon from '../shared/Icon.vue'
+import { icons } from '../design/icons'
+import { useLibrary } from '../library/store'
+import { runCommand, useCommands } from '../shared/commands'
+import FeatureState from '../shared/FeatureState.vue'
+import Page from '../shared/Page.vue'
+import PageHeader from '../shared/PageHeader.vue'
+import { errorText } from '../shared/errors'
+import { fileName } from '../shared/format'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
+import { notifyKept } from '../trash/actions'
 import { showTrashUndo } from '../trash/undo'
+import DuplicateGroupCard from './DuplicateGroup.vue'
 import ReviewDialog from './ReviewDialog.vue'
 import { useDuplicates, useKeepChoices } from './store'
 import type { Review } from './store'
 
+const lib = useLibrary()
 const duplicates = useDuplicates()
 const choices = useKeepChoices()
 const busy = ref(false)
 const error = ref('')
 const preview = shallowRef<DuplicateItem | null>(null)
-const previewDialog = ref<HTMLDialogElement | null>(null)
+const previewOpen = computed({
+  get: () => preview.value !== null,
+  set: (open) => {
+    if (!open) preview.value = null
+  },
+})
+let previewTrigger: HTMLElement | null = null
+function returnPreviewFocus(event: Event) {
+  if (!previewTrigger?.isConnected) return
+  event.preventDefault()
+  previewTrigger.focus()
+}
 const reviewing = shallowRef<Review | null>(null)
 const acting = ref(false) // a confirmed move is under way
 
@@ -90,7 +111,6 @@ watch(
       current = group.items.find((item) => item.id === id)
       if (current) break
     }
-    if (!current) previewDialog.value?.close()
     preview.value = current ?? null
   },
 )
@@ -162,11 +182,11 @@ async function confirmReview() {
   try {
     if (review.kind === DuplicateKind.DuplicateExact) {
       const done = await engine.deleteCopies(review.keep.id, review.keepPath, review.recycle)
-      if (done.kept.length) notice.value = t('trash.kept', { n: done.kept.length })
+      if (done.kept.length) notifyKept(done.kept.length)
     } else {
       const ids = review.trash.map((item) => item.id)
       await engine.trashAssets(ids)
-      showTrashUndo(ids)
+      showTrashUndo(ids, lib.restoreAssets)
     }
   } catch (e) {
     error.value = errorText(e)
@@ -176,28 +196,51 @@ async function confirmReview() {
   await refresh() // the groups changed, or the move failed part way
 }
 
-async function openPreview(item: DuplicateItem) {
+function openPreview(item: DuplicateItem) {
+  previewTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
   preview.value = item
-  await nextTick()
-  previewDialog.value?.showModal()
 }
+
+useCommands([
+  {
+    id: 'duplicates.refresh',
+    group: 'view',
+    title: () => t('duplicates.refresh'),
+    icon: 'refresh',
+    enabled: () => !busy.value,
+    run: refresh,
+  },
+])
 </script>
 
 <template>
-  <div class="page">
-    <header class="topbar">
-      <h1>{{ t('nav.duplicates') }}</h1>
-      <SearchBox />
-      <div class="spacer" />
-      <button class="icon-btn" :title="t('duplicates.refresh')" :disabled="busy" @click="refresh">
-        <Icon name="refresh" />
-      </button>
-    </header>
-    <div ref="scroller" class="page-body">
-      <div ref="intro">
-        <p class="muted">{{ t('duplicates.intro') }} {{ t('duplicates.bestHint') }}</p>
-        <p v-if="error || duplicates.error" class="page-error" role="alert">{{ error || duplicates.error }}</p>
-        <p v-if="busy" class="muted" role="status">{{ t('duplicates.loading') }}</p>
+  <Page :scroll="false">
+    <template #header>
+      <PageHeader :title="t('nav.duplicates')">
+        <SearchBox />
+        <UButton
+          :icon="icons.refresh"
+          :aria-label="t('duplicates.refresh')"
+          :loading="busy"
+          color="neutral"
+          variant="ghost"
+          square
+          @click="runCommand('duplicates.refresh')"
+        />
+      </PageHeader>
+    </template>
+    <div ref="scroller" class="duplicates-scroll" data-duplicates-scroll>
+      <div ref="intro" class="guidance">
+        <p class="text-muted">{{ t('duplicates.intro') }} {{ t('duplicates.bestHint') }}</p>
+        <UAlert
+          v-if="error || duplicates.error"
+          color="error"
+          variant="soft"
+          :icon="icons.error"
+          :title="error || duplicates.error"
+          role="alert"
+        />
+        <FeatureState v-if="busy" kind="loading" :title="t('duplicates.loading')" />
       </div>
       <div ref="list" class="virtual-list" :style="{ height: `${virtualizer.getTotalSize()}px` }" role="list">
         <div
@@ -211,145 +254,79 @@ async function openPreview(item: DuplicateItem) {
         >
           <template v-if="!row.group">
             <h2>{{ t(row.kind === DuplicateKind.DuplicateExact ? 'duplicates.exact' : 'duplicates.similar') }}</h2>
-            <p class="muted">
+            <p class="text-muted">
               {{ t(row.kind === DuplicateKind.DuplicateExact ? 'duplicates.exactHint' : 'duplicates.similarHint') }}
             </p>
           </template>
-          <div v-else class="group">
-            <template v-if="row.kind === DuplicateKind.DuplicateExact">
-              <div v-for="item in row.group.items" :key="item.id" class="item">
-                <button
-                  class="preview-button"
-                  :aria-label="t('duplicates.preview', { name: fileName(item.paths[0] ?? '') })"
-                  @click="openPreview(item)"
-                >
-                  <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
-                  <span v-else class="ph" />
-                </button>
-                <div class="item-info">
-                  <span class="muted">{{
-                    t('duplicates.copies', {
-                      n: item.paths.length,
-                      size: bytes(item.size),
-                    })
-                  }}</span>
-                  <ul>
-                    <li v-for="path in item.paths" :key="path" :title="path">
-                      <span>{{ path }}</span>
-                      <label class="keep">
-                        <input
-                          type="radio"
-                          :name="`keep-${item.id}`"
-                          :aria-label="t('duplicates.keepNamed', { name: path })"
-                          :checked="choices.keeperOf(row.group)?.path === path"
-                          @change="choices.choose(row.group, item, path)"
-                        />
-                        {{ t('duplicates.keep') }}
-                        <em v-if="item.keep === path">{{ t('duplicates.suggested') }}</em>
-                      </label>
-                      <button
-                        class="btn btn-subtle"
-                        :aria-label="t('duplicates.showFile', { name: path })"
-                        @click="showPath(item, path)"
-                      >
-                        {{ t('common.showInFolder') }}
-                      </button>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </template>
-            <div v-else class="similar">
-              <div v-for="item in row.group.items" :key="item.id" class="similar-item">
-                <button
-                  class="preview-button"
-                  :aria-label="t('duplicates.preview', { name: fileName(item.paths[0] ?? '') })"
-                  @click="openPreview(item)"
-                >
-                  <img v-if="item.thumb" :src="thumbUrl(item.id, item.thumb)" alt="" loading="lazy" decoding="async" />
-                  <span v-else class="ph" />
-                </button>
-                <strong :title="item.paths[0]">{{ fileName(item.paths[0] ?? '') }}</strong>
-                <span class="muted">{{
-                  t('duplicates.photoSize', { w: item.width, h: item.height, size: bytes(item.size) })
-                }}</span>
-                <label class="keep">
-                  <input
-                    type="radio"
-                    :name="`keep-${row.key}`"
-                    :aria-label="t('duplicates.keepNamed', { name: fileName(item.paths[0] ?? '') })"
-                    :checked="choices.keeperOf(row.group)?.item.id === item.id"
-                    @change="choices.choose(row.group, item)"
-                  />
-                  {{ t('duplicates.keep') }}
-                  <em v-if="item.best">{{ t('duplicates.suggested') }}</em>
-                </label>
-                <button
-                  v-if="item.paths[0]"
-                  class="btn btn-subtle"
-                  :aria-label="t('duplicates.showFile', { name: item.paths[0] })"
-                  @click="showPath(item, item.paths[0])"
-                >
-                  {{ t('common.showInFolder') }}
-                </button>
-              </div>
-            </div>
-            <div class="group-actions">
-              <button
-                class="btn"
-                :aria-label="t('duplicates.reviewNamed', { name: fileName(row.group.items[0]?.paths[0] ?? '') })"
-                :disabled="acting || !choices.reviewOf(row.group)"
-                @click="startReview(row.group)"
-              >
-                {{ t('duplicates.review') }}
-              </button>
-            </div>
-          </div>
+          <DuplicateGroupCard
+            v-else
+            :group="row.group"
+            :busy="acting"
+            @review="startReview"
+            @preview="openPreview"
+            @show-path="showPath"
+          />
         </div>
       </div>
-
-      <EmptyState
-        v-if="duplicates.loaded && !duplicates.list.length"
-        icon="copy"
+      <FeatureState
+        v-if="duplicates.loaded && !duplicates.list.length && !busy && !duplicates.error"
+        kind="empty"
+        icon="duplicates"
         :title="t('duplicates.empty')"
         :text="t('duplicates.emptyHint')"
       />
     </div>
-    <dialog
-      ref="previewDialog"
-      class="dialog preview-dialog"
-      :aria-label="preview ? fileName(preview.paths[0] ?? '') : undefined"
-      @close="preview = null"
+    <UModal
+      v-model:open="previewOpen"
+      :title="preview ? fileName(preview.paths[0] ?? '') : t('duplicates.previewTitle')"
+      :description="t('duplicates.previewHint')"
+      :close="false"
+      :content="{ onCloseAutoFocus: returnPreviewFocus }"
+      :ui="{ content: 'max-w-5xl' }"
     >
-      <template v-if="preview">
-        <button class="icon-btn close" :aria-label="t('common.close')" @click="previewDialog?.close()">
-          <Icon name="close" />
-        </button>
-        <img :src="thumbUrl(preview.id, preview.thumb, THUMB_LARGE)" :alt="fileName(preview.paths[0] ?? '')" />
-        <p v-for="path in preview.paths" :key="path">{{ path }}</p>
+      <template #close>
+        <UButton
+          :icon="icons.close"
+          :aria-label="t('common.close')"
+          color="neutral"
+          variant="ghost"
+          square
+          @click="preview = null"
+        />
       </template>
-    </dialog>
+      <template #body>
+        <div v-if="preview" data-duplicate-preview>
+          <img
+            class="preview-image"
+            :src="thumbUrl(preview.id, preview.thumb, THUMB_LARGE)"
+            :alt="fileName(preview.paths[0] ?? '')"
+          />
+          <p v-for="path in preview.paths" :key="path" class="preview-path lumen-selectable">{{ path }}</p>
+        </div>
+      </template>
+    </UModal>
     <ReviewDialog :review="reviewing" :busy="acting" @confirm="confirmReview" @cancel="cancelReview" />
-  </div>
+  </Page>
 </template>
 
 <style scoped>
+.duplicates-scroll {
+  height: 100%;
+  overflow-y: auto;
+  padding: 0.25rem var(--lumen-page-x) 1.5rem;
+}
+.guidance p {
+  margin: 0.5rem 0 1rem;
+}
 h2 {
-  margin: 28px 0 4px;
-  font-size: 18px;
+  margin: 1.5rem 0 0.25rem;
+  color: var(--ui-text-highlighted);
+  font-size: 1.125rem;
+  font-weight: 600;
 }
-
-.group {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  padding: 12px;
-  margin: 12px 0;
-}
-
 .virtual-list {
   position: relative;
 }
-
 .virtual-row {
   position: absolute;
   top: 0;
@@ -357,124 +334,16 @@ h2 {
   width: 100%;
   display: flow-root;
 }
-
-.item {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
-
-.item img {
-  width: 120px;
-  height: 120px;
-  object-fit: cover;
-  border-radius: var(--radius-m);
-}
-
-.preview-button {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: zoom-in;
-}
-
-/* No thumbnail made yet. */
-.preview-button .ph {
-  display: block;
-  width: 120px;
-  height: 120px;
-  border-radius: var(--radius-m);
-  background: var(--placeholder);
-}
-
-.item-info {
-  min-width: 0;
-}
-
-ul {
-  padding-left: 20px;
-  overflow-wrap: anywhere;
-}
-
-li + li {
-  margin-top: 4px;
-}
-
-li .btn {
-  display: block;
-  margin: 4px 0 10px;
-}
-
-.similar {
-  display: flex;
-  gap: 14px;
-  overflow-x: auto;
-}
-
-.keep {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-
-.keep em {
-  font-style: normal;
-  font-size: 12px;
-  color: var(--accent);
-}
-
-.group-actions {
-  margin-top: 12px;
-}
-
-.similar-item {
-  display: flex;
-  flex: 0 0 160px;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-
-.similar-item img {
-  width: 160px;
-  height: 160px;
-  object-fit: cover;
-  border-radius: var(--radius-m);
-}
-
-.similar-item strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.similar-item .btn {
-  align-self: flex-start;
-  margin-top: 4px;
-}
-
-.preview-dialog {
-  max-width: min(90vw, 1100px);
-  max-height: 90vh;
-  padding: 20px;
-  background: var(--surface-2);
-}
-
-.preview-dialog > img {
+.preview-image {
   display: block;
   max-width: 100%;
-  max-height: 72vh;
+  max-height: 65vh;
   object-fit: contain;
   margin: auto;
 }
-
-.preview-dialog p {
-  max-width: 70ch;
+.preview-path {
   overflow-wrap: anywhere;
-}
-
-.close {
-  float: right;
+  margin: 0.75rem 0 0;
+  color: var(--ui-text-muted);
 }
 </style>

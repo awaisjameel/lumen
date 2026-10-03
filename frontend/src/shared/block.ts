@@ -1,7 +1,11 @@
 import { getActivePinia } from 'pinia'
 import type { Pinia } from 'pinia'
 import { shallowRef } from 'vue'
+import { engine } from '../bridge'
 import type { BlockKind } from '../bridge'
+import { reportError } from './errors'
+import { t } from './i18n'
+import { notify } from './notify'
 
 export interface BlockRequest {
   kind: BlockKind
@@ -15,18 +19,27 @@ export interface BlockRequest {
 
 export const blockRequest = shallowRef<BlockRequest | null>(null)
 
-export const blockUndo = shallowRef<{ id: number; name: string } | null>(null)
-let undoTimer = 0
+/** The id of the notification that offers to undo a block. */
+export const BLOCK_UNDO_NOTIFICATION = 'block.undo'
 
+/** Says a block was saved, and offers for a few seconds to undo it. */
 export function showBlockUndo(id: number, name: string): void {
-  blockUndo.value = { id, name }
-  clearTimeout(undoTimer)
-  undoTimer = window.setTimeout(() => (blockUndo.value = null), 8000)
+  notify({
+    id: BLOCK_UNDO_NOTIFICATION,
+    kind: 'success',
+    title: t('blocked.saved', { name }),
+    duration: 8000,
+    actions: [{ label: t('blocked.undo'), run: () => void undoBlock(id) }],
+  })
 }
 
-export function clearBlockUndo(): void {
-  clearTimeout(undoTimer)
-  blockUndo.value = null
+async function undoBlock(id: number): Promise<void> {
+  try {
+    await engine.undoBlock(id)
+    await showBlocksChanged()
+  } catch (e) {
+    reportError(e)
+  }
 }
 
 // What showBlocksChanged refreshes, per app (Pinia instance): each store

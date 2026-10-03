@@ -21,7 +21,8 @@ tooling; this file covers how code is written.
   `store` before `services`; `shared` before a feature folder) and delete
   the other.
 - **Scope.** Phase 5 is built as `docs/phase5-design-2026-10-01.md` sets
-  out. Phase 6 (the installer, politeness controls, crash reports and
+  out. Phase 7 (the Nuxt UI frontend and design system) is built as
+  `docs/phase7-design-2026-10-04.md` records. Phase 6 (the installer, politeness controls, crash reports and
   diagnostics, onboarding and empty states, the performance pass) is built
   as `docs/phase6-design-2026-10-03.md` sets out; its decisions are not
   reopened except by a later explicit product-owner decision. Lumen currently
@@ -122,6 +123,43 @@ tooling; this file covers how code is written.
   script, template, style.
 - **Feature folders** (`library`, `people` and the rest) own their views
   and their store. Code used by two features moves to `shared/`.
+- **Layers.** `design/` (tokens, the icon manifest, how the appearance is
+  applied) sits below everything but the bridge's types. `shared/` holds
+  the compositions and registries features build on and never imports a
+  feature or the shell. Features never import `app/`; the shell (`app/`)
+  composes features, which reach it through shared registries (commands,
+  notifications, overlays). ESLint enforces each direction.
+- **Design system**
+  - Controls are Nuxt UI's, imported by name
+    (`import UButton from '@nuxt/ui/components/Button.vue'`); auto-import is
+    off, so a template uses only what its script imports. Use a library
+    control directly when it meets the need; add a Lumen component only for
+    shared product behaviour or a recurring composition (`Page`,
+    `PageHeader`, `FeatureState`, `CollectionCard`, `MediaTile`,
+    `SelectionBar`, `MetaRow`, `PrefRow`, `WorkProgress`). Virtual grids, the
+    viewer and timelines stay purpose-built.
+  - Colour, spacing, density, motion and layers come from the tokens in
+    `design/tokens.css` (Nuxt UI's `--ui-*` and Lumen's `--lumen-*`), by
+    utility class or scoped CSS. No literal colours outside the tokens,
+    except the viewer's fixed dark palette and photo badges.
+  - Icons are names from `design/icons.ts`, shown with `Icon` or passed as
+    `icons[name]`. A new icon is a new manifest line; nothing is fetched.
+  - Every list has loading, empty and failure states (`FeatureState`); a
+    state is never shown by colour, shadow or motion alone, so reduced
+    motion and forced colours lose nothing.
+- **One owner each**
+  - Appearance and layout preferences: `shared/preferences.ts`, saved in the
+    library's settings through the bridge (`latestSave` ordering). Browser
+    storage holds only the derived first-paint cache.
+  - Notifications: `notify()` in `shared/notify.ts`, shown as toasts by the
+    shell. No component draws its own notice bar.
+  - Overlays: Nuxt UI's modal, slideover, menu and popover (focus trap,
+    Escape and focus return are theirs). A full-window layer of Lumen's own
+    registers with `useLayer` and handles a key only when it `owns()`; page
+    shortcuts check `shortcutsSuspended()`.
+  - Commands: an action offered in more than one place (toolbar, menu,
+    palette, shortcut) is one `Command` registered with `useCommands`; its
+    availability is computed, and the engine still validates every call.
 - **Pinia**
   - Only setup stores (`defineStore(id, () => …)`).
   - A list from the engine uses `defineListStore` or `defineCollectionStore`
@@ -148,6 +186,10 @@ tooling; this file covers how code is written.
 - **Tests** are Vitest with `@vue/test-utils`. They mock the bridge with
   `vi.mock('../bridge', async (importOriginal) => ({ ...await importOriginal(), engine: {...} }))`,
   are named for behaviour, and sit beside the file they test
-  (`X.test.ts`).
+  (`X.test.ts`). A component built on Nuxt UI is mounted with `mountInApp`
+  (`shared/testing.ts`), which supplies the app's providers; overlay
+  content is portalled, so it is found in `document.body`. Notifications
+  are asserted with `recordNotifications()`. Tests find elements by role,
+  label or a deliberate `data-*` hook, not by styling classes.
 - **Pass gate:** `npm run check` (vue-tsc, ESLint with zero warnings,
   Prettier) and `npm run test`. `scripts/lint.sh` runs everything.

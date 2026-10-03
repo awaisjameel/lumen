@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { Device, engine, Filter, onLibraryChanged, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event, Progress } from '../bridge'
+import { mountInApp } from '../shared/testing'
 import LibraryView from './LibraryView.vue'
 import { useLibrary } from './store'
 
@@ -77,9 +78,7 @@ async function mountedTimeline() {
     routes: [{ path: '/events/:id', name: 'event', component: LibraryView }],
   })
   await router.push('/events/1')
-  const wrapper = mount(LibraryView, {
-    global: { plugins: [createPinia(), router], stubs: { SearchBox: true } },
-  })
+  const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
   await flushPromises()
   return { wrapper, router }
 }
@@ -128,9 +127,7 @@ it('shows the empty Trash with its own message and no toolbar', async () => {
     routes: [{ path: '/trash', name: 'trash', component: LibraryView, meta: { filter: Filter.FilterTrash } }],
   })
   await router.push('/trash')
-  const wrapper = mount(LibraryView, {
-    global: { plugins: [createPinia(), router], stubs: { SearchBox: true } },
-  })
+  const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
   await flushPromises()
   expect(wrapper.get('h1').text()).toBe('Trash')
   expect(wrapper.text()).toContain('The Trash is empty')
@@ -149,7 +146,7 @@ it('says it is looking while the first scan runs, and that nothing was found onc
   })
   await router.push('/')
   const pinia = createPinia()
-  const wrapper = mount(LibraryView, { global: { plugins: [pinia, router], stubs: { SearchBox: true } } })
+  const wrapper = mountInApp(LibraryView, { plugins: [pinia, router], stubs: { SearchBox: true } })
   await flushPromises()
   const lib = useLibrary(pinia)
   lib.progress = { ...progressIdle, scanning: true }

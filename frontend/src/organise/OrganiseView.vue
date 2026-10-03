@@ -3,11 +3,25 @@
 // writes, after a dry-run preview, with live progress and a full undo. The
 // engine does all the moving (internal/fileops); this page only asks.
 import { useVirtualizer } from '@tanstack/vue-virtual'
+import UAlert from '@nuxt/ui/components/Alert.vue'
+import UBadge from '@nuxt/ui/components/Badge.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UInput from '@nuxt/ui/components/Input.vue'
+import USelect from '@nuxt/ui/components/Select.vue'
+import UFormField from '@nuxt/ui/components/FormField.vue'
 import { storeToRefs } from 'pinia'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { ORGANISE_TOKENS, OrganiseMoveState, OrganiseReason, OrganiseRunState } from '../bridge'
 import type { OrganiseMove, OrganiseRun } from '../bridge'
 import { confirm } from '../shared/confirm'
+import { icons } from '../design/icons'
+import { registerCommands, runCommand, useCommands } from '../shared/commands'
+import type { Command } from '../shared/commands'
+import FeatureState from '../shared/FeatureState.vue'
+import Page from '../shared/Page.vue'
+import PageHeader from '../shared/PageHeader.vue'
+import PrefRow from '../shared/PrefRow.vue'
+import WorkProgress from '../shared/WorkProgress.vue'
 import { LOCALE, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import { renderExample, unknownTokens } from './template'
@@ -30,10 +44,13 @@ const {
   busy,
 } = storeToRefs(organise)
 
-const schemeInput = ref<HTMLInputElement | null>(null)
+const schemeInput = ref<{ inputRef: HTMLInputElement | null } | null>(null)
+const loadingRuns = ref(true)
 
 onMounted(() => {
-  void organise.loadRuns()
+  void organise.loadRuns().finally(() => {
+    loadingRuns.value = false
+  })
   void organise.loadSources()
   void organise.loadExample()
 })
@@ -47,7 +64,7 @@ const exampleText = computed(() => (example.value ? renderExample(template.value
 
 /** Puts a token into the scheme where the cursor is. */
 async function insertToken(token: string) {
-  const input = schemeInput.value
+  const input = schemeInput.value?.inputRef
   const text = braced(token)
   const start = input?.selectionStart ?? template.value.length
   const end = input?.selectionEnd ?? start
@@ -163,213 +180,254 @@ const canUndo = (run: OrganiseRun) =>
   (run.state === OrganiseRunState.OrganiseDone ||
     run.state === OrganiseRunState.OrganiseFailed ||
     run.state === OrganiseRunState.OrganiseUndoing)
+
+const sourceChoices = computed(() => [
+  { value: 0, label: t('organise.allSources') },
+  ...sources.value.map((source) => ({ value: source.id, label: source.path })),
+])
+useCommands([
+  {
+    id: 'organise.preview',
+    group: 'library',
+    title: () => t('organise.preview'),
+    icon: 'eye',
+    enabled: () => !planning.value && !busy.value && !!template.value.trim(),
+    run: () => organise.preview(),
+  },
+  {
+    id: 'organise.move',
+    group: 'library',
+    title: () => t('organise.move', { n: toMove.value }),
+    icon: 'organise',
+    available: () => plan.value !== null,
+    enabled: () => toMove.value > 0 && !busy.value,
+    run: startRun,
+  },
+])
+
+// Run actions follow the live history, so the palette and its buttons use
+// the same run and availability checks even after a progress event.
+let removeRunCommands: () => void = () => undefined
+watch(
+  runs,
+  (history) => {
+    removeRunCommands()
+    const commands: Command[] = history.flatMap((run) => [
+      {
+        id: `organise.resume.${run.id}`,
+        group: 'library',
+        title: () => `${t('organise.resume')} · ${when(run.createdAt)}`,
+        icon: 'play',
+        available: () => run.state === OrganiseRunState.OrganiseFailed,
+        enabled: () => !busy.value,
+        run: () => organise.resume(run),
+      },
+      {
+        id: `organise.undo.${run.id}`,
+        group: 'library',
+        title: () => `${t('organise.undo')} · ${when(run.createdAt)}`,
+        icon: 'undo',
+        available: () => canUndo(run),
+        enabled: () => !busy.value,
+        run: () => undoRun(run),
+      },
+    ])
+    removeRunCommands = registerCommands(commands)
+  },
+  { immediate: true },
+)
+onScopeDispose(() => removeRunCommands())
 </script>
 
 <template>
-  <div class="page">
-    <header class="topbar">
-      <h1>{{ t('organise.title') }}</h1>
-    </header>
-    <div class="page-body">
-      <RouterLink to="/settings" class="btn btn-subtle">{{ t('organise.back') }}</RouterLink>
-      <p class="muted">{{ t('organise.intro') }}</p>
-      <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-
-      <section class="scheme">
-        <label for="organise-scheme">{{ t('organise.scheme') }}</label>
-        <input id="organise-scheme" ref="schemeInput" v-model="template" type="text" spellcheck="false" />
-        <p class="muted hint">{{ t('organise.schemeHint') }}</p>
-        <div class="chips" role="group" :aria-label="t('organise.tokens')">
-          <button
-            v-for="token in ORGANISE_TOKENS"
-            :key="token"
-            type="button"
-            class="chip"
-            :title="t(`organise.token.${token}`)"
-            @click="insertToken(token)"
-          >
-            {{ braced(token) }}
-          </button>
-        </div>
-        <p v-for="token in unknown" :key="token" class="page-error" role="alert">
-          {{ t('organise.unknownToken', { token: braced(token) }) }}
-        </p>
-        <p class="example" aria-live="polite">
-          <template v-if="exampleText">{{ t('organise.example', { path: exampleText }) }}</template>
-          <template v-else-if="!example">{{ t('organise.exampleNone') }}</template>
-        </p>
-
-        <label for="organise-source">{{ t('organise.source') }}</label>
-        <select id="organise-source" v-model.number="sourceId">
-          <option :value="0">{{ t('organise.allSources') }}</option>
-          <option v-for="source in sources" :key="source.id" :value="source.id">{{ source.path }}</option>
-        </select>
-        <div class="actions">
-          <button class="btn btn-primary" :disabled="planning || busy || !template.trim()" @click="organise.preview()">
-            {{ t('organise.preview') }}
-          </button>
-        </div>
-      </section>
-
-      <p v-if="planning" class="muted" role="status">{{ t('organise.previewing') }}</p>
-
-      <section v-if="plan" class="preview">
-        <ul class="summary">
-          <li v-if="toMove">{{ t('organise.willMove', { n: toMove }) }}</li>
-          <li v-if="plan.inPlace">{{ t('organise.inPlace', { n: plan.inPlace }) }}</li>
-          <li v-if="plan.renamed">{{ t('organise.renamed', { n: plan.renamed }) }}</li>
-          <li v-if="plan.sidecars">{{ t('organise.sidecars', { n: plan.sidecars }) }}</li>
-          <li v-if="skipped">{{ t('organise.skipped', { n: skipped }) }}</li>
-        </ul>
-        <p v-if="!plan.moves.length" class="muted">{{ t('organise.nothing') }}</p>
-        <div
-          v-else
-          ref="scroller"
-          class="moves"
-          role="list"
-          tabindex="0"
-          :aria-label="t('organise.moves')"
-          :aria-rowcount="plan.moves.length"
+  <Page>
+    <template #header
+      ><PageHeader :title="t('organise.title')" :back="{ to: '/settings', label: t('organise.back') }"
+    /></template>
+    <p class="text-muted mb-4">{{ t('organise.intro') }}</p>
+    <UAlert v-if="error" data-organise-error color="error" variant="subtle" :title="error" role="alert" class="mb-4" />
+    <section class="scheme grid gap-4">
+      <UFormField :label="t('organise.scheme')" :help="t('organise.schemeHint')" class="w-full max-w-xl">
+        <UInput
+          id="organise-scheme"
+          ref="schemeInput"
+          v-model="template"
+          type="text"
+          spellcheck="false"
+          class="w-full"
+          :ui="{ base: 'font-mono' }"
+        />
+      </UFormField>
+      <div class="flex flex-wrap gap-1.5" role="group" :aria-label="t('organise.tokens')">
+        <UButton
+          v-for="token in ORGANISE_TOKENS"
+          :key="token"
+          type="button"
+          class="chip font-mono"
+          size="sm"
+          variant="outline"
+          :title="t(`organise.token.${token}`)"
+          @click="insertToken(token)"
+          >{{ braced(token) }}</UButton
         >
-          <div class="moves-inner" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-            <div
-              v-for="{ item, move } in visibleMoves"
-              :key="move.seq"
-              class="move"
-              :class="{ left: move.state === OrganiseMoveState.MoveSkipped }"
-              role="listitem"
-              :style="{ height: `${rowHeight}px`, transform: `translateY(${item.start}px)` }"
+      </div>
+      <UAlert
+        v-for="token in unknown"
+        :key="token"
+        color="error"
+        variant="subtle"
+        :title="t('organise.unknownToken', { token: braced(token) })"
+        role="alert"
+      />
+      <p class="example text-muted font-mono break-words" aria-live="polite">
+        <template v-if="exampleText">{{ t('organise.example', { path: exampleText }) }}</template>
+        <template v-else-if="!example">{{ t('organise.exampleNone') }}</template>
+      </p>
+      <PrefRow :label="t('organise.source')">
+        <template #default="{ labelledBy }"
+          ><USelect
+            id="organise-source"
+            v-model="sourceId"
+            :items="sourceChoices"
+            :aria-labelledby="labelledBy"
+            class="source-select"
+        /></template>
+      </PrefRow>
+      <div>
+        <UButton
+          color="primary"
+          variant="solid"
+          :icon="icons.eye"
+          :disabled="planning || busy || !template.trim()"
+          :loading="planning"
+          @click="runCommand('organise.preview')"
+          >{{ t('organise.preview') }}</UButton
+        >
+      </div>
+    </section>
+    <FeatureState v-if="planning" kind="loading" :title="t('organise.previewing')" />
+    <section v-if="plan" class="preview mt-4">
+      <ul class="summary text-muted mb-3 pl-5 list-disc">
+        <li v-if="toMove">{{ t('organise.willMove', { n: toMove }) }}</li>
+        <li v-if="plan.inPlace">{{ t('organise.inPlace', { n: plan.inPlace }) }}</li>
+        <li v-if="plan.renamed">{{ t('organise.renamed', { n: plan.renamed }) }}</li>
+        <li v-if="plan.sidecars">{{ t('organise.sidecars', { n: plan.sidecars }) }}</li>
+        <li v-if="skipped">{{ t('organise.skipped', { n: skipped }) }}</li>
+      </ul>
+      <FeatureState v-if="!plan.moves.length" kind="empty" icon="organise" :title="t('organise.nothing')" />
+      <div v-else ref="scroller" class="moves" role="list" tabindex="0" :aria-label="t('organise.moves')">
+        <div class="moves-inner" :style="{ height: `${virtualizer.getTotalSize()}px` }">
+          <div
+            v-for="{ item, move } in visibleMoves"
+            :key="move.seq"
+            class="move"
+            :class="{ left: move.state === OrganiseMoveState.MoveSkipped }"
+            role="listitem"
+            :aria-posinset="item.index + 1"
+            :aria-setsize="plan.moves.length"
+            :style="{ height: `${rowHeight}px`, transform: `translateY(${item.start}px)` }"
+          >
+            <span class="path" :title="move.from">{{ move.from }}</span>
+            <span v-if="move.state === OrganiseMoveState.MoveSkipped" class="path reason" :title="reasonText(move)">{{
+              reasonText(move)
+            }}</span>
+            <span v-else class="path" :title="move.to"
+              ><span class="sr-only">{{ t('organise.movesTo') }}</span
+              ><span aria-hidden="true">→</span> {{ move.to }}
+              <UBadge v-if="move.renamed" color="neutral" variant="outline" size="sm">{{
+                t('organise.renamedTag')
+              }}</UBadge></span
             >
-              <span class="path" :title="move.from">{{ move.from }}</span>
-              <span v-if="move.state === OrganiseMoveState.MoveSkipped" class="path reason">{{
-                reasonText(move)
-              }}</span>
-              <span v-else class="path" :title="move.to">
-                <span class="sr-only">{{ t('organise.movesTo') }}</span
-                ><span aria-hidden="true">→</span> {{ move.to }}
-                <span v-if="move.renamed" class="tag">{{ t('organise.renamedTag') }}</span>
-              </span>
-              <span v-if="move.state !== OrganiseMoveState.MoveSkipped && move.error" class="path note">{{
-                reasonText(move)
-              }}</span>
-            </div>
+            <span
+              v-if="move.state !== OrganiseMoveState.MoveSkipped && move.error"
+              class="path note"
+              :title="reasonText(move)"
+              >{{ reasonText(move) }}</span
+            >
           </div>
         </div>
-        <div class="actions">
-          <button class="btn btn-primary" :disabled="!toMove || busy" @click="startRun">
-            {{ t('organise.move', { n: toMove }) }}
-          </button>
-        </div>
-      </section>
-
-      <section v-if="moving && progress" class="progress">
-        <progress :value="progress.done" :max="Math.max(progress.total, 1)" :aria-label="progressText"></progress>
-        <p>{{ progressText }}</p>
-      </section>
-      <p v-else-if="finished" class="finished" role="status">{{ finished }}</p>
-
-      <section class="runs">
-        <h2>{{ t('organise.runs') }}</h2>
-        <p v-if="!runs.length" class="muted">{{ t('organise.noRuns') }}</p>
-        <ul v-else class="list">
-          <li v-for="run in runs" :key="run.id">
-            <div class="item-name">
-              <strong>{{ when(run.createdAt) }}</strong>
-              <small
-                >{{ t(stateText(run.state)) }} · {{ t('organise.runMoved', { moved: run.moved, total: run.total }) }} ·
-                <template v-if="run.sidecarsKept">{{ t('organise.runKept', { n: run.sidecarsKept }) }} · </template>
-                {{ run.template }}</small
-              >
-            </div>
-            <button
+      </div>
+      <UButton
+        class="mt-3"
+        color="primary"
+        variant="solid"
+        :icon="icons.organise"
+        :disabled="!toMove || busy"
+        @click="runCommand('organise.move')"
+        >{{ t('organise.move', { n: toMove }) }}</UButton
+      >
+    </section>
+    <WorkProgress
+      v-if="moving && progress"
+      class="progress my-4"
+      :label="progressText"
+      :done="progress.done"
+      :total="progress.total"
+    />
+    <UAlert
+      v-else-if="finished"
+      class="finished my-4"
+      :color="progress?.state === OrganiseRunState.OrganiseFailed ? 'error' : 'neutral'"
+      variant="subtle"
+      :title="finished"
+      role="status"
+    />
+    <section class="runs mt-6">
+      <h2 class="text-highlighted font-semibold text-lg mb-3">{{ t('organise.runs') }}</h2>
+      <FeatureState v-if="loadingRuns" kind="loading" :title="t('organise.loadingRuns')" />
+      <FeatureState v-else-if="!runs.length" kind="empty" icon="history" :title="t('organise.noRuns')" />
+      <ul v-else class="run-list">
+        <li v-for="run in runs" :key="run.id" class="run-entry">
+          <WorkProgress
+            class="min-w-0 flex-1"
+            :label="when(run.createdAt)"
+            :detail="`${t(stateText(run.state))} · ${t('organise.runMoved', { moved: run.moved, total: run.total })}`"
+            :done="run.moved"
+            :total="run.total"
+            :failed="run.state === OrganiseRunState.OrganiseFailed"
+          >
+            <UButton
               v-if="run.state === OrganiseRunState.OrganiseFailed"
-              class="btn"
+              :icon="icons.play"
               :disabled="busy"
-              @click="organise.resume(run)"
+              @click="runCommand(`organise.resume.${run.id}`)"
+              >{{ t('organise.resume') }}</UButton
             >
-              {{ t('organise.resume') }}
-            </button>
-            <button v-if="canUndo(run)" class="btn" :disabled="busy" @click="undoRun(run)">
-              {{ t('organise.undo') }}
-            </button>
-          </li>
-        </ul>
-      </section>
-    </div>
-  </div>
+            <UButton
+              v-if="canUndo(run)"
+              :icon="icons.undo"
+              :disabled="busy"
+              @click="runCommand(`organise.undo.${run.id}`)"
+              >{{ t('organise.undo') }}</UButton
+            >
+          </WorkProgress>
+          <p v-if="run.sidecarsKept" class="text-muted text-xs">{{ t('organise.runKept', { n: run.sidecarsKept }) }}</p>
+          <p class="text-muted text-xs font-mono break-words">{{ run.template }}</p>
+        </li>
+      </ul>
+    </section>
+  </Page>
 </template>
 
 <style scoped>
-.scheme {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 12px 0 16px;
+.source-select {
+  width: min(28rem, 100%);
 }
-
-.scheme input[type='text'] {
-  width: min(560px, 100%);
-  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-}
-
-.hint {
-  margin: 0;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.chip {
-  padding: 3px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
-  font:
-    12px/1.4 ui-monospace,
-    'Cascadia Mono',
-    Consolas,
-    monospace;
-  cursor: pointer;
-}
-
-.chip:hover {
-  background: var(--surface-hover);
-}
-
 .example {
-  margin: 0;
   min-height: 1.4em;
-  color: var(--text-2);
-  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  margin: 0;
   overflow-wrap: anywhere;
 }
-
-.preview {
-  margin: 8px 0 16px;
-}
-
-.summary {
-  margin: 0 0 8px;
-  padding-left: 18px;
-}
-
 .moves {
   height: 320px;
   overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--ui-border);
+  border-radius: calc(var(--ui-radius) * 2);
 }
-
 .moves-inner {
   position: relative;
   width: 100%;
 }
-
 .move {
   position: absolute;
   top: 0;
@@ -379,81 +437,37 @@ const canUndo = (run: OrganiseRun) =>
   flex-direction: column;
   justify-content: center;
   gap: 2px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid var(--ui-border);
+  font-size: 0.8125rem;
 }
-
 .path {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-
-.move .path:first-child {
-  color: var(--text-2);
-}
-
-.move.left .reason {
-  color: var(--danger);
-}
-
+.move .path:first-child,
 .note {
-  color: var(--text-2);
-  font-size: 12px;
+  color: var(--ui-text-muted);
 }
-
-.tag {
-  margin-left: 6px;
-  padding: 0 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 11px;
+.move.left .reason {
+  color: var(--ui-error);
 }
-
-.progress {
-  margin: 8px 0 16px;
+.note {
+  font-size: 0.75rem;
 }
-
-.progress progress {
-  width: min(560px, 100%);
-}
-
-.finished {
-  margin: 8px 0 16px;
-}
-
-.runs .list {
+.run-list {
+  list-style: none;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
-
-.runs li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
+.run-entry {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--ui-border);
 }
-
-.item-name {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.item-name small {
-  overflow: hidden;
-  color: var(--text-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
+@container (max-width: 40rem) {
+  .source-select {
+    width: 100%;
+  }
 }
 </style>

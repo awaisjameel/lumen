@@ -9,6 +9,23 @@ import prettier from 'eslint-config-prettier/flat'
 import pluginVue from 'eslint-plugin-vue'
 import globals from 'globals'
 
+// The feature folders: each owns its views and store (AUDIT_CONVENTIONS.md).
+const features = [
+  'about',
+  'albums',
+  'duplicates',
+  'events',
+  'library',
+  'onboarding',
+  'organise',
+  'people',
+  'places',
+  'search',
+  'settings',
+  'things',
+  'trash',
+]
+
 export default defineConfigWithVueTs(
   { name: 'lumen/ignores', ignores: ['dist/', 'bindings/'] },
 
@@ -85,20 +102,53 @@ export default defineConfigWithVueTs(
             { group: ['**/bindings/**'], message: 'Call the engine through src/bridge.' },
             { group: ['@wailsio/runtime', '@wailsio/runtime/*'], message: 'Use the runtime through src/bridge.' },
             {
-              group: [
-                'library',
-                'people',
-                'albums',
-                'things',
-                'duplicates',
-                'events',
-                'places',
-                'settings',
-                'search',
-                'onboarding',
-              ].map((feature) => `../${feature}/*`),
+              group: features.map((feature) => `../${feature}/*`),
               message: 'Shared code must not depend on a feature folder.',
             },
+            { group: ['../app/*'], message: 'Shared code must not depend on the shell.' },
+          ],
+        },
+      ],
+    },
+  },
+
+  // The design system sits below everything but the bridge's types: tokens,
+  // the icon manifest and how the appearance is applied know no feature,
+  // shared composition or shell. This block replaces bridge-only's patterns
+  // for these files, so it repeats them.
+  {
+    name: 'lumen/design-below-all',
+    files: ['src/design/**/*.{ts,vue}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['**/bindings/**'], message: 'Call the engine through src/bridge.' },
+            { group: ['@wailsio/runtime', '@wailsio/runtime/*'], message: 'Use the runtime through src/bridge.' },
+            {
+              group: [...features, 'shared', 'app'].map((folder) => `../${folder}/*`),
+              message: 'The design system must not depend on shared code, a feature or the shell.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  // Features sit below the shell: a feature never imports from app/ (the
+  // shell composes features, and they reach it through shared registries).
+  {
+    name: 'lumen/features-below-shell',
+    files: features.map((feature) => `src/${feature}/**/*.{ts,vue}`),
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['**/bindings/**'], message: 'Call the engine through src/bridge.' },
+            { group: ['@wailsio/runtime', '@wailsio/runtime/*'], message: 'Use the runtime through src/bridge.' },
+            { group: ['../app/*'], message: 'A feature must not depend on the shell: register with shared code.' },
           ],
         },
       ],

@@ -1,0 +1,10 @@
+Decoder tiff [TIFF image]:
+    General capabilities: dr1 threads 
+    Threading capabilities: frame
+TIFF decoder AVOptions:
+  -subimage          <boolean>    .D.V....... decode subimage instead if available (default false)
+  -thumbnail         <boolean>    .D.V....... decode embedded thumbnail subimage instead if available (default false)
+  -page              <int>        .D.V....... page number of multi-page image to decode (starting from 1) (from 0 to 65535) (default 0)
+
+
+Exiting with exit code 0

@@ -1,0 +1,21 @@
+=== RUN   TestInventory
+physical_bytes=33854128128 available_bytes=14235496448
+ACLineStatus=1 BatteryFlag=8 BatteryLifePercent=59
+logical_processors=20
+decoder=BMP Decoder version=1.0.0.0 extensions=.bmp,.dib,.rle
+decoder=GIF Decoder version=1.0.0.0 extensions=.gif
+decoder=ICO Decoder version=1.0.0.0 extensions=.ico,.icon
+decoder=CUR Decoder version=1.0.0.0 extensions=.cur
+decoder=JPEG Decoder version=1.0.0.0 extensions=.jpeg,.jpe,.jpg,.jfif,.exif
+decoder=PNG Decoder version=1.0.0.0 extensions=.png
+decoder=TIFF Decoder version=1.0.0.0 extensions=.tiff,.tif
+decoder=DNG Decoder version=1.0.0.0 extensions=.dng
+decoder=WMPhoto Decoder version=1.0.0.0 extensions=.wdp,.jxr
+decoder=DDS Decoder version=1.0.0.0 extensions=.dds
+decoder=Microsoft HEIF Decoder version=1.0.0.0 extensions=.heic,.heif,.hif,.avci,.heics,.heifs,.avcs,.avif,.avifs
+decoder=Microsoft Webp Decoder version=1.0.0.0 extensions=.webp
+decoder=Microsoft Raw Image Decoder version=10.0.26100.1 extensions=.3FR,.ARI,.ARW,.BAY,.CAP,.CR2,.CR3,.CRW,.DCS,.DCR,.DRF,.EIP,.ERF,.FFF,.IIQ,.K25,.KDC,.MEF,.MOS,.MRW,.NEF,.NRW,.ORF,.ORI,.PEF,.PTX,.PXN,.RAF,.RAW,.RW2,.RWL,.SR2,.SRF,.SRW,.X3F,.DNG
+decoder=Microsoft JPEG XL Decoder version=10.0.26100.1 extensions=.JXL
+libvips=8.18.6
+--- PASS: TestInventory (0.00s)
+PASS

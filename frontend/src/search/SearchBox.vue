@@ -2,7 +2,9 @@
 // The one search box: type a description and press Enter to search by what's
 // in the photos (names of people narrow it to them), or pick a matching
 // person or Thing. Ctrl+F or / focuses it.
-import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UInput from '@nuxt/ui/components/Input.vue'
+import { computed, ref, useId, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import { engine } from '../bridge'
@@ -10,7 +12,8 @@ import type { Person, Tag } from '../bridge'
 import { logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
-import { isTyping, modalOpen } from '../shared/keys'
+import { icons } from '../design/icons'
+import { useCommands } from '../shared/commands'
 import { useSuggestions } from '../shared/suggest'
 import { useLibrary } from '../library/store'
 import FaceThumb from '../people/FaceThumb.vue'
@@ -20,7 +23,8 @@ const router = useRouter()
 const lib = useLibrary()
 
 const id = useId()
-const input = ref<HTMLInputElement | null>(null)
+// UInput exposes its <input>; the box is focused and blurred through it.
+const field = ref<{ inputRef: HTMLInputElement | null } | null>(null)
 const text = ref('')
 const open = ref(false)
 const active = ref(0) // index into options
@@ -61,7 +65,7 @@ function onFocus() {
 
 function close() {
   open.value = false
-  input.value?.blur()
+  field.value?.inputRef?.blur()
 }
 
 function search() {
@@ -90,7 +94,7 @@ function choose(o: Option | undefined) {
 function clear() {
   text.value = ''
   if (route.name === 'search') void router.push('/')
-  input.value?.focus()
+  field.value?.inputRef?.focus()
 }
 
 function onKey(e: KeyboardEvent) {
@@ -104,22 +108,29 @@ function onKey(e: KeyboardEvent) {
     choose(options.value[active.value])
   } else if (e.key === 'Escape') {
     if (open.value && n) open.value = false
-    else input.value?.blur()
+    else field.value?.inputRef?.blur()
   }
 }
 
-// Ctrl+F or "/" from anywhere (except while typing elsewhere, or when the
-// viewer or a question covers the box).
-function onGlobalKey(e: KeyboardEvent) {
-  if (modalOpen()) return
-  if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !isTyping(e))) {
-    e.preventDefault()
-    input.value?.focus()
-    input.value?.select()
-  }
+// Ctrl+F or "/" from anywhere: one command, so the palette and the shortcut
+// reference offer it too. The registry leaves it alone while the user types
+// elsewhere, or while the viewer or a dialog covers the box.
+function focusBox() {
+  const el = field.value?.inputRef
+  el?.focus()
+  el?.select()
 }
-onMounted(() => window.addEventListener('keydown', onGlobalKey))
-onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
+useCommands([
+  {
+    id: 'search.focus',
+    group: 'library',
+    title: () => t('search.command'),
+    icon: 'search',
+    keys: 'Ctrl+F',
+    altKeys: ['/'],
+    run: focusBox,
+  },
+])
 
 function optionKey(o: Option): string {
   return o.kind === 'person' ? `p${o.person.id}` : o.kind === 'thing' ? `t${o.tag.id}` : 's'
@@ -134,10 +145,10 @@ function heading(o: Option, i: number): string {
 
 <template>
   <div class="search" @focusout="open = false">
-    <Icon name="search" :size="18" class="lead" />
-    <input
-      ref="input"
+    <UInput
+      ref="field"
       v-model="text"
+      class="box"
       type="search"
       role="combobox"
       aria-autocomplete="list"
@@ -147,17 +158,31 @@ function heading(o: Option, i: number): string {
       :aria-label="t('search.shortcut')"
       :placeholder="t('search.placeholder')"
       :title="t('search.shortcut')"
+      :leading-icon="icons.search"
+      variant="soft"
+      :ui="{ base: 'rounded-full', trailing: 'pe-1' }"
       spellcheck="false"
       autocomplete="off"
       @focus="onFocus"
-      @input="open = true"
+      @update:model-value="open = true"
       @keydown="onKey"
-    />
-    <button v-if="text" class="icon-btn clear" :title="t('search.clear')" @mousedown.prevent @click="clear">
-      <Icon name="close" :size="16" />
-    </button>
+    >
+      <template v-if="text" #trailing>
+        <UButton
+          :icon="icons.close"
+          :aria-label="t('search.clear')"
+          :title="t('search.clear')"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          square
+          @mousedown.prevent
+          @click="clear"
+        />
+      </template>
+    </UInput>
 
-    <ul v-if="open && options.length" :id="`${id}-list`" class="menu" role="listbox" @mousedown.prevent>
+    <ul v-if="open && options.length" :id="`${id}-list`" class="menu lumen-surface" role="listbox" @mousedown.prevent>
       <template v-for="(o, i) in options" :key="optionKey(o)">
         <li v-if="heading(o, i)" class="heading" role="presentation">{{ heading(o, i) }}</li>
         <li
@@ -189,82 +214,62 @@ function heading(o: Option, i: number): string {
 <style scoped>
 .search {
   position: relative;
-  display: flex;
-  align-items: center;
-  flex: 1;
-  max-width: 560px;
-  min-width: 180px;
+  flex: 1 1 14rem;
+  max-width: 35rem;
+  min-width: 10rem;
 }
-.lead {
-  position: absolute;
-  left: 12px;
-  color: var(--text-3);
-  pointer-events: none;
-}
-input {
+.box {
   width: 100%;
-  height: 36px;
-  padding: 0 36px 0 38px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--surface-2);
-  color: var(--text);
-  font: inherit;
-  outline: none;
 }
-input::-webkit-search-cancel-button {
+.box :deep(input::-webkit-search-cancel-button) {
   display: none;
-}
-input:focus {
-  border-color: var(--accent);
-  background: var(--surface);
-}
-.clear {
-  position: absolute;
-  right: 4px;
-  width: 28px;
-  height: 28px;
 }
 .menu {
   position: absolute;
-  top: 42px;
+  top: calc(100% + 0.375rem);
   left: 0;
   right: 0;
-  z-index: 20;
+  z-index: var(--lumen-z-panel);
   margin: 0;
-  padding: 6px;
+  padding: 0.375rem;
   list-style: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  border: 1px solid var(--ui-border);
+  border-radius: calc(var(--ui-radius) * 1.5);
+  background: var(--ui-bg);
+  box-shadow: var(--lumen-shadow);
 }
 .menu li {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 34px;
-  padding: 0 10px;
-  border-radius: var(--radius-s);
-  color: var(--text-2);
+  gap: 0.625rem;
+  min-height: var(--lumen-row-h);
+  padding: 0 0.625rem;
+  border-radius: var(--ui-radius);
+  color: var(--ui-text-muted);
   cursor: pointer;
 }
 .menu li.active {
-  background: var(--surface-hover);
-  color: var(--text);
+  background: var(--ui-bg-elevated);
+  color: var(--ui-text-highlighted);
 }
 .menu li.heading {
-  height: 26px;
-  font-size: 11px;
+  min-height: 1.625rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-3);
+  color: var(--ui-text-dimmed);
   cursor: default;
 }
 .ellipsis {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+@media (forced-colors: active) {
+  .menu li.active {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 </style>

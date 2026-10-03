@@ -27,6 +27,8 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
   const block = shallowRef<Block | null>(null)
   const items = shallowRef<CoveredItem[]>([]) // up to tens of thousands
   const loading = ref(false)
+  const selected = shallowRef<ReadonlySet<number>>(new Set())
+  const trashing = ref(false)
   const viewing = ref<number | null>(null)
   let request = 0
 
@@ -59,6 +61,21 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
     items.value = []
     viewing.value = null
     loading.value = false
+    selected.value = new Set()
+    trashing.value = false
+  }
+
+  function select(id: number, checked: boolean) {
+    if (!position.value.has(id)) return
+    const next = new Set(selected.value)
+    if (checked) next.add(id)
+    else next.delete(id)
+    selected.value = next
+    hooks.used()
+  }
+
+  function clearSelection() {
+    selected.value = new Set()
   }
 
   /** Says the photos are being looked at (scrolling, playing a video), without telling the screen at every event. */
@@ -86,31 +103,47 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
    * Moves the photo in the Viewer to the Trash, and the Viewer on to the next
    * one (else the previous), once the user has been told that the Trash is
    * open to anyone: a photo kept behind the PIN leaves its protection there.
-   * The Viewer covers the screen, so a failure is reported on the app-wide
-   * notice; a locked screen relocks instead.
+   * The Viewer covers the screen, so a failure is reported as a toast;
+   * a locked screen relocks instead.
    */
-  async function moveToTrash() {
+  async function moveToTrash(ids?: number[]) {
     const id = viewing.value
-    if (id === null || !position.value.has(id)) return
+    const targets = ids ?? (id === null ? [] : [id])
+    if (trashing.value || !targets.length || targets.some((target) => !position.value.has(target))) return
     const mine = request
-    if (!(await confirm(t('covered.trashTitle'), t('covered.trashText'), t('trash.move')))) return
-    if (mine !== request) return // the screen locked, or was left, while the question was open
-    const at = position.value.get(id)
-    if (at === undefined) return
-    const next = items.value[at + 1] ?? items.value[at - 1]
+    trashing.value = true
     try {
-      await engine.trashCovered([id])
-    } catch (e) {
+      if (!(await confirm(t('covered.trashTitle'), t('covered.trashText'), t('trash.move')))) return
+      if (mine !== request) return // the screen locked, or was left, while the question was open
+      const at = id === null ? undefined : position.value.get(id)
+      const removed = new Set(targets)
+      const next =
+        at === undefined
+          ? undefined
+          : (items.value.slice(at + 1).find((item) => !removed.has(item.id)) ??
+            items.value
+              .slice(0, at)
+              .reverse()
+              .find((item) => !removed.has(item.id)))
+      try {
+        await engine.trashCovered(targets)
+      } catch (e) {
+        if (mine !== request) return
+        if (errorCode(e) === ErrorCode.BlocksLocked) hooks.failed(e)
+        else reportError(e)
+        return
+      }
       if (mine !== request) return
-      if (errorCode(e) === ErrorCode.BlocksLocked) hooks.failed(e)
-      else reportError(e)
-      return
+      items.value = items.value.filter((it) => !removed.has(it.id))
+      selected.value = new Set([...selected.value].filter((target) => !removed.has(target)))
+      if (viewing.value === id && id !== null && removed.has(id)) viewing.value = next?.id ?? null
+      hooks.used()
+    } finally {
+      if (mine === request) trashing.value = false
     }
-    if (mine !== request) return
-    items.value = items.value.filter((it) => it.id !== id)
-    if (viewing.value === id) viewing.value = next?.id ?? null
-    hooks.used()
   }
+
+  const trashSelection = () => moveToTrash([...selected.value])
 
   const actions: ViewerActions = { moveToTrash: () => void moveToTrash(), details: false }
 
@@ -133,7 +166,22 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
   }
 
   // Reactive, so a component reading it need not unwrap each ref.
-  return reactive({ block, items, loading, viewing, source: markRaw(source), open, close, view, touch })
+  return reactive({
+    block,
+    items,
+    loading,
+    viewing,
+    selected,
+    trashing,
+    source: markRaw(source),
+    open,
+    close,
+    view,
+    touch,
+    select,
+    clearSelection,
+    trashSelection,
+  })
 }
 
 export type CoveredPhotos = ReturnType<typeof useCoveredPhotos>

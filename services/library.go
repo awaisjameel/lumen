@@ -401,6 +401,25 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 	return set, nil
 }
 
+// Preferences returns how the user likes the interface to look.
+func (s *LibraryService) Preferences(ctx context.Context) (core.Preferences, error) {
+	return s.store.Preferences(ctx)
+}
+
+// SetPreferences stores the interface preferences, held to what the UI can
+// apply, and returns them as stored. They change nothing on disk and start
+// no indexing.
+func (s *LibraryService) SetPreferences(ctx context.Context, p core.Preferences) (core.Preferences, error) {
+	return s.store.SetPreferences(ctx, p)
+}
+
+// MigratePreferences offers the library, once, the choices an older Lumen
+// kept in the WebView's storage, and returns the preferences afterwards. A
+// value the library already has is never replaced.
+func (s *LibraryService) MigratePreferences(ctx context.Context, legacy core.LegacyPreferences) (core.Preferences, error) {
+	return s.store.MigrateLegacyPreferences(ctx, legacy)
+}
+
 // SetCPUThreads sets how many CPU threads indexing may keep busy, held to
 // what the machine has. It applies at once.
 func (s *LibraryService) SetCPUThreads(ctx context.Context, n int) error {

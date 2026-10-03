@@ -1,17 +1,28 @@
 <script setup lang="ts">
+import UButton from '@nuxt/ui/components/Button.vue'
+import UPopover from '@nuxt/ui/components/Popover.vue'
+import USlider from '@nuxt/ui/components/Slider.vue'
+import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { AlbumKind, engine, Filter, thumbUrl } from '../bridge'
+import { AlbumKind, engine, Filter, TILE_SIZE_MAX, TILE_SIZE_MIN } from '../bridge'
 import type { GridItem } from '../bridge'
+import { icons } from '../design/icons'
+import type { IconName } from '../design/icons'
+import { dispatchKey, useCommands } from '../shared/commands'
 import { logError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { useLiveReload } from '../shared/liveReload'
-import { dayLabel, duration } from '../shared/format'
+import FeatureState from '../shared/FeatureState.vue'
+import { dayLabel } from '../shared/format'
 import { listFormat, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
-import EmptyState from '../shared/EmptyState.vue'
-import Icon from '../shared/Icon.vue'
+import { useLayoutMode } from '../shared/layout'
+import MediaTile from '../shared/MediaTile.vue'
+import Page from '../shared/Page.vue'
+import PageHeader from '../shared/PageHeader.vue'
+import { usePreferences } from '../shared/preferences'
 import PersonHeader from '../people/PersonHeader.vue'
 import { usePeople } from '../people/store'
 import SearchBox from '../search/SearchBox.vue'
@@ -20,7 +31,7 @@ import { useAlbums } from '../albums/store'
 import { buildLayout, GAP, move, rowHeight, rowOfItem } from './layout'
 import type { Row } from './layout'
 import TrashBar from '../trash/TrashBar.vue'
-import { RESULTS, scopeKey, useLibrary, ZOOM_MAX, ZOOM_MIN } from './store'
+import { RESULTS, scopeKey, useLibrary } from './store'
 import type { Scope, Sel } from './store'
 import TimelineScrubber from './TimelineScrubber.vue'
 import DetailsPanel from './DetailsPanel.vue'
@@ -30,6 +41,8 @@ import VideoThumb from './VideoThumb.vue'
 const PAD = 20 // horizontal padding of the grid
 
 const lib = useLibrary()
+const prefs = usePreferences()
+const mode = useLayoutMode()
 const things = useThings()
 const people = usePeople()
 const albums = useAlbums()
@@ -162,7 +175,7 @@ onBeforeUnmount(() => {
   lib.detach()
 })
 
-const layout = computed(() => buildLayout(lib.buckets, Math.max(width.value, 200), lib.zoom, !lib.isSearch))
+const layout = computed(() => buildLayout(lib.buckets, Math.max(width.value, 200), prefs.prefs.tileSize, !lib.isSearch))
 
 const virtualizer = useVirtualizer(
   computed(() => ({
@@ -280,8 +293,67 @@ const arrows: Partial<Record<string, 'left' | 'right' | 'up' | 'down'>> = {
   ArrowDown: 'down',
 }
 
+// What can be done with the grid and its selected photo: one definition for
+// the toolbar, the command palette and the keys (the grid passes its own key
+// events on, so F and I act only while it has the focus, as before).
+const ZOOM_STEP = 8
+function setTileSize(v: number) {
+  void prefs.set({ tileSize: Math.min(TILE_SIZE_MAX, Math.max(TILE_SIZE_MIN, v)) })
+}
+useCommands([
+  {
+    id: 'media.favourite',
+    group: 'media',
+    title: () => t(lib.selectedItem?.f ? 'details.unfavourite' : 'details.favourite'),
+    icon: 'heart',
+    keys: 'F',
+    zone: 'grid',
+    available: () => !!lib.selected && !lib.inTrash && !lib.viewer,
+    run: () => lib.toggleFavourite(lib.selected),
+  },
+  {
+    id: 'media.open',
+    group: 'media',
+    title: () => t('library.open'),
+    icon: 'image',
+    keys: 'Enter',
+    zone: 'grid',
+    available: () => !!lib.selected && !lib.viewer,
+    run: () => {
+      if (lib.selected) lib.viewer = { ...lib.selected }
+    },
+  },
+  {
+    id: 'view.details',
+    group: 'view',
+    title: () => t('library.info'),
+    icon: 'inspector',
+    keys: 'I',
+    zone: 'grid',
+    available: () => !lib.viewer,
+    run: () => (lib.showDetails = !lib.showDetails),
+  },
+  {
+    id: 'view.largerTiles',
+    group: 'view',
+    title: () => t('library.zoomIn'),
+    icon: 'zoom-in',
+    enabled: () => prefs.prefs.tileSize < TILE_SIZE_MAX,
+    run: () => setTileSize(prefs.prefs.tileSize + ZOOM_STEP * 3),
+  },
+  {
+    id: 'view.smallerTiles',
+    group: 'view',
+    title: () => t('library.zoomOut'),
+    icon: 'zoom-out',
+    enabled: () => prefs.prefs.tileSize > TILE_SIZE_MIN,
+    run: () => setTileSize(prefs.prefs.tileSize - ZOOM_STEP * 3),
+  },
+])
+
 async function onKey(e: KeyboardEvent) {
   if (e.ctrlKey || e.altKey || e.metaKey) return // leave shortcuts like Ctrl+F alone
+  if (dispatchKey(e, 'grid')) return
   const sel = lib.selected
   const dir = arrows[e.key]
   if (dir) {
@@ -306,14 +378,8 @@ async function onKey(e: KeyboardEvent) {
       lib.selected = next
       scrollIntoView(next)
     }
-  } else if (e.key === 'Enter' && sel) {
-    lib.viewer = { ...sel }
   } else if (e.key === 'Escape') {
     lib.selected = null
-  } else if (e.key.toLowerCase() === 'f' && sel && !lib.inTrash) {
-    void lib.toggleFavourite(sel)
-  } else if (e.key.toLowerCase() === 'i') {
-    lib.showDetails = !lib.showDetails
   }
 }
 
@@ -372,8 +438,12 @@ const countText = computed(() => {
   return lib.isSearch ? t('search.results', { n: lib.total }) : t('status.items', { n: lib.total })
 })
 
-function onZoom(e: Event) {
-  if (e.target instanceof HTMLInputElement) lib.setZoom(Number(e.target.value))
+const emptyIcon = computed<IconName>(() => (lib.isSearch ? 'search' : lib.inTrash ? 'trash' : 'photos'))
+
+// The slider reports each step of a drag: the preference store shows it at
+// once and saves the newest.
+function onZoom(v: number | undefined) {
+  if (v !== undefined) setTileSize(v)
 }
 
 /** What a cell is, for screen readers: the kind, the day, a favourite. */
@@ -401,44 +471,87 @@ const searchNotes = computed(() => {
 
 <template>
   <div class="library">
-    <section class="page main">
-      <header class="topbar">
-        <PersonHeader v-if="personId" :id="personId" />
-        <div v-else class="heading">
-          <h1 :title="title">{{ title }}</h1>
-          <span v-if="countText" class="count">{{ countText }}</span>
-        </div>
-        <SearchBox />
-        <div class="spacer" />
-        <label class="zoom" :title="t('library.zoom')">
-          <Icon name="photos" :size="16" />
-          <input
-            type="range"
-            :min="ZOOM_MIN"
-            :max="ZOOM_MAX"
-            step="8"
-            :value="lib.zoom"
-            :aria-label="t('library.zoom')"
-            @input="onZoom"
-          />
-        </label>
-        <button
-          class="icon-btn"
-          :aria-pressed="lib.showDetails"
-          :title="t('common.withKey', { label: t('library.info'), key: 'I' })"
-          :aria-label="t('library.info')"
-          @click="lib.showDetails = !lib.showDetails"
-        >
-          <Icon name="info" />
-        </button>
-      </header>
+    <Page class="main" :scroll="false">
+      <template #header>
+        <PageHeader :title="title" :subtitle="personId ? undefined : countText">
+          <template v-if="personId" #title>
+            <PersonHeader :id="personId" />
+          </template>
+          <SearchBox />
+          <!-- Wide windows keep the size slider in the toolbar; narrower ones
+               fold it into a button so the search box keeps its room. -->
+          <label v-if="mode === 'wide'" class="zoom" :title="t('library.zoom')">
+            <UButton
+              :icon="icons['zoom-out']"
+              :aria-label="t('library.zoomOut')"
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              square
+              :disabled="prefs.prefs.tileSize <= TILE_SIZE_MIN"
+              @click="setTileSize(prefs.prefs.tileSize - ZOOM_STEP * 3)"
+            />
+            <USlider
+              class="zoom-slider"
+              :model-value="prefs.prefs.tileSize"
+              :min="TILE_SIZE_MIN"
+              :max="TILE_SIZE_MAX"
+              :step="ZOOM_STEP"
+              size="xs"
+              :aria-label="t('library.zoom')"
+              @update:model-value="onZoom"
+            />
+            <UButton
+              :icon="icons['zoom-in']"
+              :aria-label="t('library.zoomIn')"
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              square
+              :disabled="prefs.prefs.tileSize >= TILE_SIZE_MAX"
+              @click="setTileSize(prefs.prefs.tileSize + ZOOM_STEP * 3)"
+            />
+          </label>
+          <UPopover v-else>
+            <UTooltip :text="t('library.zoom')">
+              <UButton :icon="icons.grid" :aria-label="t('library.zoom')" color="neutral" variant="ghost" square />
+            </UTooltip>
+            <template #content>
+              <div class="zoom-pop">
+                <span>{{ t('library.zoom') }}</span>
+                <USlider
+                  :model-value="prefs.prefs.tileSize"
+                  :min="TILE_SIZE_MIN"
+                  :max="TILE_SIZE_MAX"
+                  :step="ZOOM_STEP"
+                  :aria-label="t('library.zoom')"
+                  @update:model-value="onZoom"
+                />
+              </div>
+            </template>
+          </UPopover>
+          <UTooltip :text="t('library.info')" :kbds="['I']">
+            <UButton
+              :icon="icons.inspector"
+              :aria-label="t('library.info')"
+              :aria-pressed="lib.showDetails"
+              color="neutral"
+              :variant="lib.showDetails ? 'soft' : 'ghost'"
+              square
+              @click="lib.showDetails = !lib.showDetails"
+            />
+          </UTooltip>
+        </PageHeader>
+      </template>
 
-      <TrashBar v-if="lib.inTrash" />
-
-      <p v-for="n in searchNotes" :key="n" class="note">{{ n }}</p>
-      <p v-if="lib.isSearch && lib.searchInfo?.blocked" class="note">
-        {{ t('search.blocked') }} <RouterLink to="/settings/blocked">{{ t('search.openBlocked') }}</RouterLink>
-      </p>
+      <template #toolbar>
+        <TrashBar v-if="lib.inTrash" />
+        <p v-for="n in searchNotes" :key="n" class="note">{{ n }}</p>
+        <p v-if="lib.isSearch && lib.searchInfo?.blocked" class="note">
+          {{ t('search.blocked') }}
+          <RouterLink to="/settings/blocked" class="link">{{ t('search.openBlocked') }}</RouterLink>
+        </p>
+      </template>
 
       <div class="grid-wrap">
         <div
@@ -448,21 +561,17 @@ const searchNotes = computed(() => {
           role="listbox"
           :aria-label="title"
           :aria-activedescendant="activeCell"
+          :aria-busy="searching"
           @scroll.passive="onScroll"
           @keydown="onKey"
         >
-          <EmptyState v-if="lib.loadError" class="overlay" role="alert" icon="image-off" :title="lib.loadError" />
-          <EmptyState
-            v-else-if="searching"
-            class="overlay"
-            role="status"
-            icon="search"
-            :title="t('search.searching')"
-          />
-          <EmptyState
+          <FeatureState v-if="lib.loadError" class="overlay" kind="error" :title="lib.loadError" />
+          <FeatureState v-else-if="searching" class="overlay" kind="loading" :title="t('search.searching')" />
+          <FeatureState
             v-else-if="empty"
             class="overlay"
-            :icon="lib.isSearch ? 'search' : lib.inTrash ? 'trash' : 'photos'"
+            kind="empty"
+            :icon="emptyIcon"
             :title="emptyText[0]"
             :text="emptyText[1]"
           />
@@ -493,23 +602,18 @@ const searchNotes = computed(() => {
                   @click="select(v.row.day, it)"
                   @dblclick="open(v.row.day, it)"
                 >
-                  <VideoThumb v-if="it?.v && it.t" :item="it" :cell="layout.cell" />
-                  <img
-                    v-else-if="it && it.t"
-                    :src="thumbUrl(it.id, it.t)"
-                    loading="lazy"
-                    decoding="async"
-                    draggable="false"
-                    alt=""
-                  />
-                  <span v-else class="ph" />
-                  <span v-if="it?.v" class="badge video">
-                    <Icon name="video" :size="16" />
-                  </span>
-                  <span v-if="it?.v && it.d" class="badge duration">{{ duration(it.d) }}</span>
-                  <span v-if="it?.f" class="badge fav">
-                    <Icon name="heart-filled" :size="16" />
-                  </span>
+                  <MediaTile
+                    :id="it?.id ?? 0"
+                    :thumb="it?.t ?? 0"
+                    :video="it?.v"
+                    :duration-ms="it?.d"
+                    :favourite="it?.f"
+                    :selected="!!it && lib.selected?.id === it.id"
+                  >
+                    <template v-if="it?.v && it.t" #media>
+                      <VideoThumb :key="it.id" :item="it" :cell="layout.cell" />
+                    </template>
+                  </MediaTile>
                 </div>
               </div>
             </div>
@@ -525,7 +629,7 @@ const searchNotes = computed(() => {
           @seek="seek"
         />
       </div>
-    </section>
+    </Page>
 
     <!-- The viewer has its own panel; this one would only load the same again behind it. -->
     <DetailsPanel v-if="lib.showDetails && !lib.viewer" :sel="lib.selected" />
@@ -539,175 +643,94 @@ const searchNotes = computed(() => {
   height: 100%;
   min-width: 0;
 }
-
 .main {
   flex: 1;
 }
-
-.heading {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: 30%;
-}
-
-.count {
-  color: var(--text-3);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
 .note {
-  margin: 0 20px 8px;
-  color: var(--text-3);
-  font-size: 12px;
+  margin: 0 var(--lumen-page-x) 0.5rem;
+  color: var(--ui-text-dimmed);
+  font-size: 0.75rem;
 }
-
+.link {
+  color: var(--ui-primary);
+  text-decoration: underline;
+}
 .zoom {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--text-3);
+  gap: 0.25rem;
+  flex-shrink: 0;
+  color: var(--ui-text-dimmed);
 }
-
-.zoom input {
-  width: 110px;
-  accent-color: var(--accent);
+.zoom-slider {
+  width: 6.5rem;
 }
-
+.zoom-pop {
+  display: grid;
+  gap: 0.625rem;
+  width: 14rem;
+  padding: 0.75rem;
+  color: var(--ui-text-muted);
+  font-size: 0.8125rem;
+}
 .grid-wrap {
-  position: relative;
-  flex: 1;
-  min-height: 0;
+  position: absolute;
+  inset: 0;
 }
-
 .scroller {
   position: absolute;
   inset: 0;
   overflow-y: auto;
   overflow-x: hidden;
   outline: none;
-  scrollbar-width: none;
-  /* the timeline scrubber replaces the scrollbar */
+  scrollbar-width: none; /* the timeline scrubber replaces the scrollbar */
 }
-
-/* Keyboard focus is on the grid itself: show it on the selected cell. */
-.scroller:focus-visible .cell.selected {
-  box-shadow: inset 0 0 0 5px var(--bg);
-}
-
 .scroller::-webkit-scrollbar {
   display: none;
 }
-
+/* Keyboard focus is on the grid itself: show it on the selected cell. */
+.scroller:focus-visible .cell.selected {
+  box-shadow: inset 0 0 0 5px var(--ui-bg);
+}
 .rows {
   position: relative;
   width: 100%;
 }
-
 .row {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
 }
-
 .day-header {
   display: flex;
   align-items: flex-end;
   height: 100%;
-  padding-bottom: 10px;
+  padding-bottom: 0.625rem;
 }
-
 .day-header h2 {
   margin: 0;
-  font-size: 14px;
+  color: var(--ui-text-highlighted);
+  font-size: 0.875rem;
   font-weight: 600;
 }
-
 .cells {
   display: flex;
 }
-
 .cell {
   position: relative;
   flex-shrink: 0;
-  border-radius: var(--radius-s);
-  overflow: hidden;
-  background: var(--placeholder);
   cursor: pointer;
 }
-
-.cell img,
-.cell .ph {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.cell .ph {
-  background: linear-gradient(100deg, var(--placeholder) 40%, var(--surface-2) 50%, var(--placeholder) 60%);
-  background-size: 300% 100%;
-  animation: shimmer 1.6s ease-in-out infinite;
-}
-
-@keyframes shimmer {
-  from {
-    background-position: 100% 0;
-  }
-
-  to {
-    background-position: 0 0;
-  }
-}
-
-.cell.selected {
-  outline: 3px solid var(--accent);
-  outline-offset: -3px;
-}
-
-.cell.selected img {
-  transform: scale(0.94);
-  border-radius: var(--radius-s);
-}
-
-.cell img {
-  transition: transform 0.12s ease;
-}
-
-.badge {
-  position: absolute;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.6));
-}
-
-.badge.video {
-  top: 6px;
-  right: 6px;
-}
-
-.badge.fav {
-  bottom: 6px;
-  left: 6px;
-}
-
-.badge.duration {
-  right: 5px;
-  bottom: 5px;
-  padding: 2px 4px;
-  border-radius: var(--radius-s);
-  background: rgb(0 0 0 / 0.68);
-  font-size: 11px;
-}
-
 .overlay {
   position: absolute;
   inset: 0;
-  place-content: center;
+  z-index: 1;
+}
+@media (forced-colors: active) {
+  .scroller:focus-visible .cell.selected {
+    outline: 3px solid Highlight;
+    outline-offset: -3px;
+  }
 }
 </style>

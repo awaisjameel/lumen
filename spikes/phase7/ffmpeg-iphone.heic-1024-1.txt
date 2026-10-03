@@ -1,0 +1,79 @@
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\Downloads\Lumen\spikes\.cache\heic\iphone.heic':
+  Metadata:
+    major_brand     : heic
+    minor_version   : 0
+    compatible_brands: mif1heic
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream group #0:0[0x31]: Tile Grid: hevc (Main) (hvc1 / 0x31637668), yuvj420p(pc), 3992x2992 (default)
+    Side data:
+      EXIF metadata: (66 bytes)
+Stream mapping:
+  Stream #0:0 (hevc) -> xstack (graph 1)
+  Stream #0:1 (hevc) -> xstack (graph 1)
+  Stream #0:2 (hevc) -> xstack (graph 1)
+  Stream #0:3 (hevc) -> xstack (graph 1)
+  Stream #0:4 (hevc) -> xstack (graph 1)
+  Stream #0:5 (hevc) -> xstack (graph 1)
+  Stream #0:6 (hevc) -> xstack (graph 1)
+  Stream #0:7 (hevc) -> xstack (graph 1)
+  Stream #0:8 (hevc) -> xstack (graph 1)
+  Stream #0:9 (hevc) -> xstack (graph 1)
+  Stream #0:10 (hevc) -> xstack (graph 1)
+  Stream #0:11 (hevc) -> xstack (graph 1)
+  Stream #0:12 (hevc) -> xstack (graph 1)
+  Stream #0:13 (hevc) -> xstack (graph 1)
+  Stream #0:14 (hevc) -> xstack (graph 1)
+  Stream #0:15 (hevc) -> xstack (graph 1)
+  Stream #0:16 (hevc) -> xstack (graph 1)
+  Stream #0:17 (hevc) -> xstack (graph 1)
+  Stream #0:18 (hevc) -> xstack (graph 1)
+  Stream #0:19 (hevc) -> xstack (graph 1)
+  Stream #0:20 (hevc) -> xstack (graph 1)
+  Stream #0:21 (hevc) -> xstack (graph 1)
+  Stream #0:22 (hevc) -> xstack (graph 1)
+  Stream #0:23 (hevc) -> xstack (graph 1)
+  Stream #0:24 (hevc) -> xstack (graph 1)
+  Stream #0:25 (hevc) -> xstack (graph 1)
+  Stream #0:26 (hevc) -> xstack (graph 1)
+  Stream #0:27 (hevc) -> xstack (graph 1)
+  Stream #0:28 (hevc) -> xstack (graph 1)
+  Stream #0:29 (hevc) -> xstack (graph 1)
+  Stream #0:30 (hevc) -> xstack (graph 1)
+  Stream #0:31 (hevc) -> xstack (graph 1)
+  Stream #0:32 (hevc) -> xstack (graph 1)
+  Stream #0:33 (hevc) -> xstack (graph 1)
+  Stream #0:34 (hevc) -> xstack (graph 1)
+  Stream #0:35 (hevc) -> xstack (graph 1)
+  Stream #0:36 (hevc) -> xstack (graph 1)
+  Stream #0:37 (hevc) -> xstack (graph 1)
+  Stream #0:38 (hevc) -> xstack (graph 1)
+  Stream #0:39 (hevc) -> xstack (graph 1)
+  Stream #0:40 (hevc) -> xstack (graph 1)
+  Stream #0:41 (hevc) -> xstack (graph 1)
+  Stream #0:42 (hevc) -> xstack (graph 1)
+  Stream #0:43 (hevc) -> xstack (graph 1)
+  Stream #0:44 (hevc) -> xstack (graph 1)
+  Stream #0:45 (hevc) -> xstack (graph 1)
+  Stream #0:46 (hevc) -> xstack (graph 1)
+  Stream #0:47 (hevc) -> xstack (graph 1)
+  scale:default (graph 0) -> Stream #0:0 (mjpeg)
+[swscaler @ 000002006f29e9c0] deprecated pixel format used, make sure you did set range correctly
+Output #0, image2, to 'D:\Downloads\Lumen\spikes\phase7\ffmpeg-iphone.heic-1024.jpg':
+  Metadata:
+    major_brand     : heic
+    minor_version   : 0
+    compatible_brands: mif1heic
+    encoder         : Lavf63.1.102
+  Stream #0:0: Video: mjpeg, yuvj420p(pc, progressive), 1024x767, q=2-31, 200 kb/s, 1 fps, 1 tbn
+    Metadata:
+      encoder         : Lavc63.1.102 mjpeg
+    Side data:
+      ICC Profile: (3144 bytes)
+      EXIF metadata: (66 bytes)
+      CPB properties: bitrate max/min/avg: 0/0/200000 buffer size: 0 vbv_delay: N/A
+[image2 @ 000002006f14ed40] The specified filename 'D:\Downloads\Lumen\spikes\phase7\ffmpeg-iphone.heic-1024.jpg' does not contain an image sequence pattern or a pattern is invalid.
+[image2 @ 000002006f14ed40] Use a pattern such as %03d for an image sequence or use the -update option (with -frames:v 1 if needed) to write a single image.
+[out#0/image2 @ 000002006f32dd40] video:266KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+frame=    1 fps=0.0 q=2.0 Lsize=N/A time=00:00:01.00 bitrate=N/A speed=13.1x elapsed=0:00:00.07    
+bench: utime=0.484s stime=0.391s rtime=0.078s
+bench: maxrss=74036KiB

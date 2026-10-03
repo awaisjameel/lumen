@@ -1,0 +1,48 @@
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.220: error in tile 0 x 0
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 1
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 2
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 3
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 4
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 5
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 6
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 7
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 8
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 9
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 10
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 11
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 12
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 13
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 14
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 15
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 16
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 17
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 18
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 0
+System.Management.Automation.RemoteException
+(vips.exe:32592): VIPS-WARNING **: 00:54:06.221: error in tile 0 x 10
+spikes/.cache/heic/autumn_1440x960.heic: bad seek to 293640
+spikes/.cache/heic/autumn_1440x960.heic: bad seek to 293622
+spikes/.cache/heic/autumn_1440x960.heic: bad seek to 293613
+spikes/.cache/heic/autumn_1440x960.heic: bad seek to 293610
+spikes/.cache/heic/autumn_1440x960.heic: bad seek to 293609
+heif: Error while loading plugin: Support for this compression format has not been built in (11.6003)

@@ -131,7 +131,7 @@ onBeforeUnmount(() => ro.disconnect())
   transform: translateY(-2px);
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-3);
+  color: var(--ui-text-dimmed);
   pointer-events: none;
 }
 .dot {
@@ -140,7 +140,7 @@ onBeforeUnmount(() => ro.disconnect())
   width: 3px;
   height: 3px;
   border-radius: 50%;
-  background: var(--text-3);
+  background: var(--ui-text-dimmed);
   opacity: 0.5;
   pointer-events: none;
 }
@@ -149,7 +149,7 @@ onBeforeUnmount(() => ro.disconnect())
   right: 8px;
   width: 28px;
   height: 2px;
-  background: var(--accent);
+  background: var(--ui-primary);
   border-radius: 1px;
   pointer-events: none;
 }
@@ -158,9 +158,11 @@ onBeforeUnmount(() => ro.disconnect())
   right: 48px;
   transform: translateY(-50%);
   padding: 4px 10px;
-  border-radius: var(--radius-m);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  border-radius: calc(var(--ui-radius) * 1.5);
+  border: 1px solid var(--ui-border);
+  background: var(--ui-bg);
+  color: var(--ui-text-highlighted);
+  box-shadow: var(--lumen-shadow);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;

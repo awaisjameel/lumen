@@ -1,6 +1,8 @@
 # Lumen: frontend and media development plan
 
-Date: 4 October 2026. Status: planned; implementation has not started.
+Date: 4 October 2026. Status: Phase 7 is implemented (see
+[the Phase 7 record](phase7-design-2026-10-04.md)); Phases 8–12 are planned
+and not started.
 
 This plan covers the product owner's four requests: rebuild the complete
 frontend with the latest stable Nuxt UI, expand viewing and file tools,

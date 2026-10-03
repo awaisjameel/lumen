@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
+import type { VueWrapper } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { mountInApp, recordNotifications } from '../shared/testing'
+import type { RecordedNotifications } from '../shared/testing'
 import {
   BLOCK_UNLOCK_IDLE_MINUTES,
   BlockKind,
@@ -10,12 +14,14 @@ import {
   ErrorCode,
   Kind,
   Playback,
+  PIN_COOLDOWN_SECONDS,
+  PIN_PATTERN,
 } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { AssetDetail, CoveredItem } from '../bridge'
 import type * as Block from '../shared/block'
 import { confirm } from '../shared/confirm'
-import { notice } from '../shared/errors'
+import { ERROR_NOTIFICATION } from '../shared/errors'
 import { t } from '../shared/i18n'
 import BlockedView from './BlockedView.vue'
 
@@ -23,6 +29,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   engine: {
     blockPINConfigured: vi.fn(),
+    createBlockPIN: vi.fn(),
     unlockBlocks: vi.fn(),
     lockBlocks: vi.fn(),
     blocks: vi.fn(),
@@ -52,7 +59,7 @@ const privateBlock = {
 const idle = BLOCK_UNLOCK_IDLE_MINUTES * 60 * 1000
 
 async function opened() {
-  wrapper = mount(BlockedView, { attachTo: document.body, global: { stubs: { RouterLink: true } } })
+  wrapper = mountView()
   await flushPromises()
   await wrapper.get('input').setValue('123456')
   await wrapper.get('form').trigger('submit')
@@ -60,11 +67,25 @@ async function opened() {
   return wrapper
 }
 
-let wrapper: ReturnType<typeof mount> | undefined
+let wrapper: VueWrapper | undefined
+let notifications: RecordedNotifications
+const body = new DOMWrapper(document.body)
+
+function mountView() {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { render: () => null } },
+      { path: '/settings', component: { render: () => null } },
+    ],
+  })
+  return mountInApp(BlockedView, { plugins: [router] })
+}
 
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.mocked(engine.blockPINConfigured).mockReset().mockResolvedValue(true)
+  vi.mocked(engine.createBlockPIN).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.unlockBlocks).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.lockBlocks).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.blocks).mockReset().mockResolvedValue([])
@@ -75,9 +96,10 @@ beforeEach(() => {
   vi.mocked(engine.trashCovered).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.asset).mockReset().mockResolvedValue(photoDetail(1))
   vi.mocked(confirm).mockReset().mockResolvedValue(true)
-  notice.value = ''
+  notifications = recordNotifications()
 })
 afterEach(() => {
+  notifications.stop()
   wrapper?.unmount()
   wrapper = undefined
   vi.useRealTimers()
@@ -101,7 +123,7 @@ it.each(['mode', 'unblock'] as const)('extends the idle deadline after a success
   vi.mocked(engine.blocks).mockResolvedValue([privateBlock])
   const view = await opened()
   await vi.advanceTimersByTimeAsync(idle - 1000)
-  await view.get(action === 'mode' ? '.list button:first-of-type' : '.list button:last-of-type').trigger('click')
+  await view.get(action === 'mode' ? '[data-blocked="mode"]' : '[data-blocked="unblock"]').trigger('click')
   await flushPromises()
   await vi.advanceTimersByTimeAsync(1000)
   expect(view.find('form').exists()).toBe(false)
@@ -119,7 +141,7 @@ it.each(['mode', 'unblock', 'reload'] as const)(
     if (action === 'mode') vi.mocked(engine.setBlockMode).mockRejectedValueOnce(locked)
     else if (action === 'unblock') vi.mocked(engine.removeBlock).mockRejectedValueOnce(locked)
     else vi.mocked(engine.blocks).mockRejectedValueOnce(locked)
-    await view.get(action === 'unblock' ? '.list button:last-of-type' : '.list button:first-of-type').trigger('click')
+    await view.get(action === 'unblock' ? '[data-blocked="unblock"]' : '[data-blocked="mode"]').trigger('click')
     await flushPromises()
     expect(view.text()).not.toContain('Private name')
     expect(view.find('form').exists()).toBe(true)
@@ -131,9 +153,11 @@ it('does not reinstall a private list response that finishes after expiry', asyn
   vi.useFakeTimers()
   vi.mocked(engine.blocks).mockResolvedValue([privateBlock])
   const view = await opened()
-  let finish!: (value: (typeof privateBlock)[]) => void
+  let finish: (value: (typeof privateBlock)[]) => void = () => {
+    throw new Error('the list has no resolver')
+  }
   vi.mocked(engine.blocks).mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
-  await view.get('.list button:first-of-type').trigger('click')
+  await view.get('[data-blocked="mode"]').trigger('click')
   await flushPromises()
   await vi.advanceTimersByTimeAsync(idle)
   finish([privateBlock])
@@ -145,16 +169,21 @@ it('does not reinstall a private list response that finishes after expiry', asyn
 it('disposes the idle timer on unmount', async () => {
   vi.useFakeTimers()
   await opened()
-  expect(vi.getTimerCount()).toBe(1)
   wrapper?.unmount()
   wrapper = undefined
-  expect(vi.getTimerCount()).toBe(0)
+  // Leaving locks the engine once. The idle timer went with the screen: the
+  // idle time passing afterwards must not lock (or do anything) again.
+  expect(engine.lockBlocks).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(idle)
+  expect(engine.lockBlocks).toHaveBeenCalledTimes(1)
 })
 
 it('locks once on leaving and does not let a delayed unlock lock a newer screen', async () => {
-  let resolve!: () => void
+  let resolve: () => void = () => {
+    throw new Error('the unlock has no resolver')
+  }
   vi.mocked(engine.unlockBlocks).mockReturnValueOnce(new Promise<void>((done) => (resolve = done)))
-  wrapper = mount(BlockedView, { global: { stubs: { RouterLink: true } } })
+  wrapper = mountView()
   await flushPromises()
   await wrapper.get('input').setValue('123456')
   await wrapper.get('form').trigger('submit')
@@ -168,7 +197,7 @@ it('locks once on leaving and does not let a delayed unlock lock a newer screen'
 })
 
 it('shows the private list only after unlock and relocks on leaving', async () => {
-  wrapper = mount(BlockedView, { global: { stubs: { RouterLink: true } } })
+  wrapper = mountView()
   await flushPromises()
   expect(engine.blocks).not.toHaveBeenCalled()
   await wrapper.get('input').setValue('123456')
@@ -183,13 +212,13 @@ it('shows the private list only after unlock and relocks on leaving', async () =
 })
 
 async function forgotten() {
-  wrapper = mount(BlockedView, { attachTo: document.body, global: { stubs: { RouterLink: true } } })
+  wrapper = mountView()
   await flushPromises()
-  await wrapper.get('button[type="button"]').trigger('click')
+  await wrapper.get('[data-blocked="forgot"]').trigger('click')
   return wrapper
 }
 
-async function chooseNewPIN(view: ReturnType<typeof mount>, first: string, second: string) {
+async function chooseNewPIN(view: VueWrapper, first: string, second: string) {
   const [pin, confirmation] = view.findAll('input')
   await pin?.setValue(first)
   await confirmation?.setValue(second)
@@ -203,7 +232,7 @@ it('resets a forgotten PIN after the Windows sign-in and asks for the new PIN to
   await chooseNewPIN(view, '654321', '654321')
   expect(engine.resetBlockPIN).toHaveBeenCalledExactlyOnceWith('654321')
   expect(view.text()).toContain(t('blocked.pinChanged'))
-  expect(view.find('.page-error').exists()).toBe(false)
+  expect(view.find('[data-blocked-error]').exists()).toBe(false)
   // Still locked: the list is not opened by the reset, and the form asks for the PIN.
   expect(engine.unlockBlocks).not.toHaveBeenCalled()
   expect(engine.blocks).not.toHaveBeenCalled()
@@ -220,7 +249,7 @@ it('makes no call when the two new PINs differ', async () => {
   const view = await forgotten()
   await chooseNewPIN(view, '654321', '654322')
   expect(engine.resetBlockPIN).not.toHaveBeenCalled()
-  expect(view.get('.page-error').text()).toBe(t('blocked.pinMismatch'))
+  expect(view.get('[data-blocked-error]').text()).toBe(t('blocked.pinMismatch'))
   expect(view.text()).not.toContain(t('blocked.pinChanged'))
 })
 
@@ -232,21 +261,20 @@ it.each([
   vi.mocked(engine.resetBlockPIN).mockRejectedValueOnce(new Error('refused', { cause: { code } }))
   const view = await forgotten()
   await chooseNewPIN(view, '654321', '654321')
-  expect(view.get('.page-error').text()).toBe(t(key, { pinMin: 6, pinMax: 12 }))
+  expect(view.get('[data-blocked-error]').text()).toBe(t(key, { pinMin: 6, pinMax: 12 }))
   expect(view.text()).not.toContain(t('blocked.pinChanged'))
   expect(view.findAll('input')).toHaveLength(2)
   await view.get('form').trigger('submit')
   await flushPromises()
   expect(engine.resetBlockPIN).toHaveBeenCalledTimes(2)
-  expect(view.find('.page-error').exists()).toBe(false)
+  expect(view.find('[data-blocked-error]').exists()).toBe(false)
   expect(view.text()).toContain(t('blocked.pinChanged'))
 })
 
 it('goes back to the PIN form from the reset form without calling the engine', async () => {
   const view = await forgotten()
   await view.get('input').setValue('654321')
-  const buttons = view.findAll('button[type="button"]')
-  await buttons[0]?.trigger('click')
+  await view.get('[data-blocked="cancel-reset"]').trigger('click')
   expect(view.findAll('input')).toHaveLength(1)
   expect(view.get('input').element).toHaveProperty('value', '')
   expect(engine.resetBlockPIN).not.toHaveBeenCalled()
@@ -254,7 +282,7 @@ it('goes back to the PIN form from the reset form without calling the engine', a
 
 it('offers no reset while there is no PIN to reset', async () => {
   vi.mocked(engine.blockPINConfigured).mockResolvedValue(false)
-  wrapper = mount(BlockedView, { global: { stubs: { RouterLink: true } } })
+  wrapper = mountView()
   await flushPromises()
   expect(wrapper.text()).not.toContain(t('blocked.forgotPIN'))
 })
@@ -276,7 +304,7 @@ const photoDetail = (id: number): AssetDetail => ({
   paths: [],
   size: 100,
   ext: '.jpg',
-  webNative: true,
+  caps: { preview: true, original: true, render: false, directPlay: false, convertPlay: false },
   video: null,
 })
 
@@ -322,15 +350,11 @@ function giveTheGridASize() {
 }
 
 /** Unlocks the screen, with the blocks given, and opens the browser on the first. */
-async function browsing(
-  items: CoveredItem[],
-  blocks = [privateBlock],
-  stubs: Record<string, boolean> = { teleport: true },
-) {
+async function browsing(items: CoveredItem[], blocks = [privateBlock]) {
   giveTheGridASize()
   vi.mocked(engine.blocks).mockResolvedValue(blocks)
   vi.mocked(engine.blockedItems).mockResolvedValue(items)
-  wrapper = mount(BlockedView, { attachTo: document.body, global: { stubs: { RouterLink: true, ...stubs } } })
+  wrapper = mountView()
   await flushPromises()
   await wrapper.get('input').setValue('123456')
   await wrapper.get('form').trigger('submit')
@@ -348,7 +372,7 @@ async function showPhotos(block: number) {
 const cells = () => wrapper?.findAll('.cell') ?? []
 
 it('offers the covered photos only once the PIN has unlocked the screen', async () => {
-  wrapper = mount(BlockedView, { global: { stubs: { RouterLink: true } } })
+  wrapper = mountView()
   await flushPromises()
   expect(wrapper.text()).not.toContain(t('covered.show'))
   expect(engine.blockedItems).not.toHaveBeenCalled()
@@ -407,33 +431,33 @@ it('says so when a block covers nothing', async () => {
 
 it('goes back to the list and forgets the photos', async () => {
   const view = await browsing([covered(1)])
-  await view.get('.head button').trigger('click')
+  await view.get('[data-covered="back"]').trigger('click')
   expect(view.find('.list').exists()).toBe(true)
   expect(cells()).toHaveLength(0)
   expect(engine.lockBlocks).not.toHaveBeenCalled() // the screen is still open
 })
 
 it('opens a photo in the Viewer, which moves it to the Trash and on to the next photo', async () => {
-  const view = await browsing([covered(1), covered(2), covered(3)])
+  await browsing([covered(1), covered(2), covered(3)])
   await cells()[1]?.trigger('click')
   await flushPromises()
-  expect(view.find('.viewer').exists()).toBe(true)
+  expect(body.find('.viewer').exists()).toBe(true)
   expect(engine.asset).toHaveBeenLastCalledWith(2)
-  await view.get('.viewer button[aria-label="Move to Trash"]').trigger('click')
+  await body.get('.viewer button[aria-label="Move to Trash"]').trigger('click')
   await flushPromises()
   expect(engine.trashCovered).toHaveBeenCalledExactlyOnceWith([2])
   expect(engine.asset).toHaveBeenLastCalledWith(3)
   expect(cells()).toHaveLength(2)
-  await view.get('.viewer .prev').trigger('click')
+  await body.get('.viewer .prev').trigger('click')
   await flushPromises()
   expect(engine.asset).toHaveBeenLastCalledWith(1)
 })
 
 it('offers nothing but Move to Trash in the Viewer of a covered photo', async () => {
-  const view = await browsing([covered(1)])
+  await browsing([covered(1)])
   await cells()[0]?.trigger('click')
   await flushPromises()
-  const labels = view.findAll('.viewer .bar button').map((b) => b.text() || b.attributes('aria-label'))
+  const labels = body.findAll('.viewer .bar button').map((b) => b.text() || b.attributes('aria-label'))
   expect(labels).toEqual([t('common.close'), t('trash.move')])
 })
 
@@ -442,13 +466,13 @@ it('plays a covered video in the Viewer', async () => {
     ...photoDetail(7),
     kind: Kind.KindVideo,
     ext: '.mp4',
-    webNative: false,
+    caps: { preview: true, original: false, render: false, directPlay: true, convertPlay: true },
     video: { duration: 60000, codec: 'h264', audio: 'aac', play: Playback.PlayDirect },
   })
-  const view = await browsing([covered(7, { v: true, d: 60000 })])
+  await browsing([covered(7, { v: true, d: 60000 })])
   await cells()[0]?.trigger('click')
   await flushPromises()
-  expect(view.get('.viewer video').attributes('src')).toContain('/video/7')
+  expect(body.get('.viewer video').attributes('src')).toContain('/video/7')
 })
 
 it('closes the browser and the Viewer, and forgets the photos, when the engine reports the screen locked', async () => {
@@ -456,9 +480,9 @@ it('closes the browser and the Viewer, and forgets the photos, when the engine r
   await cells()[0]?.trigger('click')
   await flushPromises()
   vi.mocked(engine.trashCovered).mockRejectedValueOnce(new Error('locked', { cause: { code: ErrorCode.BlocksLocked } }))
-  await view.get('.viewer button[aria-label="Move to Trash"]').trigger('click')
+  await body.get('.viewer button[aria-label="Move to Trash"]').trigger('click')
   await flushPromises()
-  expect(view.find('.viewer').exists()).toBe(false)
+  expect(body.find('.viewer').exists()).toBe(false)
   expect(cells()).toHaveLength(0)
   expect(view.text()).not.toContain('Trip')
   expect(view.text()).not.toContain('Private name')
@@ -469,7 +493,7 @@ it('relocks when the photos cannot be read because the screen is locked', async 
   giveTheGridASize()
   vi.mocked(engine.blocks).mockResolvedValue([privateBlock])
   vi.mocked(engine.blockedItems).mockRejectedValue(new Error('locked', { cause: { code: ErrorCode.BlocksLocked } }))
-  wrapper = mount(BlockedView, { attachTo: document.body, global: { stubs: { RouterLink: true } } })
+  wrapper = mountView()
   await flushPromises()
   await wrapper.get('input').setValue('123456')
   await wrapper.get('form').trigger('submit')
@@ -480,15 +504,15 @@ it('relocks when the photos cannot be read because the screen is locked', async 
 })
 
 it('keeps the browser and the photo when the Trash refuses, and says why', async () => {
-  const view = await browsing([covered(1), covered(2)])
+  await browsing([covered(1), covered(2)])
   await cells()[0]?.trigger('click')
   await flushPromises()
   vi.mocked(engine.trashCovered).mockRejectedValueOnce(new Error('disk on fire'))
-  await view.get('.viewer button[aria-label="Move to Trash"]').trigger('click')
+  await body.get('.viewer button[aria-label="Move to Trash"]').trigger('click')
   await flushPromises()
-  expect(view.find('.viewer').exists()).toBe(true)
+  expect(body.find('.viewer').exists()).toBe(true)
   expect(cells()).toHaveLength(2)
-  expect(notice.value).toContain('disk on fire')
+  expect(notifications.find(ERROR_NOTIFICATION)?.title).toContain('disk on fire')
 })
 
 it('closes the browser and the Viewer when the screen relocks from being left idle', async () => {
@@ -497,7 +521,7 @@ it('closes the browser and the Viewer when the screen relocks from being left id
   await cells()[0]?.trigger('click')
   await flushPromises()
   await vi.advanceTimersByTimeAsync(idle)
-  expect(view.find('.viewer').exists()).toBe(false)
+  expect(body.find('.viewer').exists()).toBe(false)
   expect(cells()).toHaveLength(0)
   expect(view.text()).not.toContain('Trip')
   expect(view.find('form').exists()).toBe(true)
@@ -511,7 +535,7 @@ it.each([
   // For events and faces the target is a row of its own, which SetBlock would read as something else.
   vi.mocked(engine.blocks).mockResolvedValue([{ ...privateBlock, id: 41, kind, mode, targetId: 7 }])
   const view = await opened()
-  await view.get('.list button:first-of-type').trigger('click')
+  await view.get('[data-blocked="mode"]').trigger('click')
   await flushPromises()
   expect(engine.setBlockMode).toHaveBeenCalledExactlyOnceWith(41, next)
 })
@@ -544,19 +568,19 @@ it('does not bring the browser back when the screen is unlocked again after a re
 
 it('counts browsing as use, so a photo being looked at does not relock', async () => {
   vi.useFakeTimers()
-  const view = await browsing([covered(1), covered(2)])
+  await browsing([covered(1), covered(2)])
   await vi.advanceTimersByTimeAsync(idle - 1000)
   await cells()[0]?.trigger('click') // opening a photo is a use
   await flushPromises()
   await vi.advanceTimersByTimeAsync(idle - 1000)
-  expect(view.find('.viewer').exists()).toBe(true)
+  expect(body.find('.viewer').exists()).toBe(true)
   await vi.advanceTimersByTimeAsync(1000)
-  expect(view.find('.viewer').exists()).toBe(false)
+  expect(body.find('.viewer').exists()).toBe(false)
 })
 
 it('closes the Viewer and locks the engine on leaving the screen', async () => {
   // The Viewer teleports to the body, so it is not part of the wrapper.
-  await browsing([covered(1)], [privateBlock], {})
+  await browsing([covered(1)], [privateBlock])
   await cells()[0]?.trigger('click')
   await flushPromises()
   expect(document.querySelector('.viewer')).not.toBeNull()
@@ -572,6 +596,57 @@ it('locks the engine as well when the screen relocks from being left idle', asyn
   expect(engine.lockBlocks).not.toHaveBeenCalled()
   await vi.advanceTimersByTimeAsync(idle)
   expect(engine.lockBlocks).toHaveBeenCalledTimes(1)
+})
+
+it('keeps PIN entry masked and preserves its numeric pattern and autocomplete', async () => {
+  wrapper = mountView()
+  await flushPromises()
+  const input = wrapper.get('input')
+  expect(input.attributes('type')).toBe('password')
+  expect(input.attributes('inputmode')).toBe('numeric')
+  expect(input.attributes('pattern')).toBe(PIN_PATTERN)
+  expect(input.attributes('required')).toBeDefined()
+  expect(input.attributes('autocomplete')).toBe('current-password')
+})
+
+it('creates a matching PIN before unlocking and keeps new PIN fields masked', async () => {
+  vi.mocked(engine.blockPINConfigured).mockResolvedValue(false)
+  wrapper = mountView()
+  await flushPromises()
+  const fields = wrapper.findAll('input')
+  expect(fields).toHaveLength(2)
+  expect(
+    fields.every(
+      (field) =>
+        field.attributes('type') === 'password' &&
+        field.attributes('pattern') === PIN_PATTERN &&
+        field.attributes('autocomplete') === 'new-password',
+    ),
+  ).toBe(true)
+  await chooseNewPIN(wrapper, '123456', '654321')
+  expect(engine.createBlockPIN).not.toHaveBeenCalled()
+  expect(wrapper.get('[data-blocked-error]').text()).toBe(t('blocked.pinMismatch'))
+  await chooseNewPIN(wrapper, '123456', '123456')
+  expect(engine.createBlockPIN).toHaveBeenCalledExactlyOnceWith('123456')
+  expect(engine.unlockBlocks).toHaveBeenCalledExactlyOnceWith('123456')
+  expect(wrapper.find('form').exists()).toBe(false)
+})
+
+it('shows the engine cool-down refusal while keeping all private media locked', async () => {
+  vi.mocked(engine.unlockBlocks).mockRejectedValue(new Error('wait', { cause: { code: ErrorCode.PINRateLimited } }))
+  const view = await opened()
+  expect(view.get('[data-blocked-error]').text()).toBe(t('error.pinRateLimited', { pinCooldown: PIN_COOLDOWN_SECONDS }))
+  expect(view.find('form').exists()).toBe(true)
+  expect(view.find('.list').exists()).toBe(false)
+  expect(engine.blocks).not.toHaveBeenCalled()
+  expect(engine.blockedItems).not.toHaveBeenCalled()
+})
+
+it('returns focus to Show photos when the covered browser is closed', async () => {
+  const view = await browsing([covered(1)])
+  await view.get('[data-covered="back"]').trigger('click')
+  await flushPromises()
+  expect(document.activeElement).toBe(view.get('[data-blocked="show"]').element)
 })
 
 it('counts scrolling the covered photos as use of the screen', async () => {
@@ -594,27 +669,27 @@ it('counts a covered video playing as use of the screen', async () => {
     ...photoDetail(7),
     kind: Kind.KindVideo,
     ext: '.mp4',
-    webNative: false,
+    caps: { preview: true, original: false, render: false, directPlay: true, convertPlay: true },
     video: { duration: 60000, codec: 'h264', audio: 'aac', play: Playback.PlayDirect },
   })
-  const view = await browsing([covered(7, { v: true, d: 60000 })])
+  await browsing([covered(7, { v: true, d: 60000 })])
   await cells()[0]?.trigger('click')
   await flushPromises()
   for (let i = 0; i < 3; i++) {
     await vi.advanceTimersByTimeAsync(idle - 1000)
-    await view.get('.viewer video').trigger('timeupdate')
+    await body.get('.viewer video').trigger('timeupdate')
   }
-  expect(view.find('.viewer').exists()).toBe(true)
+  expect(body.find('.viewer').exists()).toBe(true)
   await vi.advanceTimersByTimeAsync(idle)
-  expect(view.find('.viewer').exists()).toBe(false)
+  expect(body.find('.viewer').exists()).toBe(false)
 })
 
 it('asks before moving a covered photo to the Trash, and moves nothing if the user declines', async () => {
-  const view = await browsing([covered(1), covered(2)])
+  await browsing([covered(1), covered(2)])
   await cells()[0]?.trigger('click')
   await flushPromises()
   vi.mocked(confirm).mockResolvedValue(false)
-  await view.get('.viewer button[aria-label="Move to Trash"]').trigger('click')
+  await body.get('.viewer button[aria-label="Move to Trash"]').trigger('click')
   await flushPromises()
   expect(confirm).toHaveBeenCalledExactlyOnceWith(t('covered.trashTitle'), t('covered.trashText'), t('trash.move'))
   expect(engine.trashCovered).not.toHaveBeenCalled()

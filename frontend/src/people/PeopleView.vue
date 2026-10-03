@@ -1,15 +1,23 @@
 <script setup lang="ts">
-// People: everyone the AI found in the photos, as round faces with names.
-// Naming someone once is how they are confirmed.
-import { computed, onMounted } from 'vue'
+// Naming someone once confirms their identity; grouping remains the engine's.
+import UButton from '@nuxt/ui/components/Button.vue'
+import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
+import { computed, onMounted, watch } from 'vue'
 import { BlockKind } from '../bridge'
 import type { Person } from '../bridge'
-import { logError } from '../shared/errors'
+import { icons } from '../design/icons'
 import { block } from '../shared/block'
+import CardGrid from '../shared/CardGrid.vue'
+import CollectionCard from '../shared/CollectionCard.vue'
+import { registerCommands, useCommands } from '../shared/commands'
+import type { Command } from '../shared/commands'
+import { logError } from '../shared/errors'
+import FeatureState from '../shared/FeatureState.vue'
 import { t } from '../shared/i18n'
-import EmptyState from '../shared/EmptyState.vue'
-import Icon from '../shared/Icon.vue'
 import { useLiveReload } from '../shared/liveReload'
+import Page from '../shared/Page.vue'
+import PageHeader from '../shared/PageHeader.vue'
 import { useLibrary } from '../library/store'
 import SearchBox from '../search/SearchBox.vue'
 import FaceThumb from './FaceThumb.vue'
@@ -17,104 +25,98 @@ import { usePeople } from './store'
 
 const lib = useLibrary()
 const people = usePeople()
-
 const named = computed(() => people.list.filter((p) => p.name))
 const unnamed = computed(() => people.list.filter((p) => !p.name))
 const facesError = computed(() => lib.progress?.ai.facesError ?? '')
 const looking = computed(() => lib.progress?.faces ?? 0)
 
 onMounted(() => void people.load().catch(logError))
-useLiveReload(people.load, (c) => c.people || c.assets || c.thumbs) // new people appear while faces are found
+useLiveReload(people.load, (c) => c.people || c.assets || c.thumbs)
 
 function blockPerson(p: Person) {
   void block(BlockKind.BlockPerson, p.id, p.name || t('person.unnamed'))
 }
+
+const cardCommands = computed<Command[]>(() =>
+  people.list.map((p) => ({
+    id: `person.${p.id}.block`,
+    group: 'view',
+    title: () => t('blocked.confirmTitle', { name: p.name || t('person.unnamed') }),
+    icon: 'eye-off',
+    run: () => blockPerson(p),
+  })),
+)
+watch(cardCommands, (entries, _previous, cleanup) => cleanup(registerCommands(entries)), { immediate: true })
+function personItems(p: Person): DropdownMenuItem[] {
+  return cardCommands.value
+    .filter((c) => c.id === `person.${p.id}.block`)
+    .map((c) => ({
+      label: c.title(),
+      icon: c.icon ? icons[c.icon] : undefined,
+      onSelect: () => {
+        void c.run()
+      },
+    }))
+}
+useCommands([
+  {
+    id: 'people.refresh',
+    group: 'view',
+    title: () => t('people.refresh'),
+    icon: 'refresh',
+    enabled: () => !people.loading,
+    run: () => people.load().catch(logError),
+  },
+])
 </script>
 
 <template>
-  <div class="page">
-    <header class="topbar">
-      <h1>{{ t('nav.people') }}</h1>
-      <SearchBox />
-      <div class="spacer" />
-    </header>
-
-    <div class="page-body">
-      <p class="muted intro">{{ t('people.intro') }}</p>
-      <p v-if="people.error || facesError" class="page-error" role="alert">
-        {{ people.error || t('people.unavailable', { error: facesError }) }}
-      </p>
-
-      <template v-for="group in [named, unnamed]" :key="group === named ? 'named' : 'unnamed'">
-        <template v-if="group.length">
-          <h2>{{ group === named ? t('people.named') : t('people.notNamed') }}</h2>
-          <div class="cards">
-            <div v-for="p in group" :key="p.id" class="card person">
-              <RouterLink
-                :to="{ name: 'person', params: { id: p.id } }"
-                class="face"
-                :aria-label="p.name || t('person.unnamed')"
-              >
-                <FaceThumb :face="p.cover" :size="128" round />
-              </RouterLink>
-              <span class="card-name" :class="{ muted: !p.name }">{{ p.name || t('person.addName') }}</span>
-              <span class="card-count">{{ t('status.items', { n: p.count }) }}</span>
-              <button
-                class="icon-btn card-act"
-                :title="t('blocked.block')"
-                :aria-label="t('blocked.confirmTitle', { name: p.name || t('person.unnamed') })"
-                @click="blockPerson(p)"
-              >
-                <Icon name="eye-off" :size="16" />
-              </button>
-            </div>
-          </div>
-        </template>
+  <Page>
+    <template #header
+      ><PageHeader :title="t('nav.people')"><SearchBox /></PageHeader
+    ></template>
+    <p class="mb-4 text-muted">{{ t('people.intro') }}</p>
+    <FeatureState
+      v-if="people.error || facesError"
+      kind="error"
+      :title="people.error || t('people.unavailable', { error: facesError })"
+    />
+    <FeatureState v-else-if="!people.loaded" kind="loading" :title="t('people.loading')" />
+    <template v-for="group in [named, unnamed]" :key="group === named ? 'named' : 'unnamed'">
+      <template v-if="group.length">
+        <h2 class="mb-3 mt-5 text-sm font-semibold">
+          {{ group === named ? t('people.named') : t('people.notNamed') }}
+        </h2>
+        <CardGrid>
+          <CollectionCard
+            v-for="p in group"
+            :key="p.id"
+            :to="{ name: 'person', params: { id: p.id } }"
+            :title="p.name || t('person.addName')"
+            :count="t('status.items', { n: p.count })"
+            icon="people"
+            round
+          >
+            <template #cover><FaceThumb :face="p.cover" :size="128" round /></template>
+            <UDropdownMenu :items="personItems(p)">
+              <UButton
+                :icon="icons.more"
+                :aria-label="t('people.actions', { name: p.name || t('person.unnamed') })"
+                color="neutral"
+                variant="subtle"
+                square
+              />
+            </UDropdownMenu>
+          </CollectionCard>
+        </CardGrid>
       </template>
-
-      <EmptyState
-        v-if="people.loaded && !people.list.length"
-        class="empty"
-        icon="people"
-        :title="t('people.empty')"
-        :text="looking ? t('people.emptyWorking', { n: looking }) : t('people.emptyHint')"
-      />
-    </div>
-  </div>
+    </template>
+    <FeatureState
+      v-if="people.loaded && !people.list.length && !people.error && !facesError"
+      kind="empty"
+      icon="people"
+      :title="t('people.empty')"
+      :text="looking ? t('people.emptyWorking', { n: looking }) : t('people.emptyHint')"
+    />
+  </Page>
 </template>
-
-<style scoped>
-h2 {
-  margin: 20px 0 12px;
-  font-size: 14px;
-  font-weight: 600;
-}
-.person {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-.face {
-  display: block;
-  border-radius: 50%;
-  transition: transform 0.15s ease;
-}
-.face:hover {
-  transform: scale(1.04);
-}
-.person .card-name {
-  max-width: 100%;
-  margin-top: 8px;
-}
-.card-name.muted {
-  color: var(--text-2);
-  font-weight: 400;
-}
-.person .card-act {
-  right: 8px;
-}
-.empty {
-  margin-top: 36px;
-}
-</style>

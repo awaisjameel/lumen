@@ -15,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -315,10 +316,13 @@ func (b *background) ServiceShutdown() error {
 }
 
 // spa serves the UI, answering client-side routes (/things, /settings…),
-// which are not files, with index.html, so they survive a reload.
+// which are not files, with index.html, so they survive a reload. A path
+// under "/@" is never a route: it is one of the development server's own
+// modules (/@vite/client, /@id/virtual:…), which have no extension either
+// and must reach it as they are, or the UI cannot start in development.
 func spa(files http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if path.Ext(r.URL.Path) == "" && r.URL.Path != "/" {
+		if path.Ext(r.URL.Path) == "" && r.URL.Path != "/" && !strings.HasPrefix(r.URL.Path, "/@") {
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
 		}

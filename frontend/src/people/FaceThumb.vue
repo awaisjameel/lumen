@@ -49,9 +49,9 @@ const image = computed(() => {
   place-items: center;
   flex-shrink: 0;
   overflow: hidden;
-  border-radius: var(--radius-m);
-  background-color: var(--placeholder);
-  color: var(--text-3);
+  border-radius: var(--ui-radius);
+  background-color: var(--lumen-placeholder);
+  color: var(--ui-text-dimmed);
 }
 .face img {
   position: absolute;

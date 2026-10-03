@@ -4,6 +4,11 @@ import AboutSection from '../about/AboutSection.vue'
 import OcrSetting from './OcrSetting.vue'
 import XmpSetting from './XmpSetting.vue'
 import {
+  Accent,
+  Density,
+  TEXT_SCALE_MIN,
+  TEXT_SCALE_MAX,
+  TEXT_SCALE_DEFAULT,
   AWAY_MINUTES,
   BlockKind,
   Device,
@@ -13,6 +18,7 @@ import {
   EVENT_GAP_MIN,
   TAG_CONFIDENCE_MAX,
   TAG_CONFIDENCE_MIN,
+  Theme,
   THUMB_CACHE_DEFAULT_MB,
   THUMB_CACHE_MAX_MB,
   THUMB_CACHE_MIN_MB,
@@ -24,9 +30,20 @@ import { confirm } from '../shared/confirm'
 import { errorText, logError } from '../shared/errors'
 import { bytes } from '../shared/format'
 import { t } from '../shared/i18n'
-import Icon from '../shared/Icon.vue'
-import { theme } from '../shared/theme'
-import type { Theme } from '../shared/theme'
+import { icons } from '../design/icons'
+import Page from '../shared/Page.vue'
+import PageHeader from '../shared/PageHeader.vue'
+import PrefRow from '../shared/PrefRow.vue'
+import FeatureState from '../shared/FeatureState.vue'
+import { useCommands, runCommand } from '../shared/commands'
+import type { MessageKey } from '../shared/i18n'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UInput from '@nuxt/ui/components/Input.vue'
+import USwitch from '@nuxt/ui/components/Switch.vue'
+import USlider from '@nuxt/ui/components/Slider.vue'
+import URadioGroup from '@nuxt/ui/components/RadioGroup.vue'
+import UAlert from '@nuxt/ui/components/Alert.vue'
+import { usePreferences } from '../shared/preferences'
 
 const lib = useLibrary()
 const error = toRef(lib, 'settingsError')
@@ -41,11 +58,6 @@ async function run(fn: () => Promise<unknown>): Promise<boolean> {
     error.value = errorText(e)
     return false
   }
-}
-
-/** A checkbox's new state, from its change event. */
-function checked(e: Event): boolean {
-  return e.target instanceof HTMLInputElement && e.target.checked
 }
 
 async function addFolder() {
@@ -81,21 +93,23 @@ function setEventGap(e: Event) {
     EVENT_GAP_MAX,
     Math.max(EVENT_GAP_MIN, Number.isFinite(parsed) ? Math.round(parsed) : EVENT_GAP_DEFAULT),
   )
+  validation.value.eventGap =
+    parsed !== value ? t('settings.eventGapRange', { min: EVENT_GAP_MIN, max: EVENT_GAP_MAX, n: value }) : ''
   e.target.value = String(value)
-  return lib.saveEventGap(value)
+  return save('eventGap', () => lib.saveEventGap(value))
 }
 
 // The indexing threads: the number follows the slider while it moves, and is
 // saved when it is let go.
 const threadsDraft = ref<number | null>(null)
 const threadsShown = computed(() => threadsDraft.value ?? lib.settings.cpuThreads)
-function onThreadsInput(e: Event) {
-  if (e.target instanceof HTMLInputElement) threadsDraft.value = e.target.valueAsNumber
+function onThreadsInput(value: number | number[] | undefined) {
+  if (typeof value === 'number') threadsDraft.value = value
 }
-function setThreads(e: Event) {
-  if (!(e.target instanceof HTMLInputElement)) return
+function setThreads() {
+  const value = threadsShown.value
   threadsDraft.value = null
-  return lib.saveCPUThreads(Math.round(e.target.valueAsNumber))
+  return save('threads', () => lib.saveCPUThreads(Math.round(value)))
 }
 
 // The cap is shown in GB and kept in MB, which is what the engine holds it in.
@@ -108,8 +122,16 @@ function setCacheCap(e: Event) {
     THUMB_CACHE_MAX_MB,
     Math.max(THUMB_CACHE_MIN_MB, Number.isFinite(parsed) ? Math.round(parsed * MB_PER_GB) : THUMB_CACHE_DEFAULT_MB),
   )
+  validation.value.cache =
+    !Number.isFinite(parsed) || Math.round(parsed * MB_PER_GB) !== mb
+      ? t('settings.cacheRange', {
+          min: THUMB_CACHE_MIN_MB / MB_PER_GB,
+          max: THUMB_CACHE_MAX_MB / MB_PER_GB,
+          n: Number((mb / MB_PER_GB).toFixed(2)),
+        })
+      : ''
   e.target.value = String(Number((mb / MB_PER_GB).toFixed(2)))
-  return lib.saveThumbCacheMB(mb)
+  return save('cache', () => lib.saveThumbCacheMB(mb))
 }
 
 // How much the cache holds now. It grows while photos are indexed and shrinks
@@ -130,20 +152,105 @@ onMounted(() => {
 })
 onBeforeUnmount(() => clearInterval(cacheTimer))
 
-const themes: Theme[] = ['system', 'light', 'dark']
-
-/** Arrow keys move the choice, and focus with it, as in any group of radio buttons. */
-async function onThemeKey(e: KeyboardEvent) {
-  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
-  const group = e.currentTarget
+const prefs = usePreferences()
+const themes = [Theme.ThemeSystem, Theme.ThemeLight, Theme.ThemeDark] as const
+const accents = [
+  Accent.AccentBlue,
+  Accent.AccentTeal,
+  Accent.AccentGreen,
+  Accent.AccentViolet,
+  Accent.AccentRose,
+  Accent.AccentAmber,
+] as const
+const densities = [Density.DensityComfortable, Density.DensityCompact] as const
+const themeItems = computed(() => themes.map((value) => ({ value, label: t(`settings.theme.${value}`) })))
+const accentItems = computed(() => accents.map((value) => ({ value, label: t(`settings.accent.${value}`) })))
+const densityItems = computed(() => densities.map((value) => ({ value, label: t(`settings.density.${value}`) })))
+function setTheme(value: unknown) {
+  for (const theme of themes) if (theme === value) void prefs.set({ theme })
+}
+// The previous theme group also accepted vertical arrows; retain them beside the library's horizontal keys.
+async function onThemeKey(event: KeyboardEvent) {
+  const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
+  const group = event.currentTarget
   if (!step || !(group instanceof HTMLElement)) return
-  e.preventDefault()
-  const next = themes[(themes.indexOf(theme.value) + step + themes.length) % themes.length]
-  if (!next) return
-  theme.value = next
-  await nextTick() // the newly checked button is the one that can take focus
+  event.preventDefault()
+  const index = themes.findIndex((value) => value === prefs.prefs.theme)
+  const theme = themes[(index + step + themes.length) % themes.length]
+  if (!theme) return
+  void prefs.set({ theme })
+  await nextTick()
   group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus()
 }
+function setAccent(value: unknown) {
+  for (const accent of accents) if (accent === value) void prefs.set({ accent })
+}
+function setDensity(value: unknown) {
+  for (const density of densities) if (density === value) void prefs.set({ density })
+}
+function setTextScale(value: number | number[] | undefined) {
+  if (typeof value === 'number') void prefs.set({ textScale: value })
+}
+const query = ref('')
+const category = ref('')
+
+function clearSearch() {
+  query.value = ''
+  category.value = ''
+}
+const categories = [
+  { id: 'appearance', label: 'settings.appearance' },
+  { id: 'library', label: 'settings.category.library' },
+  { id: 'indexing', label: 'settings.category.indexing' },
+  { id: 'search', label: 'settings.category.search' },
+  { id: 'files', label: 'settings.category.files' },
+  { id: 'privacy', label: 'settings.privacy' },
+  { id: 'about', label: 'about.title' },
+] as const
+function matches(...texts: string[]) {
+  const needle = query.value.trim().toLocaleLowerCase()
+  return !needle || texts.some((text) => text.toLocaleLowerCase().includes(needle))
+}
+function row(group: string, ...keys: MessageKey[]) {
+  return (!category.value || category.value === group) && matches(...keys.map((key) => t(key)))
+}
+const counts = ref<Record<string, number>>({})
+const lastSave = ref('')
+const feedback = ref<Record<string, string>>({})
+const validation = ref<Record<string, string>>({})
+async function save(key: string, fn: () => Promise<unknown>) {
+  lastSave.value = key
+  feedback.value[key] = ''
+  counts.value[key] = (counts.value[key] ?? 0) + 1
+  try {
+    await fn()
+    if (lastSave.value === key) feedback.value[key] = error.value ? '' : t('settings.saved')
+  } finally {
+    counts.value[key] = (counts.value[key] ?? 1) - 1
+  }
+}
+function hint(key: string) {
+  return counts.value[key] ? t('settings.saving') : validation.value[key] || feedback.value[key]
+}
+function failure(key: string) {
+  return lastSave.value === key ? error.value : ''
+}
+useCommands([
+  {
+    id: 'settings.addFolder',
+    group: 'library',
+    title: () => t('settings.addFolder'),
+    icon: 'folder-add',
+    run: addFolder,
+  },
+  {
+    id: 'settings.rescan',
+    group: 'library',
+    title: () => t('settings.rescan'),
+    icon: 'refresh',
+    run: () => run(engine.rescan),
+  },
+])
 
 const aiStatus = computed(() => {
   const ai = lib.progress?.ai
@@ -167,371 +274,667 @@ function saveConfidence() {
   const value = pendingConfidence
   pendingConfidence = null
   error.value = ''
-  void lib.saveTagConfidence(value)
+  void save('confidence', () => lib.saveTagConfidence(value))
 }
-function onConfidence(e: Event) {
-  if (!(e.target instanceof HTMLInputElement)) return
-  lib.intendTagConfidence(TAG_CONFIDENCE_MIN * Math.exp((span * Number(e.target.value)) / 100))
+function onConfidence(value: number | number[] | undefined) {
+  if (typeof value !== 'number') return
+  lib.intendTagConfidence(TAG_CONFIDENCE_MIN * Math.exp((span * value) / 100))
   pendingConfidence = lib.settings.tagConfidence
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(saveConfidence, 250)
 }
 onBeforeUnmount(saveConfidence)
+// Filtering keeps long-running child operations mounted so their busy state and results survive.
+const categoryKeys: Record<string, MessageKey[]> = {
+  appearance: [
+    'settings.theme',
+    'settings.themeHint',
+    'settings.accent',
+    'settings.accentHint',
+    'settings.density',
+    'settings.densityHint',
+    'settings.textSize',
+    'settings.textSizeHint',
+  ],
+  library: ['settings.folders', 'settings.foldersHint', 'settings.videos', 'settings.videosHint'],
+  indexing: [
+    'settings.pause',
+    'settings.pauseHint',
+    'settings.pauseFullScreen',
+    'settings.pauseFullScreenHint',
+    'settings.pauseBusy',
+    'settings.pauseBusyHint',
+    'settings.idleOnly',
+    'settings.idleOnlyHint',
+    'settings.threadsHint',
+    'settings.threadsLabel',
+    'settings.cache',
+    'settings.cacheLimit',
+    'settings.cacheHint',
+  ],
+  search: [
+    'settings.aiOnBattery',
+    'settings.aiOnBatteryHint',
+    'settings.ocr',
+    'settings.ocrHint',
+    'settings.ai',
+    'settings.aiHint',
+    'settings.confidence',
+    'settings.confidenceHint',
+  ],
+  files: [
+    'settings.eventGap',
+    'settings.eventGapHint',
+    'settings.xmp',
+    'settings.xmpHint',
+    'settings.xmpDelete',
+    'settings.xmpDeleteHint',
+    'settings.xmpExport',
+    'settings.xmpExportHint',
+    'settings.organise',
+    'settings.organiseHint',
+  ],
+  privacy: ['settings.privacy', 'settings.privacyText'],
+  about: [
+    'about.title',
+    'about.openLogs',
+    'about.saveReport',
+    'about.licences',
+    'about.reportHint',
+    'about.updates',
+    'about.releases',
+    'about.logsHint',
+    'about.licencesHint',
+    'about.geonames',
+    'about.places',
+    'about.versionLabel',
+  ],
+}
+const shownCategories = computed(() =>
+  categories.filter(
+    (item) =>
+      (!category.value || category.value === item.id) && (categoryKeys[item.id] ?? []).some((key) => matches(t(key))),
+  ),
+)
 </script>
 
 <template>
-  <div class="page">
-    <header class="topbar">
-      <h1>{{ t('settings.title') }}</h1>
-    </header>
-    <div class="page-body">
-      <div class="content">
-        <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-
-        <section>
-          <h2>{{ t('settings.folders') }}</h2>
-          <p class="muted hint">{{ t('settings.foldersHint') }}</p>
-          <ul class="list">
+  <Page>
+    <template #header>
+      <PageHeader :title="t('settings.title')">
+        <UInput
+          v-model="query"
+          :icon="icons.search"
+          :placeholder="t('settings.search')"
+          :aria-label="t('settings.search')"
+          type="search"
+        />
+      </PageHeader>
+    </template>
+    <div class="settings-layout">
+      <nav class="category-nav" :aria-label="t('settings.categories')">
+        <UButton :aria-pressed="category === ''" :variant="category === '' ? 'soft' : 'ghost'" @click="category = ''">{{
+          t('settings.all')
+        }}</UButton>
+        <UButton
+          v-for="item in categories"
+          :key="item.id"
+          :aria-pressed="category === item.id"
+          :variant="category === item.id ? 'soft' : 'ghost'"
+          @click="category = item.id"
+          >{{ t(item.label) }}</UButton
+        >
+      </nav>
+      <div class="settings-content">
+        <UAlert v-if="error" :description="error" color="error" variant="subtle" role="alert" />
+        <FeatureState
+          v-if="!shownCategories.length"
+          kind="empty"
+          icon="search"
+          :title="t('settings.noResults')"
+          :text="t('settings.noResultsHint')"
+        >
+          <UButton @click="clearSearch">{{ t('settings.clearSearch') }}</UButton>
+        </FeatureState>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'appearance')"
+          data-category="appearance"
+          :aria-label="t('settings.appearance')"
+        >
+          <h2>{{ t('settings.appearance') }}</h2>
+          <PrefRow
+            v-if="row('appearance', 'settings.theme', 'settings.themeHint')"
+            :label="t('settings.theme')"
+            :description="t('settings.themeHint')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <URadioGroup
+                data-appearance="theme"
+                :model-value="themes.find((value) => value === prefs.prefs.theme)"
+                :items="themeItems"
+                orientation="horizontal"
+                class="appearance-choices"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="setTheme"
+                @keydown="onThemeKey"
+              >
+              </URadioGroup>
+            </template>
+          </PrefRow>
+          <PrefRow
+            v-if="row('appearance', 'settings.accent', 'settings.accentHint')"
+            :label="t('settings.accent')"
+            :description="t('settings.accentHint')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <URadioGroup
+                data-appearance="accent"
+                :model-value="accents.find((value) => value === prefs.prefs.accent)"
+                :items="accentItems"
+                orientation="horizontal"
+                class="appearance-choices"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="setAccent"
+              >
+                <template #label="{ item }">
+                  <span class="swatch" :class="`swatch-${item.value}`" aria-hidden="true" />{{ item.label }}</template
+                >
+              </URadioGroup>
+            </template>
+          </PrefRow>
+          <PrefRow
+            v-if="row('appearance', 'settings.density', 'settings.densityHint')"
+            :label="t('settings.density')"
+            :description="t('settings.densityHint')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <URadioGroup
+                data-appearance="density"
+                :model-value="densities.find((value) => value === prefs.prefs.density)"
+                :items="densityItems"
+                orientation="horizontal"
+                class="appearance-choices"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="setDensity"
+              >
+              </URadioGroup>
+            </template>
+          </PrefRow>
+          <PrefRow
+            v-if="row('appearance', 'settings.textSize', 'settings.textSizeHint')"
+            :label="t('settings.textSize')"
+            :description="t('settings.textSizeHint')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <div class="scale-controls">
+                <USlider
+                  data-appearance="textScale"
+                  :model-value="prefs.prefs.textScale"
+                  :min="TEXT_SCALE_MIN"
+                  :max="TEXT_SCALE_MAX"
+                  :step="5"
+                  :aria-labelledby="labelledBy"
+                  :aria-describedby="describedBy"
+                  @update:model-value="setTextScale"
+                />
+                <span>{{ t('settings.textPercent', { n: prefs.prefs.textScale }) }}</span>
+                <UButton
+                  :icon="icons.reset"
+                  :disabled="prefs.prefs.textScale === TEXT_SCALE_DEFAULT"
+                  @click="prefs.set({ textScale: TEXT_SCALE_DEFAULT })"
+                  >{{ t('settings.resetText') }}</UButton
+                >
+              </div>
+            </template>
+          </PrefRow>
+          <p v-if="prefs.saving" role="status" class="text-muted">{{ t('settings.saving') }}</p>
+        </section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'library')"
+          data-category="library"
+          :aria-label="t('settings.category.library')"
+        >
+          <h2>{{ t('settings.category.library') }}</h2>
+          <PrefRow
+            v-if="row('library', 'settings.folders', 'settings.foldersHint')"
+            :label="t('settings.folders')"
+            :description="t('settings.foldersHint')"
+          >
+            <template #default>
+              <div class="flex flex-wrap gap-2">
+                <UButton :icon="icons['folder-add']" loading-auto @click="runCommand('settings.addFolder')">{{
+                  t('settings.addFolder')
+                }}</UButton>
+                <UButton :icon="icons.refresh" loading-auto @click="runCommand('settings.rescan')">{{
+                  t('settings.rescan')
+                }}</UButton>
+              </div>
+            </template>
+          </PrefRow>
+          <FeatureState
+            v-if="!lib.sources.length && row('library', 'settings.folders', 'settings.foldersHint')"
+            kind="empty"
+            icon="folder"
+            :title="t('settings.noFolders')"
+            :text="t('settings.noFoldersHint')"
+          />
+          <ul
+            v-if="lib.sources.length && row('library', 'settings.folders', 'settings.foldersHint')"
+            class="source-list"
+          >
             <li v-for="s in lib.sources" :key="s.id">
-              <Icon name="folder" :size="18" />
-              <span class="path" :title="s.path">{{ s.path }}</span>
-              <button class="btn" :aria-label="t('blocked.confirmTitle', { name: s.path })" @click="blockFolder(s)">
-                {{ t('blocked.block') }}
-              </button>
-              <button class="btn" :aria-label="t('settings.removeNamed', { path: s.path })" @click="removeFolder(s)">
-                {{ t('settings.remove') }}
-              </button>
+              <span class="source-path lumen-selectable" :title="s.path">{{ s.path }}</span>
+              <UButton
+                :icon="icons.blocked"
+                :aria-label="t('blocked.confirmTitle', { name: s.path })"
+                @click="blockFolder(s)"
+                >{{ t('blocked.block') }}</UButton
+              >
+              <UButton
+                loading-auto
+                :aria-label="t('settings.removeNamed', { path: s.path })"
+                @click="removeFolder(s)"
+                >{{ t('settings.remove') }}</UButton
+              >
             </li>
           </ul>
-          <div class="row">
-            <button class="btn" @click="addFolder"><Icon name="plus" :size="16" />{{ t('settings.addFolder') }}</button>
-            <button class="btn" @click="run(engine.rescan)">
-              <Icon name="refresh" :size="16" />{{ t('settings.rescan') }}
-            </button>
-            <RouterLink to="/settings/organise" class="btn">{{ t('organise.link') }}</RouterLink>
-          </div>
-        </section>
-
-        <section>
-          <h2>{{ t('settings.indexing') }}</h2>
-          <label class="toggle">
-            <input type="checkbox" :checked="lib.settings.videos" @change="lib.saveVideos(checked($event))" />
-            <span>
-              {{ t('settings.videos') }}
-              <small class="muted">{{ t('settings.videosHint') }}</small>
-            </span>
-          </label>
-          <label class="toggle">
-            <input type="checkbox" :checked="lib.progress?.paused" @change="lib.setPaused(checked($event))" />
-            <span>{{ t('settings.pause') }}</span>
-          </label>
-          <label class="toggle">
-            <input
-              type="checkbox"
-              :checked="lib.settings.pauseFullScreen"
-              @change="lib.savePauseFullScreen(checked($event))"
-            />
-            <span>
-              {{ t('settings.pauseFullScreen') }}
-              <small class="muted">{{ t('settings.pauseFullScreenHint') }}</small>
-            </span>
-          </label>
-          <label class="toggle">
-            <input type="checkbox" :checked="lib.settings.pauseBusy" @change="lib.savePauseBusy(checked($event))" />
-            <span>
-              {{ t('settings.pauseBusy') }}
-              <small class="muted">{{ t('settings.pauseBusyHint') }}</small>
-            </span>
-          </label>
-          <div v-if="lib.settings.maxCPUThreads > 1" class="slider">
-            <label for="cpu-threads">{{
-              t('settings.threads', { n: threadsShown, max: lib.settings.maxCPUThreads })
-            }}</label>
-            <small class="muted">{{ t('settings.threadsHint', { n: lib.settings.defaultCPUThreads }) }}</small>
-            <input
-              id="cpu-threads"
-              type="range"
-              min="1"
-              :max="lib.settings.maxCPUThreads"
-              step="1"
-              :value="threadsShown"
-              @input="onThreadsInput"
-              @change="setThreads"
-            />
-            <div class="ends muted">
-              <span>{{ t('settings.threadsFewer') }}</span>
-              <span>{{ t('settings.threadsMore') }}</span>
-            </div>
-          </div>
-          <details class="advanced">
-            <summary>{{ t('settings.advanced') }}</summary>
-            <label class="toggle">
-              <input type="checkbox" :checked="lib.settings.idleOnly" @change="lib.saveIdleOnly(checked($event))" />
-              <span>
-                {{ t('settings.idleOnly') }}
-                <small class="muted">{{ t('settings.idleOnlyHint', { n: AWAY_MINUTES }) }}</small>
-              </span>
-            </label>
-          </details>
-        </section>
-
-        <section>
-          <h2>{{ t('settings.ai') }}</h2>
-          <p class="muted hint">{{ t('settings.aiHint') }}</p>
-          <p class="ai-status">{{ aiStatus }}</p>
-          <p v-if="lib.progress?.ai.facesError" class="ai-status">
-            {{ t('settings.peopleError', { error: lib.progress.ai.facesError }) }}
-          </p>
-          <label class="toggle">
-            <input type="checkbox" :checked="lib.settings.aiOnBattery" @change="lib.saveAIOnBattery(checked($event))" />
-            <span>
-              {{ t('settings.aiOnBattery') }}
-              <small class="muted">{{ t('settings.aiOnBatteryHint') }}</small>
-            </span>
-          </label>
-          <OcrSetting />
-          <details class="advanced">
-            <summary>{{ t('settings.advanced') }}</summary>
-            <label class="event-gap">
-              {{ t('settings.eventGap') }}
-              <small class="muted">{{ t('settings.eventGapHint') }}</small>
-              <input
-                type="number"
-                :min="EVENT_GAP_MIN"
-                :max="EVENT_GAP_MAX"
-                step="1"
-                class="field"
-                :value="lib.settings.eventGapHours"
-                @change="setEventGap"
+          <PrefRow
+            v-if="row('library', 'settings.videos', 'settings.videosHint')"
+            :label="t('settings.videos')"
+            :description="t('settings.videosHint')"
+            :hint="hint('videos')"
+            :error="failure('videos')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <USwitch
+                :model-value="lib.settings.videos"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="(value) => save('videos', () => lib.saveVideos(value))"
               />
-            </label>
-            <div class="slider">
-              <label for="confidence">{{ t('settings.confidence') }}</label>
-              <small class="muted">{{ t('settings.confidenceHint') }}</small>
-              <input id="confidence" type="range" min="0" max="100" :value="confidencePos" @input="onConfidence" />
-              <div class="ends muted">
-                <span>{{ t('settings.confidenceMore') }}</span>
-                <span>{{ t('settings.confidenceFewer') }}</span>
+            </template>
+          </PrefRow>
+        </section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'indexing')"
+          data-category="indexing"
+          :aria-label="t('settings.category.indexing')"
+        >
+          <h2>{{ t('settings.category.indexing') }}</h2>
+          <PrefRow
+            v-if="row('indexing', 'settings.pause', 'settings.pauseHint')"
+            :label="t('settings.pause')"
+            :description="t('settings.pauseHint')"
+            :hint="hint('pause')"
+            :error="failure('pause')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <USwitch
+                :model-value="lib.progress?.paused ?? false"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="(value) => save('pause', () => lib.setPaused(value))"
+              />
+            </template>
+          </PrefRow>
+          <PrefRow
+            v-if="row('indexing', 'settings.pauseFullScreen', 'settings.pauseFullScreenHint')"
+            :label="t('settings.pauseFullScreen')"
+            :description="t('settings.pauseFullScreenHint')"
+            :hint="hint('pauseFullScreen')"
+            :error="failure('pauseFullScreen')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <USwitch
+                :model-value="lib.settings.pauseFullScreen"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="(value) => save('pauseFullScreen', () => lib.savePauseFullScreen(value))"
+              />
+            </template>
+          </PrefRow>
+          <PrefRow
+            v-if="row('indexing', 'settings.pauseBusy', 'settings.pauseBusyHint')"
+            :label="t('settings.pauseBusy')"
+            :description="t('settings.pauseBusyHint')"
+            :hint="hint('pauseBusy')"
+            :error="failure('pauseBusy')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <USwitch
+                :model-value="lib.settings.pauseBusy"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="(value) => save('pauseBusy', () => lib.savePauseBusy(value))"
+              />
+            </template>
+          </PrefRow>
+          <PrefRow
+            v-if="row('indexing', 'settings.idleOnly', 'settings.idleOnlyHint')"
+            :label="t('settings.idleOnly')"
+            :hint="hint('idleOnly')"
+            :error="failure('idleOnly')"
+            :description="t('settings.idleOnlyHint', { n: AWAY_MINUTES })"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <USwitch
+                :model-value="lib.settings.idleOnly"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="(value) => save('idleOnly', () => lib.saveIdleOnly(value))"
+              />
+            </template>
+          </PrefRow>
+          <PrefRow
+            v-if="row('indexing', 'settings.threadsLabel', 'settings.threadsHint') && lib.settings.maxCPUThreads > 1"
+            :label="t('settings.threadsLabel')"
+            :hint="hint('threads')"
+            :error="failure('threads')"
+            :description="t('settings.threadsHint', { n: lib.settings.defaultCPUThreads })"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <div class="slider-controls">
+                <USlider
+                  id="cpu-threads"
+                  :model-value="threadsShown"
+                  :min="1"
+                  :max="lib.settings.maxCPUThreads"
+                  :step="1"
+                  :aria-labelledby="labelledBy"
+                  :aria-describedby="describedBy"
+                  @update:model-value="onThreadsInput"
+                  @change="setThreads"
+                />
+                <div class="slider-ends">
+                  <span>{{ t('settings.threadsFewer') }}</span>
+                  <span>{{ t('settings.threadsMore') }}</span>
+                </div>
               </div>
-            </div>
-          </details>
-        </section>
-
-        <section>
-          <h2>{{ t('settings.xmpTitle') }}</h2>
-          <XmpSetting />
-        </section>
-
-        <section>
-          <h2>{{ t('settings.cache') }}</h2>
-          <p class="muted hint">{{ t('settings.cacheHint') }}</p>
-          <label class="cache-cap">
-            {{ t('settings.cacheLimit') }}
-            <input
-              type="number"
-              :min="THUMB_CACHE_MIN_MB / MB_PER_GB"
-              :max="THUMB_CACHE_MAX_MB / MB_PER_GB"
-              step="0.25"
-              class="field"
-              :value="cacheCapGB"
-              @change="setCacheCap"
-            />
-          </label>
-          <p v-if="cacheBytes !== null" class="cache-used muted">
+            </template>
+          </PrefRow>
+          <p v-if="lib.settings.maxCPUThreads > 1 && row('indexing', 'settings.threadsLabel', 'settings.threadsHint')">
+            {{ t('settings.threads', { n: threadsShown, max: lib.settings.maxCPUThreads }) }}
+          </p>
+          <PrefRow
+            v-if="row('indexing', 'settings.cache', 'settings.cacheLimit', 'settings.cacheHint')"
+            :label="t('settings.cache')"
+            :description="t('settings.cacheHint')"
+            :hint="hint('cache') || t('settings.cacheLimit')"
+            :error="failure('cache')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <UInput
+                type="number"
+                class="cache-cap w-28"
+                :min="THUMB_CACHE_MIN_MB / MB_PER_GB"
+                :max="THUMB_CACHE_MAX_MB / MB_PER_GB"
+                step="0.25"
+                :model-value="cacheCapGB"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @change="setCacheCap"
+              />
+            </template>
+          </PrefRow>
+          <p
+            v-if="cacheBytes !== null && row('indexing', 'settings.cache', 'settings.cacheLimit', 'settings.cacheHint')"
+            class="cache-used text-muted"
+          >
             {{ t('settings.cacheUsed', { size: bytes(cacheBytes) }) }}
           </p>
         </section>
-
-        <section>
-          <h2>{{ t('settings.appearance') }}</h2>
-          <div class="segmented" role="radiogroup" :aria-label="t('settings.theme')" @keydown="onThemeKey">
-            <button
-              v-for="th in themes"
-              :key="th"
-              role="radio"
-              :aria-checked="theme === th"
-              :tabindex="theme === th ? 0 : -1"
-              :class="{ on: theme === th }"
-              @click="theme = th"
-            >
-              {{ t(`settings.theme.${th}`) }}
-            </button>
-          </div>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'search')"
+          data-category="search"
+          :aria-label="t('settings.category.search')"
+        >
+          <h2>{{ t('settings.category.search') }}</h2>
+          <p v-if="row('search', 'settings.ai', 'settings.aiHint')" class="text-muted">{{ t('settings.aiHint') }}</p>
+          <p>{{ aiStatus }}</p>
+          <UAlert
+            v-if="lib.progress?.ai.facesError"
+            :description="t('settings.peopleError', { error: lib.progress.ai.facesError })"
+            color="error"
+            variant="subtle"
+          />
+          <PrefRow
+            v-if="row('search', 'settings.aiOnBattery', 'settings.aiOnBatteryHint')"
+            :label="t('settings.aiOnBattery')"
+            :description="t('settings.aiOnBatteryHint')"
+            :hint="hint('aiOnBattery')"
+            :error="failure('aiOnBattery')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <USwitch
+                :model-value="lib.settings.aiOnBattery"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="(value) => save('aiOnBattery', () => lib.saveAIOnBattery(value))"
+              />
+            </template>
+          </PrefRow>
+          <OcrSetting v-show="row('search', 'settings.ocr', 'settings.ocrHint')" />
+          <PrefRow
+            v-if="row('search', 'settings.confidence', 'settings.confidenceHint')"
+            :label="t('settings.confidence')"
+            :description="t('settings.confidenceHint')"
+            :hint="hint('confidence')"
+            :error="failure('confidence')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <div class="slider-controls">
+                <USlider
+                  id="confidence"
+                  :model-value="confidencePos"
+                  :min="0"
+                  :max="100"
+                  :aria-labelledby="labelledBy"
+                  :aria-describedby="describedBy"
+                  @update:model-value="onConfidence"
+                />
+                <div class="slider-ends">
+                  <span>{{ t('settings.confidenceMore') }}</span>
+                  <span>{{ t('settings.confidenceFewer') }}</span>
+                </div>
+              </div>
+            </template>
+          </PrefRow>
         </section>
-
-        <section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'files')"
+          data-category="files"
+          :aria-label="t('settings.category.files')"
+        >
+          <h2>{{ t('settings.category.files') }}</h2>
+          <PrefRow
+            v-if="row('files', 'settings.eventGap', 'settings.eventGapHint')"
+            :label="t('settings.eventGap')"
+            :description="t('settings.eventGapHint')"
+            :hint="hint('eventGap')"
+            :error="failure('eventGap')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <UInput
+                type="number"
+                class="event-gap w-28"
+                :min="EVENT_GAP_MIN"
+                :max="EVENT_GAP_MAX"
+                step="1"
+                :model-value="lib.settings.eventGapHours"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @change="setEventGap"
+              />
+            </template>
+          </PrefRow>
+          <XmpSetting
+            v-show="
+              row(
+                'files',
+                'settings.xmp',
+                'settings.xmpHint',
+                'settings.xmpDelete',
+                'settings.xmpDeleteHint',
+                'settings.xmpExport',
+                'settings.xmpExportHint',
+              )
+            "
+            :query="query"
+          />
+          <PrefRow
+            v-if="row('files', 'settings.organise', 'settings.organiseHint')"
+            :label="t('settings.organise')"
+            :description="t('settings.organiseHint')"
+          >
+            <template #default>
+              <UButton to="/settings/organise" :icon="icons.organise">{{ t('organise.link') }}</UButton>
+            </template>
+          </PrefRow>
+        </section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'privacy')"
+          data-category="privacy"
+          :aria-label="t('settings.privacy')"
+        >
           <h2>{{ t('settings.privacy') }}</h2>
-          <p class="muted hint"><Icon name="lock" :size="16" /> {{ t('settings.privacyText') }}</p>
-          <RouterLink to="/settings/blocked" class="btn">{{ t('blocked.title') }}</RouterLink>
+          <PrefRow
+            v-if="row('privacy', 'settings.privacy', 'settings.privacyText')"
+            :label="t('settings.privacy')"
+            :description="t('settings.privacyText')"
+          >
+            <template #default>
+              <UButton to="/settings/blocked" :icon="icons.blocked">{{ t('blocked.title') }}</UButton>
+            </template>
+          </PrefRow>
         </section>
-
-        <section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'about')"
+          data-category="about"
+          :aria-label="t('about.title')"
+        >
           <h2>{{ t('about.title') }}</h2>
-          <AboutSection />
+          <AboutSection :query="query" />
         </section>
       </div>
     </div>
-  </div>
+  </Page>
 </template>
-
 <style scoped>
-.event-gap {
+.settings-layout {
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+  gap: 1.5rem;
+  padding-top: 0.75rem;
+}
+.category-nav {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  margin: 16px 0;
+  align-items: stretch;
+  gap: 0.25rem;
 }
-
-.event-gap input {
-  width: 80px;
+.category-nav :deep(button) {
+  white-space: normal;
+  text-align: left;
+  justify-content: flex-start;
 }
-
-.cache-cap {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  margin: 0 0 8px;
+.settings-content {
+  min-width: 0;
+  max-width: 60rem;
 }
-
-.cache-cap input {
-  width: 80px;
-}
-
-.cache-used {
-  margin: 0;
-}
-
-.content {
-  max-width: 720px;
-  padding: 4px 0 16px;
-}
-
 section {
-  margin-bottom: 32px;
+  margin-bottom: 2rem;
 }
-
 h2 {
-  margin: 0 0 4px;
-  font: 600 16px var(--font-display);
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ui-text-highlighted);
 }
-
-.hint {
-  margin: 0 0 12px;
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
-}
-
-.list {
+.source-list {
   list-style: none;
-  margin: 0 0 12px;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  background: var(--surface);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
 }
-
-.list:empty {
-  display: none;
-}
-
-.list li {
+.source-list li {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 10px 10px 14px;
-}
-
-.list li + li {
-  border-top: 1px solid var(--border);
-}
-
-.path {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row {
-  display: flex;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem;
 }
-
-.toggle {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 8px 0;
-  cursor: pointer;
+.source-list li + li {
+  border-top: 1px solid var(--ui-border);
 }
-
-.toggle input {
-  accent-color: var(--accent);
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
+.source-path {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-
-.toggle small {
-  display: block;
+.slider-controls {
+  width: min(20rem, 100%);
+  min-width: 12rem;
 }
-
-.segmented {
-  display: inline-flex;
-  padding: 3px;
-  border-radius: var(--radius-m);
-  background: var(--surface-2);
-}
-
-.segmented button {
-  height: 30px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: var(--radius-m);
-  background: transparent;
-  cursor: pointer;
-}
-
-.segmented button.on {
-  background: var(--surface);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
-  font-weight: 600;
-}
-
-.ai-status {
-  margin: 0 0 4px;
-}
-
-.advanced {
-  margin-top: 8px;
-}
-
-.advanced summary {
-  padding: 6px 0;
-  color: var(--text-2);
-  cursor: pointer;
-}
-
-.slider {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-width: 420px;
-  padding: 8px 0 0;
-}
-
-.slider input {
-  margin: 8px 0 2px;
-  accent-color: var(--accent);
-}
-
-.ends {
+.slider-ends {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  color: var(--ui-text-muted);
+  font-size: 0.75rem;
+}
+.scale-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+.scale-controls :deep([data-slot='root']) {
+  min-width: 8rem;
+}
+.appearance-choices :deep(fieldset) {
+  flex-wrap: wrap;
+}
+.swatch {
+  display: inline-block;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-right: 0.375rem;
+  border: 1px solid var(--ui-border);
+  border-radius: 50%;
+  background: var(--lumen-swatch);
+}
+.swatch-blue {
+  --lumen-swatch: #2563eb;
+}
+.swatch-teal {
+  --lumen-swatch: #0f766e;
+}
+.swatch-green {
+  --lumen-swatch: #15803d;
+}
+.swatch-violet {
+  --lumen-swatch: #7c3aed;
+}
+.swatch-rose {
+  --lumen-swatch: #e11d48;
+}
+.swatch-amber {
+  --lumen-swatch: #b45309;
+}
+@container (max-width: 56rem) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+  .category-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
 }
 </style>

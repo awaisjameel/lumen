@@ -12,10 +12,12 @@ import {
   SystemService,
 } from '../../bindings/lumen/services'
 import {
+  Accent,
   AlbumKind,
   BlockKind,
   BlockMode,
   DateSource,
+  Density,
   Device,
   DuplicateKind,
   FailReason,
@@ -27,6 +29,7 @@ import {
   Playback,
   TagKind,
   TagSource,
+  Theme,
   WaitReason,
 } from '../../bindings/lumen/internal/core'
 import type {
@@ -55,8 +58,11 @@ import type {
   FailureGroup as RawFailureGroup,
   Face,
   GridItem,
+  LegacyPreferences,
+  MediaCaps,
   Person,
   Place,
+  Preferences,
   Progress,
   SearchResult,
   Settings,
@@ -67,10 +73,12 @@ import type {
 } from '../../bindings/lumen/internal/core'
 
 export {
+  Accent,
   AlbumKind,
   BlockKind,
   BlockMode,
   DateSource,
+  Density,
   Device,
   DuplicateKind,
   FailReason,
@@ -82,6 +90,7 @@ export {
   Playback,
   TagKind,
   TagSource,
+  Theme,
   WaitReason,
 }
 export type {
@@ -98,10 +107,13 @@ export type {
   Person,
   Event,
   FailedFile,
+  LegacyPreferences,
+  MediaCaps,
   OrganiseMove,
   OrganiseProgress,
   OrganiseRun,
   Place,
+  Preferences,
   Progress,
   Settings,
   Source,
@@ -158,6 +170,18 @@ export const THUMB_CACHE_DEFAULT_MB = 2048 // core.ThumbCacheDefaultMB
 export const THUMB_CACHE_MIN_MB = 256 // core.ThumbCacheMinMB
 export const THUMB_CACHE_MAX_MB = 102400 // core.ThumbCacheMaxMB
 export const AWAY_MINUTES = 5 // index.AwayAfter: no input this long and idle-only indexing runs
+export const TEXT_SCALE_MIN = 90 // core.TextScaleMin: percent of the UI's base text size
+export const TEXT_SCALE_MAX = 130 // core.TextScaleMax
+export const TEXT_SCALE_DEFAULT = 100 // core.TextScaleDefault
+export const TILE_SIZE_MIN = 96 // core.TileSizeMin: the grid's target thumbnail edge
+export const TILE_SIZE_MAX = 320 // core.TileSizeMax
+export const TILE_SIZE_DEFAULT = 168 // core.TileSizeDefault
+export const SIDEBAR_WIDTH_MIN = 200 // core.SidebarWidthMin
+export const SIDEBAR_WIDTH_MAX = 360 // core.SidebarWidthMax
+export const SIDEBAR_WIDTH_DEFAULT = 232 // core.SidebarWidthDefault
+export const INSPECTOR_WIDTH_MIN = 280 // core.InspectorWidthMin
+export const INSPECTOR_WIDTH_MAX = 480 // core.InspectorWidthMax
+export const INSPECTOR_WIDTH_DEFAULT = 320 // core.InspectorWidthDefault
 export const ORGANISE_DEFAULT_TEMPLATE = '{Year}/{Month}/{Event}/{Name}' // fileops.DefaultTemplate
 /** The tokens an organise scheme may hold, in the order the editor offers them (fileops.Tokens). */
 export const ORGANISE_TOKENS = ['Year', 'Month', 'MonthName', 'Day', 'Event', 'Place', 'Camera', 'Name', 'Ext'] as const
@@ -322,6 +346,12 @@ export const engine = {
   /** How many CPU threads indexing may keep busy; the engine holds it to the machine's. */
   setCPUThreads: (n: number): Promise<void> => LibraryService.SetCPUThreads(n),
   thumbCacheBytes: (): Promise<number> => MediaService.ThumbCacheBytes(),
+  /** How the user likes the interface to look. */
+  preferences: (): Promise<Preferences> => LibraryService.Preferences(),
+  /** Stores every interface preference; resolves to them as stored (held to their ranges). */
+  setPreferences: (p: Preferences): Promise<Preferences> => LibraryService.SetPreferences(p),
+  /** Offers the library, once, what an older Lumen kept in the WebView's storage; resolves to the preferences afterwards. */
+  migratePreferences: (legacy: LegacyPreferences): Promise<Preferences> => LibraryService.MigratePreferences(legacy),
   setOCR: (on: boolean): Promise<void> => LibraryService.SetOCR(on),
   setXMP: (on: boolean): Promise<void> => LibraryService.SetXMP(on),
   /** Writes every out-of-date XMP sidecar now. */

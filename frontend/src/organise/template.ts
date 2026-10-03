@@ -36,7 +36,7 @@ function clean(text: string, limit: number, fallback: string): string {
 }
 
 function isToken(name: string): name is (typeof ORGANISE_TOKENS)[number] {
-  return (ORGANISE_TOKENS as readonly string[]).includes(name)
+  return ORGANISE_TOKENS.some((token) => token === name)
 }
 
 /** The names in {braces} that are not tokens, once each. */

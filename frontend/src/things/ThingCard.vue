@@ -1,149 +1,173 @@
 <script setup lang="ts">
-// One Thing's card: cover, name and count, with what the user can do to it.
-import { thumbUrl } from '../bridge'
+// Card actions share their definitions with the command palette.
+import UBadge from '@nuxt/ui/components/Badge.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
+import UInput from '@nuxt/ui/components/Input.vue'
+import { computed, ref } from 'vue'
+import { MAX_NAME_LEN, TagKind, thumbUrl } from '../bridge'
 import type { Tag } from '../bridge'
+import { icons } from '../design/icons'
+import type { IconName } from '../design/icons'
+import CollectionCard from '../shared/CollectionCard.vue'
+import { isEnabled, useCommands } from '../shared/commands'
+import type { Command } from '../shared/commands'
 import { t } from '../shared/i18n'
-import Icon from '../shared/Icon.vue'
-import type { IconName } from '../shared/Icon.vue'
 import { nameTooLong } from '../shared/names'
 import { useRename } from '../shared/rename'
-import { MAX_NAME_LEN } from '../bridge'
 
 const props = defineProps<{
   tag: Tag
   icon: IconName
   deletable: boolean
-  /** Saves a new name ('' restores the built-in's own); resolves true when it was saved. */
+  /** An empty name restores the built-in name; false leaves the draft open. */
   rename: (id: number, name: string) => Promise<boolean>
 }>()
-defineEmits<{ pin: []; block: []; remove: [] }>()
-
+const emit = defineEmits<{ pin: []; block: []; remove: [] }>()
 const editor = useRename<number>()
 const { editing, draft } = editor
+const saving = ref(false)
 
 async function save(name: string) {
-  if (nameTooLong(name)) return
-  if (await props.rename(props.tag.id, name)) void editor.close()
+  if (nameTooLong(name) || saving.value) return
+  saving.value = true
+  try {
+    if (await props.rename(props.tag.id, name)) void editor.close()
+  } finally {
+    saving.value = false
+  }
+}
+
+const actions: Command[] = [
+  {
+    id: `thing.${props.tag.id}.pin`,
+    group: 'view',
+    title: () => t(props.tag.pinned ? 'things.unpinNamed' : 'things.pinNamed', { name: props.tag.name }),
+    icon: 'pin',
+    run: () => emit('pin'),
+  },
+  {
+    id: `thing.${props.tag.id}.rename`,
+    group: 'view',
+    title: () => t('things.renameNamed', { name: props.tag.name }),
+    icon: 'pencil',
+    enabled: () => !saving.value,
+    run: () => editor.open(props.tag.id, props.tag.name),
+  },
+  {
+    id: `thing.${props.tag.id}.reset`,
+    group: 'view',
+    title: () => t('things.resetName'),
+    icon: 'reset',
+    available: () => !!props.tag.original,
+    enabled: () => !saving.value,
+    run: () => save(''),
+  },
+  {
+    id: `thing.${props.tag.id}.block`,
+    group: 'view',
+    title: () => t('blocked.confirmTitle', { name: props.tag.name }),
+    icon: 'eye-off',
+    run: () => emit('block'),
+  },
+  {
+    id: `thing.${props.tag.id}.delete`,
+    group: 'view',
+    title: () => t('things.deleteNamed', { name: props.tag.name }),
+    icon: 'trash',
+    available: () => props.deletable,
+    run: () => emit('remove'),
+  },
+]
+useCommands(actions)
+const items = computed<DropdownMenuItem[]>(() =>
+  actions
+    .filter((c) => c.available?.() ?? true)
+    .map((c) => ({
+      label: c.title(),
+      icon: c.icon ? icons[c.icon] : undefined,
+      disabled: !isEnabled(c),
+      onSelect: () => {
+        void c.run()
+      },
+    })),
+)
+function keepEditorFocus(e: Event) {
+  if (editing.value !== null) e.preventDefault()
+}
+// Nuxt UI exposes the native input; rename keeps its focus and selection behaviour.
+function fieldRef(el: unknown) {
+  editor.fieldRef(
+    el && typeof el === 'object' && 'inputRef' in el && el.inputRef instanceof HTMLInputElement ? el.inputRef : null,
+  )
+}
+function triggerRef(el: unknown, key: number) {
+  editor.triggerRef(key)(el && typeof el === 'object' && '$el' in el && el.$el instanceof HTMLElement ? el.$el : null)
 }
 </script>
 
 <template>
-  <div class="card">
-    <RouterLink :to="{ name: 'thing', params: { id: tag.id } }" class="card-cover" :aria-label="tag.name">
-      <img
-        v-if="tag.cover && tag.coverThumb"
-        :src="thumbUrl(tag.cover, tag.coverThumb)"
-        alt=""
-        loading="lazy"
-        decoding="async"
-        draggable="false"
+  <CollectionCard
+    :to="{ name: 'thing', params: { id: tag.id } }"
+    :title="tag.name"
+    :count="tag.count ? t('status.items', { n: tag.count }) : t('things.noPhotos')"
+    :cover="tag.cover && tag.coverThumb ? thumbUrl(tag.cover, tag.coverThumb) : undefined"
+    :icon="icon"
+  >
+    <template #badge>
+      <div class="flex flex-wrap gap-1">
+        <UBadge color="neutral" variant="subtle" size="xs">{{
+          t(tag.kind === TagKind.TagBuiltin ? 'things.builtin' : 'things.custom')
+        }}</UBadge>
+        <UBadge
+          v-if="tag.pinned"
+          data-pinned
+          :icon="icons.pin"
+          color="primary"
+          variant="subtle"
+          size="xs"
+          :aria-label="t('things.pinned')"
+          >{{ t('things.pinned') }}</UBadge
+        >
+      </div>
+    </template>
+    <template v-if="editing === tag.id" #title>
+      <form class="rename" @submit.prevent="save(draft)" @keydown.esc.stop="editor.close()">
+        <UInput
+          :ref="fieldRef"
+          v-model="draft"
+          class="w-full"
+          :aria-label="t('things.name')"
+          :aria-invalid="nameTooLong(draft) || undefined"
+        />
+        <p v-if="nameTooLong(draft)" class="text-xs text-error" role="alert">
+          {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
+        </p>
+        <UButton type="submit" :loading="saving" :disabled="saving || nameTooLong(draft)">{{
+          t('things.save')
+        }}</UButton>
+        <UButton type="button" variant="ghost" :disabled="saving" @click="editor.close()">{{
+          t('common.cancel')
+        }}</UButton>
+      </form>
+    </template>
+    <UDropdownMenu :items="items" :content="{ onCloseAutoFocus: keepEditorFocus }">
+      <UButton
+        :ref="(el) => triggerRef(el, tag.id)"
+        :icon="icons.more"
+        :aria-label="t('things.actions', { name: tag.name })"
+        square
       />
-      <Icon v-else :name="icon" :size="32" />
-    </RouterLink>
-    <span v-if="tag.pinned" class="pin-badge" role="img" :aria-label="t('things.pinned')" :title="t('things.pinned')">
-      <Icon name="pin" :size="14" />
-    </span>
-    <form v-if="editing === tag.id" class="rename" @submit.prevent="save(draft)" @keydown.esc.stop="editor.close()">
-      <input
-        :ref="editor.fieldRef"
-        v-model="draft"
-        class="field"
-        :aria-label="t('things.name')"
-        :aria-invalid="nameTooLong(draft) || undefined"
-      />
-      <p v-if="nameTooLong(draft)" class="page-error" role="alert">
-        {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
-      </p>
-      <button class="btn" type="submit" :disabled="nameTooLong(draft)">{{ t('things.save') }}</button>
-      <button class="btn btn-subtle" type="button" @click="editor.close()">{{ t('common.cancel') }}</button>
-    </form>
-    <div v-else class="card-meta">
-      <span class="card-name">{{ tag.name }}</span>
-      <span class="card-count">{{ tag.count ? t('status.items', { n: tag.count }) : t('things.noPhotos') }}</span>
-      <button v-if="tag.original" class="reset" type="button" :title="tag.original" @click="rename(tag.id, '')">
-        {{ t('things.resetName') }}
-      </button>
-    </div>
-    <div class="acts">
-      <button
-        class="icon-btn card-act"
-        :title="t('blocked.block')"
-        :aria-label="t('blocked.confirmTitle', { name: tag.name })"
-        @click="$emit('block')"
-      >
-        <Icon name="eye-off" :size="16" />
-      </button>
-      <button
-        class="icon-btn card-act"
-        :title="tag.pinned ? t('things.unpin') : t('things.pin')"
-        :aria-label="tag.pinned ? t('things.unpinNamed', { name: tag.name }) : t('things.pinNamed', { name: tag.name })"
-        :aria-pressed="tag.pinned"
-        @click="$emit('pin')"
-      >
-        <Icon name="pin" :size="16" />
-      </button>
-      <button
-        :ref="editor.triggerRef(tag.id)"
-        class="icon-btn card-act"
-        :title="t('things.rename')"
-        :aria-label="t('things.renameNamed', { name: tag.name })"
-        @click="editor.open(tag.id, tag.name)"
-      >
-        <Icon name="pencil" :size="16" />
-      </button>
-      <button
-        v-if="deletable"
-        class="icon-btn card-act"
-        :title="t('things.delete')"
-        :aria-label="t('things.deleteNamed', { name: tag.name })"
-        @click="$emit('remove')"
-      >
-        <Icon name="trash" :size="16" />
-      </button>
-    </div>
-  </div>
+    </UDropdownMenu>
+  </CollectionCard>
 </template>
 
 <style scoped>
-.acts {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  display: flex;
-  gap: 6px;
-}
-.acts .card-act {
-  position: static;
-}
-.pin-badge {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  color: var(--text);
-  background: var(--surface);
-}
 .rename {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  padding-top: 6px;
-}
-.rename input {
-  min-width: 0;
-  width: 100%;
-}
-.reset {
-  align-self: flex-start;
-  padding: 0;
-  border: 0;
-  color: var(--accent);
-  background: none;
-  font-size: 12px;
-  cursor: pointer;
+  gap: 0.25rem;
+  padding-top: 0.375rem;
 }
 </style>

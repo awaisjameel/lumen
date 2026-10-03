@@ -198,6 +198,15 @@ export function LockBlocks(): $CancellablePromise<void> {
 }
 
 /**
+ * MigratePreferences offers the library, once, the choices an older Lumen
+ * kept in the WebView's storage, and returns the preferences afterwards. A
+ * value the library already has is never replaced.
+ */
+export function MigratePreferences(legacy: core$0.LegacyPreferences): $CancellablePromise<core$0.Preferences> {
+    return $Call.ByID(681252860, legacy);
+}
+
+/**
  * OrganiseRuns lists the runs that have started, newest first.
  */
 export function OrganiseRuns(): $CancellablePromise<core$0.OrganiseRun[] | null> {
@@ -233,6 +242,13 @@ export function Places(): $CancellablePromise<core$0.Place[] | null> {
  */
 export function PlanOrganise(template: string, sourceID: number): $CancellablePromise<core$0.OrganisePlan> {
     return $Call.ByID(2885257754, template, sourceID);
+}
+
+/**
+ * Preferences returns how the user likes the interface to look.
+ */
+export function Preferences(): $CancellablePromise<core$0.Preferences> {
+    return $Call.ByID(4276076709);
 }
 
 /**
@@ -398,6 +414,15 @@ export function SetPauseFullScreen(on: boolean): $CancellablePromise<void> {
  */
 export function SetPaused(paused: boolean): $CancellablePromise<void> {
     return $Call.ByID(1388624885, paused);
+}
+
+/**
+ * SetPreferences stores the interface preferences, held to what the UI can
+ * apply, and returns them as stored. They change nothing on disk and start
+ * no indexing.
+ */
+export function SetPreferences(p: core$0.Preferences): $CancellablePromise<core$0.Preferences> {
+    return $Call.ByID(1109237639, p);
 }
 
 /**

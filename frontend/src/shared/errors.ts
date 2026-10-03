@@ -1,4 +1,3 @@
-import { shallowRef } from 'vue'
 import {
   ErrorCode,
   errorCode,
@@ -12,6 +11,7 @@ import {
 import type { UIError } from '../bridge'
 import { t } from './i18n'
 import type { MessageKey } from './i18n'
+import { notify } from './notify'
 
 // Failures the engine names (ErrorCode) read in the UI's own words.
 const codeText: Record<ErrorCode, MessageKey> = {
@@ -75,15 +75,15 @@ export function logError(e: unknown): void {
 }
 
 /**
- * For failures nothing else caught (a bug): logged, and, when notify is
- * set, the app-wide notice says something went wrong. Cancelled reads are
- * not failures.
+ * For failures nothing else caught (a bug): logged, and, when tell is set,
+ * a notification says something went wrong. Cancelled reads are not
+ * failures.
  */
-export function reportUnexpected(e: unknown, where: string, notify = true): void {
+export function reportUnexpected(e: unknown, where: string, tell = true): void {
   if (isCancelled(e)) return
   console.error(e)
   toEngineLog(e, where)
-  if (notify) showNotice(t('error.unexpected'))
+  if (tell) showError(t('error.unexpected'))
 }
 
 /** A failure as Lumen's log records it. */
@@ -119,9 +119,8 @@ export async function orFallback<T>(p: Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-/** The app-wide notice (shown by Notice in App), "" when there is none. */
-export const notice = shallowRef('')
-let noticeTimer = 0
+/** The id of the one failure notification: a newer failure replaces the one showing. */
+export const ERROR_NOTIFICATION = 'error'
 
 /**
  * For failures of something the user did that has no place of its own to
@@ -129,12 +128,10 @@ let noticeTimer = 0
  */
 export function reportError(e: unknown): void {
   logError(e)
-  showNotice(errorText(e))
+  showError(errorText(e))
 }
 
-/** Shows text in the app-wide notice for a few seconds. */
-function showNotice(text: string): void {
-  notice.value = text
-  clearTimeout(noticeTimer)
-  noticeTimer = window.setTimeout(() => (notice.value = ''), 6000)
+/** Says text as a failure notification for a few seconds. */
+function showError(text: string): void {
+  notify({ id: ERROR_NOTIFICATION, kind: 'error', title: text, duration: 6000 })
 }

@@ -1,0 +1,19 @@
+[tiff @ 000002381109e4c0] No embedded thumbnail present
+[in#0/tiff_pipe @ 0000023810fc02c0] Could not find codec parameters for stream 0 (Video: tiff, none): unspecified size
+Consider increasing the value for the 'analyzeduration' (0) and 'probesize' (5000000) options
+Input #0, tiff_pipe, from 'spikes/phase7/fixtures/synthetic-cfa.dng':
+  Duration: N/A, bitrate: N/A
+  Stream #0:0: Video: tiff, none, 25 fps, 25 tbr, 25 tbn
+Stream mapping:
+  Stream #0:0 -> #0:0 (tiff (native) -> mjpeg (native))
+Press [q] to stop, [?] for help
+[tiff @ 0000023811087780] No embedded thumbnail present
+[vf#0:0 @ 0000023811095500] Cannot determine format of input 0:0 after EOF
+[vf#0:0 @ 0000023811095500] Task finished with error code: -1094995529 (Invalid data found when processing input)
+[vf#0:0 @ 0000023811095500] Terminating thread with return code -1094995529 (Invalid data found when processing input)
+[vost#0:0/mjpeg @ 0000023810fafb40] [enc:mjpeg @ 0000023811095080] Could not open encoder before EOF
+[vost#0:0/mjpeg @ 0000023810fafb40] Task finished with error code: -22 (Invalid argument)
+[vost#0:0/mjpeg @ 0000023810fafb40] Terminating thread with return code -22 (Invalid argument)
+[out#0/image2 @ 0000023811090040] Nothing was written into output file, because at least one of its streams received no packets.
+frame=    0 fps=0.0 q=0.0 Lsize=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.00    
+Conversion failed!

@@ -1,5 +1,8 @@
+import { t } from '../shared/i18n'
+import { mountInApp } from '../shared/testing'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { Place } from '../bridge'
 import { blockRequest } from '../shared/block'
 import PlacesView from './PlacesView.vue'
@@ -32,7 +35,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   },
 }))
 
-let wrapper: ReturnType<typeof mount> | undefined
+let wrapper: ReturnType<typeof mountInApp> | undefined
 
 beforeEach(() => {
   reads = 0
@@ -45,22 +48,53 @@ afterEach(() => {
 })
 
 it('keeps the place after cancelling a block and clears it before a saved block refresh fails', async () => {
-  wrapper = mount(PlacesView, { global: { stubs: { SearchBox: true, RouterLink: true } } })
+  wrapper = mountInApp(PlacesView, { plugins: [testRouter()] })
   await flushPromises()
-  await wrapper.get('button[title="Block"]').trigger('click')
+  await menuAction(wrapper, t('blocked.confirmTitle', { name: place.name }))
   blockRequest.value?.answer(false)
   await flushPromises()
-  expect(wrapper.find('.group-card').exists()).toBe(true)
+  expect(wrapper.find('.collection-card').exists()).toBe(true)
   expect(reads).toBe(1)
 
   let fail: ((reason: Error) => void) | undefined
   places = () => new Promise((_resolve, reject) => (fail = reject))
-  await wrapper.get('button[title="Block"]').trigger('click')
+  await menuAction(wrapper, t('blocked.confirmTitle', { name: place.name }))
   blockRequest.value?.answer(true)
   await flushPromises()
-  expect(wrapper.find('.group-card').exists()).toBe(false)
+  expect(wrapper.find('.collection-card').exists()).toBe(false)
   fail?.(new Error('read failed'))
   await flushPromises()
-  expect(wrapper.find('.group-card').exists()).toBe(false)
+  expect(wrapper.find('.collection-card').exists()).toBe(false)
   expect(wrapper.get('[role="alert"]').text()).toContain('read failed')
 })
+
+function testRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { template: '<div />' } },
+      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
+        name,
+        path: `/${name}/:id?`,
+        component: { template: '<div />' },
+      })),
+    ],
+  })
+}
+
+vi.mock('../search/SearchBox.vue', () => ({ default: { render: () => null } }))
+
+async function menuAction(
+  _w: ReturnType<typeof mountInApp>,
+  label: string,
+  trigger = 'button[aria-label^="Actions for"]',
+) {
+  await new DOMWrapper(document.body).get(trigger).trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  const item = [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    (el) => el.textContent.trim() === label,
+  )
+  if (!item) throw new Error(`No menu item named ${label}`)
+  item.click()
+  await flushPromises()
+}

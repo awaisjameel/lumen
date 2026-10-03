@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import UAlert from '@nuxt/ui/components/Alert.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UModal from '@nuxt/ui/components/Modal.vue'
+import URadioGroup from '@nuxt/ui/components/RadioGroup.vue'
+import { computed, ref, watch } from 'vue'
 import { BlockKind, BlockMode, engine, PIN_MAX_LEN, PIN_MIN_LEN } from '../bridge'
 import { blockRequest, showBlocksChanged, showBlockUndo } from './block'
 import type { BlockRequest } from './block'
@@ -7,7 +11,8 @@ import { errorText, reportError } from './errors'
 import { t } from './i18n'
 import PinFields from './PinFields.vue'
 
-const dialog = ref<HTMLDialogElement | null>(null)
+const ready = ref(false)
+let opener: HTMLElement | null = null
 const mode = ref<BlockMode>(BlockMode.BlockPhotos)
 const lookalikes = ref(false) // a face: block faces like it too
 const configured = ref(true)
@@ -16,11 +21,12 @@ const confirmPIN = ref('')
 const error = ref('')
 const busy = ref(false)
 
-watch(blockRequest, async (request) => {
+watch(blockRequest, async (request, previous) => {
+  ready.value = false
   if (!request) {
-    dialog.value?.close()
     return
   }
+  if (!previous) opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   mode.value = request.photosAllowed ? BlockMode.BlockPhotos : BlockMode.BlockLabel
   lookalikes.value = false
   configured.value = true
@@ -36,9 +42,35 @@ watch(blockRequest, async (request) => {
     error.value = errorText(e)
   }
   if (blockRequest.value !== request) return
-  await nextTick()
-  if (!dialog.value?.open) dialog.value?.showModal()
+  ready.value = true
 })
+
+const open = computed({
+  get: () => ready.value && blockRequest.value !== null,
+  set: (value) => {
+    if (!value) cancel()
+  },
+})
+const modeChoices = computed(() => [
+  { value: BlockMode.BlockLabel, label: t('blocked.labelOnly') },
+  { value: BlockMode.BlockPhotos, label: t('blocked.labelPhotos') },
+])
+// Radio values are strings; the request still receives its original boolean.
+const faceScope = computed({
+  get: () => (lookalikes.value ? 'similar' : 'one'),
+  set: (value: string) => {
+    lookalikes.value = value === 'similar'
+  },
+})
+const faceChoices = computed(() => [
+  { value: 'one', label: t('blocked.faceOnly') },
+  { value: 'similar', label: t('blocked.faceLookalikes'), description: t('blocked.faceLookalikesHint') },
+])
+
+function returnFocus(event: Event) {
+  event.preventDefault()
+  if (blockRequest.value === null && opener?.isConnected) opener.focus({ preventScroll: true })
+}
 
 function close(request: BlockRequest, saved: boolean) {
   request.answer(saved)
@@ -82,78 +114,53 @@ async function save() {
 </script>
 
 <template>
-  <dialog ref="dialog" class="dialog block-dialog" aria-labelledby="block-title" @cancel.prevent="cancel">
-    <form v-if="blockRequest" @submit.prevent="save">
-      <h2 id="block-title">{{ t('blocked.confirmTitle', { name: blockRequest.name }) }}</h2>
-      <p>{{ t('blocked.confirmText') }}</p>
-      <fieldset v-if="blockRequest.kind === BlockKind.BlockFace">
-        <legend>{{ t('blocked.faceScope') }}</legend>
-        <label><input v-model="lookalikes" type="radio" :value="false" />{{ t('blocked.faceOnly') }}</label>
-        <label><input v-model="lookalikes" type="radio" :value="true" />{{ t('blocked.faceLookalikes') }}</label>
-        <p class="hint">{{ t('blocked.faceLookalikesHint') }}</p>
-      </fieldset>
-      <fieldset v-if="blockRequest.labelOnly && blockRequest.photosAllowed">
-        <legend>{{ t('blocked.mode') }}</legend>
-        <label><input v-model="mode" type="radio" :value="BlockMode.BlockLabel" />{{ t('blocked.labelOnly') }}</label>
-        <label
-          ><input v-model="mode" type="radio" :value="BlockMode.BlockPhotos" />{{ t('blocked.labelPhotos') }}</label
-        >
-      </fieldset>
-      <p v-else>{{ t(blockRequest.photosAllowed ? 'blocked.photosOnly' : 'blocked.labelOnly') }}</p>
-      <template v-if="!configured">
-        <p>{{ t('blocked.createPINHint', { pinMin: PIN_MIN_LEN, pinMax: PIN_MAX_LEN }) }}</p>
-        <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" creating />
-      </template>
-      <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-      <div class="actions">
-        <button type="button" class="btn" :disabled="busy" @click="cancel">{{ t('common.cancel') }}</button>
-        <button class="btn btn-primary" :disabled="busy">{{ t('blocked.block') }}</button>
-      </div>
-    </form>
-  </dialog>
+  <UModal
+    v-model:open="open"
+    :title="blockRequest ? t('blocked.confirmTitle', { name: blockRequest.name }) : ''"
+    :description="t('blocked.confirmText')"
+    :close="false"
+    :dismissible="!busy"
+    :content="{ onCloseAutoFocus: returnFocus }"
+    :ui="{ content: 'max-w-md' }"
+  >
+    <template #body>
+      <form v-if="blockRequest" data-block-form class="grid gap-5" @submit.prevent="save">
+        <URadioGroup
+          v-if="blockRequest.kind === BlockKind.BlockFace"
+          v-model="faceScope"
+          :legend="t('blocked.faceScope')"
+          :items="faceChoices"
+        />
+        <URadioGroup
+          v-if="blockRequest.labelOnly && blockRequest.photosAllowed"
+          v-model="mode"
+          :legend="t('blocked.mode')"
+          :items="modeChoices"
+        />
+        <p v-else class="text-muted">
+          {{ t(blockRequest.photosAllowed ? 'blocked.photosOnly' : 'blocked.labelOnly') }}
+        </p>
+        <template v-if="!configured">
+          <p class="text-muted">{{ t('blocked.createPINHint', { pinMin: PIN_MIN_LEN, pinMax: PIN_MAX_LEN }) }}</p>
+          <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" creating />
+        </template>
+        <UAlert v-if="error" color="error" variant="subtle" :title="error" role="alert" />
+        <div class="flex flex-wrap justify-end gap-2">
+          <UButton
+            type="button"
+            data-block="cancel"
+            autofocus
+            color="neutral"
+            variant="outline"
+            :disabled="busy"
+            @click="cancel"
+            >{{ t('common.cancel') }}</UButton
+          >
+          <UButton type="submit" data-block="save" color="primary" variant="solid" :disabled="busy" :loading="busy">{{
+            t('blocked.block')
+          }}</UButton>
+        </div>
+      </form>
+    </template>
+  </UModal>
 </template>
-
-<style scoped>
-.block-dialog {
-  width: min(440px, calc(100vw - 32px));
-  padding: 20px;
-}
-
-p {
-  color: var(--text-2);
-}
-
-fieldset {
-  display: grid;
-  gap: 8px;
-  margin: 16px 0;
-  border: 0;
-  padding: 0;
-}
-
-.hint {
-  margin: 0;
-  font-size: 12px;
-}
-
-legend {
-  margin-bottom: 8px;
-  font-weight: 600;
-}
-
-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-:deep(.field) {
-  display: block;
-  width: 100%;
-  margin: 8px 0;
-}
-
-.actions {
-  margin-top: 20px;
-}
-</style>
