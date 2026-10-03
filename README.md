@@ -67,6 +67,13 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 - **Performance pass** ([docs/performance-2026-10-03.md](docs/performance-2026-10-03.md)), measured in the real app: cold start to a usable grid in about a second, 60 fps scrolling, searches in 120–200 ms once the text model is loaded, 454 MB in all when idle. On mains power 3,000 photos are browsable in 55 s and fully understood in 264 s on the integrated GPU, with indexing on half the processor.
 - Onboarding, empty states and the beta guide for testers ([docs/beta-testing.md](docs/beta-testing.md)). Design and decisions: [docs/phase6-design-2026-10-03.md](docs/phase6-design-2026-10-03.md).
 
+**Next development is planned:** a complete Nuxt UI frontend and shared
+design system, richer image/video viewing and file tools, RAW/DNG-first
+format support, and expanded customisation. The phased scope, architecture,
+migration rules and acceptance gates are in
+[the next development plan](docs/next-development-plan-2026-10-04.md).
+Implementation has not started.
+
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
 ## Setup (Windows)
