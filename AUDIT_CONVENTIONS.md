@@ -24,7 +24,12 @@ tooling; this file covers how code is written.
   out. Phase 6 (the installer, politeness controls, crash reports and
   diagnostics, onboarding and empty states, the performance pass) is built
   as `docs/phase6-design-2026-10-03.md` sets out; its decisions are not
-  reopened. Lumen makes no network request: no change may add one.
+  reopened except by a later explicit product-owner decision. Lumen currently
+  makes no network request. The owner's 4 October request authorises the
+  planned update-only exception in
+  [the automatic update plan](docs/automatic-updates-plan-2026-10-04.md):
+  opt-in checking and explicitly requested authenticated downloads. Other
+  features must not add network requests or upload library data.
 
 ## Go
 

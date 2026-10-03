@@ -10,6 +10,12 @@ for behaviour.
 
 ## Decisions
 
+Later decision, 4 October 2026: the owner requested automatic update checks
+and installation. [The Phase 12 update plan](automatic-updates-plan-2026-10-04.md)
+supersedes decision 1 for future update-only network activity, with opt-in
+checks and a user-requested download/restart. The table below records the
+Phase 6 baseline; the current application has no updater implementation.
+
 The product owner settled the plan's open questions on 3 October 2026:
 
 | #   | Question                                                    | Decision                                                                                                                                          |
