@@ -69,7 +69,8 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 
 **Next development is planned:** a complete Nuxt UI frontend and shared
 design system, richer image/video viewing and file tools, RAW/DNG-first
-format support, and expanded customisation. The phased scope, architecture,
+format support, expanded customisation, and individual/bulk lossless image
+compression. The phased scope, architecture,
 migration rules and acceptance gates are in
 [the next development plan](docs/next-development-plan-2026-10-04.md).
 Implementation has not started.

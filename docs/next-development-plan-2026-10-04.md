@@ -6,10 +6,12 @@ This plan covers the product owner's four requests: rebuild the complete
 frontend with the latest stable Nuxt UI, expand viewing and file tools,
 support more formats, and provide more useful customisation. The owner chose
 a calm, photo-focused visual direction and camera RAW/DNG as the first
-format priority. Installation and reinstallation acceptance were reported
+format priority. The owner also requested individual and bulk lossless
+image compression, specified in Phase 11 below.
+Installation and reinstallation acceptance were reported
 as passed by the owner; the existing beta remains the regression baseline.
 
-The sequence below extends the roadmap with Phases 7–10. These are planned
+The sequence below extends the roadmap with Phases 7–11. These are planned
 development phases, not claims of completion or a decision to publish a
 new version. Existing Phase 5/6 decisions and AUDIT_CONVENTIONS.md still
 apply. Version numbering is settled when a release candidate is assembled.
@@ -269,12 +271,12 @@ runtime probes; use file inspection rather than extension alone to decide
 what a particular file can do. Unsupported variants explain why and do
 not retry forever.
 
-| Order | Format work                                                                                                                           | Acceptance boundary                                                                                                                 |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 9A    | DNG and RAW families: Canon CR2/CR3/CRW, Nikon NEF/NRW, Sony ARW/SR2/SRF, Fujifilm RAF, Olympus/OM ORF, Panasonic RW2 and Pentax PEF. | Publish a tested camera/compression matrix. Recognising a family does not promise every model.                                      |
-| 9B    | Animated GIF/WebP/AVIF/APNG and multi-page TIFF handling.                                                                             | Distinguish static thumbnail/AI representative frame from animation/page browsing. Advertise only decoder-proven capabilities.      |
-| 9C    | Candidate JPEG XL and PSD composite previews; HEIF/AVIF variants needing better handling.                                             | Add only after decoding, metadata, colour, distribution and fixture checks pass. PSD layers remain outside a gallery's scope.       |
-| 9D    | Additional useful video containers, prioritised from the user's corpus: MPEG/MPG, TS, OGV and ASF candidates.                         | Test container plus video/audio codec combinations, seeking, duration, rotation, fallback and cancellation with the bundled FFmpeg. |
+| Order | Format work                                                                                                                           | Acceptance boundary                                                                                                                                   |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 9A    | DNG and RAW families: Canon CR2/CR3/CRW, Nikon NEF/NRW, Sony ARW/SR2/SRF, Fujifilm RAF, Olympus/OM ORF, Panasonic RW2 and Pentax PEF. | Publish a tested camera/compression matrix. Recognising a family does not promise every model.                                                        |
+| 9B    | Animated GIF/WebP/AVIF/APNG and multi-page TIFF handling.                                                                             | Distinguish static thumbnail/AI representative frame from animation/page browsing. Advertise only decoder-proven capabilities.                        |
+| 9C    | JPEG XL decoding/reconstruction for Phase 11; candidate PSD composite previews and HEIF/AVIF improvements.                            | JPEG XL must support viewing/indexing/restoration before compression ships. Other candidates require fixture checks; PSD layers remain outside scope. |
+| 9D    | Additional useful video containers, prioritised from the user's corpus: MPEG/MPG, TS, OGV and ASF candidates.                         | Test container plus video/audio codec combinations, seeking, duration, rotation, fallback and cancellation with the bundled FFmpeg.                   |
 
 Evaluate a pinned LibRaw-based decoder for RAW in a Windows worker process,
 so malformed or huge inputs have a process lifetime and resource budget.
@@ -347,7 +349,29 @@ delete existing assets or originals. Its effect on browsing is explicitly
 described. Cache controls distinguish disposable rendered media from
 originals, and clearing caches never discards library metadata.
 
-## 6. Implementation sequence and acceptance
+## 6. Phase 11 — Individual and bulk lossless compression
+
+Add a dedicated compression workspace and one shared **Compress losslessly…**
+action in the viewer, inspector, thumbnail menu and bulk-selection toolbar.
+It supports same-format JPEG/PNG optimisation, reversible JPEG-to-JPEG XL
+archiving and eligible pixel-exact conversions. Fast/Balanced/Maximum
+presets change search effort only. Every kept output must be verified and
+smaller; unsupported or already-optimised files are explained and skipped.
+
+Default to new copies with metadata preserved. Optional same-format
+replacement requires an explicitly chosen, journalled transaction with a
+recoverable original and conflict-aware Undo. Show temporary/backup costs
+and actual storage impact separately from output-size reductions. Reuse
+the existing format catalogue, settings, visibility, subprocess/resource
+controls and `fileops` ownership. Bulk jobs are durable, cancellable and
+resumable; original RAW sensor data and colour-managed previews are never
+silently substituted for source image samples.
+
+The preservation definitions, codec choices, workspace flow, transaction
+rules, library/sidecar integration and milestones are specified in
+[the lossless compression plan](lossless-compression-plan-2026-10-04.md).
+
+## 7. Implementation sequence and acceptance
 
 ```mermaid
 flowchart LR
@@ -357,7 +381,10 @@ flowchart LR
     C --> E[9 RAW and broader formats]
     D --> F[10 Complete customisation]
     E --> F
-    F --> G[Native regression and release candidate]
+    F --> H[11 Lossless compression]
+    D --> H
+    E --> H
+    H --> G[Native regression and release candidate]
 ```
 
 This shows dependencies, not a request for parallel agents. Render and RAW
@@ -366,16 +393,17 @@ starts. Complete high-resolution rendering before claiming actual-size
 RAW viewing. New preference controls ship with their features rather than
 being placeholders waiting for Phase 10.
 
-| Milestone | Concrete deliverable                                                        | Required evidence                                                                                               |
-| --------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| 7A        | Inventory, screen baseline, contracts and compatible Nuxt UI integration.   | Production build, representative overlays/forms, offline assets and RAW/render feasibility record.              |
-| 7B        | Token/theme reference, reusable compositions, shell and component showcase. | Light/dark, keyboard, narrow window, DPI, forced colours and reduced-motion review.                             |
-| 7C        | Every existing route and workflow migrated; old presentation code removed.  | Module matrix passes; existing state, privacy and file-operation regression tests still pass.                   |
-| 8A/B      | Image and video controllers with new viewing tools.                         | Native zoom/gestures, source navigation, rapid seek, track/fallback and resource-lifetime checks.               |
-| 8C        | Inspector, media tiles, selection and file tools.                           | Cross-surface command parity; batch cancellation, collisions, journalling, Undo and visibility rechecks.        |
-| 9         | Tested RAW-first capability catalogue and bundled decoders.                 | Real-format fixtures, selected camera variants, stage upgrade/retry and clean offline packaging.                |
-| 10        | Complete settings categories and migrated preferences.                      | Persistence, rapid-save order, failure rollback, category resets and validated preset import/export.            |
-| Final     | Regression record and a packaged candidate.                                 | Repository gates, native acceptance, performance comparison and install/upgrade/reinstall/uninstall regression. |
+| Milestone | Concrete deliverable                                                        | Required evidence                                                                                                      |
+| --------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 7A        | Inventory, screen baseline, contracts and compatible Nuxt UI integration.   | Production build, representative overlays/forms, offline assets and RAW/render feasibility record.                     |
+| 7B        | Token/theme reference, reusable compositions, shell and component showcase. | Light/dark, keyboard, narrow window, DPI, forced colours and reduced-motion review.                                    |
+| 7C        | Every existing route and workflow migrated; old presentation code removed.  | Module matrix passes; existing state, privacy and file-operation regression tests still pass.                          |
+| 8A/B      | Image and video controllers with new viewing tools.                         | Native zoom/gestures, source navigation, rapid seek, track/fallback and resource-lifetime checks.                      |
+| 8C        | Inspector, media tiles, selection and file tools.                           | Cross-surface command parity; batch cancellation, collisions, journalling, Undo and visibility rechecks.               |
+| 9         | Tested RAW-first capability catalogue and bundled decoders.                 | Real-format fixtures, selected camera variants, stage upgrade/retry and clean offline packaging.                       |
+| 10        | Complete settings categories and migrated preferences.                      | Persistence, rapid-save order, failure rollback, category resets and validated preset import/export.                   |
+| 11        | Individual/bulk verified lossless compression and reversible JPEG XL.       | Per-output preservation checks, measured savings, durable jobs, source safety, library/sidecar integrity and recovery. |
+| Final     | Regression record and a packaged candidate.                                 | Repository gates, native acceptance, performance comparison and install/upgrade/reinstall/uninstall regression.        |
 
 For each implementation slice, run the relevant frontend behaviour tests,
 type/lint/format checks and backend tests affected by changed contracts.
@@ -400,6 +428,9 @@ The final acceptance matrix includes:
   fallback, removable storage and clean offline installations.
 - Disk-operation fixtures covering collision races, sidecars, cancellation,
   restart, partial success and Undo without overwriting subsequent user work.
+- Lossless compression fixtures and mandatory per-output verification;
+  original JPEG reconstruction, sample/metadata equality, no-gain cases and
+  interrupted commit/backup recovery as the dedicated compression plan specifies.
 - Real-library performance: first usable grid, warm and first search,
   scroll frame times, detail/viewer navigation, idle/active memory, render
   cache size and conversion lifetime. Compare on the same machine and
@@ -413,7 +444,7 @@ record the actual budgets from 7A measurements. Motion must not introduce
 layout thrashing or break virtualisation. No unsupported format is called
 supported solely because its extension was added.
 
-## 7. First implementation slice
+## 8. First implementation slice
 
 Begin with **7A and 7B**: the screen/action inventory, Nuxt UI compatibility
 spike, semantic tokens, offline icon manifest, theme/preference migration
