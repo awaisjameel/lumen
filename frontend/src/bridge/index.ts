@@ -68,6 +68,7 @@ import type {
   Settings,
   Source,
   Tag,
+  TrashSelection as RawTrashSelection,
   UIError,
   View,
 } from '../../bindings/lumen/internal/core'
@@ -141,6 +142,8 @@ export type DuplicateItem = NonNullLists<RawDuplicateItem, 'paths' | 'mtimes'>
 export type DuplicateGroup = Omit<RawDuplicateGroup, 'items'> & { items: DuplicateItem[] }
 /** What moving files to the Recycle Bin did; kept files were left as they were. */
 export type DiskDeletion = NonNullLists<RawDiskDeletion, 'kept'>
+/** Trashed assets and how many files they have: what Delete from disk asks the user to confirm. */
+export type TrashSelection = NonNullLists<RawTrashSelection, 'assets'>
 /** A photo a block covers, with the other blocks that also hide it. */
 export type CoveredItem = NonNullLists<RawCoveredItem, 'hiddenBy'>
 /** An organise preview: the moves a template would make. */
@@ -238,6 +241,7 @@ export const ErrorCode = {
   UndoExpired: 'undo_expired',
   InvalidBlock: 'invalid_block',
   DeleteFailed: 'delete_failed',
+  TrashChanged: 'trash_changed',
   XMPOff: 'xmp_off',
   InvalidTemplate: 'invalid_template',
   OrganiseBusy: 'organise_busy',
@@ -380,15 +384,14 @@ export const engine = {
   restoreAssets: (ids: number[]): Promise<void> => LibraryService.RestoreAssets(ids),
   restoreAllTrash: (): Promise<void> => LibraryService.RestoreAllTrash(),
   trashCount: (): Promise<number> => LibraryService.TrashCount(),
-  /** How many files Delete from disk would move for these trashed assets (none given: all of the Trash). */
-  trashFileCount: (ids: number[]): Promise<number> => LibraryService.TrashFileCount(ids),
-  /** Moves trashed assets' files to the Windows Recycle Bin. */
-  deleteFromDisk: async (ids: number[]): Promise<DiskDeletion> => {
-    const r = await LibraryService.DeleteFromDisk(ids)
-    return { ...r, kept: r.kept ?? [] }
+  /** What Delete from disk would take for these trashed assets (none given: all of the Trash), to confirm. */
+  trashSelection: async (ids: number[]): Promise<TrashSelection> => {
+    const r = await LibraryService.TrashSelection(ids)
+    return { ...r, assets: r.assets ?? [] }
   },
-  deleteAllTrashFromDisk: async (): Promise<DiskDeletion> => {
-    const r = await LibraryService.DeleteAllTrashFromDisk()
+  /** Moves the files of a confirmed selection to the Windows Recycle Bin; refused if the Trash changed since. */
+  deleteFromDisk: async (sel: TrashSelection): Promise<DiskDeletion> => {
+    const r = await LibraryService.DeleteFromDisk(sel)
     return { ...r, kept: r.kept ?? [] }
   },
 
@@ -422,8 +425,9 @@ export const engine = {
     const r = await cancellable(SearchService.Search(query), signal)
     return { ...r, items: r.items ?? [], people: r.people ?? [] }
   },
-  visibleAssets: async (ids: number[], signal?: AbortSignal): Promise<number[]> =>
-    (await cancellable(SearchService.VisibleAssets(ids), signal)) ?? [],
+  /** Search results again as they are now, in order: hidden ones left out, thumbnails current. */
+  searchHits: async (ids: number[], signal?: AbortSignal): Promise<GridItem[]> =>
+    (await cancellable(SearchService.Hits(ids), signal)) ?? [],
   suggestTags: async (text: string): Promise<Tag[]> => (await SearchService.SuggestTags(text)) ?? [],
   prepareSearch: (): Promise<void> => SearchService.PrepareSearch(),
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],

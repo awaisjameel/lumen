@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
-import { DateSource, engine, Filter, Kind } from '../bridge'
+import { DateSource, engine, ErrorCode, Filter, Kind } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Confirm from '../shared/confirm'
 import type { AssetDetail } from '../bridge'
@@ -37,9 +37,8 @@ vi.mock('../bridge', async (importOriginal) => ({
     restoreAssets: vi.fn(),
     restoreAllTrash: vi.fn(),
     trashCount: vi.fn(),
-    trashFileCount: vi.fn(),
+    trashSelection: vi.fn(),
     deleteFromDisk: vi.fn(),
-    deleteAllTrashFromDisk: vi.fn(),
   },
 }))
 
@@ -90,9 +89,10 @@ beforeEach(() => {
   vi.mocked(engine.restoreAssets).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.restoreAllTrash).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.trashCount).mockReset().mockResolvedValue(0)
-  vi.mocked(engine.trashFileCount).mockReset().mockResolvedValue(2)
+  vi.mocked(engine.trashSelection)
+    .mockReset()
+    .mockResolvedValue({ assets: [1], files: 2 })
   vi.mocked(engine.deleteFromDisk).mockReset().mockResolvedValue({ recycled: 1, kept: [] })
-  vi.mocked(engine.deleteAllTrashFromDisk).mockReset().mockResolvedValue({ recycled: 3, kept: [] })
   vi.mocked(engine.asset)
     .mockReset()
     .mockImplementation((id) => Promise.resolve(detail(id)))
@@ -170,7 +170,6 @@ it('calls nothing when the delete-from-disk question is declined', async () => {
   await deleteFromDisk(lib, { day, id: 1 })
   await deleteAllFromDisk(lib)
   expect(engine.deleteFromDisk).not.toHaveBeenCalled()
-  expect(engine.deleteAllTrashFromDisk).not.toHaveBeenCalled()
 })
 
 it('says how many files go to the Recycle Bin before deleting them from disk', async () => {
@@ -181,25 +180,37 @@ it('says how many files go to the Recycle Bin before deleting them from disk', a
     expect.stringContaining('2 files will be moved to the Windows Recycle Bin'),
     'Move to Recycle Bin',
   )
-  expect(engine.deleteFromDisk).toHaveBeenCalledWith([1])
+  expect(engine.deleteFromDisk).toHaveBeenCalledWith({ assets: [1], files: 2 })
   expect(notifications.find(ERROR_NOTIFICATION)).toBeUndefined()
 })
 
-it('states the engine’s own file count, for one photo and for the whole Trash', async () => {
+it('deletes exactly the selection the user confirmed, for one photo and for the whole Trash', async () => {
   const lib = await libraryShowing(Filter.FilterTrash)
-  vi.mocked(engine.trashFileCount).mockResolvedValueOnce(5)
+  vi.mocked(engine.trashSelection).mockResolvedValueOnce({ assets: [1], files: 5 })
   await deleteFromDisk(lib, { day, id: 1 })
-  expect(engine.trashFileCount).toHaveBeenLastCalledWith([1])
+  expect(engine.trashSelection).toHaveBeenLastCalledWith([1])
   expect(confirm).toHaveBeenLastCalledWith(expect.anything(), expect.stringContaining('5 files'), expect.anything())
-  vi.mocked(engine.trashFileCount).mockResolvedValueOnce(7)
+  expect(engine.deleteFromDisk).toHaveBeenLastCalledWith({ assets: [1], files: 5 })
+  vi.mocked(engine.trashSelection).mockResolvedValueOnce({ assets: [1, 2, 3], files: 7 })
   await deleteAllFromDisk(lib)
-  expect(engine.trashFileCount).toHaveBeenLastCalledWith([])
+  expect(engine.trashSelection).toHaveBeenLastCalledWith([])
   expect(confirm).toHaveBeenLastCalledWith(expect.anything(), expect.stringContaining('7 files'), expect.anything())
+  expect(engine.deleteFromDisk).toHaveBeenLastCalledWith({ assets: [1, 2, 3], files: 7 })
+})
+
+it('says the Trash changed when the engine refuses what was confirmed', async () => {
+  const lib = await libraryShowing(Filter.FilterTrash)
+  vi.mocked(engine.deleteFromDisk).mockRejectedValue(new Error('changed', { cause: { code: ErrorCode.TrashChanged } }))
+  await deleteAllFromDisk(lib)
+  expect(notifications.find(ERROR_NOTIFICATION)?.title).toBe(
+    'The Trash changed while you were deciding, so nothing was deleted. Try again.',
+  )
+  expect(engine.trashCount).toHaveBeenCalled()
 })
 
 it('deletes nothing and asks nothing when the file count cannot be read', async () => {
   const lib = await libraryShowing(Filter.FilterTrash)
-  vi.mocked(engine.trashFileCount).mockRejectedValue(new Error('no'))
+  vi.mocked(engine.trashSelection).mockRejectedValue(new Error('no'))
   await deleteFromDisk(lib, { day, id: 1 })
   expect(confirm).not.toHaveBeenCalled()
   expect(engine.deleteFromDisk).not.toHaveBeenCalled()
@@ -228,7 +239,7 @@ it('reports the files the Recycle Bin would not take', async () => {
   vi.mocked(engine.deleteFromDisk).mockResolvedValue({ recycled: 0, kept: ['D:\\share\\a.jpg'] })
   await deleteFromDisk(lib, { day, id: 1 })
   expect(notifications.find(KEPT_NOTIFICATION)?.title).toContain('1 file couldn’t be moved to the Recycle Bin')
-  vi.mocked(engine.deleteAllTrashFromDisk).mockResolvedValue({ recycled: 1, kept: ['a', 'b'] })
+  vi.mocked(engine.deleteFromDisk).mockResolvedValue({ recycled: 1, kept: ['a', 'b'] })
   await deleteAllFromDisk(lib)
   expect(notifications.find(KEPT_NOTIFICATION)?.title).toContain('2 files couldn’t be moved')
 })
@@ -251,7 +262,6 @@ it('confirms the engine’s file count from the Viewer even before the photo’s
   const lib = await libraryShowing(Filter.FilterTrash)
   lib.viewer = { day, id: 1 }
   vi.mocked(engine.asset).mockReturnValue(new Promise(() => undefined)) // the details never arrive
-  vi.mocked(engine.trashFileCount).mockResolvedValue(2)
   wrapper = mountInApp(Viewer)
   await flushPromises()
   // The viewer is a layer over the page, outside the wrapper's own element.
@@ -261,19 +271,19 @@ it('confirms the engine’s file count from the Viewer even before the photo’s
   expect(button).toBeDefined()
   await button?.trigger('click')
   await flushPromises()
-  expect(engine.trashFileCount).toHaveBeenCalledWith([1])
+  expect(engine.trashSelection).toHaveBeenCalledWith([1])
   expect(confirm).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('2 files'), expect.anything())
 })
 
 it('confirms the number of files, not of photos, when deleting the whole Trash from its bar', async () => {
   const lib = await libraryShowing(Filter.FilterTrash)
-  vi.mocked(engine.trashFileCount).mockResolvedValue(5)
+  vi.mocked(engine.trashSelection).mockResolvedValue({ assets: [1, 2, 3], files: 5 })
   wrapper = mountInApp(TrashBar)
   const button = wrapper.findAll('button').find((b) => b.text().includes('Delete all from disk'))
   await button?.trigger('click')
   await flushPromises()
   expect(lib.total).toBe(3)
-  expect(engine.trashFileCount).toHaveBeenCalledWith([])
+  expect(engine.trashSelection).toHaveBeenCalledWith([])
   expect(confirm).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('5 files'), expect.anything())
 })
 
@@ -331,7 +341,7 @@ it('disables both recovery actions while a restore is pending and restores once'
   expect(wrapper.get<HTMLButtonElement>('[data-trash-delete-all]').element.disabled).toBe(true)
   await wrapper.get('[data-trash-restore-all]').trigger('click')
   expect(engine.restoreAllTrash).toHaveBeenCalledOnce()
-  expect(engine.deleteAllTrashFromDisk).not.toHaveBeenCalled()
+  expect(engine.deleteFromDisk).not.toHaveBeenCalled()
   if (!finish) throw new Error('the restore did not start')
   finish()
   await flushPromises()

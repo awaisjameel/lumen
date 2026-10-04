@@ -45,6 +45,7 @@ const (
 	CodeUndoExpired     ErrorCode = "undo_expired"     // too late to undo that block
 	CodeInvalidBlock    ErrorCode = "invalid_block"    // that can't be blocked
 	CodeDeleteFailed    ErrorCode = "delete_failed"    // the Recycle Bin could not be used
+	CodeTrashChanged    ErrorCode = "trash_changed"    // the Trash changed after Delete from disk was confirmed
 	CodeXMPOff          ErrorCode = "xmp_off"          // XMP sidecars were asked for while the setting is off
 
 	CodeInvalidTemplate ErrorCode = "invalid_template" // the folder scheme to organise by cannot be used
@@ -64,6 +65,7 @@ var errorCodes = []struct {
 	err  error
 	code ErrorCode
 }{
+	{ErrTrashChanged, CodeTrashChanged}, // before not_found: an asset that left the Trash changed it
 	{store.ErrNotFound, CodeNotFound},
 	{ErrNoAI, CodeNoAI},
 	{search.ErrNotLoaded, CodeNoAI},

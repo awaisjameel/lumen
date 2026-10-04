@@ -42,6 +42,7 @@ const codeText: Record<ErrorCode, MessageKey> = {
   [ErrorCode.UndoExpired]: 'error.undoExpired',
   [ErrorCode.InvalidBlock]: 'error.invalidBlock',
   [ErrorCode.DeleteFailed]: 'error.deleteFailed',
+  [ErrorCode.TrashChanged]: 'error.trashChanged',
   [ErrorCode.XMPOff]: 'error.xmpOff',
   [ErrorCode.InvalidTemplate]: 'error.invalidTemplate',
   [ErrorCode.OrganiseBusy]: 'error.organiseBusy',

@@ -108,8 +108,8 @@ useCommands([
         :loading="about.savingReport"
         :disabled="about.savingReport"
         @click="runCommand('about.report')"
-        >{{ about.savingReport ? t('about.saving') : t('about.saveReport') }}</UButton
-      >
+        >{{ about.savingReport ? t('about.saving') : t('about.saveReport') }}
+      </UButton>
     </PrefRow>
     <p v-if="savedTo" class="text-muted lumen-selectable break-words" role="status">
       {{ t('about.saved', { path: savedTo }) }}
@@ -131,13 +131,13 @@ useCommands([
       role="alert"
     >
       <template #actions>
-        <UButton v-if="about.loadError" loading-auto @click="about.load">{{ t('about.retry') }}</UButton>
+        <UButton v-if="about.loadError" loading-auto @click="about.load">{{ t('common.retry') }}</UButton>
       </template>
     </UAlert>
     <MetaRow v-if="matches('about.places', 'about.geonames')" :label="t('about.places')" icon="map">
       <UButton variant="link" @click="run(() => engine.openLink(Link.LinkGeoNames))">{{ t('about.geonames') }}</UButton>
-      {{ t('about.placesLicence') }}</MetaRow
-    >
+      {{ t('about.placesLicence') }}
+    </MetaRow>
   </div>
 </template>
 <style scoped>
@@ -146,6 +146,7 @@ useCommands([
   flex-direction: column;
   gap: 0.25rem;
 }
+
 .release-link {
   max-width: 100%;
   overflow-wrap: anywhere;

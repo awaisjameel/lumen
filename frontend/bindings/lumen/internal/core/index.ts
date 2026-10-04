@@ -59,6 +59,7 @@ export type {
     Settings,
     Source,
     Tag,
+    TrashSelection,
     UIError,
     Video,
     View,

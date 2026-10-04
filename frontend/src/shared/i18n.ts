@@ -315,6 +315,7 @@ const en = {
   'library.photoOn': 'Photo, {day}',
   'library.videoOn': 'Video, {day}',
   'library.favouriteItem': '{item}, favourite',
+  'library.daysFailed': 'Some photos couldn’t be loaded.',
 
   'format.megapixels': '{mp} MP',
   'format.bytes': '{n} B',
@@ -481,7 +482,6 @@ const en = {
 
   'about.title': 'About Lumen',
   'about.loading': 'Reading Lumen’s details…',
-  'about.retry': 'Try again',
   'about.versionLabel': 'Version',
   'about.releases': 'Published releases',
   'about.logsHint': 'Logs stay on this PC. Open their folder to inspect them.',
@@ -505,6 +505,7 @@ const en = {
   'common.cancel': 'Cancel',
   'common.close': 'Close',
   'common.dismiss': 'Dismiss',
+  'common.retry': 'Try again',
   'common.showInFolder': 'Show in folder',
   'common.withKey': '{label} ({key})',
   'common.labelValue': '{label}: {value}',
@@ -538,6 +539,7 @@ const en = {
   'error.undoExpired': 'It’s too late to undo that block. Unblock it on the Blocked screen instead.',
   'error.invalidBlock': 'That can’t be blocked.',
   'error.deleteFailed': 'Lumen couldn’t use the Recycle Bin, so it left the remaining files where they are.',
+  'error.trashChanged': 'The Trash changed while you were deciding, so nothing was deleted. Try again.',
 
   // Things and Events: rename and pin.
   'things.pinNamed': 'Pin “{name}”',

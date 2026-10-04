@@ -142,6 +142,17 @@ func (f trashFixture) inTrash(t *testing.T) int {
 	return n
 }
 
+// confirm is what the user agrees to delete: the trashed assets ids, or with
+// none, everything in the Trash.
+func (f trashFixture) confirm(t *testing.T, ids ...int64) core.TrashSelection {
+	t.Helper()
+	sel, err := f.svc.TrashSelection(t.Context(), ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sel
+}
+
 func TestTrashingMovesNothingOnDiskAndNeverCallsTheRecycler(t *testing.T) {
 	f := newTrashFixture(t)
 	if err := f.svc.TrashAssets(t.Context(), []int64{f.ids["a"], f.ids["b"]}); err != nil {
@@ -192,7 +203,7 @@ func TestDeleteFromDiskRecyclesEveryCopyAndForgetsTheirFiles(t *testing.T) {
 	if err := f.svc.TrashAssets(ctx, []int64{f.ids["a"], f.ids["b"]}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.svc.DeleteFromDisk(ctx, []int64{f.ids["a"]})
+	result, err := f.svc.DeleteFromDisk(ctx, f.confirm(t, f.ids["a"]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,8 +236,9 @@ func TestDeleteFromDiskRefusesAssetsThatAreNotInTheTrash(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ids := range [][]int64{{f.ids["b"]}, {f.ids["a"], f.ids["b"]}, {9999}} {
-		if _, err := f.svc.DeleteFromDisk(ctx, ids); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("DeleteFromDisk(%v) = %v, want ErrNotFound", ids, err)
+		_, err := f.svc.DeleteFromDisk(ctx, core.TrashSelection{Assets: ids, Files: len(ids)})
+		if !errors.Is(err, store.ErrNotFound) || !errors.Is(err, ErrTrashChanged) {
+			t.Errorf("DeleteFromDisk(%v) = %v, want ErrTrashChanged from ErrNotFound", ids, err)
 		}
 	}
 	if f.rec.called() != 0 {
@@ -242,7 +254,7 @@ func TestDeleteFromDiskRefusesAssetsThatAreNotInTheTrash(t *testing.T) {
 
 func TestDeleteFromDiskWithNothingGivenDoesNothing(t *testing.T) {
 	f := newTrashFixture(t)
-	result, err := f.svc.DeleteFromDisk(t.Context(), nil)
+	result, err := f.svc.DeleteFromDisk(t.Context(), core.TrashSelection{})
 	if err != nil || result.Recycled != 0 || result.Kept == nil || f.rec.called() != 0 {
 		t.Fatalf("result = %+v, %v, calls = %d", result, err, f.rec.called())
 	}
@@ -255,7 +267,7 @@ func TestDeleteFromDiskReportsKeptAndFailedFilesAndForgetsOnlyRecycledOnes(t *te
 	if err := f.svc.TrashAssets(ctx, []int64{f.ids["a"], f.ids["b"], f.ids["c"]}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.svc.DeleteFromDisk(ctx, []int64{f.ids["a"], f.ids["b"], f.ids["c"]})
+	result, err := f.svc.DeleteFromDisk(ctx, f.confirm(t, f.ids["a"], f.ids["b"], f.ids["c"]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +304,7 @@ func TestDeleteFromDiskForgetsFilesThatWereAlreadyGoneWithoutCountingThem(t *tes
 	if err := f.svc.TrashAssets(ctx, []int64{f.ids["c"]}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.svc.DeleteFromDisk(ctx, []int64{f.ids["c"]})
+	result, err := f.svc.DeleteFromDisk(ctx, f.confirm(t, f.ids["c"]))
 	if err != nil || result.Recycled != 0 || len(result.Kept) != 0 {
 		t.Fatalf("result = %+v, %v", result, err)
 	}
@@ -301,13 +313,13 @@ func TestDeleteFromDiskForgetsFilesThatWereAlreadyGoneWithoutCountingThem(t *tes
 	}
 }
 
-func TestDeleteAllTrashFromDiskTakesOnlyWhatIsInTheTrash(t *testing.T) {
+func TestDeletingEverythingTakesOnlyWhatIsInTheTrash(t *testing.T) {
 	f := newTrashFixture(t)
 	ctx := t.Context()
 	if err := f.svc.TrashAssets(ctx, []int64{f.ids["a"], f.ids["c"]}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.svc.DeleteAllTrashFromDisk(ctx)
+	result, err := f.svc.DeleteFromDisk(ctx, f.confirm(t))
 	if err != nil || result.Recycled != 3 || len(result.Kept) != 0 {
 		t.Fatalf("result = %+v, %v, want a's two copies and c", result, err)
 	}
@@ -319,8 +331,52 @@ func TestDeleteAllTrashFromDiskTakesOnlyWhatIsInTheTrash(t *testing.T) {
 	}
 	// An empty Trash has nothing to give the recycler.
 	before := f.rec.called()
-	if result, err := f.svc.DeleteAllTrashFromDisk(ctx); err != nil || result.Recycled != 0 || f.rec.called() != before {
+	if result, err := f.svc.DeleteFromDisk(ctx, f.confirm(t)); err != nil || result.Recycled != 0 || f.rec.called() != before {
 		t.Fatalf("emptying an empty Trash: %+v, %v, calls %d", result, err, f.rec.called())
+	}
+}
+
+func TestDeleteFromDiskTakesOnlyWhatWasConfirmed(t *testing.T) {
+	f := newTrashFixture(t)
+	ctx := t.Context()
+	if err := f.svc.TrashAssets(ctx, []int64{f.ids["c"]}); err != nil {
+		t.Fatal(err)
+	}
+	sel := f.confirm(t)
+	// A trash finishing while the user reads the question is not part of it.
+	if err := f.svc.TrashAssets(ctx, []int64{f.ids["b"]}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.svc.DeleteFromDisk(ctx, sel)
+	if err != nil || result.Recycled != 1 || len(f.rec.calls) != 1 || !slices.Equal(f.rec.calls[0], []string{f.paths["c"]}) {
+		t.Fatalf("result = %+v, %v, calls %v, want c alone", result, err, f.rec.calls)
+	}
+	if n := f.inTrash(t); n != 1 {
+		t.Fatalf("TrashCount = %d, want b still there", n)
+	}
+}
+
+func TestDeleteFromDiskRefusesASelectionThatChanged(t *testing.T) {
+	f := newTrashFixture(t)
+	ctx := t.Context()
+	if err := f.svc.TrashAssets(ctx, []int64{f.ids["a"], f.ids["b"]}); err != nil {
+		t.Fatal(err)
+	}
+	restored := f.confirm(t)
+	if err := f.svc.RestoreAssets(ctx, []int64{f.ids["b"]}); err != nil {
+		t.Fatal(err)
+	}
+	lost := f.confirm(t, f.ids["a"])
+	lost.Files++ // as if a copy of a was forgotten since
+	for _, sel := range []core.TrashSelection{restored, lost} {
+		_, err := f.svc.DeleteFromDisk(ctx, sel)
+		var failure Failure
+		if !errors.Is(err, ErrTrashChanged) || json.Unmarshal(MarshalError(err), &failure) != nil || failure.Code != CodeTrashChanged {
+			t.Errorf("DeleteFromDisk(%+v) = %v, the UI sees %+v, want trash_changed", sel, err, failure)
+		}
+	}
+	if f.rec.called() != 0 {
+		t.Fatal("a changed selection reached the recycler")
 	}
 }
 
@@ -332,7 +388,7 @@ func TestDeleteFromDiskWhenTheRecyclerFailsKeepsWhatItDidRecycle(t *testing.T) {
 	if err := f.svc.TrashAssets(ctx, []int64{f.ids["b"], f.ids["c"]}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.svc.DeleteFromDisk(ctx, []int64{f.ids["b"], f.ids["c"]})
+	_, err := f.svc.DeleteFromDisk(ctx, f.confirm(t, f.ids["b"], f.ids["c"]))
 	if !errors.Is(err, ErrDeleteFailed) {
 		t.Fatalf("err = %v, want ErrDeleteFailed", err)
 	}
@@ -353,7 +409,7 @@ func TestDeleteFromDiskForgetsNothingWhenTheRecyclerLosesTrack(t *testing.T) {
 	if err := f.svc.TrashAssets(ctx, []int64{f.ids["b"], f.ids["c"]}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.DeleteFromDisk(ctx, []int64{f.ids["b"], f.ids["c"]}); !errors.Is(err, ErrDeleteFailed) {
+	if _, err := f.svc.DeleteFromDisk(ctx, f.confirm(t, f.ids["b"], f.ids["c"])); !errors.Is(err, ErrDeleteFailed) {
 		t.Fatalf("err = %v, want ErrDeleteFailed", err)
 	}
 	if n := f.inTrash(t); n != 2 {
@@ -366,12 +422,13 @@ func TestDeleteFromDiskForgetsRecycledFilesEvenIfTheCallWasCancelled(t *testing.
 	if err := f.svc.TrashAssets(t.Context(), []int64{f.ids["c"]}); err != nil {
 		t.Fatal(err)
 	}
+	sel := f.confirm(t, f.ids["c"])
 	ctx, cancel := context.WithCancel(t.Context())
 	f.svc.recycle = func(_ context.Context, paths []string) ([]fileops.Outcome, error) {
 		cancel() // the user quits after the shell has taken the file
 		return []fileops.Outcome{{Path: paths[0], Status: fileops.Recycled}}, ctx.Err()
 	}
-	if _, err := f.svc.DeleteFromDisk(ctx, []int64{f.ids["c"]}); !errors.Is(err, context.Canceled) {
+	if _, err := f.svc.DeleteFromDisk(ctx, sel); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want the cancellation", err)
 	}
 	if n := f.inTrash(t); n != 0 {
@@ -398,7 +455,7 @@ func TestAFailedRecycleLogsNoFilePaths(t *testing.T) {
 	if err := f.svc.TrashAssets(ctx, []int64{f.ids["b"]}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.DeleteFromDisk(ctx, []int64{f.ids["b"]}); err != nil {
+	if _, err := f.svc.DeleteFromDisk(ctx, f.confirm(t, f.ids["b"])); err != nil {
 		t.Fatal(err)
 	}
 	if logs.Len() == 0 {
@@ -411,22 +468,30 @@ func TestAFailedRecycleLogsNoFilePaths(t *testing.T) {
 	}
 }
 
-func TestTrashFileCountCountsEveryCopyAndRefusesAssetsOutsideTheTrash(t *testing.T) {
+func TestTrashSelectionCountsEveryCopyAndRefusesAssetsOutsideTheTrash(t *testing.T) {
 	f := newTrashFixture(t)
 	ctx := t.Context()
 	if err := f.svc.TrashAssets(ctx, []int64{f.ids["a"], f.ids["c"]}); err != nil {
 		t.Fatal(err)
 	}
+	both := []int64{f.ids["a"], f.ids["c"]}
+	slices.Sort(both)
 	for _, c := range []struct {
-		ids  []int64
-		want int
-	}{{[]int64{f.ids["a"]}, 2}, {[]int64{f.ids["c"]}, 1}, {[]int64{f.ids["a"], f.ids["c"]}, 3}, {nil, 3}} {
-		if n, err := f.svc.TrashFileCount(ctx, c.ids); err != nil || n != c.want {
-			t.Errorf("TrashFileCount(%v) = %d, %v, want %d", c.ids, n, err, c.want)
+		ids    []int64
+		assets []int64
+		files  int
+	}{{[]int64{f.ids["a"]}, []int64{f.ids["a"]}, 2}, {[]int64{f.ids["c"]}, []int64{f.ids["c"]}, 1}, {both, both, 3}, {nil, both, 3}} {
+		sel, err := f.svc.TrashSelection(ctx, c.ids)
+		slices.Sort(sel.Assets)
+		if err != nil || sel.Files != c.files || !slices.Equal(sel.Assets, c.assets) {
+			t.Errorf("TrashSelection(%v) = %+v, %v, want %v with %d files", c.ids, sel, err, c.assets, c.files)
 		}
 	}
-	if _, err := f.svc.TrashFileCount(ctx, []int64{f.ids["b"]}); !errors.Is(err, store.ErrNotFound) {
+	if _, err := f.svc.TrashSelection(ctx, []int64{f.ids["b"]}); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("a photo outside the Trash: %v", err)
+	}
+	if sel, err := f.svc.TrashSelection(ctx, nil); err != nil || sel.Assets == nil {
+		t.Errorf("TrashSelection(nil) = %+v, %v: the UI needs a list", sel, err)
 	}
 }
 
@@ -444,6 +509,7 @@ func TestDeleteFromDiskLeavesAFileThatTookOverARecycledFilesRowId(t *testing.T) 
 	if err := os.WriteFile(newcomer, []byte("n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	sel := f.confirm(t, f.ids["a"])
 	// While the shell works, the scanner forgets the copy's row (the highest
 	// id) and then finds an unrelated file, which SQLite gives the same id.
 	f.svc.recycle = func(ctx context.Context, paths []string) ([]fileops.Outcome, error) {
@@ -464,7 +530,7 @@ func TestDeleteFromDiskLeavesAFileThatTookOverARecycledFilesRowId(t *testing.T) 
 		}
 		return f.rec.recycle(ctx, paths)
 	}
-	if _, err := f.svc.DeleteFromDisk(ctx, []int64{f.ids["a"]}); err != nil {
+	if _, err := f.svc.DeleteFromDisk(ctx, sel); err != nil {
 		t.Fatal(err)
 	}
 	id, err := assetAt(ctx, f.st, newcomer)

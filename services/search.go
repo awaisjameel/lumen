@@ -157,14 +157,15 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	return core.SearchResult{Items: items, People: names, Pending: pending, Complete: complete, NoAI: noAI}, nil
 }
 
-// VisibleAssets lets the UI prune current search results after a visibility
-// change, keeping their relevance order without running the search again.
-func (s *SearchService) VisibleAssets(ctx context.Context, ids []int64) ([]int64, error) {
-	visible, err := s.store.VisibleAssets(ctx, ids)
-	if visible == nil {
-		visible = []int64{}
+// Hits gives current search results again as they are now, in the order
+// given, without running the search again: hits no longer visible are left
+// out, and the others carry their current thumbnail and favourite.
+func (s *SearchService) Hits(ctx context.Context, ids []int64) ([]core.GridItem, error) {
+	items, err := s.store.GridItems(ctx, ids)
+	if items == nil {
+		items = []core.GridItem{}
 	}
-	return visible, err
+	return items, err
 }
 
 // PrepareSearch readies the AI for a search the user is starting to type

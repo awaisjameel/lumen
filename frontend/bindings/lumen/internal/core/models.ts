@@ -1208,6 +1208,15 @@ export enum Theme {
 };
 
 /**
+ * TrashSelection is what Delete from disk asks the user to confirm: trashed
+ * assets and how many files they have on disk.
+ */
+export interface TrashSelection {
+    "assets": number[] | null;
+    "files": number;
+}
+
+/**
  * UIError is a failure in the UI, for Lumen's log.
  */
 export interface UIError {

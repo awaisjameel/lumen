@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UPopover from '@nuxt/ui/components/Popover.vue'
 import USlider from '@nuxt/ui/components/Slider.vue'
@@ -549,6 +550,19 @@ const searchNotes = computed(() => {
 
       <template #toolbar>
         <TrashBar v-if="lib.inTrash" />
+        <UAlert
+          v-if="lib.daysError"
+          :title="t('library.daysFailed')"
+          :description="lib.daysError"
+          color="error"
+          variant="subtle"
+          orientation="horizontal"
+          role="alert"
+        >
+          <template #actions>
+            <UButton color="neutral" variant="outline" @click="lib.retryDays()">{{ t('common.retry') }}</UButton>
+          </template>
+        </UAlert>
         <p v-for="n in searchNotes" :key="n" class="note">{{ n }}</p>
         <p v-if="lib.isSearch && lib.searchInfo?.blocked" class="note">
           {{ t('search.blocked') }}

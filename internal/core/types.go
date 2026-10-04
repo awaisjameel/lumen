@@ -315,6 +315,13 @@ type DiskDeletion struct {
 	Kept     []string `json:"kept"`     // files left in place because they could not be recycled
 }
 
+// TrashSelection is what Delete from disk asks the user to confirm: trashed
+// assets and how many files they have on disk.
+type TrashSelection struct {
+	Assets []int64 `json:"assets"`
+	Files  int     `json:"files"`
+}
+
 // GridItem is the minimum the grid needs to lay out and draw one cell.
 // Field names are short on purpose: a big library sends many of these.
 type GridItem struct {

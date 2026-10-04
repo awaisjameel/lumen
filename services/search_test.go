@@ -164,7 +164,7 @@ func TestSearchWithoutAI(t *testing.T) {
 	}
 }
 
-func TestVisibleAssetsPrunesResultsInOrder(t *testing.T) {
+func TestHitsPruneResultsInOrderWithCurrentThumbnails(t *testing.T) {
 	ctx := t.Context()
 	db := filepath.Join(t.TempDir(), "library.db")
 	st, err := store.Open(db)
@@ -199,30 +199,34 @@ func TestVisibleAssetsPrunesResultsInOrder(t *testing.T) {
 	if _, err := w.ExecContext(ctx, "UPDATE assets SET hidden = 1 WHERE id = ?", hidden); err != nil {
 		t.Fatal(err)
 	}
+	// a's thumbnail is made after the search found it.
+	if _, err := w.ExecContext(ctx, "UPDATE assets SET thumb_version = 7 WHERE id = ?", a); err != nil {
+		t.Fatal(err)
+	}
 	s := NewSearchService(st, nil, false, nil)
-	for _, read := range []struct {
-		name string
-		fn   func(context.Context, []int64) ([]int64, error)
-	}{{"store", st.VisibleAssets}, {"service", s.VisibleAssets}} {
-		t.Run(read.name, func(t *testing.T) {
-			for _, c := range []struct {
-				ids, want []int64
-			}{
-				{[]int64{b, blocked, a, hidden, b, 999}, []int64{b, a, b}},
-				{[]int64{hidden, blocked, 999}, []int64{}},
-				{nil, []int64{}},
-			} {
-				got, err := read.fn(ctx, c.ids)
-				if err != nil || got == nil || !slices.Equal(got, c.want) {
-					t.Errorf("visible IDs %v = %v, %v; want %v", c.ids, got, err, c.want)
-				}
-			}
-		})
+	for _, c := range []struct {
+		ids, want []int64
+	}{
+		{[]int64{b, blocked, a, hidden, b, 999}, []int64{b, a, b}},
+		{[]int64{hidden, blocked, 999}, []int64{}},
+		{nil, []int64{}},
+	} {
+		items, err := s.Hits(ctx, c.ids)
+		got := make([]int64, len(items))
+		for i, it := range items {
+			got[i] = it.ID
+		}
+		if err != nil || items == nil || !slices.Equal(got, c.want) {
+			t.Errorf("hits %v = %v, %v; want %v", c.ids, got, err, c.want)
+		}
+		if i := slices.Index(got, a); i >= 0 && items[i].Thumb != 7 {
+			t.Errorf("a's thumbnail = %d, want the current version 7", items[i].Thumb)
+		}
 	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if got, err := s.VisibleAssets(cancelled, []int64{a}); got == nil || !errors.Is(err, context.Canceled) {
-		t.Errorf("cancelled visibility read = %v, %v", got, err)
+	if got, err := s.Hits(cancelled, []int64{a}); got == nil || !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled hits read = %v, %v", got, err)
 	}
 }
 

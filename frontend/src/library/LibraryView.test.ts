@@ -161,6 +161,21 @@ it('leaves grid shortcuts to an open overlay and ignores composing key events', 
   wrapper.unmount()
 })
 
+it('says when days could not be loaded and offers to try again', async () => {
+  vi.mocked(engine.event).mockResolvedValue(event(1, 'Event'))
+  const { wrapper } = await mountedTimeline()
+  const lib = useLibrary()
+  const retry = vi.spyOn(lib, 'retryDays')
+  lib.daysError = 'Something went wrong: disk busy'
+  await flushPromises()
+  const alert = wrapper.get('[role="alert"]')
+  expect(alert.text()).toContain('Some photos couldn’t be loaded.')
+  expect(alert.text()).toContain('disk busy')
+  await alert.get('button').trigger('click')
+  expect(retry).toHaveBeenCalledOnce()
+  wrapper.unmount()
+})
+
 it('says it is looking while the first scan runs, and that nothing was found once it ends', async () => {
   const router = createRouter({
     history: createMemoryHistory(),

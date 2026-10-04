@@ -1,0 +1,98 @@
+[
+  {
+    "case": "the default scheme",
+    "template": "{Year}/{Month}/{Event}/{Name}",
+    "example": {
+      "takenAt": 1722868200,
+      "event": "Beach day",
+      "place": "Karachi",
+      "camera": "Pixel 8",
+      "path": "D:\\Photos\\IMG_0042.JPG"
+    },
+    "want": "2024\\08\\Beach day\\IMG_0042.JPG"
+  },
+  {
+    "case": "device names, alone or before an extension",
+    "template": "{Event}/{Place}/{Name}",
+    "example": {
+      "takenAt": 1722868200,
+      "event": "CON",
+      "place": "com1.txt",
+      "camera": "Pixel 8",
+      "path": "D:\\Photos\\IMG_0042.JPG"
+    },
+    "want": "_CON\\_com1.txt\\IMG_0042.JPG"
+  },
+  {
+    "case": "a file named for a device",
+    "template": "{Year}/{Name}",
+    "example": {
+      "takenAt": 1722868200,
+      "event": "Beach day",
+      "place": "Karachi",
+      "camera": "Pixel 8",
+      "path": "D:\\Photos\\nul.jpg"
+    },
+    "want": "2024\\_nul.jpg"
+  },
+  {
+    "case": "names the scanner leaves out",
+    "template": "{Event}/{Camera}/{Name}",
+    "example": {
+      "takenAt": 1722868200,
+      "event": "$Recycle",
+      "place": "Karachi",
+      "camera": "System Volume Information",
+      "path": "D:\\Photos\\IMG_0042.JPG"
+    },
+    "want": "_$Recycle\\_System Volume Information\\IMG_0042.JPG"
+  },
+  {
+    "case": "white space and control characters as Go reads them",
+    "template": "{Event}/{Camera}/{Name}",
+    "example": {
+      "takenAt": 1722868200,
+      "event": "Eid\u0085Party\ufeff",
+      "place": "Karachi",
+      "camera": "Cam\u007fX",
+      "path": "D:\\Photos\\IMG_0042.JPG"
+    },
+    "want": "Eid Party\ufeff\\Cam_X\\IMG_0042.JPG"
+  },
+  {
+    "case": "a folder name too long once its tokens are joined",
+    "template": "{Event}{Event}{Event}{Event}/{Name}",
+    "example": {
+      "takenAt": 1722868200,
+      "event": "01234567890123456789012345678901234567890123456789012345678901234567890123456789",
+      "place": "Karachi",
+      "camera": "Pixel 8",
+      "path": "D:\\Photos\\IMG_0042.JPG"
+    },
+    "want": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567\\IMG_0042.JPG"
+  },
+  {
+    "case": "a file name cut to leave room for its extension and a collision suffix",
+    "template": "{Name} {Name} {Name}",
+    "example": {
+      "takenAt": 1722868200,
+      "event": "Beach day",
+      "place": "Karachi",
+      "camera": "Pixel 8",
+      "path": "D:\\Photos\\012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789.jpg"
+    },
+    "want": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789 012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789 01.jpg"
+  },
+  {
+    "case": "an extension's length counted in bytes, and a cut that ends in a space",
+    "template": "{Name} {Name} {Name}",
+    "example": {
+      "takenAt": 1722868200,
+      "event": "Beach day",
+      "place": "Karachi",
+      "camera": "Pixel 8",
+      "path": "D:\\Photos\\012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789.jp\u00e9g"
+    },
+    "want": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789 012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789.jp\u00e9g"
+  }
+]
