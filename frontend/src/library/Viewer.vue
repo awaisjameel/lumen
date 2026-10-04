@@ -5,26 +5,15 @@
 // source: the library grid unless one is given (the Blocked screen's browser).
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
-import USlider from '@nuxt/ui/components/Slider.vue'
 import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import {
-  engine,
-  isCancelled,
-  originalUrl,
-  Playback,
-  playUrl,
-  THUMB_LARGE,
-  thumbUrl,
-  videosAvailable,
-  videoUrl,
-} from '../bridge'
+import { engine, isCancelled, originalUrl, THUMB_LARGE, thumbUrl, videosAvailable } from '../bridge'
 import type { AssetDetail } from '../bridge'
 import { icons } from '../design/icons'
 import { dispatchKey, runCommand, useCommands } from '../shared/commands'
 import { errorText } from '../shared/errors'
 import FeatureState from '../shared/FeatureState.vue'
-import { dateTime, duration } from '../shared/format'
+import { dateTime } from '../shared/format'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { isTyping, ownsArrows } from '../shared/keys'
@@ -32,6 +21,7 @@ import { useLayer } from '../shared/overlay'
 import { libraryViewerSource, useLibrary } from './store'
 import type { ViewerSource } from './store'
 import DetailsPanel from './DetailsPanel.vue'
+import VideoPlayer from './VideoPlayer.vue'
 
 const props = defineProps<{ source?: ViewerSource }>()
 const lib = useLibrary()
@@ -41,22 +31,11 @@ const actions = computed(() => src.value.actions)
 const detail = ref<AssetDetail | null>(null)
 const originalReady = ref(false)
 const root = ref<HTMLElement | null>(null)
-const video = ref<HTMLVideoElement | null>(null)
-const videoMode = ref<Playback>(Playback.PlayConvert)
-const videoStart = ref(0)
-const videoPosition = ref(0)
-const videoFailed = ref(false)
 const loading = ref(false)
 const loadError = ref('')
 const layer = useLayer()
 let previousFocus: Element | null = null
 let detailRequest = 0
-const converting = computed(() => videoMode.value === Playback.PlayConvert)
-const videoSrc = computed(() => {
-  const d = detail.value
-  if (!d?.video) return ''
-  return converting.value ? playUrl(d.id, videoStart.value) : videoUrl(d.id)
-})
 
 watch(
   () => src.value.id,
@@ -65,9 +44,6 @@ watch(
     onCleanup(() => detailRequest++)
     originalReady.value = false
     detail.value = null
-    videoStart.value = item.value?.at ?? 0
-    videoPosition.value = videoStart.value
-    videoFailed.value = false
     loadError.value = ''
     loading.value = !!id
     if (!id) return
@@ -75,14 +51,6 @@ watch(
       const d = await engine.asset(id)
       if (request !== detailRequest) return
       detail.value = d
-      if (d.video) {
-        // HEVC plays directly only where this WebView decodes it.
-        const direct =
-          d.caps.directPlay &&
-          (d.video.play !== Playback.PlayHEVC ||
-            document.createElement('video').canPlayType('video/mp4; codecs="hvc1"'))
-        videoMode.value = direct ? Playback.PlayDirect : Playback.PlayConvert
-      }
     } catch (e) {
       if (request === detailRequest && !isCancelled(e)) loadError.value = errorText(e)
     } finally {
@@ -100,47 +68,6 @@ function close() {
   src.value.close()
 }
 
-function videoReady() {
-  if (video.value && !converting.value && videoStart.value > 0) {
-    video.value.currentTime = videoStart.value / 1000
-  }
-}
-
-// While the seek slider is dragged, playback must not move its thumb back.
-let seeking = false
-
-function videoTime() {
-  src.value.touch?.()
-  if (video.value && !seeking)
-    videoPosition.value = (converting.value ? videoStart.value : 0) + video.value.currentTime * 1000
-}
-
-function startSeek(at: number | undefined) {
-  if (at === undefined) return
-  seeking = true
-  videoPosition.value = at
-}
-
-function seekVideo() {
-  const at = videoPosition.value
-  seeking = false
-  videoPosition.value = at
-  if (converting.value) {
-    videoStart.value = at // a new stream starts here; no full converted copy is kept
-  } else if (video.value) {
-    video.value.currentTime = at / 1000
-  }
-}
-
-function videoError() {
-  if (!converting.value && detail.value?.caps.convertPlay) {
-    videoMode.value = Playback.PlayConvert
-    videoStart.value = videoPosition.value
-  } else {
-    videoFailed.value = true
-  }
-}
-
 function onMediaDoubleClick() {
   if (!detail.value?.video) close()
 }
@@ -150,13 +77,15 @@ function onMediaDoubleClick() {
 function onKey(e: KeyboardEvent) {
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return
   if (!layer.owns()) return
+  // Escape belongs to the browser while the player is fullscreen.
+  if (e.key === 'Escape' && document.fullscreenElement) return
   if (e.key === 'Tab') {
     trapTab(e)
     return
   }
   // Typing in the details panel (adding a tag): only Escape still closes.
   if (isTyping(e) && e.key !== 'Escape') return
-  // The seek slider and the video's own controls move with the arrows.
+  // Playback controls keep their own arrow keys.
   const slider = e.target instanceof Element && e.target.closest('[role="slider"], [role="separator"]')
   if ((ownsArrows(e) || slider) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
   // These viewer shortcuts ignored Shift before the command registry did the matching.
@@ -246,8 +175,8 @@ useCommands([
 ])
 
 function trapTab(e: KeyboardEvent) {
-  const controls = root.value?.querySelectorAll<HTMLElement>(
-    'button:not(:disabled), a[href], input:not(:disabled), video[controls], [tabindex="0"]',
+  const controls = (document.fullscreenElement ?? root.value)?.querySelectorAll<HTMLElement>(
+    'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex="0"]',
   )
   const first = controls?.[0]
   const last = controls?.[controls.length - 1]
@@ -370,17 +299,13 @@ onBeforeUnmount(() => {
           <FeatureState v-if="loadError" kind="error" :title="loadError" />
           <FeatureState v-else-if="!item && !loading" kind="empty" icon="image-off" :title="t('viewer.notFound')" />
           <template v-else-if="item">
-            <video
+            <VideoPlayer
               v-if="detail?.video && detail.id === item.id && videosAvailable()"
-              ref="video"
-              :key="videoSrc"
-              :src="videoSrc"
-              :poster="item.t ? thumbUrl(detail.id, item.t, THUMB_LARGE) : undefined"
-              controls
-              autoplay
-              @loadedmetadata="videoReady"
-              @timeupdate="videoTime"
-              @error="videoError"
+              :key="detail.id"
+              :detail="detail"
+              :at="item.at ?? 0"
+              :thumb-version="item.t"
+              @timeupdate="src.touch?.()"
             />
             <UAlert
               v-if="detail?.video && !videosAvailable()"
@@ -389,14 +314,6 @@ onBeforeUnmount(() => {
               color="error"
               variant="subtle"
               :title="t('viewer.videoUnavailable')"
-            />
-            <UAlert
-              v-else-if="videoFailed"
-              class="playback-message"
-              role="alert"
-              color="error"
-              variant="subtle"
-              :title="t('viewer.videoFailed')"
             />
             <template v-else-if="!detail?.video">
               <img
@@ -427,20 +344,6 @@ onBeforeUnmount(() => {
             </template>
           </template>
           <FeatureState v-else kind="loading" :title="t('details.loading')" />
-        </div>
-
-        <div v-if="detail?.video && detail.video.duration" class="video-seek">
-          <span>{{ duration(videoPosition) }}</span>
-          <USlider
-            class="seek-control"
-            :min="0"
-            :max="detail.video.duration"
-            :model-value="videoPosition"
-            :aria-label="t('viewer.seek')"
-            @update:model-value="startSeek"
-            @change="seekVideo"
-          />
-          <span>{{ duration(detail.video.duration) }}</span>
         </div>
 
         <UTooltip :text="t('viewer.prev')" :content="{ side: 'right' }">
@@ -553,28 +456,6 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
-.video-seek {
-  position: absolute;
-  z-index: 2;
-  left: 4rem;
-  right: 4rem;
-  bottom: 3.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.625rem;
-  border-radius: var(--ui-radius);
-  background: var(--lumen-viewer-bg);
-  color: var(--lumen-viewer-text);
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.seek-control {
-  flex: 1;
-  min-width: 0;
-}
-
 .playback-message {
   position: absolute;
   z-index: 3;
@@ -612,11 +493,6 @@ onBeforeUnmount(() => {
 
   .grow {
     display: none;
-  }
-
-  .video-seek {
-    left: 0.75rem;
-    right: 0.75rem;
   }
 }
 

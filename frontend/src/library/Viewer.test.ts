@@ -40,6 +40,7 @@ const detail: AssetDetail = {
   video: { duration: 60000, codec: 'h264', audio: 'aac', play: Playback.PlayDirect },
 }
 let wrapper: VueWrapper | undefined
+const displayRestores: (() => void)[] = []
 const view = () => new DOMWrapper(document.body)
 
 function getTestPinia() {
@@ -72,6 +73,7 @@ afterEach(() => {
   question.value?.answer(false)
   wrapper?.unmount()
   wrapper = undefined
+  for (const restore of displayRestores.splice(0).reverse()) restore()
   document.body.innerHTML = ''
   vi.unstubAllGlobals()
 })
@@ -81,6 +83,9 @@ it('shows the video without a still image covering playback', async () => {
   await flushPromises()
   expect(view().find('video').exists()).toBe(true)
   expect(view().find('.media img').exists()).toBe(false)
+  expect(view().get('video').attributes('controls')).toBeUndefined()
+  expect(view().findAll('[role="slider"][aria-label="Seek video"]')).toHaveLength(1)
+  expect(view().find('button[aria-label="Play"]').exists()).toBe(true)
 })
 
 it('says so when videos cannot play at all', async () => {
@@ -88,6 +93,7 @@ it('says so when videos cannot play at all', async () => {
   wrapper = mountViewer()
   await flushPromises()
   expect(view().find('video').exists()).toBe(false)
+  expect(view().find('.video-controls').exists()).toBe(false)
   expect(view().get('[role="alert"]').text()).toContain('couldn’t start its video player')
   vi.mocked(videosAvailable).mockReturnValue(true)
 })
@@ -260,14 +266,20 @@ it('tells its source it is being watched as a video plays', async () => {
 
 function deferred<T>() {
   let complete: ((value: T) => void) | undefined
-  const promise = new Promise<T>((resolve) => {
+  let fail: ((error: unknown) => void) | undefined
+  const promise = new Promise<T>((resolve, reject) => {
     complete = resolve
+    fail = reject
   })
   return {
     promise,
     resolve(value: T) {
       if (!complete) throw new Error('Deferred promise was not initialised')
       complete(value)
+    },
+    reject(error: unknown) {
+      if (!fail) throw new Error('Deferred promise was not initialised')
+      fail(error)
     },
   }
 }
@@ -395,4 +407,308 @@ it('uses converted playback when the WebView cannot decode HEVC', async () => {
   wrapper = mountViewer()
   await flushPromises()
   expect(view().get('video').attributes('src')).toContain('at=10000')
+})
+
+function simulatePlayback(el: HTMLVideoElement) {
+  let paused = true
+  Object.defineProperty(el, 'paused', { configurable: true, get: () => paused })
+  const play = vi.spyOn(el, 'play').mockImplementation(() => {
+    paused = false
+    el.dispatchEvent(new Event('play'))
+    return Promise.resolve()
+  })
+  const pause = vi.spyOn(el, 'pause').mockImplementation(() => {
+    paused = true
+    el.dispatchEvent(new Event('pause'))
+  })
+  return { play, pause }
+}
+
+it('plays and pauses with the custom controls and synchronizes native playback events', async () => {
+  wrapper = mountViewer()
+  await flushPromises()
+  const video = view().get<HTMLVideoElement>('video')
+  const playback = simulatePlayback(video.element)
+  await view().get('button[aria-label="Play"]').trigger('click')
+  expect(playback.play).toHaveBeenCalledOnce()
+  await view().get('button[aria-label="Pause"]').trigger('click')
+  expect(playback.pause).toHaveBeenCalledOnce()
+  expect(view().find('button[aria-label="Play"]').exists()).toBe(true)
+  await video.element.play()
+  await flushPromises()
+  expect(view().find('button[aria-label="Pause"]').exists()).toBe(true)
+})
+
+it('preserves pause, volume, mute and speed when a converted seek replaces the stream', async () => {
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
+  wrapper = mountViewer()
+  await flushPromises()
+  let video = view().get<HTMLVideoElement>('video')
+  simulatePlayback(video.element)
+  await video.trigger('loadedmetadata')
+  await view().get('button[aria-label="Play"]').trigger('click')
+  await view().get('button[aria-label="Pause"]').trigger('click')
+  const [seek, volume] = wrapper.findAllComponents(USlider)
+  if (!seek || !volume) throw new Error('Missing playback sliders')
+  volume.vm.$emit('update:modelValue', 35)
+  await flushPromises()
+  await view().get('button[aria-label="Mute"]').trigger('click')
+  await view().get('select[aria-label="Playback speed"]').setValue('1.5')
+  const oldElement = video.element
+  seek.vm.$emit('update:modelValue', 25000)
+  seek.vm.$emit('change', new Event('change'))
+  await flushPromises()
+  video = view().get<HTMLVideoElement>('video')
+  await video.trigger('loadedmetadata')
+  expect(video.element).not.toBe(oldElement)
+  expect(video.attributes('src')).toContain('at=25000')
+  expect(video.element.autoplay).toBe(false)
+  expect(video.element.volume).toBe(0.35)
+  expect(video.element.muted).toBe(true)
+  expect(video.element.playbackRate).toBe(1.5)
+  await view().get('button[aria-label="Unmute"]').trigger('click')
+  expect(video.element.muted).toBe(false)
+  expect(video.element.volume).toBe(0.35)
+})
+
+it('replays a converted video from the beginning instead of the last stream offset', async () => {
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
+  wrapper = mountViewer()
+  await flushPromises()
+  await view().get('video').trigger('ended')
+  expect(view().get('[role="slider"][aria-label="Seek video"]').attributes('aria-valuenow')).toBe('60000')
+  await view().get('button[aria-label="Replay"]').trigger('click')
+  await flushPromises()
+  expect(view().get('video').attributes('src')).toContain('at=0')
+  expect(view().get<HTMLVideoElement>('video').element.autoplay).toBe(true)
+})
+
+it('clamps skips to the source bounds and avoids an empty converted stream at the end', async () => {
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
+  wrapper = mountViewer()
+  await flushPromises()
+  await view().get('video').trigger('loadedmetadata')
+  await view().get('button[aria-label="Back 10 seconds"]').trigger('click')
+  expect(view().get('video').attributes('src')).toContain('at=0')
+  await view().get('video').trigger('loadedmetadata')
+  await view().get('button[aria-label="Back 10 seconds"]').trigger('click')
+  expect(view().get('video').attributes('src')).toContain('at=0')
+  const slider = wrapper.findComponent(USlider)
+  slider.vm.$emit('update:modelValue', 60000)
+  slider.vm.$emit('change', new Event('change'))
+  await flushPromises()
+  expect(view().get('video').attributes('src')).toContain('at=59999')
+})
+
+it('reports rejected play requests and leaves the Play button available to retry', async () => {
+  wrapper = mountViewer()
+  await flushPromises()
+  const video = view().get<HTMLVideoElement>('video')
+  const play = vi.spyOn(video.element, 'play').mockRejectedValue(new Error('autoplay blocked'))
+  await view().get('button[aria-label="Play"]').trigger('click')
+  await flushPromises()
+  expect(play).toHaveBeenCalledOnce()
+  expect(view().get('.notice').text()).toContain('Press Play to try again')
+  expect(view().find('button[aria-label="Play"]').exists()).toBe(true)
+})
+
+it('keeps a rejected play from a replaced stream from changing the current controls', async () => {
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
+  wrapper = mountViewer()
+  await flushPromises()
+  const pending = deferred<undefined>()
+  vi.spyOn(view().get<HTMLVideoElement>('video').element, 'play').mockReturnValue(pending.promise)
+  await view().get('button[aria-label="Play"]').trigger('click')
+  const slider = wrapper.findComponent(USlider)
+  slider.vm.$emit('update:modelValue', 25000)
+  slider.vm.$emit('change', new Event('change'))
+  await flushPromises()
+  pending.reject(new Error('old stream removed'))
+  await flushPromises()
+  expect(view().find('.notice').exists()).toBe(false)
+  expect(view().get<HTMLVideoElement>('video').element.autoplay).toBe(true)
+})
+
+it('keeps the speed selector arrows in the player and supports playback keys on the video', async () => {
+  wrapper = mountViewer()
+  await flushPromises()
+  const neighbour = vi.spyOn(useLibrary(), 'neighbour').mockResolvedValue(null)
+  await view().get('select[aria-label="Playback speed"]').trigger('keydown', { key: 'ArrowRight' })
+  const video = view().get<HTMLVideoElement>('video')
+  await video.trigger('loadedmetadata')
+  const playback = simulatePlayback(video.element)
+  await video.trigger('keydown', { key: ' ' })
+  expect(playback.play).toHaveBeenCalledOnce()
+  await video.trigger('keydown', { key: 'ArrowRight' })
+  expect(video.element.currentTime).toBe(20)
+  expect(neighbour).not.toHaveBeenCalled()
+})
+
+it('restores audible volume when unmuting a zero-volume video', async () => {
+  wrapper = mountViewer()
+  await flushPromises()
+  const video = view().get<HTMLVideoElement>('video')
+  video.element.volume = 0
+  video.element.muted = false
+  await video.trigger('volumechange')
+  await view().get('button[aria-label="Unmute"]').trigger('click')
+  expect(video.element.volume).toBe(1)
+  expect(video.element.muted).toBe(false)
+})
+
+it('commits the new seek value when the slider sends its keyboard commit before its model update', async () => {
+  wrapper = mountViewer()
+  await flushPromises()
+  const video = view().get<HTMLVideoElement>('video')
+  await video.trigger('loadedmetadata')
+  const slider = view().get('[role="slider"][aria-label="Seek video"]')
+  await slider.trigger('keydown', { key: 'ArrowRight' })
+  await flushPromises()
+  expect(video.element.currentTime).toBe(11)
+  await slider.trigger('keydown', { key: 'Home' })
+  await flushPromises()
+  expect(video.element.currentTime).toBe(0)
+  video.element.currentTime = 3
+  await video.trigger('timeupdate')
+  expect(slider.attributes('aria-valuenow')).toBe('3000')
+})
+
+it('releases the seek thumb when a cancelled drag sends no change event', async () => {
+  wrapper = mountViewer()
+  await flushPromises()
+  const video = view().get<HTMLVideoElement>('video')
+  await video.trigger('loadedmetadata')
+  wrapper.findComponent(USlider).vm.$emit('update:modelValue', 15000)
+  await flushPromises()
+  await view().get('.seek-control').trigger('pointercancel')
+  await flushPromises()
+  expect(video.element.currentTime).toBe(15)
+  video.element.currentTime = 16
+  await video.trigger('timeupdate')
+  expect(view().get('[role="slider"][aria-label="Seek video"]').attributes('aria-valuenow')).toBe('16000')
+})
+
+it('rewinds the existing converted stream when seeking back to its own starting time', async () => {
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
+  wrapper = mountViewer()
+  await flushPromises()
+  const video = view().get<HTMLVideoElement>('video')
+  video.element.currentTime = 5
+  await video.trigger('timeupdate')
+  const slider = wrapper.findComponent(USlider)
+  slider.vm.$emit('update:modelValue', 10000)
+  slider.vm.$emit('change', new Event('change'))
+  await flushPromises()
+  expect(view().get('video').element).toBe(video.element)
+  expect(video.element.currentTime).toBe(0)
+})
+
+function displayProperty(object: object, key: PropertyKey, value: unknown) {
+  const previous = Object.getOwnPropertyDescriptor(object, key)
+  Object.defineProperty(object, key, { configurable: true, value })
+  displayRestores.push(() => {
+    if (previous) Object.defineProperty(object, key, previous)
+    else Reflect.deleteProperty(object, key)
+  })
+}
+
+it('keeps fullscreen controls and the viewer open across converted stream replacements', async () => {
+  const enter = vi.fn(function (this: HTMLElement) {
+    displayProperty(document, 'fullscreenElement', this)
+    document.dispatchEvent(new Event('fullscreenchange'))
+    return Promise.resolve()
+  })
+  const exit = vi.fn(() => {
+    displayProperty(document, 'fullscreenElement', null)
+    document.dispatchEvent(new Event('fullscreenchange'))
+    return Promise.resolve()
+  })
+  displayProperty(document, 'fullscreenEnabled', true)
+  displayProperty(HTMLElement.prototype, 'requestFullscreen', enter)
+  displayProperty(document, 'exitFullscreen', exit)
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
+  wrapper = mountViewer()
+  await flushPromises()
+  await view().get('button[aria-label="Fullscreen"]').trigger('click')
+  const fullscreenPlayer = document.fullscreenElement
+  expect(fullscreenPlayer).toBe(view().get('.video-player').element)
+  expect(fullscreenPlayer?.querySelector('.video-controls')).not.toBeNull()
+  const slider = wrapper.findComponent(USlider)
+  slider.vm.$emit('update:modelValue', 25000)
+  slider.vm.$emit('change', new Event('change'))
+  await flushPromises()
+  expect(document.fullscreenElement).toBe(fullscreenPlayer)
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  expect(useLibrary().viewer).not.toBeNull()
+  await view().get('button[aria-label="Exit fullscreen"]').trigger('click')
+  expect(exit).toHaveBeenCalledOnce()
+  expect(document.fullscreenElement).toBeNull()
+})
+
+it('synchronizes picture-in-picture controls with browser events and exits on close', async () => {
+  const enter = vi.fn(function (this: HTMLVideoElement) {
+    displayProperty(document, 'pictureInPictureElement', this)
+    this.dispatchEvent(new Event('enterpictureinpicture'))
+    return Promise.resolve()
+  })
+  const exit = vi.fn(() => {
+    const el = document.pictureInPictureElement
+    displayProperty(document, 'pictureInPictureElement', null)
+    el?.dispatchEvent(new Event('leavepictureinpicture'))
+    return Promise.resolve()
+  })
+  displayProperty(document, 'pictureInPictureEnabled', true)
+  displayProperty(HTMLVideoElement.prototype, 'requestPictureInPicture', enter)
+  displayProperty(document, 'exitPictureInPicture', exit)
+  wrapper = mountViewer()
+  await flushPromises()
+  await view().get('video').trigger('loadedmetadata')
+  await view().get('button[aria-label="Picture in picture"]').trigger('click')
+  expect(enter).toHaveBeenCalledOnce()
+  await view().get('button[aria-label="Exit picture in picture"]').trigger('click')
+  expect(exit).toHaveBeenCalledOnce()
+  await view().get('button[aria-label="Picture in picture"]').trigger('click')
+  wrapper.unmount()
+  wrapper = undefined
+  expect(exit).toHaveBeenCalledTimes(2)
+})
+
+it('reports declined fullscreen requests without breaking playback controls', async () => {
+  displayProperty(document, 'fullscreenEnabled', true)
+  displayProperty(HTMLElement.prototype, 'requestFullscreen', vi.fn().mockRejectedValue(new Error('unavailable')))
+  wrapper = mountViewer()
+  await flushPromises()
+  await view().get('button[aria-label="Fullscreen"]').trigger('click')
+  await flushPromises()
+  expect(view().get('.notice').text()).toContain('Fullscreen is unavailable')
+  expect(view().find('button[aria-label="Play"]').exists()).toBe(true)
+})
+
+it('clears picture-in-picture state when a converted seek replaces its video element', async () => {
+  displayProperty(document, 'pictureInPictureEnabled', true)
+  displayProperty(HTMLVideoElement.prototype, 'requestPictureInPicture', vi.fn().mockResolvedValue(undefined))
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
+  wrapper = mountViewer()
+  await flushPromises()
+  await view().get('video').trigger('enterpictureinpicture')
+  expect(view().find('button[aria-label="Exit picture in picture"]').exists()).toBe(true)
+  const slider = wrapper.findComponent(USlider)
+  slider.vm.$emit('update:modelValue', 25000)
+  slider.vm.$emit('change', new Event('change'))
+  await flushPromises()
+  expect(view().find('button[aria-label="Picture in picture"]').exists()).toBe(true)
+})
+
+it('continues playback after a decoder failure pauses the direct video before conversion', async () => {
+  wrapper = mountViewer()
+  await flushPromises()
+  const video = view().get<HTMLVideoElement>('video')
+  const playback = simulatePlayback(video.element)
+  await video.element.play()
+  Object.defineProperty(video.element, 'error', { configurable: true, value: { code: 3 } })
+  playback.pause()
+  await video.trigger('error')
+  await flushPromises()
+  expect(view().get('video').attributes('src')).toContain('/play/')
+  expect(view().get<HTMLVideoElement>('video').element.autoplay).toBe(true)
 })

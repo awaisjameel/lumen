@@ -17,5 +17,10 @@ export function isTyping(e: KeyboardEvent): boolean {
  */
 export function ownsArrows(e: KeyboardEvent): boolean {
   const el = e.target
-  return isTyping(e) || (el instanceof HTMLInputElement && el.type === 'range') || el instanceof HTMLMediaElement
+  return (
+    isTyping(e) ||
+    (el instanceof HTMLInputElement && el.type === 'range') ||
+    el instanceof HTMLSelectElement ||
+    el instanceof HTMLMediaElement
+  )
 }
