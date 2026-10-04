@@ -4,7 +4,6 @@ import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
-import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
 import UFormField from '@nuxt/ui/components/FormField.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
@@ -23,8 +22,7 @@ import { nameTooLong, trimName } from '../shared/names'
 import { icons } from '../design/icons'
 import CardGrid from '../shared/CardGrid.vue'
 import CollectionCard from '../shared/CollectionCard.vue'
-import { isEnabled, registerCommands, useCommands } from '../shared/commands'
-import type { Command } from '../shared/commands'
+import { useItemCommands, useCommands } from '../shared/commands'
 import FeatureState from '../shared/FeatureState.vue'
 import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
@@ -176,8 +174,10 @@ function returnFocus(e: Event) {
 function keepEditorFocus(e: Event) {
   if (editorOpen.value) e.preventDefault()
 }
-const cardCommands = computed<Command[]>(() =>
-  albums.list.flatMap((album) => [
+const albumItems = useItemCommands(
+  () => albums.list,
+  (album) => album.id,
+  (album) => [
     {
       id: `album.${album.id}.edit`,
       group: 'library',
@@ -201,21 +201,8 @@ const cardCommands = computed<Command[]>(() =>
       enabled: () => !busy.value,
       run: () => remove(album),
     },
-  ]),
+  ],
 )
-watch(cardCommands, (entries, _previous, cleanup) => cleanup(registerCommands(entries)), { immediate: true })
-function albumItems(album: Album): DropdownMenuItem[] {
-  return cardCommands.value
-    .filter((c) => c.id.startsWith(`album.${album.id}.`))
-    .map((c) => ({
-      label: c.title(),
-      icon: c.icon ? icons[c.icon] : undefined,
-      disabled: !isEnabled(c),
-      onSelect: () => {
-        if (isEnabled(c)) void c.run()
-      },
-    }))
-}
 useCommands([
   {
     id: 'albums.new',
@@ -281,7 +268,7 @@ useCommands([
             >{{ t(album.kind === AlbumKind.AlbumSmart ? 'albums.smart' : 'albums.manual') }}</UBadge
           ></template
         >
-        <UDropdownMenu :items="albumItems(album)" :content="{ onCloseAutoFocus: keepEditorFocus }">
+        <UDropdownMenu :items="albumItems(album.id)" :content="{ onCloseAutoFocus: keepEditorFocus }">
           <UButton
             :icon="icons.more"
             :aria-label="t('albums.actions', { name: album.name })"
@@ -353,7 +340,10 @@ useCommands([
         </form>
       </template>
       <template #footer>
-        <UDropdownMenu v-if="editedAlbum" :items="albumItems(editedAlbum).filter((item) => item.icon !== icons.pencil)">
+        <UDropdownMenu
+          v-if="editedAlbum"
+          :items="albumItems(editedAlbum.id).filter((item) => item.icon !== icons.pencil)"
+        >
           <UButton
             :icon="icons.more"
             :aria-label="t('albums.actions', { name: editedAlbum.name })"

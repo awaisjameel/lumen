@@ -4,6 +4,8 @@ import { engine } from '../bridge'
 import type { About } from '../bridge'
 import { errorText, logError } from '../shared/errors'
 
+export const CRASH_NOTIFICATION = 'about.crash'
+
 /**
  * Lumen's own details (Settings → About Lumen), read once, and whether its
  * last run crashed, which App says until the user dismisses it.

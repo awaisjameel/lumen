@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
-import { CancellablePromise } from '@wailsio/runtime'
+import { Call, CancelError, CancellablePromise, CancelledRejectionError } from '@wailsio/runtime'
 import { LibraryService, SearchService, SystemService } from '../../bindings/lumen/services'
-import { engine, ErrorCode, logUIError } from './index'
+import { engine, ErrorCode, isCancelled, logUIError } from './index'
 import { errorText } from '../shared/errors'
 
 vi.mock('../../bindings/lumen/services', () => ({
@@ -41,6 +41,15 @@ it('normalizes an empty visible subset and passes cancellation to the engine', a
 it('uses asset-first album membership arguments end to end', async () => {
   await engine.setAlbumItem(17, 43, true)
   expect(LibraryService.SetAlbumItem).toHaveBeenCalledWith(17, 43, true)
+})
+
+it('recognises a late cancelled runtime read without hiding another late failure', () => {
+  const promise = CancellablePromise.resolve()
+  expect(isCancelled(new CancelError('superseded'))).toBe(true)
+  expect(isCancelled(new CancelledRejectionError(promise, new Call.RuntimeError('context canceled')))).toBe(true)
+  expect(isCancelled(new Call.RuntimeError('context canceled'))).toBe(false)
+  expect(isCancelled(new CancelledRejectionError(promise, new Call.RuntimeError('disk full')))).toBe(false)
+  expect(isCancelled(new CancelledRejectionError(promise, new Error('context canceled')))).toBe(false)
 })
 
 it('localizes every invalid-album reason without showing engine prose', () => {

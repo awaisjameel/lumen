@@ -139,6 +139,28 @@ it('shows the empty Trash with its own message and no toolbar', async () => {
   wrapper.unmount()
 })
 
+it('leaves grid shortcuts to an open overlay and ignores composing key events', async () => {
+  vi.mocked(engine.event).mockResolvedValue(event(1, 'Event'))
+  const { wrapper } = await mountedTimeline()
+  const lib = useLibrary()
+  const grid = wrapper.get('[role="listbox"]')
+  const dialog = document.createElement('div')
+  dialog.setAttribute('role', 'dialog')
+  dialog.dataset.state = 'open'
+  document.body.append(dialog)
+  await grid.trigger('keydown', { key: 'i' })
+  expect(lib.showDetails).toBe(false)
+  lib.selected = { day: '2026-01-01', id: 1 }
+  await grid.trigger('keydown', { key: 'Escape' })
+  expect(lib.selected).toEqual({ day: '2026-01-01', id: 1 })
+  dialog.remove()
+  await grid.trigger('keydown', { key: 'Escape', isComposing: true })
+  expect(lib.selected).toEqual({ day: '2026-01-01', id: 1 })
+  await grid.trigger('keydown', { key: 'Escape' })
+  expect(lib.selected).toBeNull()
+  wrapper.unmount()
+})
+
 it('says it is looking while the first scan runs, and that nothing was found once it ends', async () => {
   const router = createRouter({
     history: createMemoryHistory(),

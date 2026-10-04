@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
-import { mountInApp } from '../shared/testing'
+import { mountInApp, recordNotifications } from '../shared/testing'
+import type { RecordedNotifications } from '../shared/testing'
 import { engine, ErrorCode, Link } from '../bridge'
 import type * as Bridge from '../bridge'
 import { t } from '../shared/i18n'
 import AboutSection from './AboutSection.vue'
 import CrashNotice from './CrashNotice.vue'
-import { useAbout } from './store'
+import { CRASH_NOTIFICATION, useAbout } from './store'
 
 enableAutoUnmount(afterEach)
 
@@ -23,12 +24,14 @@ vi.mock('../bridge', async (importOriginal) => ({
 }))
 
 const RELEASES = 'https://github.com/awaisjameel/lumen/releases'
+let notifications: RecordedNotifications
 
 function about(lastRunCrashed = false): Bridge.About {
   return { version: '0.9.0', dataDir: 'C:/Lumen', releasesURL: RELEASES, lastRunCrashed }
 }
 
 beforeEach(() => {
+  notifications = recordNotifications()
   setActivePinia(createPinia())
   vi.mocked(engine.about).mockReset().mockResolvedValue(about())
   vi.mocked(engine.openLink).mockReset().mockResolvedValue()
@@ -36,6 +39,7 @@ beforeEach(() => {
   vi.mocked(engine.openLogFolder).mockReset().mockResolvedValue()
   vi.mocked(engine.saveProblemReport).mockReset().mockResolvedValue('')
 })
+afterEach(() => notifications.stop())
 
 it('shares one report save across callers and remains busy until it finishes', async () => {
   let finish: ((path: string) => void) | undefined
@@ -104,22 +108,24 @@ it('says nothing when the user cancels, and why when a call fails', async () => 
 })
 
 it('says nothing after a clean run', async () => {
-  const notice = mountInApp(CrashNotice)
+  mountInApp(CrashNotice)
   await flushPromises()
-  expect(notice.find('[data-crash]').exists()).toBe(false)
+  expect(notifications.find(CRASH_NOTIFICATION)).toBeUndefined()
 })
 
 it('says once that the last run crashed, offers a report, and goes when dismissed', async () => {
   vi.mocked(engine.about).mockResolvedValue(about(true))
   vi.mocked(engine.saveProblemReport).mockResolvedValue('C:/report.zip')
-  const notice = mountInApp(CrashNotice)
+  mountInApp(CrashNotice)
   await flushPromises()
-  expect(notice.get('[data-crash]').text()).toContain('Lumen closed unexpectedly last time.')
-  await notice.get('[data-crash-report]').trigger('click')
+  expect(notifications.find(CRASH_NOTIFICATION)?.title).toBe('Lumen closed unexpectedly last time.')
+  expect(notifications.find(CRASH_NOTIFICATION)?.duration).toBe(0)
+  notifications.find(CRASH_NOTIFICATION)?.actions?.[0]?.run()
   await flushPromises()
-  expect(notice.get('[role="status"]').text()).toBe('Saved to C:/report.zip')
-  await notice.get('[data-crash-dismiss]').trigger('click')
-  expect(notice.find('[data-crash]').exists()).toBe(false)
+  expect(notifications.find(CRASH_NOTIFICATION)?.description).toBe('Saved to C:/report.zip')
+  notifications.find(CRASH_NOTIFICATION)?.closed?.()
+  await flushPromises()
+  expect(notifications.find(CRASH_NOTIFICATION)).toBeUndefined()
   // The details are read once, for the notice and the About section alike.
   mountInApp(AboutSection)
   await flushPromises()
@@ -128,19 +134,37 @@ it('says once that the last run crashed, offers a report, and goes when dismisse
 
 it('keeps the crash notice through report cancellation and failure, and allows a retry', async () => {
   vi.mocked(engine.about).mockResolvedValue(about(true))
-  const notice = mountInApp(CrashNotice)
+  mountInApp(CrashNotice)
   await flushPromises()
-  await notice.get('[data-crash-report]').trigger('click')
+  notifications.find(CRASH_NOTIFICATION)?.actions?.[0]?.run()
   await flushPromises()
-  expect(notice.find('[data-crash]').exists()).toBe(true)
-  expect(notice.find('[role="status"]').exists()).toBe(false)
+  expect(notifications.find(CRASH_NOTIFICATION)?.description).toBe(t('about.crashedHint'))
   vi.mocked(engine.saveProblemReport).mockRejectedValueOnce(new Error('report unavailable'))
-  await notice.get('[data-crash-report]').trigger('click')
+  notifications.find(CRASH_NOTIFICATION)?.actions?.[0]?.run()
   await flushPromises()
-  expect(notice.get('[data-crash]').text()).toContain('report unavailable')
+  expect(notifications.find(CRASH_NOTIFICATION)?.description).toContain('report unavailable')
   vi.mocked(engine.saveProblemReport).mockResolvedValueOnce('C:/retry.zip')
-  await notice.get('[data-crash-report]').trigger('click')
+  notifications.find(CRASH_NOTIFICATION)?.actions?.[0]?.run()
   await flushPromises()
-  expect(notice.get('[role="status"]').text()).toBe('Saved to C:/retry.zip')
-  expect(notice.text()).not.toContain('report unavailable')
+  expect(notifications.find(CRASH_NOTIFICATION)?.description).toBe('Saved to C:/retry.zip')
+})
+
+it('keeps the report action disabled while saving and does not revive a dismissed crash notice', async () => {
+  vi.mocked(engine.about).mockResolvedValue(about(true))
+  let finish: ((path: string) => void) | undefined
+  vi.mocked(engine.saveProblemReport).mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+  mountInApp(CrashNotice)
+  await flushPromises()
+  notifications.find(CRASH_NOTIFICATION)?.actions?.[0]?.run()
+  await flushPromises()
+  const action = notifications.find(CRASH_NOTIFICATION)?.actions?.[0]
+  expect(action?.disabled).toBe(true)
+  expect(action?.dismiss).toBe(false)
+  action?.run()
+  expect(engine.saveProblemReport).toHaveBeenCalledOnce()
+  notifications.find(CRASH_NOTIFICATION)?.closed?.()
+  await flushPromises()
+  finish?.('C:/late.zip')
+  await flushPromises()
+  expect(notifications.find(CRASH_NOTIFICATION)).toBeUndefined()
 })

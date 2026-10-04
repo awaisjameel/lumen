@@ -80,21 +80,36 @@ export const usePreferences = defineStore('preferences', () => {
   }
 
   function saver(initial: Preferences): LatestSave<Preferences> {
-    return latestSave<Preferences>((p) => engine.setPreferences(p), initial, {
-      // A failed save shows the last values the library holds again.
-      rollback: show,
-      failed: reportError,
-    })
+    let stored = initial
+    return latestSave<Preferences>(
+      async (p) => {
+        stored = await engine.setPreferences(p)
+      },
+      initial,
+      {
+        saved: () => show(stored),
+        // A failed save shows the last values the library holds again.
+        rollback: () => show(stored),
+        failed: reportError,
+      },
+    )
   }
   let save = saver(prefs.value)
   let pending = 0
+  let loading: Promise<void> | null = null
 
   /** Reads the library's preferences, first offering it an older Lumen's choices. */
-  async function load(): Promise<void> {
-    const p = await engine.migratePreferences(legacy())
-    save = saver(p)
-    show(p)
-    loaded.value = true
+  function load(): Promise<void> {
+    if (loaded.value) return Promise.resolve()
+    loading ??= (async () => {
+      const p = await engine.migratePreferences(legacy())
+      save = saver(p)
+      show(p)
+      loaded.value = true
+    })().finally(() => {
+      loading = null
+    })
+    return loading
   }
 
   /**
@@ -103,11 +118,16 @@ export const usePreferences = defineStore('preferences', () => {
    * what the library holds and says why.
    */
   async function set(patch: Partial<Preferences>): Promise<void> {
-    show({ ...prefs.value, ...patch })
     pending++
     saving.value = true
     try {
+      // A startup edit must preserve the library's other choices rather
+      // than saving the first-paint cache as a whole preference set.
+      if (!loaded.value) await load()
+      show({ ...prefs.value, ...patch })
       await save(prefs.value)
+    } catch (e) {
+      reportError(e)
     } finally {
       if (--pending === 0) saving.value = false
     }

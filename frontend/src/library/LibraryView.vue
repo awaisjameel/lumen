@@ -23,6 +23,8 @@ import MediaTile from '../shared/MediaTile.vue'
 import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
 import { usePreferences } from '../shared/preferences'
+import { shortcutsSuspended } from '../shared/overlay'
+import { observeResize } from '../shared/observeResize'
 import PersonHeader from '../people/PersonHeader.vue'
 import { usePeople } from '../people/store'
 import SearchBox from '../search/SearchBox.vue'
@@ -158,19 +160,18 @@ const scroller = ref<HTMLElement | null>(null)
 const width = ref(0)
 const viewportH = ref(0)
 const scrollTop = ref(0)
-let ro: ResizeObserver | null = null
+let stopResize: (() => void) | undefined
 
 onMounted(() => {
-  ro = new ResizeObserver(() => {
+  stopResize = observeResize(scroller.value ? [scroller.value] : [], () => {
     if (!scroller.value) return
     width.value = scroller.value.clientWidth - PAD * 2
     viewportH.value = scroller.value.clientHeight
   })
-  if (scroller.value) ro.observe(scroller.value)
 })
 onBeforeUnmount(() => {
   active = false
-  ro?.disconnect()
+  stopResize?.()
   clearTimeout(focusTimer)
   lib.detach()
 })
@@ -186,6 +187,7 @@ const virtualizer = useVirtualizer(
       return row ? rowHeight(row, layout.value.cell) : layout.value.cell
     },
     overscan: 4,
+    useAnimationFrameWithResizeObserver: true,
   })),
 )
 watch(layout, () => virtualizer.value.measure())
@@ -352,6 +354,7 @@ useCommands([
 ])
 
 async function onKey(e: KeyboardEvent) {
+  if (e.defaultPrevented || e.isComposing || shortcutsSuspended()) return
   if (e.ctrlKey || e.altKey || e.metaKey) return // leave shortcuts like Ctrl+F alone
   if (dispatchKey(e, 'grid')) return
   const sel = lib.selected

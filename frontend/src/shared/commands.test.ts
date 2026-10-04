@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { effectScope } from 'vue'
+import { effectScope, nextTick, ref, shallowRef } from 'vue'
 import {
   availableCommands,
   commandById,
@@ -11,6 +11,7 @@ import {
   registerCommands,
   runCommand,
   useCommands,
+  useItemCommands,
 } from './commands'
 import type { Command } from './commands'
 
@@ -150,4 +151,55 @@ it('suspends page shortcuts while an overlay owns the keyboard', () => {
 it('splits a shortcut into the caps it is shown as', () => {
   expect(keyCaps('Ctrl+Shift+K')).toEqual(['Ctrl', 'Shift', 'K'])
   expect(keyCaps('F')).toEqual(['F'])
+})
+
+it('keeps collection menus and the palette on the current item and availability', async () => {
+  const scope = effectScope()
+  const items = shallowRef([
+    { id: 1, name: 'Before' },
+    { id: 2, name: 'Other' },
+  ])
+  const busy = ref(false)
+  const run = vi.fn<(name: string) => void>()
+  const menu = scope.run(() =>
+    useItemCommands(
+      items,
+      (item) => item.id,
+      (item) => [
+        {
+          id: `item.${item.id}.edit`,
+          group: 'view',
+          title: () => item.name,
+          enabled: () => !busy.value,
+          run: () => run(item.name),
+        },
+      ],
+    ),
+  )
+  if (!menu) throw new Error('The command scope did not start')
+  try {
+    const original = menu(1)[0]
+    expect(original?.label).toBe('Before')
+    expect(menu(2).map((item) => item.label)).toEqual(['Other'])
+    busy.value = true
+    expect(menu(1)[0]?.disabled).toBe(true)
+    await original?.onSelect?.(new Event('select'))
+    expect(run).not.toHaveBeenCalled()
+    busy.value = false
+    items.value = [{ id: 1, name: 'After' }]
+    await nextTick()
+    expect(menu(1)[0]?.label).toBe('After')
+    expect(commandById('item.1.edit')?.title()).toBe('After')
+    expect(menu(2)).toEqual([])
+    expect(commandById('item.2.edit')).toBeUndefined()
+    await original?.onSelect?.(new Event('select'))
+    expect(run).toHaveBeenCalledExactlyOnceWith('After')
+    items.value = []
+    await nextTick()
+    await original?.onSelect?.(new Event('select'))
+    expect(run).toHaveBeenCalledOnce()
+  } finally {
+    scope.stop()
+  }
+  expect(commandById('item.1.edit')).toBeUndefined()
 })

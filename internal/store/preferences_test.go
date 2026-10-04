@@ -142,3 +142,40 @@ func TestEachLibraryMigratesItsOwnLegacyPreferences(t *testing.T) {
 		t.Errorf("the first library's theme = %q, %v, want light", kept.Theme, err)
 	}
 }
+
+func TestPreferencesNeverCombineDifferentSavedChoices(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	first := core.DefaultPreferences()
+	second := core.Preferences{Theme: core.ThemeDark, Accent: core.AccentTeal,
+		Density: core.DensityCompact, TextScale: 120, TileSize: 240, SidebarCollapsed: true,
+		SidebarWidth: 300, InspectorWidth: 400}
+	if _, err := st.SetPreferences(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		for range 128 {
+			for _, choice := range []core.Preferences{second, first} {
+				if _, err := st.SetPreferences(ctx, choice); err != nil {
+					done <- err
+					return
+				}
+			}
+		}
+		done <- nil
+	}()
+	for range 512 {
+		got, err := st.Preferences(ctx)
+		if err != nil {
+			t.Error(err)
+			break
+		}
+		if got != first && got != second {
+			t.Errorf("Preferences returned part of each saved choice: %+v", got)
+			break
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

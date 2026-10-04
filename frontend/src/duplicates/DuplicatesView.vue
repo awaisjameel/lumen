@@ -23,6 +23,7 @@ import { errorText } from '../shared/errors'
 import { fileName } from '../shared/format'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
+import { observeResize } from '../shared/observeResize'
 import { notifyKept } from '../trash/actions'
 import { showTrashUndo } from '../trash/undo'
 import DuplicateGroupCard from './DuplicateGroup.vue'
@@ -63,7 +64,7 @@ const scroller = ref<HTMLElement | null>(null)
 const intro = ref<HTMLElement | null>(null)
 const list = ref<HTMLElement | null>(null)
 const scrollMargin = ref(0)
-let resizeObserver: ResizeObserver | undefined
+let stopResize: (() => void) | undefined
 function updateMargin() {
   if (!list.value || !scroller.value) return
   scrollMargin.value =
@@ -88,6 +89,7 @@ const virtualizer = useVirtualizer(
     getItemKey: (index: number) => rows.value[index]?.key ?? index,
     estimateSize: (index: number) => (rows.value[index]?.group ? 250 : 88),
     overscan: 3,
+    useAnimationFrameWithResizeObserver: true,
     scrollMargin: scrollMargin.value,
   })),
 )
@@ -126,12 +128,10 @@ watch(
   { flush: 'post' },
 )
 onMounted(() => {
-  resizeObserver = new ResizeObserver(updateMargin)
-  if (intro.value) resizeObserver.observe(intro.value)
-  if (scroller.value) resizeObserver.observe(scroller.value)
-  updateMargin()
+  const elements = [intro.value, scroller.value].filter((element) => element !== null)
+  stopResize = observeResize(elements, updateMargin)
 })
-onBeforeUnmount(() => resizeObserver?.disconnect())
+onBeforeUnmount(() => stopResize?.())
 
 async function refresh() {
   busy.value = true

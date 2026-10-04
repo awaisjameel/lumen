@@ -34,8 +34,9 @@ const recovering = -1
 // organiser is the organise runs' bookkeeping: the one run at a time, and the
 // goroutine that makes it. LibraryService's zero value for it works.
 type organiser struct {
-	mu     sync.Mutex // guards the fields below
-	active int64      // the run being made, put back or recovered; 0 when none
+	mu     sync.Mutex            // guards the fields below
+	active int64                 // the run being made, put back or recovered; 0 when none
+	state  core.OrganiseRunState // its public state until all cleanup has finished
 	ctx    context.Context
 	stop   context.CancelFunc
 	wg     sync.WaitGroup
@@ -57,7 +58,7 @@ func (o *organiser) lifetime() context.Context {
 }
 
 // claim takes the one place for a run, or says it is taken.
-func (o *organiser) claim(runID int64) error {
+func (o *organiser) claim(runID int64, state core.OrganiseRunState) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.closed {
@@ -67,6 +68,7 @@ func (o *organiser) claim(runID int64) error {
 		return ErrOrganiseBusy
 	}
 	o.active = runID
+	o.state = state
 	return nil
 }
 
@@ -83,10 +85,17 @@ func (o *organiser) track() (done func(), ok bool) {
 	return o.wg.Done, true
 }
 
-func (o *organiser) release() {
+// release makes the next action available. A completion event is sent under
+// the same lock, so it cannot arrive after a newly started action's event.
+// completed, like the progress emitter, must not block or re-enter the owner.
+func (o *organiser) release(completed func()) {
 	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.active = 0
-	o.mu.Unlock()
+	o.state = ""
+	if completed != nil {
+		completed()
+	}
 }
 
 // ServiceStartup settles the organise runs a crash left in doubt (Wails calls
@@ -134,10 +143,10 @@ func (s *LibraryService) recoverOrganise(ctx context.Context) error {
 	if err != nil || len(open) == 0 {
 		return err
 	}
-	if s.organise.claim(recovering) != nil {
+	if s.organise.claim(recovering, "") != nil {
 		return nil // a run the user started settles its own rows first
 	}
-	defer s.organise.release()
+	defer s.organise.release(nil)
 	unhold, err := s.holdScans(ctx)
 	if err != nil {
 		return err
@@ -283,13 +292,13 @@ func (s *LibraryService) UndoOrganise(ctx context.Context, runID int64) error {
 // ahead, claims the one place, marks the run as started, and hands the work to
 // a goroutine that holds scans for its duration.
 func (s *LibraryService) begin(ctx context.Context, runID int64, op organiseOp) error {
-	if err := s.organise.claim(runID); err != nil {
+	if err := s.organise.claim(runID, op.started); err != nil {
 		return err
 	}
 	handed := false
 	defer func() {
 		if !handed {
-			s.organise.release()
+			s.organise.release(nil)
 		}
 	}()
 	run, err := s.store.OrganiseRun(ctx, runID)
@@ -314,7 +323,12 @@ func (s *LibraryService) begin(ctx context.Context, runID int64, op organiseOp) 
 	handed = true
 	go func() {
 		defer done()
-		defer s.organise.release()
+		var finished *core.OrganiseProgress
+		defer s.organise.release(func() {
+			if finished != nil {
+				s.sendOrganiseProgress(*finished)
+			}
+		})
 		s.sendOrganiseProgress(core.OrganiseProgress{RunID: runID, State: op.started, Total: op.todo(counts)})
 		unhold, err := s.holdScans(life)
 		if err != nil {
@@ -324,7 +338,17 @@ func (s *LibraryService) begin(ctx context.Context, runID int64, op organiseOp) 
 			return
 		}
 		defer unhold()
-		if err := op.work(life, s.runner(), runID); err != nil && life.Err() == nil {
+		runner := s.runner()
+		runner.Progress = func(p core.OrganiseProgress) {
+			if p.State == core.OrganiseRunning || p.State == core.OrganiseUndoing {
+				s.sendOrganiseProgress(p)
+			} else {
+				// The journal may be finished before retries and scan cleanup.
+				// Offer the next action only once those have finished too.
+				finished = &p
+			}
+		}
+		if err := op.work(life, runner, runID); err != nil && life.Err() == nil {
 			slog.Error("organise run stopped", "run", runID, "err", err)
 		}
 		s.afterOrganise(life, runID)
@@ -352,5 +376,15 @@ func (s *LibraryService) afterOrganise(ctx context.Context, runID int64) {
 
 // OrganiseRuns lists the runs that have started, newest first.
 func (s *LibraryService) OrganiseRuns(ctx context.Context) ([]core.OrganiseRun, error) {
-	return s.store.OrganiseRuns(ctx)
+	// Keep the read and public state together: a terminal journal entry does
+	// not mean another action can start while the owner is still cleaning up.
+	s.organise.mu.Lock()
+	defer s.organise.mu.Unlock()
+	runs, err := s.store.OrganiseRuns(ctx)
+	for i := range runs {
+		if runs[i].ID == s.organise.active {
+			runs[i].State = s.organise.state
+		}
+	}
+	return runs, err
 }

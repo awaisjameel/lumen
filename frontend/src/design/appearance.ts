@@ -5,7 +5,7 @@
 // accent colour and its controls' size). Portalled overlays follow, because
 // everything is set on the document's root.
 import { useAppConfig } from '@nuxt/ui/runtime/vue/composables/useAppConfig.js'
-import { Accent, Density, Theme } from '../bridge'
+import { Accent, Density, TEXT_SCALE_MAX, TEXT_SCALE_MIN, Theme } from '../bridge'
 import type { Preferences } from '../bridge'
 
 /** The preferences that decide the first frame. */
@@ -46,7 +46,12 @@ export function cachedAppearance(): Appearance | null {
       typeof v.textScale === 'number' &&
       Number.isFinite(v.textScale)
     ) {
-      return { theme: v.theme, accent: v.accent, density: v.density, textScale: v.textScale }
+      return {
+        theme: v.theme,
+        accent: v.accent,
+        density: v.density,
+        textScale: Math.round(Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, v.textScale))),
+      }
     }
   } catch {
     /* storage unavailable or unreadable: paint the defaults */

@@ -2,16 +2,14 @@
 // Naming someone once confirms their identity; grouping remains the engine's.
 import UButton from '@nuxt/ui/components/Button.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
-import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import { BlockKind } from '../bridge'
 import type { Person } from '../bridge'
 import { icons } from '../design/icons'
 import { block } from '../shared/block'
 import CardGrid from '../shared/CardGrid.vue'
 import CollectionCard from '../shared/CollectionCard.vue'
-import { registerCommands, useCommands } from '../shared/commands'
-import type { Command } from '../shared/commands'
+import { useItemCommands, useCommands } from '../shared/commands'
 import { logError } from '../shared/errors'
 import FeatureState from '../shared/FeatureState.vue'
 import { t } from '../shared/i18n'
@@ -37,27 +35,19 @@ function blockPerson(p: Person) {
   void block(BlockKind.BlockPerson, p.id, p.name || t('person.unnamed'))
 }
 
-const cardCommands = computed<Command[]>(() =>
-  people.list.map((p) => ({
-    id: `person.${p.id}.block`,
-    group: 'view',
-    title: () => t('blocked.confirmTitle', { name: p.name || t('person.unnamed') }),
-    icon: 'eye-off',
-    run: () => blockPerson(p),
-  })),
+const personItems = useItemCommands(
+  () => people.list,
+  (p) => p.id,
+  (p) => [
+    {
+      id: `person.${p.id}.block`,
+      group: 'view',
+      title: () => t('blocked.confirmTitle', { name: p.name || t('person.unnamed') }),
+      icon: 'eye-off',
+      run: () => blockPerson(p),
+    },
+  ],
 )
-watch(cardCommands, (entries, _previous, cleanup) => cleanup(registerCommands(entries)), { immediate: true })
-function personItems(p: Person): DropdownMenuItem[] {
-  return cardCommands.value
-    .filter((c) => c.id === `person.${p.id}.block`)
-    .map((c) => ({
-      label: c.title(),
-      icon: c.icon ? icons[c.icon] : undefined,
-      onSelect: () => {
-        void c.run()
-      },
-    }))
-}
 useCommands([
   {
     id: 'people.refresh',
@@ -98,7 +88,7 @@ useCommands([
             round
           >
             <template #cover><FaceThumb :face="p.cover" :size="128" round /></template>
-            <UDropdownMenu :items="personItems(p)">
+            <UDropdownMenu :items="personItems(p.id)">
               <UButton
                 :icon="icons.more"
                 :aria-label="t('people.actions', { name: p.name || t('person.unnamed') })"

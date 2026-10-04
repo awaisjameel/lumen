@@ -13,6 +13,10 @@ import (
 // choice, or its default where none was made, all held to what the UI can
 // apply (core.Preferences.Normalised).
 func (s *Store) Preferences(ctx context.Context) (core.Preferences, error) {
+	// A preference set is one choice: a read must not combine values from
+	// either side of a save while its cache entries are being replaced.
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
 	p := core.DefaultPreferences()
 	for key, to := range map[string]*string{
 		core.SettingUITheme:   (*string)(&p.Theme),

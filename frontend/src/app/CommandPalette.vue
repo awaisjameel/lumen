@@ -7,7 +7,7 @@ import type { CommandPaletteGroup, CommandPaletteItem } from '@nuxt/ui/component
 import UModal from '@nuxt/ui/components/Modal.vue'
 import { computed } from 'vue'
 import { icons } from '../design/icons'
-import { availableCommands, isEnabled, keyCaps } from '../shared/commands'
+import { availableCommands, isEnabled, keyCaps, runCommand } from '../shared/commands'
 import type { Command, CommandGroup } from '../shared/commands'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
@@ -32,7 +32,7 @@ function item(c: Command): CommandPaletteItem {
     disabled: !isEnabled(c),
     onSelect: () => {
       open.value = false
-      void c.run()
+      void runCommand(c.id)
     },
   }
 }

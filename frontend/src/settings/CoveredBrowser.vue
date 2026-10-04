@@ -12,6 +12,7 @@ import type { CoveredItem } from '../bridge'
 import { listFormat, t } from '../shared/i18n'
 import { icons } from '../design/icons'
 import { runCommand, useCommands } from '../shared/commands'
+import { observeResize } from '../shared/observeResize'
 import FeatureState from '../shared/FeatureState.vue'
 import MediaTile from '../shared/MediaTile.vue'
 import SelectionBar from '../shared/SelectionBar.vue'
@@ -27,14 +28,13 @@ const CAPTION_H = 36 // two lines of "Also hidden by", under every cell so rows 
 
 const scroller = ref<HTMLElement | null>(null)
 const width = ref(0)
-let observer: ResizeObserver | undefined
+let stopResize: (() => void) | undefined
 onMounted(() => {
-  observer = new ResizeObserver(() => {
+  stopResize = observeResize(scroller.value ? [scroller.value] : [], () => {
     if (scroller.value) width.value = scroller.value.clientWidth
   })
-  if (scroller.value) observer.observe(scroller.value)
 })
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => stopResize?.())
 
 const labelOnly = computed(() => props.covered.block?.mode === BlockMode.BlockLabel)
 const layout = computed(() =>
@@ -54,6 +54,7 @@ const virtualizer = useVirtualizer(
       return (row ? rowHeight(row, layout.value.cell) : layout.value.cell) + CAPTION_H
     },
     overscan: 4,
+    useAnimationFrameWithResizeObserver: true,
   })),
 )
 watch(layout, () => virtualizer.value.measure())

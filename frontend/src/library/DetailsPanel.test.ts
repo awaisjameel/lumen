@@ -26,6 +26,9 @@ vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
   engine: {
+    migratePreferences: vi.fn<typeof Bridge.engine.migratePreferences>(() =>
+      Promise.resolve({ ...usePreferences().prefs }),
+    ),
     asset: vi.fn(),
     assetTags: vi.fn(),
     assetFaces: vi.fn(),
@@ -35,6 +38,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     setAlbumItem: vi.fn(),
     place: vi.fn(),
     tagAsset: vi.fn(),
+    showInFolder: vi.fn<typeof Bridge.engine.showInFolder>().mockResolvedValue(undefined),
     event: vi.fn(),
     setPreferences: vi.fn().mockImplementation((prefs) => Promise.resolve(prefs)),
   },
@@ -131,6 +135,17 @@ function liveChanges() {
   })
   return (change: Changes) => callbacks.forEach((callback) => callback(change))
 }
+
+it('opens the file copy whose folder button was chosen', async () => {
+  const paths = ['C:/Photos/first.jpg', 'D:/Backup/second.jpg']
+  vi.mocked(engine.asset).mockResolvedValueOnce({ ...detail(1), paths })
+  wrapper = mountDetails({ day: '2026-01-01', id: 1 })
+  await flushPromises()
+  const buttons = wrapper.findAll('button').filter((b) => b.attributes('aria-label') === t('common.showInFolder'))
+  expect(buttons).toHaveLength(2)
+  await buttons[1]?.trigger('click')
+  expect(engine.showInFolder).toHaveBeenCalledExactlyOnceWith(1, paths[1])
+})
 
 it('does not reload metadata for grid updates or tag-only changes', async () => {
   vi.useFakeTimers()

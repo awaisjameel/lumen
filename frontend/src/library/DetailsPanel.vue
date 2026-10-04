@@ -351,9 +351,9 @@ function deleteThisFromDisk() {
   if (props.sel) void deleteFromDisk(lib, props.sel)
 }
 
-function showInFolder(id: number) {
+function showInFolder(id: number, path = '') {
   error.value = ''
-  engine.showInFolder(id).catch((e: unknown) => {
+  engine.showInFolder(id, path).catch((e: unknown) => {
     if (props.sel?.id === id) error.value = errorText(e)
   })
 }
@@ -674,7 +674,7 @@ useCommands([
                   variant="ghost"
                   size="sm"
                   square
-                  @click="runCommand('inspector.folder')"
+                  @click="showInFolder(detail.id, p)"
                 />
               </UTooltip>
               <UTooltip v-if="!lib.inTrash" :text="t('blocked.blockFolder', { path: p })">

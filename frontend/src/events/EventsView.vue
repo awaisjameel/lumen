@@ -2,17 +2,15 @@
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
-import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { icons } from '../design/icons'
 import CardGrid from '../shared/CardGrid.vue'
 import CollectionCard from '../shared/CollectionCard.vue'
-import { isEnabled, registerCommands, useCommands } from '../shared/commands'
-import type { Command } from '../shared/commands'
+import { useItemCommands, useCommands } from '../shared/commands'
 import FeatureState from '../shared/FeatureState.vue'
 import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { BlockKind, engine, MAX_NAME_LEN, thumbUrl } from '../bridge'
 import type { Event as LibraryEvent } from '../bridge'
 import { block, onBlocksChanged } from '../shared/block'
@@ -74,8 +72,10 @@ async function save(id: number, value: string) {
     busy.value = false
   }
 }
-const cardCommands = computed<Command[]>(() =>
-  list.value.flatMap((event) => [
+const eventItems = useItemCommands(
+  list,
+  (event) => event.id,
+  (event) => [
     {
       id: `event.${event.id}.rename`,
       group: 'view',
@@ -100,21 +100,8 @@ const cardCommands = computed<Command[]>(() =>
       enabled: () => !busy.value,
       run: () => blockEvent(event),
     },
-  ]),
+  ],
 )
-watch(cardCommands, (entries, _previous, cleanup) => cleanup(registerCommands(entries)), { immediate: true })
-function eventItems(event: LibraryEvent): DropdownMenuItem[] {
-  return cardCommands.value
-    .filter((c) => c.id.startsWith(`event.${event.id}.`))
-    .map((c) => ({
-      label: c.title(),
-      icon: c.icon ? icons[c.icon] : undefined,
-      disabled: !isEnabled(c),
-      onSelect: () => {
-        if (isEnabled(c)) void c.run()
-      },
-    }))
-}
 function keepEditorFocus(e: Event) {
   if (editing.value !== null) e.preventDefault()
 }
@@ -216,7 +203,7 @@ function triggerRef(el: unknown, key: number) {
             t('events.reset')
           }}</UButton>
         </form>
-        <UDropdownMenu v-else :items="eventItems(event)" :content="{ onCloseAutoFocus: keepEditorFocus }">
+        <UDropdownMenu v-else :items="eventItems(event.id)" :content="{ onCloseAutoFocus: keepEditorFocus }">
           <UButton
             :ref="(el) => triggerRef(el, event.id)"
             :icon="icons.more"

@@ -21,6 +21,9 @@ import { isActive, navEntries } from './nav'
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   engine: {
+    migratePreferences: vi.fn<typeof Bridge.engine.migratePreferences>(() =>
+      Promise.resolve({ ...usePreferences().prefs }),
+    ),
     setPreferences: vi.fn<typeof Bridge.engine.setPreferences>((p) => Promise.resolve(p)),
     blockPINConfigured: vi.fn<typeof Bridge.engine.blockPINConfigured>().mockResolvedValue(true),
   },
@@ -123,6 +126,7 @@ it('collapses and expands the sidebar as a saved preference, also from the keybo
 it('resizes the sidebar from the keyboard within its limits', async () => {
   setWidth(1400)
   const prefs = usePreferences()
+  await prefs.load()
   const shell = mountShell()
   await flushPromises()
   const handle = shell.get('[role="separator"]')
@@ -222,4 +226,25 @@ it('presents notifications as toasts, replacing one with the same id and telling
   await vi.waitFor(() => expect(titles()).toContain('A note'))
   dismiss('note')
   expect(gone).toHaveBeenCalledTimes(1)
+
+  // A report action keeps its notice open, and an Undo offered immediately
+  // after dismissing an older offer survives that toast's delayed removal.
+  const report = vi.fn()
+  notify({
+    id: 'report',
+    kind: 'info',
+    title: 'Save a report',
+    duration: 0,
+    actions: [{ label: 'Save', dismiss: false, run: report }],
+  })
+  await vi.waitFor(() => expect(titles()).toContain('Save a report'))
+  const save = [...document.body.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save')
+  save?.click()
+  expect(report).toHaveBeenCalledOnce()
+  expect(titles()).toContain('Save a report')
+  dismiss('report')
+  notify({ id: 'report', kind: 'info', title: 'The newer report', duration: 0 })
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(titles()).toContain('The newer report')
+  dismiss('report')
 })

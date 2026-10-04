@@ -178,7 +178,7 @@ async function onThemeKey(event: KeyboardEvent) {
   const index = themes.findIndex((value) => value === prefs.prefs.theme)
   const theme = themes[(index + step + themes.length) % themes.length]
   if (!theme) return
-  void prefs.set({ theme })
+  await prefs.set({ theme })
   await nextTick()
   group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus()
 }
@@ -843,6 +843,7 @@ const shownCategories = computed(() =>
 .settings-content {
   min-width: 0;
   max-width: 60rem;
+  container-type: inline-size;
 }
 section {
   margin-bottom: 2rem;

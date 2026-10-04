@@ -4,6 +4,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DayBucket } from '../bridge'
 import { monthLabel } from '../shared/format'
+import { observeResize } from '../shared/observeResize'
 import { rowAt } from './layout'
 import type { Layout } from './layout'
 
@@ -82,16 +83,13 @@ function up() {
 }
 
 // Measure once mounted and whenever the window resizes.
-const ro = new ResizeObserver(() => {
-  if (track.value) trackH.value = track.value.clientHeight
-})
+let stopResize: (() => void) | undefined
 onMounted(() => {
-  if (track.value) {
-    ro.observe(track.value)
-    trackH.value = track.value.clientHeight
-  }
+  stopResize = observeResize(track.value ? [track.value] : [], () => {
+    if (track.value) trackH.value = track.value.clientHeight
+  })
 })
-onBeforeUnmount(() => ro.disconnect())
+onBeforeUnmount(() => stopResize?.())
 </script>
 
 <template>

@@ -35,7 +35,7 @@ const id = useId()
 <style scoped>
 .pref-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
   gap: 0.25rem 1.5rem;
   padding: 0.75rem 0;
@@ -60,6 +60,7 @@ const id = useId()
 }
 .control {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;

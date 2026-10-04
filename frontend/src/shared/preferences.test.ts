@@ -156,3 +156,59 @@ it('keeps a newer successful change when an older save fails after it', async ()
   expect(prefs.prefs.tileSize).toBe(300)
   expect(notified.shown).toEqual([])
 })
+
+it('waits for the library before saving startup edits and preserves its other choices', async () => {
+  let release: ((p: Preferences) => void) | undefined
+  vi.mocked(engine.migratePreferences).mockReturnValueOnce(new Promise((resolve) => (release = resolve)))
+  const prefs = usePreferences()
+  const loading = prefs.load()
+  const first = prefs.set({ theme: Theme.ThemeLight })
+  const second = prefs.set({ tileSize: 240 })
+  await flushPromises()
+  expect(engine.migratePreferences).toHaveBeenCalledOnce()
+  expect(engine.setPreferences).not.toHaveBeenCalled()
+  release?.(stored)
+  await Promise.all([loading, first, second])
+  expect(prefs.prefs).toEqual({ ...stored, theme: Theme.ThemeLight, tileSize: 240 })
+  expect(engine.setPreferences).toHaveBeenLastCalledWith(prefs.prefs)
+})
+
+it('does not reload preferences over a newer local edit', async () => {
+  const prefs = usePreferences()
+  await prefs.load()
+  await prefs.set({ accent: Accent.AccentRose })
+  await prefs.load()
+  expect(prefs.prefs.accent).toBe(Accent.AccentRose)
+  expect(engine.migratePreferences).toHaveBeenCalledOnce()
+})
+
+it('keeps startup edits away from storage when loading fails, and retries on the next edit', async () => {
+  vi.mocked(engine.migratePreferences).mockRejectedValueOnce(new Error('library unavailable'))
+  const prefs = usePreferences()
+  await prefs.set({ theme: Theme.ThemeLight })
+  expect(engine.setPreferences).not.toHaveBeenCalled()
+  expect(prefs.loaded).toBe(false)
+  expect(prefs.saving).toBe(false)
+  expect(notified.find(ERROR_NOTIFICATION)?.title).toContain('library unavailable')
+  await prefs.set({ theme: Theme.ThemeLight })
+  expect(engine.setPreferences).toHaveBeenCalledExactlyOnceWith({ ...stored, theme: Theme.ThemeLight })
+})
+
+it('shows the engine’s normalised choices and rolls back to them after a later failure', async () => {
+  const prefs = usePreferences()
+  await prefs.load()
+  const normalised = { ...stored, tileSize: 320 }
+  vi.mocked(engine.setPreferences).mockResolvedValueOnce(normalised)
+  await prefs.set({ tileSize: 999 })
+  expect(prefs.prefs).toEqual(normalised)
+  vi.mocked(engine.setPreferences).mockRejectedValueOnce(new Error('disk full'))
+  await prefs.set({ theme: Theme.ThemeLight })
+  expect(prefs.prefs).toEqual(normalised)
+})
+
+it('holds a stale first-paint text scale to the supported range before the engine answers', () => {
+  localStorage.setItem('lumen.appearance', JSON.stringify({ ...stored, textScale: -100 }))
+  const prefs = usePreferences()
+  expect(prefs.prefs.textScale).toBe(90)
+  expect(root().style.getPropertyValue('--lumen-text-scale')).toBe('0.9')
+})

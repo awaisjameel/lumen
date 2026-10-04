@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import UButton from '@nuxt/ui/components/Button.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
-import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
-import { computed, watch } from 'vue'
-import type { Place } from '../bridge'
 import { BlockKind, engine, thumbUrl } from '../bridge'
 import { block } from '../shared/block'
 import { logError } from '../shared/errors'
@@ -16,8 +13,7 @@ import CollectionCard from '../shared/CollectionCard.vue'
 import FeatureState from '../shared/FeatureState.vue'
 import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
-import { registerCommands, useCommands } from '../shared/commands'
-import type { Command } from '../shared/commands'
+import { useItemCommands, useCommands } from '../shared/commands'
 import SearchBox from '../search/SearchBox.vue'
 
 const { list, loaded, error, load, invalidate } = useList(engine.places)
@@ -26,27 +22,19 @@ useLiveReload(load, (c) => c.assets || c.thumbs)
 async function blockPlace(id: number, name: string) {
   if (await block(BlockKind.BlockPlace, id, name)) await invalidate().catch(logError)
 }
-const cardCommands = computed<Command[]>(() =>
-  list.value.map((place) => ({
-    id: `place.${place.id}.block`,
-    group: 'view',
-    title: () => t('blocked.confirmTitle', { name: place.name }),
-    icon: 'eye-off',
-    run: () => blockPlace(place.id, place.name),
-  })),
+const placeItems = useItemCommands(
+  list,
+  (place) => place.id,
+  (place) => [
+    {
+      id: `place.${place.id}.block`,
+      group: 'view',
+      title: () => t('blocked.confirmTitle', { name: place.name }),
+      icon: 'eye-off',
+      run: () => blockPlace(place.id, place.name),
+    },
+  ],
 )
-watch(cardCommands, (entries, _previous, cleanup) => cleanup(registerCommands(entries)), { immediate: true })
-function placeItems(place: Place): DropdownMenuItem[] {
-  return cardCommands.value
-    .filter((c) => c.id === `place.${place.id}.block`)
-    .map((c) => ({
-      label: c.title(),
-      icon: c.icon ? icons[c.icon] : undefined,
-      onSelect: () => {
-        void c.run()
-      },
-    }))
-}
 useCommands([
   {
     id: 'places.refresh',
@@ -80,7 +68,7 @@ useCommands([
         icon="places"
         layout="row"
       >
-        <UDropdownMenu :items="placeItems(place)">
+        <UDropdownMenu :items="placeItems(place.id)">
           <UButton :icon="icons.more" :aria-label="t('places.actions', { name: place.name })" square />
         </UDropdownMenu>
       </CollectionCard>

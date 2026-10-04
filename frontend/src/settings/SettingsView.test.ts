@@ -27,6 +27,9 @@ import SettingsView from './SettingsView.vue'
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   engine: {
+    migratePreferences: vi.fn<typeof Bridge.engine.migratePreferences>(() =>
+      Promise.resolve({ ...usePreferences().prefs }),
+    ),
     setTagConfidence: vi.fn<() => Promise<void>>().mockResolvedValue(),
     setVideos: vi.fn<() => Promise<void>>(),
     setAIOnBattery: vi.fn<() => Promise<void>>(),
@@ -612,6 +615,7 @@ it('uses the text scale bounds and step and restores the default with its reset'
 
 it('applies appearance at once, shows saving, queues newer choices and rolls a failed latest save back', async () => {
   setActivePinia(createPinia())
+  await usePreferences().load()
   const notifications = recordNotifications()
   let finish: () => void = () => {
     throw new Error('the appearance save has not started')

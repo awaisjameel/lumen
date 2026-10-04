@@ -2,7 +2,7 @@
 // functions, never the generated bindings directly (ESLint enforces it), so
 // engine communication can be understood (and mocked) from this file alone.
 
-import { CancelError, Events } from '@wailsio/runtime'
+import { Call, CancelError, CancelledRejectionError, Events } from '@wailsio/runtime'
 import type { CancellablePromise } from '@wailsio/runtime'
 import {
   LibraryService,
@@ -265,7 +265,15 @@ export function errorCode(e: unknown): ErrorCode | undefined {
  * no longer wanted the answer, so there is nothing to report.
  */
 export function isCancelled(e: unknown): boolean {
-  return e instanceof CancelError
+  // Wails beta.26 reports a late Go cancellation response separately from
+  // the CancelError already handled by the read's owner. Only that known
+  // response is cancellation; other late rejections remain failures.
+  return (
+    e instanceof CancelError ||
+    (e instanceof CancelledRejectionError &&
+      e.cause instanceof Call.RuntimeError &&
+      e.cause.message === 'context canceled')
+  )
 }
 
 /** call, cancelled in the engine too (its context ends) if signal aborts. */

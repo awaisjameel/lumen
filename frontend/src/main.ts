@@ -5,6 +5,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import { router } from './router'
 import { reportUnexpected } from './shared/errors'
+import { isCancelled } from './bridge'
 import './design/tokens.css'
 
 // Icons come from the bundle alone (design/icons.ts). Iconify would
@@ -21,5 +22,8 @@ const app = createApp(App)
 // the browser won't describe) is logged alone: there is nothing to tell.
 app.config.errorHandler = (e, _instance, info) => reportUnexpected(e, `vue: ${info}`)
 window.addEventListener('error', (e) => reportUnexpected(e.error ?? e.message, 'window', e.error instanceof Error))
-window.addEventListener('unhandledrejection', (e) => reportUnexpected(e.reason, 'promise'))
+window.addEventListener('unhandledrejection', (e) => {
+  if (isCancelled(e.reason)) e.preventDefault()
+  else reportUnexpected(e.reason, 'promise')
+})
 app.use(createPinia()).use(router).use(ui).mount('#app')

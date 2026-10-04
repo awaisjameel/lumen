@@ -7,6 +7,9 @@ import type { IconName } from '../design/icons'
 export interface NotificationAction {
   label: string
   run: () => void
+  disabled?: boolean
+  /** Report actions keep the notice while a local save is in progress. */
+  dismiss?: boolean
 }
 
 export interface Notification {

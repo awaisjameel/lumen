@@ -68,7 +68,7 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 - Onboarding, empty states and the beta guide for testers ([docs/beta-testing.md](docs/beta-testing.md)). Design and decisions: [docs/phase6-design-2026-10-03.md](docs/phase6-design-2026-10-03.md).
 
 **Phase 7 (the Nuxt UI frontend and design system)** is built
-([record](docs/phase7-design-2026-10-04.md), [baseline inventory](docs/phase7-inventory-2026-10-04.md)):
+([record](docs/phase7-design-2026-10-04.md), [baseline inventory](docs/phase7-inventory-2026-10-04.md), [implementation review](docs/phase7-review-2026-10-04.md)):
 
 - Every screen is rebuilt on Nuxt UI 4 and Tailwind CSS 4 inside the same standalone Vue app: one shell (resizable, collapsible sidebar; icon rail at medium width; navigation drawer when narrow), one page header, one set of loading, empty and failure states, one card, tile, selection bar and settings row.
 - Design tokens for light and dark themes, six accent colours, comfortable and compact density and a 90–130 % text size, all in Settings → Appearance. They are saved with the library (SQLite), not in the WebView; an older Lumen's theme and thumbnail size are carried over once.

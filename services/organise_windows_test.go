@@ -314,6 +314,65 @@ func TestARunWaitsForScansToBeHeldAndASecondStartWhileItRunsIsRefused(t *testing
 	l.waitState(plan.RunID, core.OrganiseUndone)
 }
 
+func TestOrganiseCompletionIsOfferedOnlyAfterTheOwnerHasFinished(t *testing.T) {
+	l := newOrganiseLibrary(t)
+	l.add("IMG_1.jpg", 10, time.Date(2024, time.August, 5, 12, 0, 0, 0, time.UTC))
+	plan, err := l.s.PlanOrganise(t.Context(), "{Year}/{Name}", 0)
+	check(t, err)
+	journalFinished, releaseWork := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	defer release.Do(func() { close(releaseWork) })
+	terminal := make(chan core.OrganiseProgress, 2)
+	l.s.organise.emit = func(p core.OrganiseProgress) {
+		if p.State == core.OrganiseDone || p.State == core.OrganiseUndone {
+			terminal <- p
+		}
+	}
+	check(t, l.s.begin(t.Context(), plan.RunID, organiseOp{
+		started: core.OrganiseRunning,
+		allowed: func(core.OrganiseRun, map[core.OrganiseMoveState]int) bool { return true },
+		todo:    func(map[core.OrganiseMoveState]int) int { return 1 },
+		work: func(ctx context.Context, runner *fileops.Runner, runID int64) error {
+			err := runner.Run(ctx, runID)
+			close(journalFinished)
+			<-releaseWork // the journal ended, but the worker has not returned
+			return err
+		},
+	}))
+	select {
+	case <-journalFinished:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the journal did not finish")
+	}
+	stored, err := l.st.OrganiseRun(t.Context(), plan.RunID)
+	check(t, err)
+	if stored.State != core.OrganiseDone {
+		t.Fatalf("the journal state = %s, want done", stored.State)
+	}
+	public, err := l.s.OrganiseRuns(t.Context())
+	check(t, err)
+	if len(public) != 1 || public[0].State != core.OrganiseRunning {
+		t.Fatalf("the public state offered completion before cleanup: %+v", public)
+	}
+	select {
+	case p := <-terminal:
+		t.Fatalf("completion was emitted before cleanup: %+v", p)
+	default:
+	}
+	if err := l.s.UndoOrganise(t.Context(), plan.RunID); !errors.Is(err, ErrOrganiseBusy) {
+		t.Fatalf("undo while cleaning up = %v, want ErrOrganiseBusy", err)
+	}
+	release.Do(func() { close(releaseWork) })
+	select {
+	case <-terminal:
+	case <-time.After(20 * time.Second):
+		t.Fatal("completion was not emitted after cleanup")
+	}
+	// A client can act as soon as it receives completion, without retrying.
+	check(t, l.s.UndoOrganise(t.Context(), plan.RunID))
+	l.waitState(plan.RunID, core.OrganiseUndone)
+}
+
 func TestScansThatFollowAnOrganiseRunFindTheLibraryAlreadyMatchingTheDisk(t *testing.T) {
 	l := newOrganiseLibrary(t)
 	ctx := t.Context()

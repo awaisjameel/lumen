@@ -4,7 +4,10 @@
 // when it is available. A feature registers its commands while its view is
 // mounted; the shell registers navigation. The engine remains the authority:
 // a command only asks, and every service checks again.
-import { computed, onScopeDispose, shallowRef } from 'vue'
+import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
+import { computed, onScopeDispose, shallowRef, toValue, watch } from 'vue'
+import type { MaybeRefOrGetter } from 'vue'
+import { icons } from '../design/icons'
 import type { IconName } from '../design/icons'
 import { isTyping } from './keys'
 import { shortcutsSuspended } from './overlay'
@@ -58,16 +61,41 @@ export function isEnabled(c: Command): boolean {
 /** Adds commands; the returned function removes them again. */
 export function registerCommands(cmds: readonly Command[]): () => void {
   const ids = new Set(cmds.map((c) => c.id))
+  const owned = new Set(cmds)
   // A view remounting registers the same ids again: the newest wins.
   registered.value = [...registered.value.filter((c) => !ids.has(c.id)), ...cmds]
   return () => {
-    registered.value = registered.value.filter((c) => !cmds.includes(c))
+    registered.value = registered.value.filter((c) => !owned.has(c))
   }
 }
 
 /** Registers commands for as long as the calling component or store lives. */
 export function useCommands(cmds: readonly Command[]): void {
   onScopeDispose(registerCommands(cmds))
+}
+
+/**
+ * Registers a collection's actions and indexes its menus by item. Building
+ * every card's menu therefore visits only that card's commands, rather
+ * than searching all the collection's commands for every rendered card.
+ * A menu chosen after the list changed resolves the current registration.
+ */
+export function useItemCommands<T, K extends string | number>(
+  items: MaybeRefOrGetter<readonly T[]>,
+  key: (item: T) => K,
+  create: (item: T) => readonly Command[],
+): (id: K) => DropdownMenuItem[] {
+  const groups = computed(() => new Map(toValue(items).map((item) => [key(item), create(item)])))
+  watch(groups, (current, _previous, cleanup) => cleanup(registerCommands([...current.values()].flat())), {
+    immediate: true,
+  })
+  return (id) =>
+    (groups.value.get(id) ?? []).filter(isAvailable).map((c) => ({
+      label: c.title(),
+      icon: c.icon ? icons[c.icon] : undefined,
+      disabled: !isEnabled(c),
+      onSelect: () => runCommand(c.id),
+    }))
 }
 
 export function commandById(id: string): Command | undefined {
