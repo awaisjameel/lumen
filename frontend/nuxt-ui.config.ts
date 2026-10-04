@@ -25,6 +25,8 @@ export const uiOptions: NuxtUIOptions = {
     button: { defaultVariants: { color: 'neutral', variant: 'subtle' } },
     modal: { slots: { content: 'lumen-overlay' } },
     slideover: { slots: { content: 'lumen-overlay' } },
+    // A notice's reason goes on its own line.
+    toast: { slots: { description: 'whitespace-pre-line' } },
     tooltip: { slots: { content: 'lumen-tooltip' } },
   },
 }

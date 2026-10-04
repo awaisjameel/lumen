@@ -45,8 +45,12 @@ const count = computed(() => selected.value.size)
 
 async function load() {
   const request = ++loadRequest
-  const [p, f] = await Promise.all([engine.person(id.value), engine.personFaces(id.value)])
-  if (request !== loadRequest) return
+  // A newer read answers for this one, success or failure.
+  const got = await Promise.all([engine.person(id.value), engine.personFaces(id.value)]).catch((e: unknown) => {
+    if (request === loadRequest) throw e
+  })
+  if (!got || request !== loadRequest) return
+  const [p, f] = got
   person.value = p
   faces.value = f
   const present = new Set(f.map((x) => x.id))
@@ -145,11 +149,12 @@ useCommands([
 
 <template>
   <Page>
-    <template #header
-      ><PageHeader
+    <template #header>
+      <PageHeader
         :title="t('faces.title', { name })"
         :back="{ to: { name: 'person', params: { id } }, label: t('faces.back') }"
-    /></template>
+      />
+    </template>
     <template #toolbar>
       <SelectionBar :summary="count ? t('faces.selected', { n: count }) : t('faces.hint', { name })">
         <template v-if="count">
@@ -180,8 +185,12 @@ useCommands([
         @click="toggle(f)"
       >
         <MediaTile :id="f.assetId" :thumb="f.thumb" :selected="selected.has(f.id)">
-          <template #media><FaceThumb :face="f" :size="104" /></template>
-          <span v-if="selected.has(f.id)" class="tick"><Icon name="check" :size="14" /></span>
+          <template #media>
+            <FaceThumb :face="f" :size="104" />
+          </template>
+          <span v-if="selected.has(f.id)" class="tick">
+            <Icon name="check" :size="14" />
+          </span>
         </MediaTile>
       </button>
     </div>
@@ -195,6 +204,7 @@ useCommands([
   grid-template-columns: repeat(auto-fill, 104px);
   gap: 0.5rem;
 }
+
 .face-tile {
   position: relative;
   content-visibility: auto;
@@ -207,6 +217,7 @@ useCommands([
   background: none;
   cursor: pointer;
 }
+
 .tick {
   position: absolute;
   top: 6px;

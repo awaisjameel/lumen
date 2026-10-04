@@ -43,8 +43,8 @@ const editorOpen = ref(false)
 let editorTrigger: HTMLElement | null = null
 const busy = ref(false)
 const error = ref('')
-const active = ref(true)
-onBeforeUnmount(() => (active.value = false))
+let active = true
+onBeforeUnmount(() => (active = false))
 
 onMounted(() => {
   void albums.load().catch(logError)
@@ -88,14 +88,15 @@ async function save() {
     const id = editing.value
     if (id === null) {
       const created = await engine.createAlbum(name.value, kind.value, rule.value)
-      await albums.load()
-      if (!active.value) return
+      // It exists now: a list that fails to refresh does not undo that.
+      await albums.load().catch(logError)
+      if (!active) return
       reset()
       editorOpen.value = false
       void router.push({ name: 'album', params: { id: created } })
     } else {
       await engine.updateAlbum(id, name.value, rule.value)
-      await albums.load()
+      await albums.load().catch(logError)
       reset()
       editorOpen.value = false
     }
@@ -259,15 +260,15 @@ useCommands([
         :cover="album.cover && album.coverThumb ? thumbUrl(album.cover, album.coverThumb) : undefined"
         :icon="album.kind === AlbumKind.AlbumSmart ? 'smart' : 'albums'"
       >
-        <template #badge
-          ><UBadge
+        <template #badge>
+          <UBadge
             :icon="album.kind === AlbumKind.AlbumSmart ? icons.smart : icons.albums"
             :color="album.kind === AlbumKind.AlbumSmart ? 'primary' : 'neutral'"
             variant="solid"
             size="xs"
             >{{ t(album.kind === AlbumKind.AlbumSmart ? 'albums.smart' : 'albums.manual') }}</UBadge
-          ></template
-        >
+          >
+        </template>
         <UDropdownMenu :items="albumItems(album.id)" :content="{ onCloseAutoFocus: keepEditorFocus }">
           <UButton
             :icon="icons.more"
@@ -312,21 +313,21 @@ useCommands([
             <USelect v-model="kind" class="w-full" :items="albumKinds" :aria-label="t('albums.type')" />
           </UFormField>
           <div v-if="kind === AlbumKind.AlbumSmart" class="rule-grid">
-            <UFormField :label="t('albums.kind')"
-              ><USelect v-model="mediaKind" class="w-full" :items="mediaKinds" :aria-label="t('albums.kind')"
-            /></UFormField>
-            <UFormField :label="t('albums.from')"
-              ><UInput v-model="rule.from" class="w-full" type="date" :aria-label="t('albums.from')"
-            /></UFormField>
-            <UFormField :label="t('albums.to')"
-              ><UInput v-model="rule.to" class="w-full" type="date" :aria-label="t('albums.to')"
-            /></UFormField>
-            <UFormField :label="t('albums.tag')"
-              ><USelect v-model="rule.tag" class="w-full" :items="tagChoices" :aria-label="t('albums.tag')"
-            /></UFormField>
-            <UFormField :label="t('albums.person')"
-              ><USelect v-model="rule.person" class="w-full" :items="personChoices" :aria-label="t('albums.person')"
-            /></UFormField>
+            <UFormField :label="t('albums.kind')">
+              <USelect v-model="mediaKind" class="w-full" :items="mediaKinds" :aria-label="t('albums.kind')" />
+            </UFormField>
+            <UFormField :label="t('albums.from')">
+              <UInput v-model="rule.from" class="w-full" type="date" :aria-label="t('albums.from')" />
+            </UFormField>
+            <UFormField :label="t('albums.to')">
+              <UInput v-model="rule.to" class="w-full" type="date" :aria-label="t('albums.to')" />
+            </UFormField>
+            <UFormField :label="t('albums.tag')">
+              <USelect v-model="rule.tag" class="w-full" :items="tagChoices" :aria-label="t('albums.tag')" />
+            </UFormField>
+            <UFormField :label="t('albums.person')">
+              <USelect v-model="rule.person" class="w-full" :items="personChoices" :aria-label="t('albums.person')" />
+            </UFormField>
             <UCheckbox v-model="rule.favourites" :label="t('albums.favourites')" class="self-end" />
           </div>
           <UAlert

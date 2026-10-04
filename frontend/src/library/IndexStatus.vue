@@ -6,7 +6,7 @@
 // single button (pause or resume, or a tick when there is nothing to do),
 // with the same list beside it.
 import UButton from '@nuxt/ui/components/Button.vue'
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { engine, FailReason, WaitReason } from '../bridge'
 import type { FailureGroup } from '../bridge'
 import { fileName } from '../shared/format'
@@ -87,6 +87,19 @@ async function loadFailures() {
     failuresAt = 0 // read again next time
   }
 }
+const card = ref<HTMLElement | null>(null)
+watch(
+  () => p.value?.errors ?? 0,
+  (n) => {
+    if (!n) {
+      // Cleared (retried, removed): the same count later is other files.
+      failuresAt = 0
+      failures.value = []
+    } else if (card.value?.matches(':hover, :focus-within')) {
+      void loadFailures() // the list is showing: keep its reasons current
+    }
+  },
+)
 
 const reasonText: Record<FailReason, MessageKey> = {
   [FailReason.FailDamaged]: 'status.failure.damaged',
@@ -116,7 +129,7 @@ function open() {
 </script>
 
 <template>
-  <div v-if="p" class="status" :class="{ compact }" @mouseenter="open" @focusin="open">
+  <div v-if="p" ref="card" class="status" :class="{ compact }" @mouseenter="open" @focusin="open">
     <div class="line">
       <span class="label" role="status">{{ label }}</span>
       <UButton
@@ -131,7 +144,9 @@ function open() {
         square
         @click="togglePause"
       />
-      <span v-else-if="compact" class="idle" :title="label"><Icon name="check" :size="16" /></span>
+      <span v-else-if="compact" class="idle" :title="label">
+        <Icon name="check" :size="16" />
+      </span>
     </div>
     <div v-if="list.length" class="bar" :class="{ indeterminate: shown?.kind === 'scan' }">
       <span :style="{ width: fraction * 100 + '%' }" />
@@ -188,14 +203,16 @@ function open() {
   padding: 12px;
   border-radius: calc(var(--ui-radius) * 1.5);
   background: var(--ui-bg-elevated);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
+
 .line {
   display: flex;
   align-items: center;
   gap: 4px;
   min-height: 24px;
 }
+
 .label {
   flex: 1;
   min-width: 0;
@@ -204,11 +221,13 @@ function open() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 /* Collapsed sidebar: only the button (or the tick) shows; what it says is
    still read out, and the list opens beside the rail. */
 .status.compact {
   padding: 6px;
 }
+
 .status.compact .label,
 .status.compact .sub,
 .status.compact .bar {
@@ -219,14 +238,17 @@ function open() {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
 .status.compact .line {
   justify-content: center;
 }
+
 .status.compact .queue {
   left: calc(100% + 6px);
   bottom: 0;
   min-width: 240px;
 }
+
 .idle {
   display: grid;
   place-items: center;
@@ -234,6 +256,7 @@ function open() {
   height: 24px;
   color: var(--ui-text-dimmed);
 }
+
 .bar {
   height: 3px;
   margin-top: 6px;
@@ -241,27 +264,33 @@ function open() {
   background: var(--ui-border);
   overflow: hidden;
 }
+
 .bar span {
   display: block;
   height: 100%;
   background: var(--ui-primary);
   transition: width 0.6s ease;
 }
+
 .bar.indeterminate span {
   width: 30% !important;
   animation: slide 1.4s ease-in-out infinite;
 }
+
 @keyframes slide {
   from {
     transform: translateX(-100%);
   }
+
   to {
     transform: translateX(340%);
   }
 }
+
 .sub {
   margin: 4px 0 0;
-  color: var(--ui-text-muted); /* the dimmed text is under 4.5:1 on this tinted panel */
+  color: var(--ui-text-muted);
+  /* the dimmed text is under 4.5:1 on this tinted panel */
 }
 
 /* The list behind the card: above it, shown a moment after the pointer or
@@ -287,11 +316,13 @@ function open() {
     opacity 0.12s,
     visibility 0s 0.12s;
 }
+
 .status:is(:hover, :focus-within) .queue:not(.dismissed) {
   visibility: visible;
   opacity: 1;
   transition-delay: 0.2s;
 }
+
 /* The pointer crosses the gap to the list over this bridge. It hangs off the
    card: off the list, which scrolls, it would be cut off and scroll with it. */
 .status:is(:hover, :focus-within):has(.queue:not(.dismissed))::before {
@@ -300,19 +331,22 @@ function open() {
   inset: auto 0 100%;
   height: 8px;
 }
+
 .head {
   margin: 4px 0 2px;
   color: var(--ui-text-dimmed);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
 .queue ul {
   margin: 0;
   padding: 0;
   list-style: none;
 }
+
 .queue li {
   display: flex;
   align-items: baseline;
@@ -320,9 +354,11 @@ function open() {
   padding: 3px 0;
   color: var(--ui-text-muted);
 }
+
 .queue li.now {
   color: var(--ui-text-highlighted);
 }
+
 .dot {
   flex-shrink: 0;
   width: 7px;
@@ -331,57 +367,69 @@ function open() {
   border-radius: 50%;
   translate: 0 -1px;
 }
+
 .now .dot {
   border-color: var(--ui-primary);
   background: var(--ui-primary);
   animation: pulse 1.6s ease-in-out infinite;
 }
+
 @keyframes pulse {
   50% {
     opacity: 0.35;
   }
 }
+
 .what {
   flex: 1;
   min-width: 0;
 }
+
 .path {
   display: block;
   overflow: hidden;
   color: var(--ui-text-dimmed);
-  font-size: 11px;
+  font-size: 0.6875rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .count {
   flex-shrink: 0;
   color: var(--ui-text-dimmed);
   font-variant-numeric: tabular-nums;
 }
+
 .note {
   margin: 6px 0 0;
   padding-top: 6px;
   border-top: 1px solid var(--ui-border);
   color: var(--ui-text-dimmed);
 }
+
 .failures.apart {
   margin-top: 8px;
   padding-top: 4px;
   border-top: 1px solid var(--ui-border);
 }
+
 .reason {
   padding: 4px 0;
 }
+
 .reason .what {
   color: var(--ui-text-highlighted);
 }
+
 .failed-count {
   border-radius: var(--ui-radius);
 }
+
 .failed-count:focus-visible {
   outline: 2px solid var(--ui-primary);
   outline-offset: 2px;
 }
+
 @media (forced-colors: active) {
   .now .dot {
     background: Highlight;

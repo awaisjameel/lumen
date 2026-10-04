@@ -797,11 +797,13 @@ type VarsArg<K extends MessageKey> = MessageKey extends K
 /** Translate a key, filling {placeholders}. Numbers are locale-formatted. */
 export function t<K extends MessageKey>(key: K, ...[vars]: VarsArg<K>): string {
   const m: Message = en[key]
-  let s = typeof m === 'string' ? m : (m[plurals.select(Number(vars?.n))] ?? m.other)
-  if (vars) {
-    for (const [k, v] of Object.entries(vars)) {
-      s = s.replaceAll(`{${k}}`, typeof v === 'number' ? numberFmt.format(v) : v)
-    }
-  }
-  return s
+  const s = typeof m === 'string' ? m : (m[plurals.select(Number(vars?.n))] ?? m.other)
+  if (!vars) return s
+  // One pass with a callback: a value is shown as given, never read as a
+  // replacement pattern ("$&") or as another placeholder.
+  return s.replace(/\{(\w+)\}/g, (whole, k: string) => {
+    const v = vars[k]
+    if (v === undefined) return whole
+    return typeof v === 'number' ? numberFmt.format(v) : v
+  })
 }

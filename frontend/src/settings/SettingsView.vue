@@ -23,7 +23,7 @@ import {
   THUMB_CACHE_MAX_MB,
   THUMB_CACHE_MIN_MB,
 } from '../bridge'
-import type { Source } from '../bridge'
+import type { Settings, Source } from '../bridge'
 import { useLibrary } from '../library/store'
 import { block } from '../shared/block'
 import { confirm } from '../shared/confirm'
@@ -44,6 +44,7 @@ import USlider from '@nuxt/ui/components/Slider.vue'
 import URadioGroup from '@nuxt/ui/components/RadioGroup.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import { usePreferences } from '../shared/preferences'
+import { useSaveFeedback } from './saveFeedback'
 
 const lib = useLibrary()
 const error = toRef(lib, 'settingsError')
@@ -93,10 +94,10 @@ function setEventGap(e: Event) {
     EVENT_GAP_MAX,
     Math.max(EVENT_GAP_MIN, Number.isFinite(parsed) ? Math.round(parsed) : EVENT_GAP_DEFAULT),
   )
-  validation.value.eventGap =
+  validation.value.eventGapHours =
     parsed !== value ? t('settings.eventGapRange', { min: EVENT_GAP_MIN, max: EVENT_GAP_MAX, n: value }) : ''
   e.target.value = String(value)
-  return save('eventGap', () => lib.saveEventGap(value))
+  return save('eventGapHours', () => lib.saveEventGap(value))
 }
 
 // The indexing threads: the number follows the slider while it moves, and is
@@ -109,7 +110,7 @@ function onThreadsInput(value: number | number[] | undefined) {
 function setThreads() {
   const value = threadsShown.value
   threadsDraft.value = null
-  return save('threads', () => lib.saveCPUThreads(Math.round(value)))
+  return save('cpuThreads', () => lib.saveCPUThreads(Math.round(value)))
 }
 
 // The cap is shown in GB and kept in MB, which is what the engine holds it in.
@@ -122,7 +123,7 @@ function setCacheCap(e: Event) {
     THUMB_CACHE_MAX_MB,
     Math.max(THUMB_CACHE_MIN_MB, Number.isFinite(parsed) ? Math.round(parsed * MB_PER_GB) : THUMB_CACHE_DEFAULT_MB),
   )
-  validation.value.cache =
+  validation.value.thumbCacheMB =
     !Number.isFinite(parsed) || Math.round(parsed * MB_PER_GB) !== mb
       ? t('settings.cacheRange', {
           min: THUMB_CACHE_MIN_MB / MB_PER_GB,
@@ -131,7 +132,7 @@ function setCacheCap(e: Event) {
         })
       : ''
   e.target.value = String(Number((mb / MB_PER_GB).toFixed(2)))
-  return save('cache', () => lib.saveThumbCacheMB(mb))
+  return save('thumbCacheMB', () => lib.saveThumbCacheMB(mb))
 }
 
 // How much the cache holds now. It grows while photos are indexed and shrinks
@@ -214,27 +215,16 @@ function matches(...texts: string[]) {
 function row(group: string, ...keys: MessageKey[]) {
   return (!category.value || category.value === group) && matches(...keys.map((key) => t(key)))
 }
-const counts = ref<Record<string, number>>({})
-const lastSave = ref('')
-const feedback = ref<Record<string, string>>({})
-const validation = ref<Record<string, string>>({})
-async function save(key: string, fn: () => Promise<unknown>) {
-  lastSave.value = key
-  feedback.value[key] = ''
-  counts.value[key] = (counts.value[key] ?? 0) + 1
-  try {
-    await fn()
-    if (lastSave.value === key) feedback.value[key] = error.value ? '' : t('settings.saved')
-  } finally {
-    counts.value[key] = (counts.value[key] ?? 1) - 1
-  }
-}
-function hint(key: string) {
-  return counts.value[key] ? t('settings.saving') : validation.value[key] || feedback.value[key]
-}
-function failure(key: string) {
-  return lastSave.value === key ? error.value : ''
-}
+// The folders row is found by its actions' names too.
+const folderKeys: readonly MessageKey[] = [
+  'settings.folders',
+  'settings.foldersHint',
+  'settings.addFolder',
+  'settings.rescan',
+]
+const showFolders = computed(() => row('library', ...folderKeys))
+const validation = ref<Partial<Record<keyof Settings, string>>>({})
+const { save, hint } = useSaveFeedback<keyof Settings>((key) => lib.settingErrors[key])
 useCommands([
   {
     id: 'settings.addFolder',
@@ -273,8 +263,7 @@ function saveConfidence() {
   if (pendingConfidence === null) return
   const value = pendingConfidence
   pendingConfidence = null
-  error.value = ''
-  void save('confidence', () => lib.saveTagConfidence(value))
+  void save('tagConfidence', () => lib.saveTagConfidence(value))
 }
 function onConfidence(value: number | number[] | undefined) {
   if (typeof value !== 'number') return
@@ -296,7 +285,7 @@ const categoryKeys: Record<string, MessageKey[]> = {
     'settings.textSize',
     'settings.textSizeHint',
   ],
-  library: ['settings.folders', 'settings.foldersHint', 'settings.videos', 'settings.videosHint'],
+  library: [...folderKeys, 'settings.videos', 'settings.videosHint'],
   indexing: [
     'settings.pause',
     'settings.pauseHint',
@@ -439,7 +428,11 @@ const shownCategories = computed(() =>
                 @update:model-value="setAccent"
               >
                 <template #label="{ item }">
-                  <span class="swatch" :class="`swatch-${item.value}`" aria-hidden="true" />{{ item.label }}</template
+                  <span
+                    class="swatch"
+                    :style="{ background: `var(--lumen-accent-${item.value})` }"
+                    aria-hidden="true"
+                  />{{ item.label }}</template
                 >
               </URadioGroup>
             </template>
@@ -498,11 +491,7 @@ const shownCategories = computed(() =>
           :aria-label="t('settings.category.library')"
         >
           <h2>{{ t('settings.category.library') }}</h2>
-          <PrefRow
-            v-if="row('library', 'settings.folders', 'settings.foldersHint')"
-            :label="t('settings.folders')"
-            :description="t('settings.foldersHint')"
-          >
+          <PrefRow v-if="showFolders" :label="t('settings.folders')" :description="t('settings.foldersHint')">
             <template #default>
               <div class="flex flex-wrap gap-2">
                 <UButton :icon="icons['folder-add']" loading-auto @click="runCommand('settings.addFolder')">{{
@@ -515,16 +504,13 @@ const shownCategories = computed(() =>
             </template>
           </PrefRow>
           <FeatureState
-            v-if="!lib.sources.length && row('library', 'settings.folders', 'settings.foldersHint')"
+            v-if="!lib.sources.length && showFolders"
             kind="empty"
             icon="folder"
             :title="t('settings.noFolders')"
             :text="t('settings.noFoldersHint')"
           />
-          <ul
-            v-if="lib.sources.length && row('library', 'settings.folders', 'settings.foldersHint')"
-            class="source-list"
-          >
+          <ul v-if="lib.sources.length && showFolders" class="source-list">
             <li v-for="s in lib.sources" :key="s.id">
               <span class="source-path lumen-selectable" :title="s.path">{{ s.path }}</span>
               <UButton
@@ -533,11 +519,8 @@ const shownCategories = computed(() =>
                 @click="blockFolder(s)"
                 >{{ t('blocked.block') }}</UButton
               >
-              <UButton
-                loading-auto
-                :aria-label="t('settings.removeNamed', { path: s.path })"
-                @click="removeFolder(s)"
-                >{{ t('settings.remove') }}</UButton
+              <UButton loading-auto :aria-label="t('settings.removeNamed', { path: s.path })" @click="removeFolder(s)">
+                {{ t('settings.remove') }}</UButton
               >
             </li>
           </ul>
@@ -546,7 +529,7 @@ const shownCategories = computed(() =>
             :label="t('settings.videos')"
             :description="t('settings.videosHint')"
             :hint="hint('videos')"
-            :error="failure('videos')"
+            :error="lib.settingErrors.videos"
           >
             <template #default="{ labelledBy, describedBy }">
               <USwitch
@@ -568,15 +551,14 @@ const shownCategories = computed(() =>
             v-if="row('indexing', 'settings.pause', 'settings.pauseHint')"
             :label="t('settings.pause')"
             :description="t('settings.pauseHint')"
-            :hint="hint('pause')"
-            :error="failure('pause')"
           >
+            <!-- The indexer's state, not a setting: a failure is a notice, as from the sidebar. -->
             <template #default="{ labelledBy, describedBy }">
               <USwitch
                 :model-value="lib.progress?.paused ?? false"
                 :aria-labelledby="labelledBy"
                 :aria-describedby="describedBy"
-                @update:model-value="(value) => save('pause', () => lib.setPaused(value))"
+                @update:model-value="(value) => void lib.setPaused(value)"
               />
             </template>
           </PrefRow>
@@ -585,7 +567,7 @@ const shownCategories = computed(() =>
             :label="t('settings.pauseFullScreen')"
             :description="t('settings.pauseFullScreenHint')"
             :hint="hint('pauseFullScreen')"
-            :error="failure('pauseFullScreen')"
+            :error="lib.settingErrors.pauseFullScreen"
           >
             <template #default="{ labelledBy, describedBy }">
               <USwitch
@@ -601,7 +583,7 @@ const shownCategories = computed(() =>
             :label="t('settings.pauseBusy')"
             :description="t('settings.pauseBusyHint')"
             :hint="hint('pauseBusy')"
-            :error="failure('pauseBusy')"
+            :error="lib.settingErrors.pauseBusy"
           >
             <template #default="{ labelledBy, describedBy }">
               <USwitch
@@ -616,7 +598,7 @@ const shownCategories = computed(() =>
             v-if="row('indexing', 'settings.idleOnly', 'settings.idleOnlyHint')"
             :label="t('settings.idleOnly')"
             :hint="hint('idleOnly')"
-            :error="failure('idleOnly')"
+            :error="lib.settingErrors.idleOnly"
             :description="t('settings.idleOnlyHint', { n: AWAY_MINUTES })"
           >
             <template #default="{ labelledBy, describedBy }">
@@ -631,8 +613,8 @@ const shownCategories = computed(() =>
           <PrefRow
             v-if="row('indexing', 'settings.threadsLabel', 'settings.threadsHint') && lib.settings.maxCPUThreads > 1"
             :label="t('settings.threadsLabel')"
-            :hint="hint('threads')"
-            :error="failure('threads')"
+            :hint="hint('cpuThreads')"
+            :error="lib.settingErrors.cpuThreads"
             :description="t('settings.threadsHint', { n: lib.settings.defaultCPUThreads })"
           >
             <template #default="{ labelledBy, describedBy }">
@@ -662,8 +644,8 @@ const shownCategories = computed(() =>
             v-if="row('indexing', 'settings.cache', 'settings.cacheLimit', 'settings.cacheHint')"
             :label="t('settings.cache')"
             :description="t('settings.cacheHint')"
-            :hint="hint('cache') || t('settings.cacheLimit')"
-            :error="failure('cache')"
+            :hint="hint('thumbCacheMB', validation.thumbCacheMB) || t('settings.cacheLimit')"
+            :error="lib.settingErrors.thumbCacheMB"
           >
             <template #default="{ labelledBy, describedBy }">
               <UInput
@@ -705,7 +687,7 @@ const shownCategories = computed(() =>
             :label="t('settings.aiOnBattery')"
             :description="t('settings.aiOnBatteryHint')"
             :hint="hint('aiOnBattery')"
-            :error="failure('aiOnBattery')"
+            :error="lib.settingErrors.aiOnBattery"
           >
             <template #default="{ labelledBy, describedBy }">
               <USwitch
@@ -721,8 +703,8 @@ const shownCategories = computed(() =>
             v-if="row('search', 'settings.confidence', 'settings.confidenceHint')"
             :label="t('settings.confidence')"
             :description="t('settings.confidenceHint')"
-            :hint="hint('confidence')"
-            :error="failure('confidence')"
+            :hint="hint('tagConfidence')"
+            :error="lib.settingErrors.tagConfidence"
           >
             <template #default="{ labelledBy, describedBy }">
               <div class="slider-controls">
@@ -753,8 +735,8 @@ const shownCategories = computed(() =>
             v-if="row('files', 'settings.eventGap', 'settings.eventGapHint')"
             :label="t('settings.eventGap')"
             :description="t('settings.eventGapHint')"
-            :hint="hint('eventGap')"
-            :error="failure('eventGap')"
+            :hint="hint('eventGapHours', validation.eventGapHours)"
+            :error="lib.settingErrors.eventGapHours"
           >
             <template #default="{ labelledBy, describedBy }">
               <UInput
@@ -829,37 +811,44 @@ const shownCategories = computed(() =>
   gap: 1.5rem;
   padding-top: 0.75rem;
 }
+
 .category-nav {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 0.25rem;
 }
+
 .category-nav :deep(button) {
   white-space: normal;
   text-align: left;
   justify-content: flex-start;
 }
+
 .settings-content {
   min-width: 0;
   max-width: 60rem;
   container-type: inline-size;
 }
+
 section {
   margin-bottom: 2rem;
 }
+
 h2 {
   margin: 0 0 0.5rem;
   font-size: 1rem;
   font-weight: 600;
   color: var(--ui-text-highlighted);
 }
+
 .source-list {
   list-style: none;
   padding: 0;
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius);
 }
+
 .source-list li {
   display: flex;
   align-items: center;
@@ -867,9 +856,11 @@ h2 {
   gap: 0.5rem;
   padding: 0.75rem;
 }
+
 .source-list li + li {
   border-top: 1px solid var(--ui-border);
 }
+
 .source-path {
   flex: 1 1 12rem;
   min-width: 0;
@@ -877,10 +868,12 @@ h2 {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
 .slider-controls {
   width: min(20rem, 100%);
   min-width: 12rem;
 }
+
 .slider-ends {
   display: flex;
   justify-content: space-between;
@@ -889,18 +882,22 @@ h2 {
   color: var(--ui-text-muted);
   font-size: 0.75rem;
 }
+
 .scale-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
 }
+
 .scale-controls :deep([data-slot='root']) {
   min-width: 8rem;
 }
+
 .appearance-choices :deep(fieldset) {
   flex-wrap: wrap;
 }
+
 .swatch {
   display: inline-block;
   width: 0.875rem;
@@ -908,31 +905,14 @@ h2 {
   margin-right: 0.375rem;
   border: 1px solid var(--ui-border);
   border-radius: 50%;
-  background: var(--lumen-swatch);
 }
-.swatch-blue {
-  --lumen-swatch: #2563eb;
-}
-.swatch-teal {
-  --lumen-swatch: #0f766e;
-}
-.swatch-green {
-  --lumen-swatch: #15803d;
-}
-.swatch-violet {
-  --lumen-swatch: #7c3aed;
-}
-.swatch-rose {
-  --lumen-swatch: #e11d48;
-}
-.swatch-amber {
-  --lumen-swatch: #b45309;
-}
+
 @container (max-width: 56rem) {
   .settings-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 1rem;
   }
+
   .category-nav {
     flex-direction: row;
     flex-wrap: wrap;

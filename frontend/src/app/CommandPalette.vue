@@ -7,21 +7,11 @@ import type { CommandPaletteGroup, CommandPaletteItem } from '@nuxt/ui/component
 import UModal from '@nuxt/ui/components/Modal.vue'
 import { computed } from 'vue'
 import { icons } from '../design/icons'
-import { availableCommands, isEnabled, keyCaps, runCommand } from '../shared/commands'
-import type { Command, CommandGroup } from '../shared/commands'
+import { availableCommands, commandGroups, isEnabled, keyCaps, runCommand } from '../shared/commands'
+import type { Command } from '../shared/commands'
 import { t } from '../shared/i18n'
-import type { MessageKey } from '../shared/i18n'
 
 const open = defineModel<boolean>('open', { required: true })
-
-const groupOrder: readonly CommandGroup[] = ['media', 'view', 'library', 'navigate', 'app']
-const groupLabel: Record<CommandGroup, MessageKey> = {
-  media: 'commands.group.media',
-  view: 'commands.group.view',
-  library: 'commands.group.library',
-  navigate: 'commands.group.navigate',
-  app: 'commands.group.app',
-}
 
 function item(c: Command): CommandPaletteItem {
   return {
@@ -38,10 +28,10 @@ function item(c: Command): CommandPaletteItem {
 }
 
 const groups = computed<CommandPaletteGroup[]>(() =>
-  groupOrder
+  commandGroups
     .map((g) => ({
       id: g,
-      label: t(groupLabel[g]),
+      label: t(`commands.group.${g}`),
       // The palette's own command would only close it again.
       items: availableCommands.value.filter((c) => c.group === g && c.id !== 'app.commandPalette').map(item),
     }))
@@ -54,6 +44,7 @@ const groups = computed<CommandPaletteGroup[]>(() =>
     v-model:open="open"
     :title="t('commands.title')"
     :description="t('commands.hint')"
+    :close="false"
     :ui="{ content: 'max-w-xl', header: 'sr-only', body: 'p-0 sm:p-0' }"
   >
     <template #body>

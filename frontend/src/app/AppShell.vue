@@ -88,6 +88,7 @@ useCommands([
       side="left"
       :title="t('shell.navigation')"
       :description="t('shell.navigationHint')"
+      :close="false"
       :ui="{ content: 'max-w-64', header: 'sr-only', body: 'p-0 sm:p-0' }"
     >
       <template #body>
@@ -103,21 +104,25 @@ useCommands([
   height: 100%;
   min-width: 0;
 }
+
 .sidebar {
   position: relative;
   flex-shrink: 0;
   border-right: 1px solid var(--ui-border);
   background: var(--ui-bg-muted);
 }
+
 .sidebar.collapsed {
   width: 3.75rem;
 }
+
 .main {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-width: 0;
 }
+
 .narrow-bar {
   display: flex;
   align-items: center;
@@ -129,10 +134,12 @@ useCommands([
   color: var(--ui-text-highlighted);
   font: 600 0.9375rem var(--font-display);
 }
+
 .narrow-bar img {
   width: 1.25rem;
   height: 1.25rem;
 }
+
 .content {
   flex: 1;
   min-width: 0;

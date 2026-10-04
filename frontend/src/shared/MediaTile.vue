@@ -115,7 +115,7 @@ img,
   padding: 2px 4px;
   border-radius: var(--ui-radius);
   background: rgb(0 0 0 / 0.68);
-  font-size: 11px;
+  font-size: 0.6875rem;
   filter: none;
 }
 @media (forced-colors: active) {

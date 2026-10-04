@@ -22,7 +22,8 @@ const active = ref(-1) // -1 = the typed text
 
 const found = useSuggestions<Person[]>(text, engine.suggestPeople, [])
 const options = computed(() => found.value.filter((p) => p.id !== props.exclude))
-watch(text, () => (active.value = -1))
+// New suggestions (or none) start from the typed text again.
+watch(options, () => (active.value = -1))
 
 function pick(name: string) {
   name = trimName(name)
@@ -33,11 +34,12 @@ function pick(name: string) {
 }
 
 function onKey(e: KeyboardEvent) {
+  if (e.isComposing) return // the key belongs to the input method
   const n = options.value.length
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault()
     open.value = true
-    if (n) active.value = e.key === 'ArrowDown' ? (active.value + 1) % n : (active.value - 1 + n) % n
+    if (n) active.value = e.key === 'ArrowDown' ? (active.value + 1) % n : (active.value <= 0 ? n : active.value) - 1
   } else if (e.key === 'Enter') {
     e.preventDefault()
     pick(options.value[active.value]?.name ?? text.value) // -1: what was typed
@@ -106,11 +108,13 @@ function preventFocus(e: Event) {
 .picker {
   min-width: 0;
 }
+
 .suggestions {
   margin: 0;
   padding: 0.25rem;
   list-style: none;
 }
+
 .suggestions li {
   display: flex;
   align-items: center;
@@ -120,6 +124,7 @@ function preventFocus(e: Event) {
   border-radius: var(--ui-radius);
   cursor: pointer;
 }
+
 .suggestions li.active {
   background: var(--ui-bg-elevated);
   outline: 1px solid var(--ui-primary);

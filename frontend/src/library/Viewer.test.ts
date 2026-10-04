@@ -106,6 +106,7 @@ it('uses the absolute media clock for direct playback from a search moment', asy
 it('adds the stream offset only for converted playback', async () => {
   vi.mocked(engine.asset).mockResolvedValue({
     ...detail,
+    caps: { ...detail.caps, directPlay: false },
     video: { duration: 60000, codec: 'mpeg4', audio: '', play: Playback.PlayConvert },
   })
   wrapper = mountViewer()

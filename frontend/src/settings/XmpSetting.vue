@@ -19,6 +19,7 @@ import { confirm } from '../shared/confirm'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
+import { useSaveFeedback } from './saveFeedback'
 
 const props = withDefaults(defineProps<{ query?: string }>(), { query: '' })
 function matches(...keys: MessageKey[]) {
@@ -31,19 +32,12 @@ const result = ref<XMPExport | null>(null)
 const exporting = ref(false)
 const deleted = ref<XMPDelete | null>(null)
 const deleting = ref(false)
+const { save, saving, hint } = useSaveFeedback(() => lib.settingErrors.xmp)
 
-const pending = ref(0)
-const changed = ref(false)
-async function toggle(value: boolean) {
+function toggle(value: boolean) {
   if (!value) result.value = null
   deleted.value = null
-  changed.value = true
-  pending.value++
-  try {
-    await lib.saveXMP(value)
-  } finally {
-    pending.value--
-  }
+  return save('xmp', () => lib.saveXMP(value))
 }
 
 async function exportNow() {
@@ -82,7 +76,8 @@ useCommands([
     title: () => t('settings.xmpExport'),
     icon: 'sidecar',
     available: () => lib.settings.xmp,
-    enabled: () => !exporting.value && !deleting.value,
+    // The engine refuses an export until turning sidecars on is saved.
+    enabled: () => !exporting.value && !deleting.value && !saving('xmp'),
     run: exportNow,
   },
   {
@@ -102,17 +97,18 @@ useCommands([
       v-if="matches('settings.xmp', 'settings.xmpHint')"
       :label="t('settings.xmp')"
       :description="t('settings.xmpHint')"
-      :error="changed ? lib.settingsError : ''"
-      :hint="pending ? t('settings.saving') : changed ? t('settings.saved') : ''"
+      :error="lib.settingErrors.xmp"
+      :hint="hint('xmp')"
     >
-      <template #default="{ labelledBy, describedBy }"
-        ><USwitch
+      <template #default="{ labelledBy, describedBy }">
+        <USwitch
           :model-value="lib.settings.xmp"
           :disabled="deleting"
           :aria-labelledby="labelledBy"
           :aria-describedby="describedBy"
           @update:model-value="toggle"
-      /></template>
+        />
+      </template>
     </PrefRow>
     <PrefRow
       v-if="lib.settings.xmp && matches('settings.xmpExport', 'settings.xmpExportHint')"
@@ -123,7 +119,7 @@ useCommands([
         data-xmp="export"
         :icon="icons.sidecar"
         :loading="exporting"
-        :disabled="exporting || deleting"
+        :disabled="exporting || deleting || saving('xmp')"
         @click="runCommand('settings.xmpExport')"
         >{{ exporting ? t('settings.xmpExporting') : t('settings.xmpExport') }}</UButton
       >
@@ -143,8 +139,8 @@ useCommands([
         :loading="deleting"
         :disabled="exporting || deleting"
         @click="runCommand('settings.xmpDelete')"
-        >{{ deleting ? t('settings.xmpDeleting') : t('settings.xmpDelete') }}</UButton
-      >
+        >{{ deleting ? t('settings.xmpDeleting') : t('settings.xmpDelete') }}
+      </UButton>
     </PrefRow>
     <p v-if="deleted" class="text-muted" role="status">
       {{ deleted.deleted > 0 ? t('settings.xmpDeleted', { n: deleted.deleted }) : t('settings.xmpDeletedNone')

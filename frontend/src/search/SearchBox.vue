@@ -54,7 +54,8 @@ watch(
   { immediate: true },
 )
 
-watch(text, () => (active.value = 0))
+// New suggestions (or none) start from searching for the text again.
+watch(options, () => (active.value = 0))
 
 // A search needs the AI's text model, which takes seconds to load: start
 // that as soon as someone is about to type one (a loaded model just stays).
@@ -98,6 +99,7 @@ function clear() {
 }
 
 function onKey(e: KeyboardEvent) {
+  if (e.isComposing) return // the key belongs to the input method
   const n = options.value.length
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault()
@@ -218,12 +220,15 @@ function heading(o: Option, i: number): string {
   max-width: 35rem;
   min-width: 10rem;
 }
+
 .box {
   width: 100%;
 }
+
 .box :deep(input::-webkit-search-cancel-button) {
   display: none;
 }
+
 .menu {
   position: absolute;
   top: calc(100% + 0.375rem);
@@ -238,6 +243,7 @@ function heading(o: Option, i: number): string {
   background: var(--ui-bg);
   box-shadow: var(--lumen-shadow);
 }
+
 .menu li {
   display: flex;
   align-items: center;
@@ -248,10 +254,12 @@ function heading(o: Option, i: number): string {
   color: var(--ui-text-muted);
   cursor: pointer;
 }
+
 .menu li.active {
   background: var(--ui-bg-elevated);
   color: var(--ui-text-highlighted);
 }
+
 .menu li.heading {
   min-height: 1.625rem;
   font-size: 0.6875rem;
@@ -261,11 +269,13 @@ function heading(o: Option, i: number): string {
   color: var(--ui-text-dimmed);
   cursor: default;
 }
+
 .ellipsis {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
 @media (forced-colors: active) {
   .menu li.active {
     outline: 2px solid Highlight;

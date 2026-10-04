@@ -3,7 +3,6 @@
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
-import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, ref } from 'vue'
 import { MAX_NAME_LEN, TagKind, thumbUrl } from '../bridge'
@@ -11,7 +10,7 @@ import type { Tag } from '../bridge'
 import { icons } from '../design/icons'
 import type { IconName } from '../design/icons'
 import CollectionCard from '../shared/CollectionCard.vue'
-import { isEnabled, useCommands } from '../shared/commands'
+import { menuItems, useCommands } from '../shared/commands'
 import type { Command } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { nameTooLong } from '../shared/names'
@@ -81,18 +80,7 @@ const actions: Command[] = [
   },
 ]
 useCommands(actions)
-const items = computed<DropdownMenuItem[]>(() =>
-  actions
-    .filter((c) => c.available?.() ?? true)
-    .map((c) => ({
-      label: c.title(),
-      icon: c.icon ? icons[c.icon] : undefined,
-      disabled: !isEnabled(c),
-      onSelect: () => {
-        void c.run()
-      },
-    })),
-)
+const items = computed(() => menuItems(actions))
 function keepEditorFocus(e: Event) {
   if (editing.value !== null) e.preventDefault()
 }

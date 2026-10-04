@@ -241,10 +241,22 @@ it('presents notifications as toasts, replacing one with the same id and telling
   const save = [...document.body.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save')
   save?.click()
   expect(report).toHaveBeenCalledOnce()
-  expect(titles()).toContain('Save a report')
+  // Past the removal delay of a toast that closed: the notice is still open.
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  const open = () =>
+    [...document.body.querySelectorAll('li[data-state="open"] [data-slot="title"]')].map((el) => el.textContent.trim())
+  expect(open()).toContain('Save a report')
   dismiss('report')
   notify({ id: 'report', kind: 'info', title: 'The newer report', duration: 0 })
   await new Promise((resolve) => setTimeout(resolve, 300))
   expect(titles()).toContain('The newer report')
   dismiss('report')
+
+  // Replaced and dismissed in the same moment: the toast still goes.
+  notify({ id: 'swap', kind: 'info', title: 'First', duration: 0 })
+  await vi.waitFor(() => expect(open()).toContain('First'))
+  notify({ id: 'swap', kind: 'info', title: 'Second', duration: 0 })
+  dismiss('swap')
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(titles()).not.toContain('Second')
 })

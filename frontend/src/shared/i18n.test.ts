@@ -7,6 +7,10 @@ it('fills placeholders, formatting numbers, and picks the plural form by n', () 
   expect(t('status.items', { n: 1200 })).toContain('1,200')
 })
 
+it('shows a value as given, never as a replacement pattern', () => {
+  expect(t('blocked.saved', { name: "$& $` $'" })).toBe("Blocked “$& $` $'”.")
+})
+
 it('checks placeholders at compile time', () => {
   // @ts-expect-error: the message has {name}
   t('blocked.saved')

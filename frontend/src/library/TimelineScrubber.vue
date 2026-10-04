@@ -127,7 +127,7 @@ onBeforeUnmount(() => stopResize?.())
   position: absolute;
   right: 12px;
   transform: translateY(-2px);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
   color: var(--ui-text-dimmed);
   pointer-events: none;
@@ -161,7 +161,7 @@ onBeforeUnmount(() => stopResize?.())
   background: var(--ui-bg);
   color: var(--ui-text-highlighted);
   box-shadow: var(--lumen-shadow);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
   pointer-events: none;

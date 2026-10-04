@@ -165,6 +165,20 @@ it('forgets a preview when asked, as the scheme it belongs to changes', async ()
   expect(organise.toMove).toBe(0)
 })
 
+it('drops a preview that answers for a scheme no longer being edited', async () => {
+  let answer: (p: OrganisePlan) => void = () => undefined
+  vi.mocked(engine.planOrganise).mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+  const organise = useOrganise()
+  const pending = organise.preview()
+  expect(organise.planning).toBe(true)
+  organise.discardPlan()
+  expect(organise.planning).toBe(false)
+  answer(plan([move(1, OrganiseMoveState.MovePlanned)]))
+  await pending
+  expect(organise.plan).toBeNull()
+  expect(organise.planning).toBe(false)
+})
+
 it('starts the previewed run, shows it moving, and refreshes the past runs', async () => {
   vi.mocked(engine.planOrganise).mockResolvedValue(
     plan([move(1, OrganiseMoveState.MovePlanned), move(2, OrganiseMoveState.MoveSkipped, 'taken')]),

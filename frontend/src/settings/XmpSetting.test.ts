@@ -95,8 +95,21 @@ it('puts the box back and says why when the save fails', async () => {
   await box.get('[role="switch"]').trigger('click')
   await flushPromises()
   expect(lib.settings.xmp).toBe(false)
-  expect(lib.settingsError).toContain('the database is locked')
+  expect(lib.settingErrors.xmp).toContain('the database is locked')
   expect(exportButton(box)).toBeUndefined()
+})
+
+it('offers Export now only once turning sidecars on is saved', async () => {
+  let finish: () => void = () => {
+    throw new Error('the save has not started')
+  }
+  vi.mocked(engine.setXMP).mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+  const box = mountInApp(XmpSetting)
+  await box.get('[role="switch"]').trigger('click')
+  expect(box.get('[data-xmp="export"]').attributes('disabled')).toBeDefined()
+  finish()
+  await flushPromises()
+  expect(box.get('[data-xmp="export"]').attributes('disabled')).toBeUndefined()
 })
 
 it('exports now and reports what was written, left up to date and left alone', async () => {
@@ -235,7 +248,7 @@ it('does not delete when the setting could not be turned off', async () => {
   await askToDelete(box, true)
   expect(engine.deleteXMP).not.toHaveBeenCalled()
   expect(lib.settings.xmp).toBe(true)
-  expect(lib.settingsError).toContain('the database is locked')
+  expect(lib.settingErrors.xmp).toContain('the database is locked')
 })
 
 it('filters sidecar controls by their labels and descriptions', () => {

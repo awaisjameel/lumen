@@ -98,6 +98,24 @@
   --ui-primary: var(--ui-color-primary-700);
 }
 
+/* Each accent as --ui-primary shows it, for the accent choice's swatches. */
+:root {
+  --lumen-accent-blue: var(--color-blue-600);
+  --lumen-accent-teal: var(--color-teal-700);
+  --lumen-accent-green: var(--color-green-700);
+  --lumen-accent-violet: var(--color-violet-600);
+  --lumen-accent-rose: var(--color-rose-600);
+  --lumen-accent-amber: var(--color-amber-700);
+}
+.dark {
+  --lumen-accent-blue: var(--color-blue-400);
+  --lumen-accent-teal: var(--color-teal-400);
+  --lumen-accent-green: var(--color-green-400);
+  --lumen-accent-violet: var(--color-violet-400);
+  --lumen-accent-rose: var(--color-rose-400);
+  --lumen-accent-amber: var(--color-amber-400);
+}
+
 /* Compact density: the same hierarchy with less air. Control sizes follow
    through Nuxt UI's size variants (appearance.ts). */
 :root[data-density='compact'] {

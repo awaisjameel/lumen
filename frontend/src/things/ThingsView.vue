@@ -62,7 +62,8 @@ async function create() {
   error.value = ''
   try {
     const id = await engine.createLabel(n) // the first one loads the text model: seconds
-    await things.load()
+    // It exists now: a list that fails to refresh does not undo that.
+    await things.load().catch(logError)
     if (!active) return // the user went elsewhere meanwhile: stay there
     name.value = ''
     void router.push({ name: 'thing', params: { id } })
@@ -120,9 +121,11 @@ useCommands([
 
 <template>
   <Page>
-    <template #header
-      ><PageHeader :title="t('nav.things')"><SearchBox /></PageHeader
-    ></template>
+    <template #header>
+      <PageHeader :title="t('nav.things')">
+        <SearchBox />
+      </PageHeader>
+    </template>
     <p class="mb-4 text-muted">{{ t('things.intro') }}</p>
     <div class="mb-4 flex flex-wrap gap-2">
       <UInput
@@ -167,8 +170,8 @@ useCommands([
     <FeatureState v-else-if="!things.loaded" kind="loading" :title="t('things.loading')" />
     <template v-if="pinned.length">
       <h2 class="mb-3 mt-5 text-sm font-semibold">{{ t('things.pinnedHeading') }}</h2>
-      <CardGrid
-        ><ThingCard
+      <CardGrid>
+        <ThingCard
           v-for="x in pinned"
           :key="x.id"
           :tag="x"
@@ -178,12 +181,13 @@ useCommands([
           @pin="pin(x)"
           @block="blockTag(x)"
           @remove="remove(x)"
-      /></CardGrid>
+        />
+      </CardGrid>
     </template>
     <template v-if="mine.length">
       <h2 class="mb-3 mt-5 text-sm font-semibold">{{ t('things.yours') }}</h2>
-      <CardGrid
-        ><ThingCard
+      <CardGrid>
+        <ThingCard
           v-for="x in mine"
           :key="x.id"
           :tag="x"
@@ -193,11 +197,12 @@ useCommands([
           @pin="pin(x)"
           @block="blockTag(x)"
           @remove="remove(x)"
-      /></CardGrid>
+        />
+      </CardGrid>
     </template>
     <h2 v-if="mine.length && builtin.length" class="mb-3 mt-5 text-sm font-semibold">{{ t('nav.things') }}</h2>
-    <CardGrid v-if="builtin.length"
-      ><ThingCard
+    <CardGrid v-if="builtin.length">
+      <ThingCard
         v-for="x in builtin"
         :key="x.id"
         :tag="x"
@@ -206,7 +211,8 @@ useCommands([
         :rename="rename"
         @pin="pin(x)"
         @block="blockTag(x)"
-    /></CardGrid>
+      />
+    </CardGrid>
     <FeatureState
       v-if="things.loaded && !listed.length && !error && !things.error && !aiError"
       kind="empty"

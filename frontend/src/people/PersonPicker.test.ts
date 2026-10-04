@@ -72,6 +72,46 @@ it('portals suggestions while retaining input focus, exclusion and arrow-key sel
   expect(document.activeElement).toBe(input.element)
 })
 
+it('moves up from the typed text to the last suggestion and wraps both ways', async () => {
+  vi.useFakeTimers()
+  const cover: Face = {
+    id: 0,
+    assetId: 0,
+    thumb: 0,
+    assetW: 0,
+    assetH: 0,
+    video: false,
+    frame: 0,
+    x: 0,
+    y: 0,
+    w: 0,
+    h: 0,
+    person: 0,
+    name: '',
+    byUser: false,
+  }
+  vi.mocked(engine.suggestPeople).mockResolvedValue(
+    ['Ali', 'Sara', 'Zoya'].map((name, i): Person => ({ id: i + 1, name, count: 1, cover })),
+  )
+  wrapper = mountInApp(PersonPicker, { props: { placeholder: 'Name' }, plugins: [testRouter()] })
+  const input = wrapper.get<HTMLInputElement>('input')
+  input.element.focus()
+  await input.setValue('a')
+  await vi.advanceTimersByTimeAsync(200)
+  await flushPromises()
+  const active = () => document.getElementById(input.attributes('aria-activedescendant') ?? '')?.textContent.trim()
+  await input.trigger('keydown', { key: 'ArrowUp' })
+  expect(active()).toBe('Zoya')
+  await input.trigger('keydown', { key: 'ArrowUp' })
+  expect(active()).toBe('Sara')
+  await input.trigger('keydown', { key: 'ArrowDown' })
+  await input.trigger('keydown', { key: 'ArrowDown' })
+  expect(active()).toBe('Ali')
+  // Composing text: Enter is the input method's, not a pick.
+  await input.trigger('keydown', { key: 'Enter', isComposing: true })
+  expect(wrapper.findComponent(PersonPicker).emitted('pick')).toBeUndefined()
+})
+
 function testRouter() {
   return createRouter({
     history: createMemoryHistory(),

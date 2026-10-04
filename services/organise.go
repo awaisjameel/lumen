@@ -350,6 +350,14 @@ func (s *LibraryService) begin(ctx context.Context, runID int64, op organiseOp) 
 		}
 		if err := op.work(life, runner, runID); err != nil && life.Err() == nil {
 			slog.Error("organise run stopped", "run", runID, "err", err)
+			if finished == nil {
+				// It stopped before it could record an end (settling a move in
+				// doubt, reading its moves): failed runs can be tried again.
+				if err := s.store.SetOrganiseRunState(life, runID, core.OrganiseFailed); err != nil {
+					slog.Error("record an organise run as failed", "run", runID, "err", err)
+				}
+				finished = &core.OrganiseProgress{RunID: runID, State: core.OrganiseFailed, Total: op.todo(counts)}
+			}
 		}
 		s.afterOrganise(life, runID)
 	}()

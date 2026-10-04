@@ -12,8 +12,9 @@ import type { IconName } from '../design/icons'
 import { isTyping } from './keys'
 import { shortcutsSuspended } from './overlay'
 
-/** Where a command is grouped in the palette and the shortcut reference. */
-export type CommandGroup = 'navigate' | 'view' | 'media' | 'library' | 'app'
+/** Where a command is grouped, in the order the palette and the shortcut reference show them. */
+export const commandGroups = ['media', 'view', 'library', 'navigate', 'app'] as const
+export type CommandGroup = (typeof commandGroups)[number]
 
 export interface Command {
   /** Stable and unique, e.g. "media.favourite". */
@@ -50,7 +51,7 @@ export const commands = computed(() => registered.value)
 /** The commands that apply now. */
 export const availableCommands = computed(() => registered.value.filter(isAvailable))
 
-export function isAvailable(c: Command): boolean {
+function isAvailable(c: Command): boolean {
   return c.available?.() ?? true
 }
 
@@ -89,13 +90,17 @@ export function useItemCommands<T, K extends string | number>(
   watch(groups, (current, _previous, cleanup) => cleanup(registerCommands([...current.values()].flat())), {
     immediate: true,
   })
-  return (id) =>
-    (groups.value.get(id) ?? []).filter(isAvailable).map((c) => ({
-      label: c.title(),
-      icon: c.icon ? icons[c.icon] : undefined,
-      disabled: !isEnabled(c),
-      onSelect: () => runCommand(c.id),
-    }))
+  return (id) => menuItems(groups.value.get(id) ?? [])
+}
+
+/** A menu of these commands: those that apply now, run through the registry when chosen. */
+export function menuItems(cmds: readonly Command[]): DropdownMenuItem[] {
+  return cmds.filter(isAvailable).map((c) => ({
+    label: c.title(),
+    icon: c.icon ? icons[c.icon] : undefined,
+    disabled: !isEnabled(c),
+    onSelect: () => runCommand(c.id),
+  }))
 }
 
 export function commandById(id: string): Command | undefined {

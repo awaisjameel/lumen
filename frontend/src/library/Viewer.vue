@@ -76,8 +76,12 @@ watch(
       if (request !== detailRequest) return
       detail.value = d
       if (d.video) {
-        const hevc = document.createElement('video').canPlayType('video/mp4; codecs="hvc1"')
-        videoMode.value = d.video.play === Playback.PlayHEVC && !hevc ? Playback.PlayConvert : d.video.play
+        // HEVC plays directly only where this WebView decodes it.
+        const direct =
+          d.caps.directPlay &&
+          (d.video.play !== Playback.PlayHEVC ||
+            document.createElement('video').canPlayType('video/mp4; codecs="hvc1"'))
+        videoMode.value = direct ? Playback.PlayDirect : Playback.PlayConvert
       }
     } catch (e) {
       if (request === detailRequest && !isCancelled(e)) loadError.value = errorText(e)
@@ -129,7 +133,7 @@ function seekVideo() {
 }
 
 function videoError() {
-  if (!converting.value) {
+  if (!converting.value && detail.value?.caps.convertPlay) {
     videoMode.value = Playback.PlayConvert
     videoStart.value = videoPosition.value
   } else {
@@ -484,12 +488,14 @@ onBeforeUnmount(() => {
   --ui-text-muted: var(--lumen-viewer-text-muted);
   --ui-text-dimmed: var(--lumen-viewer-text-muted);
 }
+
 .stage {
   position: relative;
   flex: 1;
   min-width: 0;
   container-type: inline-size;
 }
+
 .bar {
   position: absolute;
   inset: 0 0 auto;
@@ -502,15 +508,18 @@ onBeforeUnmount(() => {
   padding: 0.375rem 0.75rem;
   background: var(--lumen-viewer-bg);
 }
+
 .viewer-control {
   flex-shrink: 0;
   color: var(--lumen-viewer-text);
 }
+
 .viewer-control:hover,
 .viewer-control[aria-pressed='true'] {
   background: var(--lumen-viewer-control);
   color: var(--lumen-viewer-text);
 }
+
 .date {
   min-width: 0;
   overflow: hidden;
@@ -519,9 +528,11 @@ onBeforeUnmount(() => {
   font-size: 0.8125rem;
   color: var(--lumen-viewer-text-muted);
 }
+
 .grow {
   flex: 1;
 }
+
 .media {
   position: absolute;
   inset: var(--lumen-topbar-h) 0 0;
@@ -531,6 +542,7 @@ onBeforeUnmount(() => {
   grid-template-rows: minmax(0, 1fr);
   place-items: center;
 }
+
 .media img,
 .media video {
   grid-area: 1 / 1;
@@ -540,6 +552,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
 }
+
 .video-seek {
   position: absolute;
   z-index: 2;
@@ -556,15 +569,18 @@ onBeforeUnmount(() => {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
+
 .seek-control {
   flex: 1;
   min-width: 0;
 }
+
 .playback-message {
   position: absolute;
   z-index: 3;
   max-width: min(28rem, calc(100% - 2rem));
 }
+
 .nav {
   position: absolute;
   top: 50%;
@@ -575,33 +591,41 @@ onBeforeUnmount(() => {
   opacity: 0;
   transition: opacity var(--lumen-motion-control) var(--lumen-ease);
 }
+
 .stage:hover .nav,
 .nav:focus-visible {
   opacity: 1;
 }
+
 .prev {
   left: 0.75rem;
 }
+
 .next {
   right: 0.75rem;
 }
+
 @container (max-width: 30rem) {
   .date {
     flex: 1 1 8rem;
   }
+
   .grow {
     display: none;
   }
+
   .video-seek {
     left: 0.75rem;
     right: 0.75rem;
   }
 }
+
 @media (pointer: coarse), (forced-colors: active) {
   .nav {
     opacity: 1;
   }
 }
+
 @media (forced-colors: active) {
   .viewer-control {
     border: 1px solid ButtonText;

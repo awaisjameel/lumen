@@ -6,8 +6,8 @@
 import { onScopeDispose, readonly, ref } from 'vue'
 import type { Ref } from 'vue'
 
-export const WIDE_PX = 1200
-export const MEDIUM_PX = 900
+const WIDE_PX = 1200
+const MEDIUM_PX = 900
 
 export type LayoutMode = 'wide' | 'medium' | 'narrow'
 

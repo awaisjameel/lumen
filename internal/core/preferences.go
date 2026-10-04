@@ -171,10 +171,11 @@ func CapsOf(kind Kind, ext string, hasPreview bool, play Playback) MediaCaps {
 	case KindPhoto:
 		c.Original = WebNative(ext)
 	case KindVideo:
-		// PlayHEVC plays directly where the WebView decodes HEVC, and is
-		// converted where it does not: both hold until the player has tried.
+		// PlayHEVC plays directly where the WebView decodes HEVC; that holds
+		// until the player has tried. Any video can be converted as it plays,
+		// which is also where a direct play that fails goes.
 		c.DirectPlay = play == PlayDirect || play == PlayHEVC
-		c.ConvertPlay = play == PlayConvert || play == PlayHEVC
+		c.ConvertPlay = true
 	}
 	return c
 }

@@ -7,7 +7,7 @@ import UInput from '@nuxt/ui/components/Input.vue'
 import USlideover from '@nuxt/ui/components/Slideover.vue'
 import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { createReusableTemplate } from '@vueuse/core'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import {
   AlbumKind,
   BlockKind,
@@ -59,6 +59,8 @@ const error = ref('')
 const detailError = ref('')
 const shownError = computed(() => error.value || detailError.value)
 const albumIDs = ref<number[]>([])
+// One save per album box at a time, so a failure restores exactly what it changed.
+const savingAlbums = shallowRef(new Set<number>())
 const newAlbum = ref('')
 const creatingAlbum = ref(false)
 const manualAlbums = computed(() => albums.list.filter((a) => a.kind === AlbumKind.AlbumManual))
@@ -129,6 +131,7 @@ watch(
     tags.value = []
     faces.value = []
     albumIDs.value = []
+    savingAlbums.value = new Set()
     newTag.value = ''
     newAlbum.value = ''
     creatingAlbum.value = false // one still on its way no longer concerns this photo
@@ -157,22 +160,30 @@ async function loadAlbums(id: number | undefined) {
   }
 }
 
+function showInAlbum(albumID: number, include: boolean) {
+  const others = albumIDs.value.filter((id) => id !== albumID)
+  albumIDs.value = include ? [...others, albumID] : others
+}
+
 function toggleAlbum(albumID: number, checked: boolean | 'indeterminate') {
   const assetID = detail.value?.id
-  if (!assetID || checked === 'indeterminate') return
+  if (!assetID || checked === 'indeterminate' || savingAlbums.value.has(albumID)) return
   const include = checked
   const revision = selectionRevision
-  const previous = albumIDs.value.includes(albumID)
-  albumIDs.value = include ? [...albumIDs.value, albumID] : albumIDs.value.filter((id) => id !== albumID)
+  showInAlbum(albumID, include)
+  savingAlbums.value = new Set(savingAlbums.value).add(albumID)
   void edit(
     () => engine.setAlbumItem(assetID, albumID, include),
     async () => {
       await Promise.all([loadAlbums(assetID), albums.load()])
     },
   ).then((ok) => {
-    // A failed edit restores this photo's box, never the next selection's.
-    if (!ok && revision === selectionRevision)
-      albumIDs.value = previous ? [...albumIDs.value, albumID] : albumIDs.value.filter((id) => id !== albumID)
+    // Another photo's boxes are its own: this one's outcome is not theirs.
+    if (revision !== selectionRevision) return
+    if (!ok) showInAlbum(albumID, !include)
+    const saving = new Set(savingAlbums.value)
+    saving.delete(albumID)
+    savingAlbums.value = saving
   })
 }
 
@@ -488,7 +499,8 @@ useCommands([
           variant="ghost"
           size="sm"
           @click="blockEvent"
-          >{{ t('blocked.blockEvent') }}</UButton
+        >
+          {{ t('blocked.blockEvent') }}</UButton
         >
       </section>
 
@@ -514,7 +526,8 @@ useCommands([
           variant="ghost"
           size="sm"
           @click="blockPlace"
-          >{{ t('blocked.blockPlace') }}</UButton
+        >
+          {{ t('blocked.blockPlace') }}</UButton
         >
       </section>
 
@@ -530,8 +543,8 @@ useCommands([
                 variant="link"
                 :title="f.name || t('person.unnamed')"
                 :ui="{ label: 'truncate' }"
-                >{{ f.name || t('person.unnamed') }}</UButton
-              >
+                >{{ f.name || t('person.unnamed') }}
+              </UButton>
               <UTooltip :text="t('details.notThisPerson', { name: f.name || t('person.unnamed') })">
                 <UButton
                   :icon="icons.close"
@@ -627,6 +640,7 @@ useCommands([
           class="album-option"
           :label="album.name"
           :model-value="albumIDs.includes(album.id)"
+          :disabled="savingAlbums.has(album.id)"
           :ui="{ label: 'break-words', wrapper: 'min-w-0' }"
           @update:model-value="toggleAlbum(album.id, $event)"
         />
@@ -747,7 +761,9 @@ useCommands([
         />
       </UTooltip>
     </header>
-    <div class="inspector-scroll"><ReuseInspectorContent /></div>
+    <div class="inspector-scroll">
+      <ReuseInspectorContent />
+    </div>
   </aside>
   <USlideover
     v-else
@@ -763,8 +779,12 @@ useCommands([
       }
     "
   >
-    <template #close><UButton :icon="icons.close" :aria-label="t('common.close')" variant="ghost" square /></template>
-    <template #body><ReuseInspectorContent /></template>
+    <template #close>
+      <UButton :icon="icons.close" :aria-label="t('common.close')" variant="ghost" square />
+    </template>
+    <template #body>
+      <ReuseInspectorContent />
+    </template>
   </USlideover>
 </template>
 
@@ -781,6 +801,7 @@ useCommands([
   color: var(--ui-text);
   user-select: text;
 }
+
 .inspector-header {
   display: flex;
   align-items: center;
@@ -789,23 +810,27 @@ useCommands([
   min-height: var(--lumen-topbar-h);
   padding: 0.375rem 0.75rem 0.375rem 1.25rem;
 }
+
 h2 {
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
   color: var(--ui-text-highlighted);
 }
+
 .inspector-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
+
 .inspector-body {
   display: flex;
   flex-direction: column;
   gap: 1.125rem;
   padding: 0.5rem 1.25rem 1.25rem;
 }
+
 section {
   display: flex;
   flex-direction: column;
@@ -813,36 +838,43 @@ section {
   gap: 0.375rem;
   min-width: 0;
 }
+
 h3 {
   margin: 0;
   color: var(--ui-text-highlighted);
   font-size: 0.8125rem;
   font-weight: 600;
 }
+
 p {
   margin: 0;
 }
+
 .album-new {
   display: flex;
   align-items: center;
   gap: 0.375rem;
 }
+
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+
 .tags,
 .faces {
   margin: 0;
   padding: 0;
   list-style: none;
 }
+
 .tags {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
 }
+
 .tags li {
   display: flex;
   flex-wrap: wrap;
@@ -850,29 +882,35 @@ p {
   gap: 0.25rem;
   min-width: 0;
 }
+
 .tag-name {
   flex: 1;
   min-width: 0;
 }
+
 .tags li > :last-child {
   flex-basis: 100%;
   width: fit-content;
 }
+
 .faces {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
+
 .faces li {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.375rem;
 }
+
 .who {
   flex: 1;
   min-width: 0;
 }
+
 .block-face {
   flex: 0 0 calc(100% - 2.625rem);
   margin-left: 2.625rem;

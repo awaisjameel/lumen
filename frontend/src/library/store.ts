@@ -73,9 +73,12 @@ export const useLibrary = defineStore('library', () => {
     pauseBusy: true,
     idleOnly: false,
   })
+  /** Why a page action in Settings failed (adding a folder, exporting sidecars). */
   const settingsError = ref('')
+  /** Why the newest save of a setting failed, by setting; cleared by its next change. */
+  const settingErrors = ref<Partial<Record<keyof Settings, string>>>({})
   let confidenceSave: LatestSave<number> | null = null
-  const settingFailed = (e: unknown) => (settingsError.value = errorText(e))
+  const settingFailed = (key: keyof Settings) => (e: unknown) => (settingErrors.value[key] = errorText(e))
 
   /**
    * A save for one setting: it shows the new value at once, saves the newest
@@ -92,10 +95,10 @@ export const useLibrary = defineStore('library', () => {
       queue ??= latestSave(save, settings.value[key], {
         saved,
         rollback: (last) => (settings.value[key] = last),
-        failed: settingFailed,
+        failed: settingFailed(key),
       })
       settings.value[key] = value
-      settingsError.value = ''
+      settingErrors.value[key] = ''
       return queue(value)
     }
   }
@@ -115,7 +118,7 @@ export const useLibrary = defineStore('library', () => {
     confidenceSave ??= latestSave(engine.setTagConfidence, settings.value.tagConfidence, {
       saved: () => refresh(),
       rollback: (value) => (settings.value.tagConfidence = value),
-      failed: settingFailed,
+      failed: settingFailed('tagConfidence'),
     })
     return confidenceSave
   }
@@ -123,7 +126,7 @@ export const useLibrary = defineStore('library', () => {
   function intendTagConfidence(value: number) {
     confidenceQueue().touch()
     settings.value.tagConfidence = value
-    settingsError.value = ''
+    settingErrors.value.tagConfidence = ''
   }
 
   function saveTagConfidence(value: number) {
@@ -641,6 +644,7 @@ export const useLibrary = defineStore('library', () => {
     sources,
     settings,
     settingsError,
+    settingErrors,
     saveVideos,
     saveAIOnBattery,
     savePauseFullScreen,

@@ -373,6 +373,30 @@ func TestOrganiseCompletionIsOfferedOnlyAfterTheOwnerHasFinished(t *testing.T) {
 	l.waitState(plan.RunID, core.OrganiseUndone)
 }
 
+func TestARunThatStopsBeforeRecordingAnEndIsLeftFailedAndCanBeResumed(t *testing.T) {
+	l := newOrganiseLibrary(t)
+	l.add("IMG_1.jpg", 10, time.Date(2024, time.August, 5, 12, 0, 0, 0, time.UTC))
+	plan, err := l.s.PlanOrganise(t.Context(), "{Year}/{Name}", 0)
+	check(t, err)
+	check(t, l.s.begin(t.Context(), plan.RunID, organiseOp{
+		started: core.OrganiseRunning,
+		allowed: func(core.OrganiseRun, map[core.OrganiseMoveState]int) bool { return true },
+		todo:    func(map[core.OrganiseMoveState]int) int { return 1 },
+		work: func(context.Context, *fileops.Runner, int64) error {
+			return errors.New("the database could not be read")
+		},
+	}))
+	l.waitState(plan.RunID, core.OrganiseFailed)
+	ev := l.progress()
+	if last := ev[len(ev)-1]; last.State != core.OrganiseFailed || last.RunID != plan.RunID {
+		t.Fatalf("last progress = %+v, want failed", last)
+	}
+	l.wantFile("IMG_1.jpg", true)
+	check(t, l.s.StartOrganise(t.Context(), plan.RunID))
+	l.waitState(plan.RunID, core.OrganiseDone)
+	l.wantFile("2024/IMG_1.jpg", true)
+}
+
 func TestScansThatFollowAnOrganiseRunFindTheLibraryAlreadyMatchingTheDisk(t *testing.T) {
 	l := newOrganiseLibrary(t)
 	ctx := t.Context()

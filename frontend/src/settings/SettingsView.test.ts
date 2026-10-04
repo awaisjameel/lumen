@@ -163,7 +163,8 @@ it.each(['videos', 'aiOnBattery', 'idleOnly'] as const)(
     await set(true)
     await set(false)
     expect(lib.settings[key]).toBe(true)
-    expect(lib.settingsError).toContain('latest toggle failed')
+    expect(lib.settingErrors[key]).toContain('latest toggle failed')
+    expect(lib.settingsError).toBe('') // a setting's failure is its own row's, not the page's
   },
 )
 

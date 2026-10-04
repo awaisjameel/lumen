@@ -238,7 +238,7 @@ useCommands([
   max-height: calc(2 * 1.3em);
   overflow: hidden;
   color: var(--ui-text-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.3;
   overflow-wrap: anywhere;
 }

@@ -361,26 +361,26 @@ async function onKey(e: KeyboardEvent) {
   const dir = arrows[e.key]
   if (dir) {
     e.preventDefault()
+    // Loading a day takes a moment: a click or Escape meanwhile wins.
+    const select = (day: string, i: number) => {
+      const next = lib.selected === sel ? lib.selAt(day, i) : undefined
+      if (next) {
+        lib.selected = next
+        scrollIntoView(next)
+      }
+    }
     if (!sel) {
       const first = lib.buckets[0]
       if (first) {
         await lib.ensureDays([first.day])
-        const s = lib.selAt(first.day, 0)
-        if (s) {
-          lib.selected = s
-          scrollIntoView(s)
-        }
+        select(first.day, 0)
       }
       return
     }
     const pos = move(layout.value, { day: sel.day, i: lib.indexOf(sel) }, dir)
     if (!pos) return
     await lib.ensureDays([pos.day])
-    const next = lib.selAt(pos.day, pos.i)
-    if (next) {
-      lib.selected = next
-      scrollIntoView(next)
-    }
+    select(pos.day, pos.i)
   } else if (e.key === 'Escape') {
     lib.selected = null
   }
@@ -646,18 +646,22 @@ const searchNotes = computed(() => {
   height: 100%;
   min-width: 0;
 }
+
 .main {
   flex: 1;
 }
+
 .note {
   margin: 0 var(--lumen-page-x) 0.5rem;
   color: var(--ui-text-dimmed);
   font-size: 0.75rem;
 }
+
 .link {
   color: var(--ui-primary);
   text-decoration: underline;
 }
+
 .zoom {
   display: flex;
   align-items: center;
@@ -665,9 +669,11 @@ const searchNotes = computed(() => {
   flex-shrink: 0;
   color: var(--ui-text-dimmed);
 }
+
 .zoom-slider {
   width: 6.5rem;
 }
+
 .zoom-pop {
   display: grid;
   gap: 0.625rem;
@@ -676,60 +682,73 @@ const searchNotes = computed(() => {
   color: var(--ui-text-muted);
   font-size: 0.8125rem;
 }
+
 .grid-wrap {
   position: absolute;
   inset: 0;
 }
+
 .scroller {
   position: absolute;
   inset: 0;
   overflow-y: auto;
   overflow-x: hidden;
   outline: none;
-  scrollbar-width: none; /* the timeline scrubber replaces the scrollbar */
+  scrollbar-width: none;
+  /* the timeline scrubber replaces the scrollbar */
 }
+
 .scroller::-webkit-scrollbar {
   display: none;
 }
+
 /* Keyboard focus is on the grid itself: show it on the selected cell. */
 .scroller:focus-visible .cell.selected {
   box-shadow: inset 0 0 0 5px var(--ui-bg);
 }
+
 .rows {
   position: relative;
   width: 100%;
 }
+
 .row {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
 }
+
 .day-header {
   display: flex;
   align-items: flex-end;
   height: 100%;
   padding-bottom: 0.625rem;
 }
+
 .day-header h2 {
   margin: 0;
   color: var(--ui-text-highlighted);
   font-size: 0.875rem;
   font-weight: 600;
 }
+
 .cells {
   display: flex;
 }
+
 .cell {
   position: relative;
   flex-shrink: 0;
   cursor: pointer;
 }
+
 .overlay {
   position: absolute;
   inset: 0;
   z-index: 1;
 }
+
 @media (forced-colors: active) {
   .scroller:focus-visible .cell.selected {
     outline: 3px solid Highlight;

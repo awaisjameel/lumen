@@ -5,6 +5,7 @@ import { mountInApp } from '../shared/testing'
 import { engine } from '../bridge'
 import type * as Bridge from '../bridge'
 import { useLibrary } from '../library/store'
+import { t } from '../shared/i18n'
 import OcrSetting from './OcrSetting.vue'
 
 enableAutoUnmount(afterEach)
@@ -57,7 +58,9 @@ it('puts the box back and says why when the newest save fails', async () => {
   await box.get('[role="switch"]').trigger('click')
   await flushPromises()
   expect(lib.settings.ocr).toBe(false)
-  expect(lib.settingsError).toContain('the models are missing')
+  expect(lib.settingErrors.ocr).toContain('the models are missing')
+  expect(box.get('[role="alert"]').text()).toContain('the models are missing')
+  expect(box.text()).not.toContain(t('settings.saved'))
 })
 
 it('keeps saves in order when Settings is closed and opened again', async () => {
