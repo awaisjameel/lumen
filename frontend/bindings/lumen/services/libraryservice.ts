@@ -112,14 +112,6 @@ export function DeleteAlbum(id: number): $CancellablePromise<void> {
 }
 
 /**
- * DeleteAllTrashFromDisk moves the files of everything in the Trash to the
- * Windows Recycle Bin.
- */
-export function DeleteAllTrashFromDisk(): $CancellablePromise<core$0.DiskDeletion> {
-    return $Call.ByID(55127656);
-}
-
-/**
  * DeleteCopies moves the files recycle of the asset assetID, the extra files
  * of exact copies, to the Windows Recycle Bin, keeping the file keep. keep and
  * every path of recycle must be current files of the asset, and recycle must
@@ -132,11 +124,13 @@ export function DeleteCopies(assetID: number, keep: string, recycle: string[] | 
 }
 
 /**
- * DeleteFromDisk moves the files of trashed assets to the Windows Recycle
- * Bin. Assets that are not in the Trash are refused.
+ * DeleteFromDisk moves the files of a confirmed TrashSelection to the Windows
+ * Recycle Bin. If any of its assets left the Trash, or their files are no
+ * longer the number confirmed, it deletes nothing and fails with
+ * ErrTrashChanged: what was trashed meanwhile is never taken unasked.
  */
-export function DeleteFromDisk(ids: number[] | null): $CancellablePromise<core$0.DiskDeletion> {
-    return $Call.ByID(1507331539, ids);
+export function DeleteFromDisk(sel: core$0.TrashSelection): $CancellablePromise<core$0.DiskDeletion> {
+    return $Call.ByID(1507331539, sel);
 }
 
 /**
@@ -198,6 +192,15 @@ export function LockBlocks(): $CancellablePromise<void> {
 }
 
 /**
+ * MigratePreferences offers the library, once, the choices an older Lumen
+ * kept in the WebView's storage, and returns the preferences afterwards. A
+ * value the library already has is never replaced.
+ */
+export function MigratePreferences(legacy: core$0.LegacyPreferences): $CancellablePromise<core$0.Preferences> {
+    return $Call.ByID(681252860, legacy);
+}
+
+/**
  * OrganiseRuns lists the runs that have started, newest first.
  */
 export function OrganiseRuns(): $CancellablePromise<core$0.OrganiseRun[] | null> {
@@ -233,6 +236,13 @@ export function Places(): $CancellablePromise<core$0.Place[] | null> {
  */
 export function PlanOrganise(template: string, sourceID: number): $CancellablePromise<core$0.OrganisePlan> {
     return $Call.ByID(2885257754, template, sourceID);
+}
+
+/**
+ * Preferences returns how the user likes the interface to look.
+ */
+export function Preferences(): $CancellablePromise<core$0.Preferences> {
+    return $Call.ByID(4276076709);
 }
 
 /**
@@ -401,6 +411,15 @@ export function SetPaused(paused: boolean): $CancellablePromise<void> {
 }
 
 /**
+ * SetPreferences stores the interface preferences, held to what the UI can
+ * apply, and returns them as stored. They change nothing on disk and start
+ * no indexing.
+ */
+export function SetPreferences(p: core$0.Preferences): $CancellablePromise<core$0.Preferences> {
+    return $Call.ByID(1109237639, p);
+}
+
+/**
  * SetTagConfidence sets how sure the AI must be for a tag to apply. Stored
  * scores cover the whole range, so this takes effect at once.
  */
@@ -512,13 +531,13 @@ export function TrashCovered(ids: number[] | null): $CancellablePromise<void> {
 }
 
 /**
- * TrashFileCount is how many files the trashed assets ids have on disk (an
- * asset with exact copies has several), or, with no ids, how many everything
- * in the Trash has: what Delete from disk will move to the Recycle Bin. Ids
- * that are not in the Trash are refused.
+ * TrashSelection is what Delete from disk would take for the trashed assets
+ * ids, or, with no ids, for everything in the Trash: the assets and how many
+ * files they have (an asset with exact copies has several), for the user to
+ * confirm. Ids that are not in the Trash are refused.
  */
-export function TrashFileCount(ids: number[] | null): $CancellablePromise<number> {
-    return $Call.ByID(4027191930, ids);
+export function TrashSelection(ids: number[] | null): $CancellablePromise<core$0.TrashSelection> {
+    return $Call.ByID(1385162189, ids);
 }
 
 /**

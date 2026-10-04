@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { Device, engine, Filter, onLibraryChanged, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event, Progress } from '../bridge'
+import { mountInApp } from '../shared/testing'
 import LibraryView from './LibraryView.vue'
 import { useLibrary } from './store'
 
@@ -77,9 +78,7 @@ async function mountedTimeline() {
     routes: [{ path: '/events/:id', name: 'event', component: LibraryView }],
   })
   await router.push('/events/1')
-  const wrapper = mount(LibraryView, {
-    global: { plugins: [createPinia(), router], stubs: { SearchBox: true } },
-  })
+  const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
   await flushPromises()
   return { wrapper, router }
 }
@@ -128,9 +127,7 @@ it('shows the empty Trash with its own message and no toolbar', async () => {
     routes: [{ path: '/trash', name: 'trash', component: LibraryView, meta: { filter: Filter.FilterTrash } }],
   })
   await router.push('/trash')
-  const wrapper = mount(LibraryView, {
-    global: { plugins: [createPinia(), router], stubs: { SearchBox: true } },
-  })
+  const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
   await flushPromises()
   expect(wrapper.get('h1').text()).toBe('Trash')
   expect(wrapper.text()).toContain('The Trash is empty')
@@ -142,6 +139,43 @@ it('shows the empty Trash with its own message and no toolbar', async () => {
   wrapper.unmount()
 })
 
+it('leaves grid shortcuts to an open overlay and ignores composing key events', async () => {
+  vi.mocked(engine.event).mockResolvedValue(event(1, 'Event'))
+  const { wrapper } = await mountedTimeline()
+  const lib = useLibrary()
+  const grid = wrapper.get('[role="listbox"]')
+  const dialog = document.createElement('div')
+  dialog.setAttribute('role', 'dialog')
+  dialog.dataset.state = 'open'
+  document.body.append(dialog)
+  await grid.trigger('keydown', { key: 'i' })
+  expect(lib.showDetails).toBe(false)
+  lib.selected = { day: '2026-01-01', id: 1 }
+  await grid.trigger('keydown', { key: 'Escape' })
+  expect(lib.selected).toEqual({ day: '2026-01-01', id: 1 })
+  dialog.remove()
+  await grid.trigger('keydown', { key: 'Escape', isComposing: true })
+  expect(lib.selected).toEqual({ day: '2026-01-01', id: 1 })
+  await grid.trigger('keydown', { key: 'Escape' })
+  expect(lib.selected).toBeNull()
+  wrapper.unmount()
+})
+
+it('says when days could not be loaded and offers to try again', async () => {
+  vi.mocked(engine.event).mockResolvedValue(event(1, 'Event'))
+  const { wrapper } = await mountedTimeline()
+  const lib = useLibrary()
+  const retry = vi.spyOn(lib, 'retryDays')
+  lib.daysError = 'Something went wrong: disk busy'
+  await flushPromises()
+  const alert = wrapper.get('[role="alert"]')
+  expect(alert.text()).toContain('Some photos couldn’t be loaded.')
+  expect(alert.text()).toContain('disk busy')
+  await alert.get('button').trigger('click')
+  expect(retry).toHaveBeenCalledOnce()
+  wrapper.unmount()
+})
+
 it('says it is looking while the first scan runs, and that nothing was found once it ends', async () => {
   const router = createRouter({
     history: createMemoryHistory(),
@@ -149,7 +183,7 @@ it('says it is looking while the first scan runs, and that nothing was found onc
   })
   await router.push('/')
   const pinia = createPinia()
-  const wrapper = mount(LibraryView, { global: { plugins: [pinia, router], stubs: { SearchBox: true } } })
+  const wrapper = mountInApp(LibraryView, { plugins: [pinia, router], stubs: { SearchBox: true } })
   await flushPromises()
   const lib = useLibrary(pinia)
   lib.progress = { ...progressIdle, scanning: true }

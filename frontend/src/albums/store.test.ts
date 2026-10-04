@@ -12,7 +12,7 @@ vi.mock('../bridge', async (importOriginal) => ({
 
 it('refreshes album membership counts after an overlapping read', async () => {
   setActivePinia(createPinia())
-  let finish!: (value: Album[]) => void
+  let finish: ((value: Album[]) => void) | undefined
   const album: Album = {
     id: 1,
     name: 'Trip',
@@ -28,6 +28,7 @@ it('refreshes album membership counts after an overlapping read', async () => {
   const albums = useAlbums()
   const initial = albums.load()
   const afterEdit = albums.load()
+  if (!finish) throw new Error('The first album read did not start')
   finish([album])
   await Promise.all([initial, afterEdit])
   expect(albums.byId.get(1)?.count).toBe(2)

@@ -1,17 +1,25 @@
 <script setup lang="ts">
+import UBadge from '@nuxt/ui/components/Badge.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UInput from '@nuxt/ui/components/Input.vue'
+import { icons } from '../design/icons'
+import CardGrid from '../shared/CardGrid.vue'
+import CollectionCard from '../shared/CollectionCard.vue'
+import { useItemCommands, useCommands } from '../shared/commands'
+import FeatureState from '../shared/FeatureState.vue'
+import Page from '../shared/Page.vue'
+import PageHeader from '../shared/PageHeader.vue'
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { BlockKind, engine, MAX_NAME_LEN } from '../bridge'
-import type { Event } from '../bridge'
+import { BlockKind, engine, MAX_NAME_LEN, thumbUrl } from '../bridge'
+import type { Event as LibraryEvent } from '../bridge'
 import { block, onBlocksChanged } from '../shared/block'
-import { errorText } from '../shared/errors'
+import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
 import { useList } from '../shared/listStore'
 import { useRename } from '../shared/rename'
 import { nameTooLong } from '../shared/names'
-import EmptyState from '../shared/EmptyState.vue'
-import GroupCard from '../shared/GroupCard.vue'
-import Icon from '../shared/Icon.vue'
 import SearchBox from '../search/SearchBox.vue'
 
 const { list, loaded, error, load, invalidate } = useList(engine.events)
@@ -28,7 +36,7 @@ watch(list, (events) => {
   if (editing.value !== null && !events.some((event) => event.id === editing.value)) void rename.close(false)
 })
 
-async function togglePin(event: Event) {
+async function togglePin(event: LibraryEvent) {
   if (busy.value) return
   busy.value = true
   actionError.value = ''
@@ -42,11 +50,11 @@ async function togglePin(event: Event) {
   }
 }
 
-function blockEvent(event: Event) {
+function blockEvent(event: LibraryEvent) {
   void block(BlockKind.BlockEvent, event.id, event.name)
 }
 
-function edit(event: Event) {
+function edit(event: LibraryEvent) {
   if (!busy.value) void rename.open(event.id, event.name)
 }
 
@@ -64,124 +72,164 @@ async function save(id: number, value: string) {
     busy.value = false
   }
 }
+const eventItems = useItemCommands(
+  list,
+  (event) => event.id,
+  (event) => [
+    {
+      id: `event.${event.id}.rename`,
+      group: 'view',
+      title: () => t('events.rename', { name: event.name }),
+      icon: 'pencil',
+      enabled: () => !busy.value,
+      run: () => edit(event),
+    },
+    {
+      id: `event.${event.id}.pin`,
+      group: 'view',
+      title: () => t(event.pinned ? 'events.unpinNamed' : 'events.pinNamed', { name: event.name }),
+      icon: 'pin',
+      enabled: () => !busy.value,
+      run: () => togglePin(event),
+    },
+    {
+      id: `event.${event.id}.block`,
+      group: 'view',
+      title: () => t('blocked.confirmTitle', { name: event.name }),
+      icon: 'eye-off',
+      enabled: () => !busy.value,
+      run: () => blockEvent(event),
+    },
+  ],
+)
+function keepEditorFocus(e: Event) {
+  if (editing.value !== null) e.preventDefault()
+}
+useCommands([
+  {
+    id: 'events.refresh',
+    group: 'view',
+    title: () => t('events.refresh'),
+    icon: 'refresh',
+    enabled: () => !busy.value,
+    run: () => load().catch(logError),
+  },
+  {
+    id: 'events.save',
+    group: 'view',
+    title: () => t('events.save'),
+    icon: 'save',
+    available: () => editing.value !== null,
+    enabled: () => !busy.value && !nameTooLong(draft.value),
+    run: () => {
+      if (editing.value !== null) return save(editing.value, draft.value)
+    },
+  },
+  {
+    id: 'events.reset',
+    group: 'view',
+    title: () => t('events.reset'),
+    icon: 'reset',
+    available: () => editing.value !== null,
+    enabled: () => !busy.value,
+    run: () => {
+      if (editing.value !== null) return save(editing.value, '')
+    },
+  },
+])
+// Nuxt UI exposes the native input; rename keeps its focus and selection behaviour.
+function fieldRef(el: unknown) {
+  rename.fieldRef(
+    el && typeof el === 'object' && 'inputRef' in el && el.inputRef instanceof HTMLInputElement ? el.inputRef : null,
+  )
+}
+function triggerRef(el: unknown, key: number) {
+  rename.triggerRef(key)(el && typeof el === 'object' && '$el' in el && el.$el instanceof HTMLElement ? el.$el : null)
+}
 </script>
 
 <template>
-  <div class="page">
-    <header class="topbar">
-      <h1>{{ t('nav.events') }}</h1>
-      <SearchBox />
-      <div class="spacer" />
-    </header>
-    <div class="page-body">
-      <p class="muted intro">{{ t('events.intro') }}</p>
-      <p v-if="actionError || error" class="page-error" role="alert">{{ actionError || error }}</p>
-      <div v-if="list.length" class="group-cards">
-        <GroupCard
-          v-for="event in list"
-          :id="event.id"
-          :key="event.id"
-          route="event"
-          :title="event.name"
-          :count="event.count"
-          :cover="event.cover"
-          :cover-thumb="event.coverThumb"
-          icon="calendar"
-        >
-          <form
-            v-if="editing === event.id"
-            class="rename"
-            @submit.prevent="save(event.id, draft)"
-            @keydown.esc.stop="rename.close()"
-          >
-            <input
-              :ref="rename.fieldRef"
-              v-model="draft"
-              class="field"
-              :aria-label="t('events.name')"
-              :aria-invalid="nameTooLong(draft) || undefined"
-              required
-            />
-            <p v-if="nameTooLong(draft)" class="page-error" role="alert">
-              {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
-            </p>
-            <button class="btn" type="submit" :disabled="busy || nameTooLong(draft)">{{ t('events.save') }}</button>
-            <button class="btn btn-subtle" type="button" :disabled="busy" @click="rename.close()">
-              {{ t('common.cancel') }}
-            </button>
-            <button class="btn btn-subtle" type="button" :disabled="busy" @click="save(event.id, '')">
-              {{ t('events.reset') }}
-            </button>
-          </form>
-          <button
-            v-if="editing !== event.id"
-            :ref="rename.triggerRef(event.id)"
-            class="icon-btn"
-            :disabled="busy"
-            :aria-label="t('events.rename', { name: event.name })"
-            @click="edit(event)"
-          >
-            <Icon name="pencil" :size="16" />
-          </button>
-          <span
-            v-if="event.pinned && editing !== event.id"
-            class="pin-badge"
-            role="img"
+  <Page>
+    <template #header
+      ><PageHeader :title="t('nav.events')"><SearchBox /></PageHeader
+    ></template>
+    <p class="mb-2 text-muted">{{ t('events.intro') }}</p>
+    <p class="mb-4 text-sm text-dimmed">{{ t('events.regrouping') }}</p>
+    <FeatureState v-if="actionError || error" kind="error" :title="actionError || error" />
+    <FeatureState v-else-if="!loaded" kind="loading" :title="t('events.loading')" />
+    <CardGrid v-if="list.length" layout="row">
+      <CollectionCard
+        v-for="event in list"
+        :key="event.id"
+        :to="{ name: 'event', params: { id: event.id } }"
+        :title="event.name"
+        :count="t('status.items', { n: event.count })"
+        :cover="event.cover && event.coverThumb ? thumbUrl(event.cover, event.coverThumb) : undefined"
+        icon="events"
+        layout="row"
+      >
+        <template #badge
+          ><UBadge
+            v-if="event.pinned"
+            data-pinned
+            :icon="icons.pin"
+            variant="subtle"
             :aria-label="t('events.pinned')"
-          >
-            <Icon name="pin" :size="16" />
-          </span>
-          <button
-            v-if="editing !== event.id"
-            class="icon-btn"
+            >{{ t('events.pinned') }}</UBadge
+          ></template
+        >
+        <form
+          v-if="editing === event.id"
+          class="rename"
+          @submit.prevent="save(event.id, draft)"
+          @keydown.esc.stop="rename.close()"
+        >
+          <UInput
+            :ref="fieldRef"
+            v-model="draft"
+            class="w-full"
+            :aria-label="t('events.name')"
+            :aria-invalid="nameTooLong(draft) || undefined"
+            required
+          />
+          <p v-if="nameTooLong(draft)" class="text-xs text-error" role="alert">
+            {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
+          </p>
+          <UButton type="submit" :loading="busy" :disabled="busy || nameTooLong(draft)">{{ t('events.save') }}</UButton>
+          <UButton type="button" variant="ghost" :disabled="busy" @click="rename.close()">{{
+            t('common.cancel')
+          }}</UButton>
+          <UButton type="button" data-action="reset" variant="ghost" :disabled="busy" @click="save(event.id, '')">{{
+            t('events.reset')
+          }}</UButton>
+        </form>
+        <UDropdownMenu v-else :items="eventItems(event.id)" :content="{ onCloseAutoFocus: keepEditorFocus }">
+          <UButton
+            :ref="(el) => triggerRef(el, event.id)"
+            :icon="icons.more"
+            :aria-label="t('events.actions', { name: event.name })"
             :disabled="busy"
-            :title="event.pinned ? t('events.unpin') : t('events.pin')"
-            :aria-label="
-              event.pinned ? t('events.unpinNamed', { name: event.name }) : t('events.pinNamed', { name: event.name })
-            "
-            :aria-pressed="event.pinned"
-            @click="togglePin(event)"
-          >
-            <Icon name="pin" :size="16" />
-          </button>
-          <button
-            v-if="editing !== event.id"
-            class="icon-btn"
-            :disabled="busy"
-            :title="t('blocked.block')"
-            :aria-label="t('blocked.confirmTitle', { name: event.name })"
-            @click="blockEvent(event)"
-          >
-            <Icon name="eye-off" :size="16" />
-          </button>
-        </GroupCard>
-      </div>
-      <EmptyState
-        v-else-if="loaded && !error"
-        icon="calendar"
-        :title="t('events.empty')"
-        :text="t('events.emptyHint')"
-      />
-    </div>
-  </div>
+            square
+          />
+        </UDropdownMenu>
+      </CollectionCard>
+    </CardGrid>
+    <FeatureState
+      v-else-if="loaded && !error"
+      kind="empty"
+      icon="events"
+      :title="t('events.empty')"
+      :text="t('events.emptyHint')"
+    />
+  </Page>
 </template>
 
 <style scoped>
-.pin-badge {
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-}
-
 .rename {
   display: flex;
   flex: 0 0 100%;
   flex-wrap: wrap;
-  gap: 4px;
-}
-
-.rename input {
+  gap: 0.25rem;
   min-width: 0;
-  width: 100%;
 }
 </style>

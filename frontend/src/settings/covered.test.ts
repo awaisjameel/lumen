@@ -1,9 +1,11 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { BlockKind, BlockMode, engine, ErrorCode } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Block, CoveredItem } from '../bridge'
 import { confirm } from '../shared/confirm'
-import { notice } from '../shared/errors'
+import { ERROR_NOTIFICATION } from '../shared/errors'
+import { recordNotifications } from '../shared/testing'
+import type { RecordedNotifications } from '../shared/testing'
 import { t } from '../shared/i18n'
 import { useCoveredPhotos } from './covered'
 
@@ -25,6 +27,10 @@ const block = (id: number): Block => ({
 const item = (id: number): CoveredItem => ({ id, w: 4, h: 3, t: 1, hiddenBy: [] })
 const locked = () => new Error('locked', { cause: { code: ErrorCode.BlocksLocked } })
 
+let notifications: RecordedNotifications
+
+afterEach(() => notifications.stop())
+
 const hooks = { used: vi.fn(), failed: vi.fn() }
 
 beforeEach(() => {
@@ -35,7 +41,7 @@ beforeEach(() => {
     .mockResolvedValue([item(1), item(2), item(3)])
   vi.mocked(engine.trashCovered).mockReset().mockResolvedValue(undefined)
   vi.mocked(confirm).mockReset().mockResolvedValue(true)
-  notice.value = ''
+  notifications = recordNotifications()
 })
 
 async function opened() {
@@ -58,7 +64,9 @@ it('loads the photos of the block it is opened on, and counts that as a use', as
 })
 
 it('drops the answer for a block that was left before it arrived', async () => {
-  let finish!: (items: CoveredItem[]) => void
+  let finish: (items: CoveredItem[]) => void = () => {
+    throw new Error('the load has no resolver')
+  }
   vi.mocked(engine.blockedItems).mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
   const covered = useCoveredPhotos(hooks)
   const loading = covered.open(block(5))
@@ -151,7 +159,7 @@ it('keeps everything and says why when the Trash refuses', async () => {
   covered.view(2)
   vi.mocked(engine.trashCovered).mockRejectedValue(new Error('disk on fire'))
   covered.source.actions.moveToTrash?.()
-  await vi.waitFor(() => expect(notice.value).toContain('disk on fire'))
+  await vi.waitFor(() => expect(notifications.find(ERROR_NOTIFICATION)?.title).toContain('disk on fire'))
   expect(covered.items).toHaveLength(3)
   expect(covered.viewing).toBe(2)
   expect(hooks.failed).not.toHaveBeenCalled()
@@ -164,14 +172,16 @@ it('leaves it to the screen to relock when the Trash says the screen is locked',
   vi.mocked(engine.trashCovered).mockRejectedValue(failure)
   covered.source.actions.moveToTrash?.()
   await vi.waitFor(() => expect(hooks.failed).toHaveBeenCalledExactlyOnceWith(failure))
-  expect(notice.value).toBe('')
+  expect(notifications.find(ERROR_NOTIFICATION)?.title).toBeUndefined()
 })
 
 it('does not bring photos back when the browser was closed while the Trash was working', async () => {
   const covered = await opened()
   covered.view(2)
   hooks.used.mockClear()
-  let finish!: () => void
+  let finish: () => void = () => {
+    throw new Error('the move has no resolver')
+  }
   vi.mocked(engine.trashCovered).mockReturnValue(new Promise<void>((resolve) => (finish = resolve)))
   covered.source.actions.moveToTrash?.()
   covered.close()
@@ -199,7 +209,9 @@ it('asks first, saying the Trash is open to anyone, and moves nothing if the use
 it('moves nothing when the screen locks while the question is open', async () => {
   const covered = await opened()
   covered.view(2)
-  let answer!: (yes: boolean) => void
+  let answer: (yes: boolean) => void = () => {
+    throw new Error('the question has no resolver')
+  }
   vi.mocked(confirm).mockReturnValue(new Promise<boolean>((resolve) => (answer = resolve)))
   covered.source.actions.moveToTrash?.()
   covered.close()
@@ -228,7 +240,9 @@ it('tells the screen the photos are in use at most once every few seconds', asyn
 it('moves nothing when the browser was opened again while the question was open', async () => {
   const covered = await opened()
   covered.view(2)
-  let answer!: (yes: boolean) => void
+  let answer: (yes: boolean) => void = () => {
+    throw new Error('the question has no resolver')
+  }
   vi.mocked(confirm).mockReturnValue(new Promise<boolean>((resolve) => (answer = resolve)))
   covered.source.actions.moveToTrash?.()
   await covered.open(block(6)) // the same photos are listed again, for another block
@@ -239,4 +253,49 @@ it('moves nothing when the browser was opened again while the question was open'
   await Promise.resolve()
   expect(engine.trashCovered).not.toHaveBeenCalled()
   expect(covered.items).toHaveLength(3)
+})
+
+it('moves selected media only after the privacy warning and clears the successful selection', async () => {
+  const covered = await opened()
+  covered.select(1, true)
+  covered.select(3, true)
+  covered.select(9, true)
+  await covered.trashSelection()
+  expect(confirm).toHaveBeenCalledExactlyOnceWith(t('covered.trashTitle'), t('covered.trashText'), t('trash.move'))
+  expect(engine.trashCovered).toHaveBeenCalledExactlyOnceWith([1, 3])
+  expect(covered.items.map((item) => item.id)).toEqual([2])
+  expect(covered.selected.size).toBe(0)
+  expect(covered.trashing).toBe(false)
+})
+
+it('preserves the selection when moving selected media fails', async () => {
+  const covered = await opened()
+  covered.select(2, true)
+  vi.mocked(engine.trashCovered).mockRejectedValue(new Error('disk on fire'))
+  await covered.trashSelection()
+  expect([...covered.selected]).toEqual([2])
+  expect(covered.items).toHaveLength(3)
+  expect(notifications.find(ERROR_NOTIFICATION)?.title).toContain('disk on fire')
+  expect(covered.trashing).toBe(false)
+})
+
+it('forgets the selection and rejects a delayed bulk confirmation after locking', async () => {
+  const covered = await opened()
+  covered.select(1, true)
+  let answer: (yes: boolean) => void = () => {
+    throw new Error('the question has no resolver')
+  }
+  vi.mocked(confirm).mockReturnValue(
+    new Promise((resolve) => {
+      answer = resolve
+    }),
+  )
+  const moving = covered.trashSelection()
+  covered.close()
+  answer(true)
+  await moving
+  expect(engine.trashCovered).not.toHaveBeenCalled()
+  expect(covered.selected.size).toBe(0)
+  expect(covered.items).toEqual([])
+  expect(covered.trashing).toBe(false)
 })

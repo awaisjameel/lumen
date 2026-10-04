@@ -20,11 +20,6 @@ import type { LatestSave } from '../shared/latestSave'
 import { deleteFromDisk } from '../trash/actions'
 import { showTrashUndo } from '../trash/undo'
 
-const ZOOM_KEY = 'lumen.zoom'
-export const ZOOM_MIN = 96
-export const ZOOM_MAX = 320
-const ZOOM_DEFAULT = 168
-
 /** The single group search results live in (they have no days). */
 export const RESULTS = 'results'
 
@@ -52,16 +47,6 @@ export interface Sel {
 /** What a search found beyond its items. */
 type SearchInfo = Omit<SearchResults, 'items'>
 
-function loadZoom(): number {
-  try {
-    const v = Number(localStorage.getItem(ZOOM_KEY))
-    if (v >= ZOOM_MIN && v <= ZOOM_MAX) return v
-  } catch {
-    /* default below */
-  }
-  return ZOOM_DEFAULT
-}
-
 /**
  * Library state: the groups (days, or one group of search results) for the
  * current scope, a cache of loaded items, selection, and indexing progress.
@@ -88,9 +73,12 @@ export const useLibrary = defineStore('library', () => {
     pauseBusy: true,
     idleOnly: false,
   })
+  /** Why a page action in Settings failed (adding a folder, exporting sidecars). */
   const settingsError = ref('')
+  /** Why the newest save of a setting failed, by setting; cleared by its next change. */
+  const settingErrors = ref<Partial<Record<keyof Settings, string>>>({})
   let confidenceSave: LatestSave<number> | null = null
-  const settingFailed = (e: unknown) => (settingsError.value = errorText(e))
+  const settingFailed = (key: keyof Settings) => (e: unknown) => (settingErrors.value[key] = errorText(e))
 
   /**
    * A save for one setting: it shows the new value at once, saves the newest
@@ -107,10 +95,10 @@ export const useLibrary = defineStore('library', () => {
       queue ??= latestSave(save, settings.value[key], {
         saved,
         rollback: (last) => (settings.value[key] = last),
-        failed: settingFailed,
+        failed: settingFailed(key),
       })
       settings.value[key] = value
-      settingsError.value = ''
+      settingErrors.value[key] = ''
       return queue(value)
     }
   }
@@ -130,7 +118,7 @@ export const useLibrary = defineStore('library', () => {
     confidenceSave ??= latestSave(engine.setTagConfidence, settings.value.tagConfidence, {
       saved: () => refresh(),
       rollback: (value) => (settings.value.tagConfidence = value),
-      failed: settingFailed,
+      failed: settingFailed('tagConfidence'),
     })
     return confidenceSave
   }
@@ -138,7 +126,7 @@ export const useLibrary = defineStore('library', () => {
   function intendTagConfidence(value: number) {
     confidenceQueue().touch()
     settings.value.tagConfidence = value
-    settingsError.value = ''
+    settingErrors.value.tagConfidence = ''
   }
 
   function saveTagConfidence(value: number) {
@@ -150,6 +138,8 @@ export const useLibrary = defineStore('library', () => {
   const buckets = shallowRef<DayBucket[]>([]) // replaced whole: thousands of days
   const timelineLoaded = ref(false)
   const loadError = ref('')
+  /** Why the newest load of days failed: their cells wait until retryDays, a scroll or a library change. */
+  const daysError = ref('')
   const searchInfo = ref<SearchInfo | null>(null)
 
   // day -> items. A shallowRef keeps big maps cheap; notifyDays tells
@@ -173,16 +163,15 @@ export const useLibrary = defineStore('library', () => {
   // loads again, the days' when they go stale (dayRevision).
   let loadAbort = new AbortController()
   let daysAbort = new AbortController()
-  let visibilityAbort = new AbortController()
-  let visibilityRequest = 0
-  let visibilityRevision = 0
+  let resultsAbort = new AbortController()
+  let resultsRequest = 0
+  let resultsRevision = 0 // search hits may have changed (hidden, or a new thumbnail)
   let shown = 0 // grids showing the scope (see attach)
   let stale = false // the library changed while no grid showed it
 
   const selected = ref<Sel | null>(null)
   const viewer = ref<Sel | null>(null)
   const showDetails = ref(false)
-  const zoom = ref(loadZoom())
 
   const total = computed(() => buckets.value.reduce((n, b) => n + b.count, 0))
   const selectedItem = computed(() => itemAt(selected.value))
@@ -252,10 +241,10 @@ export const useLibrary = defineStore('library', () => {
     stopChanges?.()
     generation++
     loadRequest++
-    visibilityRequest++
+    resultsRequest++
     loadAbort.abort()
     daysAbort.abort()
-    visibilityAbort.abort()
+    resultsAbort.abort()
   })
 
   /** Load the current scope's groups (and, for a search, its results). */
@@ -263,9 +252,9 @@ export const useLibrary = defineStore('library', () => {
     const s = scope.value
     const current = generation
     const request = ++loadRequest
-    let visibility = visibilityRevision
-    visibilityAbort.abort()
-    visibilityRequest++
+    let revision = resultsRevision
+    resultsAbort.abort()
+    resultsRequest++
     loadAbort.abort()
     loadAbort = new AbortController()
     const { signal } = loadAbort
@@ -276,16 +265,16 @@ export const useLibrary = defineStore('library', () => {
         const r = await engine.search(s.query, signal)
         if (current !== generation || request !== loadRequest) return
         let items = r.items
-        // A pre-change answer must pass visibility before any of its hits
-        // reach the grid. Repeat if another change arrived during the check.
-        while (visibility !== visibilityRevision) {
-          visibility = visibilityRevision
-          items = await visibleItems(items, signal)
+        // A pre-change answer must be read again before any of its hits
+        // reach the grid. Repeat if another change arrived during the read.
+        while (revision !== resultsRevision) {
+          revision = resultsRevision
+          items = await currentHits(items, signal)
           if (current !== generation || request !== loadRequest) return
         }
-        // A prune of the previous results must not replace these verified hits.
-        visibilityAbort.abort()
-        visibilityRequest++
+        // A refresh of the previous results must not replace these hits.
+        resultsAbort.abort()
+        resultsRequest++
         searchInfo.value = {
           pending: r.pending,
           complete: r.complete,
@@ -318,58 +307,63 @@ export const useLibrary = defineStore('library', () => {
     dayRevision++
     daysAbort.abort()
     daysAbort = new AbortController()
+    daysError.value = '' // the grid asks for its days again
   }
 
-  async function visibleItems(items: GridItem[], signal: AbortSignal): Promise<GridItem[]> {
-    const visible = new Set(
-      await engine.visibleAssets(
-        items.map((item) => item.id),
-        signal,
-      ),
+  /** Search hits as they are now (see engine.searchHits), each keeping the moment it was found at. */
+  async function currentHits(items: GridItem[], signal: AbortSignal): Promise<GridItem[]> {
+    const moments = new Map(items.map((item) => [item.id, item.at]))
+    const hits = await engine.searchHits(
+      items.map((item) => item.id),
+      signal,
     )
-    return items.filter((item) => visible.has(item.id))
+    return hits.map((item) => {
+      const at = moments.get(item.id)
+      return at ? { ...item, at } : item
+    })
   }
 
-  async function pruneSearch() {
+  async function refreshResults() {
     const current = generation
     const load = loadRequest
-    const request = ++visibilityRequest
-    visibilityAbort.abort()
-    visibilityAbort = new AbortController()
+    const request = ++resultsRequest
+    resultsAbort.abort()
+    resultsAbort = new AbortController()
     const items = days.value.get(RESULTS) ?? []
     try {
-      const kept = await visibleItems(items, visibilityAbort.signal)
-      if (current !== generation || load !== loadRequest || request !== visibilityRequest) return
+      const kept = await currentHits(items, resultsAbort.signal)
+      if (current !== generation || load !== loadRequest || request !== resultsRequest) return
       buckets.value = kept.length ? [{ day: RESULTS, count: kept.length }] : []
       days.value = new Map(kept.length ? [[RESULTS, kept]] : [])
       if (selected.value && !itemAt(selected.value)) selected.value = movedOn(selected.value)
       if (viewer.value && !itemAt(viewer.value)) viewer.value = movedOn(viewer.value)
       stale = false
     } catch (e) {
-      if (current !== generation || request !== visibilityRequest || isCancelled(e)) return
+      if (current !== generation || request !== resultsRequest || isCancelled(e)) return
       throw e
     }
   }
 
   /**
    * Reload after the engine reports changes (all, if c is not given): counts,
-   * then visible days on demand. Search results only lose hidden hits;
-   * searching again picks up new photos without reshuffling a live search.
+   * then visible days on demand. Search results are read again in place: they
+   * lose hidden hits and show new thumbnails; searching again picks up new
+   * photos without reshuffling a live search.
    */
   let refreshing: Promise<void> | null = null
   let refreshRevision = 0
   async function refresh(c?: Changes) {
     const s = scope.value
     if (s.kind === 'search') {
-      if (c && !c.assets) return
-      visibilityRevision++
+      if (c && !c.assets && !c.thumbs) return
+      resultsRevision++
       if (!shown) {
-        visibilityAbort.abort()
-        visibilityRequest++
+        resultsAbort.abort()
+        resultsRequest++
         stale = true
         return
       }
-      return pruneSearch()
+      return refreshResults()
     }
     if (c && !affects(s.view, c) && !c.thumbs) return
     if (!shown) {
@@ -430,7 +424,7 @@ export const useLibrary = defineStore('library', () => {
   /**
    * Make sure the given days are loaded (one request for the whole span),
    * waiting for any already on their way. Never throws: a failed load is
-   * logged and retried when next needed.
+   * logged and said in daysError.
    */
   async function ensureDays(want: string[]) {
     const s = scope.value
@@ -471,6 +465,7 @@ export const useLibrary = defineStore('library', () => {
         fresh.add(d)
       }
       days.value = next
+      daysError.value = ''
       // A filter edit or source removal can remove the selected item while
       // leaving its day in place. Do not leave a panel with inactive actions.
       if (selected.value && missing.includes(selected.value.day) && !itemAt(selected.value))
@@ -478,8 +473,16 @@ export const useLibrary = defineStore('library', () => {
       if (viewer.value && missing.includes(viewer.value.day) && !itemAt(viewer.value))
         viewer.value = movedOn(viewer.value)
     } catch (e) {
-      if (!isCancelled(e)) logError(e)
+      if (isCancelled(e)) return
+      logError(e)
+      if (current === generation && revision === dayRevision) daysError.value = errorText(e)
     }
+  }
+
+  /** Ask again for the days the grid shows, after a load of them failed. */
+  function retryDays() {
+    daysError.value = ''
+    notifyDays()
   }
 
   /**
@@ -531,15 +534,6 @@ export const useLibrary = defineStore('library', () => {
   function detach() {
     shown = Math.max(0, shown - 1)
     if (!shown) viewer.value = null
-  }
-
-  function setZoom(v: number) {
-    zoom.value = v
-    try {
-      localStorage.setItem(ZOOM_KEY, String(v))
-    } catch {
-      /* not critical */
-    }
   }
 
   /**
@@ -637,7 +631,7 @@ export const useLibrary = defineStore('library', () => {
 
   /** Move an asset to the Trash, which offers to undo it. */
   async function moveToTrash(p: Sel) {
-    if (await removeFromView(p, () => engine.trashAssets([p.id]))) showTrashUndo([p.id])
+    if (await removeFromView(p, () => engine.trashAssets([p.id]))) showTrashUndo([p.id], restoreAssets)
   }
 
   /** Take the trashed asset at p out of the Trash. */
@@ -666,6 +660,7 @@ export const useLibrary = defineStore('library', () => {
     sources,
     settings,
     settingsError,
+    settingErrors,
     saveVideos,
     saveAIOnBattery,
     savePauseFullScreen,
@@ -683,12 +678,12 @@ export const useLibrary = defineStore('library', () => {
     buckets,
     timelineLoaded,
     loadError,
+    daysError,
     searchInfo,
     days,
     selected,
     viewer,
     showDetails,
-    zoom,
     total,
     selectedItem,
     viewerItem,
@@ -703,11 +698,11 @@ export const useLibrary = defineStore('library', () => {
     refreshVisibility,
     needsDays,
     ensureDays,
+    retryDays,
     neighbour,
     setScope,
     attach,
     detach,
-    setZoom,
     toggleFavourite,
     setPaused,
     sourcesChanged,

@@ -1,0 +1,131 @@
+// The icon manifest: every icon the UI shows, by the name Lumen calls it.
+// The build bundles exactly these from the local Lucide collection
+// (nuxt-ui.config.ts), so an icon chosen at run time (a command, a
+// navigation entry, a status) is always in the bundle, and none is ever
+// fetched: the icon API is switched off in main.ts. Nuxt UI's own icons
+// (close, chevrons, the loading spinner) are bundled by its plugin.
+export const icons = {
+  // Navigation and modules
+  photos: 'i-lucide-images',
+  people: 'i-lucide-users',
+  things: 'i-lucide-shapes',
+  places: 'i-lucide-map-pin',
+  events: 'i-lucide-calendar-days',
+  albums: 'i-lucide-book-image',
+  duplicates: 'i-lucide-copy',
+  heart: 'i-lucide-heart',
+  trash: 'i-lucide-trash-2',
+  video: 'i-lucide-video',
+  settings: 'i-lucide-settings',
+  blocked: 'i-lucide-shield',
+  organise: 'i-lucide-folder-tree',
+
+  // Shell
+  menu: 'i-lucide-menu',
+  'sidebar-collapse': 'i-lucide-panel-left-close',
+  'sidebar-expand': 'i-lucide-panel-left-open',
+  inspector: 'i-lucide-panel-right',
+  command: 'i-lucide-command',
+  keyboard: 'i-lucide-keyboard',
+  more: 'i-lucide-ellipsis',
+  'more-vertical': 'i-lucide-ellipsis-vertical',
+
+  // Actions
+  close: 'i-lucide-x',
+  check: 'i-lucide-check',
+  plus: 'i-lucide-plus',
+  minus: 'i-lucide-minus',
+  pencil: 'i-lucide-pencil',
+  copy: 'i-lucide-copy',
+  search: 'i-lucide-search',
+  filter: 'i-lucide-list-filter',
+  refresh: 'i-lucide-refresh-cw',
+  undo: 'i-lucide-undo-2',
+  reset: 'i-lucide-rotate-ccw',
+  restore: 'i-lucide-archive-restore',
+  recycle: 'i-lucide-recycle',
+  save: 'i-lucide-save',
+  download: 'i-lucide-download',
+  external: 'i-lucide-external-link',
+  merge: 'i-lucide-merge',
+  pin: 'i-lucide-pin',
+  'pin-off': 'i-lucide-pin-off',
+  ban: 'i-lucide-ban',
+  eye: 'i-lucide-eye',
+  'eye-off': 'i-lucide-eye-off',
+  lock: 'i-lucide-lock',
+  unlock: 'i-lucide-lock-open',
+  key: 'i-lucide-key-round',
+  play: 'i-lucide-play',
+  pause: 'i-lucide-pause',
+  rewind: 'i-lucide-rewind',
+  'fast-forward': 'i-lucide-fast-forward',
+  volume: 'i-lucide-volume-2',
+  'volume-off': 'i-lucide-volume-x',
+  maximize: 'i-lucide-maximize',
+  minimize: 'i-lucide-minimize',
+  pip: 'i-lucide-picture-in-picture-2',
+  'zoom-in': 'i-lucide-zoom-in',
+  'zoom-out': 'i-lucide-zoom-out',
+  'chevron-left': 'i-lucide-chevron-left',
+  'chevron-right': 'i-lucide-chevron-right',
+  'chevron-down': 'i-lucide-chevron-down',
+  'chevron-up': 'i-lucide-chevron-up',
+  'arrow-left': 'i-lucide-arrow-left',
+  'arrow-right': 'i-lucide-arrow-right',
+
+  // Things in the library
+  image: 'i-lucide-image',
+  'image-off': 'i-lucide-image-off',
+  film: 'i-lucide-film',
+  folder: 'i-lucide-folder',
+  'folder-open': 'i-lucide-folder-open',
+  'folder-add': 'i-lucide-folder-input',
+  files: 'i-lucide-files',
+  tag: 'i-lucide-tag',
+  user: 'i-lucide-user',
+  'user-add': 'i-lucide-user-plus',
+  'user-check': 'i-lucide-user-check',
+  'user-remove': 'i-lucide-user-round-x',
+  face: 'i-lucide-scan-face',
+  calendar: 'i-lucide-calendar',
+  clock: 'i-lucide-clock',
+  map: 'i-lucide-map-pinned',
+  smart: 'i-lucide-sparkles',
+  star: 'i-lucide-star',
+  layers: 'i-lucide-layers',
+  history: 'i-lucide-history',
+  document: 'i-lucide-file-text',
+  sidecar: 'i-lucide-file-code',
+  ocr: 'i-lucide-scan-text',
+
+  // Status
+  info: 'i-lucide-info',
+  help: 'i-lucide-circle-help',
+  warning: 'i-lucide-triangle-alert',
+  error: 'i-lucide-circle-alert',
+  success: 'i-lucide-circle-check',
+  loading: 'i-lucide-loader-circle',
+
+  // Settings
+  appearance: 'i-lucide-palette',
+  'theme-system': 'i-lucide-monitor',
+  'theme-light': 'i-lucide-sun',
+  'theme-dark': 'i-lucide-moon',
+  text: 'i-lucide-type',
+  accessibility: 'i-lucide-accessibility',
+  cpu: 'i-lucide-cpu',
+  battery: 'i-lucide-battery',
+  gauge: 'i-lucide-gauge',
+  storage: 'i-lucide-hard-drive',
+  bug: 'i-lucide-bug',
+  support: 'i-lucide-life-buoy',
+  list: 'i-lucide-list',
+  grid: 'i-lucide-layout-grid',
+} as const
+
+/** The name of an icon in the manifest. */
+export type IconName = keyof typeof icons
+
+/** The Iconify names to bundle: the manifest's, each once. */
+export const bundledIcons: string[] = [...new Set(Object.values(icons))]

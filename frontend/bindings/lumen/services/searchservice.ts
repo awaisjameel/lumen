@@ -38,6 +38,15 @@ export function DeleteTag(id: number): $CancellablePromise<void> {
 }
 
 /**
+ * Hits gives current search results again as they are now, in the order
+ * given, without running the search again: hits no longer visible are left
+ * out, and the others carry their current thumbnail and favourite.
+ */
+export function Hits(ids: number[] | null): $CancellablePromise<core$0.GridItem[] | null> {
+    return $Call.ByID(2307546406, ids);
+}
+
+/**
  * PrepareSearch readies the AI for a search the user is starting to type
  * (the search box got focus). It does nothing without the AI.
  */
@@ -101,12 +110,4 @@ export function Things(): $CancellablePromise<core$0.Tag[] | null> {
  */
 export function UntagAsset(assetID: number, tagID: number): $CancellablePromise<void> {
     return $Call.ByID(2710358875, assetID, tagID);
-}
-
-/**
- * VisibleAssets lets the UI prune current search results after a visibility
- * change, keeping their relevance order without running the search again.
- */
-export function VisibleAssets(ids: number[] | null): $CancellablePromise<number[] | null> {
-    return $Call.ByID(3842970683, ids);
 }

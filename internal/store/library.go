@@ -14,20 +14,6 @@ import (
 // exist (or no longer does), or an asset is not visible.
 var ErrNotFound = errors.New("not found")
 
-// VisibleAssets returns the visible subset of ids, keeping their order and
-// repeated IDs so callers can prune results without changing their ranking.
-func (s *Store) VisibleAssets(ctx context.Context, ids []int64) ([]int64, error) {
-	if len(ids) == 0 {
-		return []int64{}, nil
-	}
-	list, err := json.Marshal(ids)
-	if err != nil {
-		return nil, err
-	}
-	return queryAll(ctx, s.r, scanID, `SELECT assets.id FROM json_each(?) AS requested
-		JOIN assets ON assets.id = requested.value WHERE `+visible+` ORDER BY requested.key`, string(list))
-}
-
 // UnavailableAssets identifies stored vectors that must not compete for search
 // results. Keep their embeddings so restored sources become searchable again.
 func (s *Store) UnavailableAssets(ctx context.Context) (map[int64]bool, error) {
@@ -258,8 +244,8 @@ func gridFields(it *core.GridItem) []any {
 	return []any{&it.W, &it.H, &it.Video, &it.Duration, &it.Favourite, &it.Thumb}
 }
 
-// GridItems returns the visible assets among ids, in the order given
-// (search results arrive best match first).
+// GridItems returns the visible assets among ids, in the order given and
+// repeats kept (search results arrive best match first).
 func (s *Store) GridItems(ctx context.Context, ids []int64) ([]core.GridItem, error) {
 	if len(ids) == 0 {
 		return []core.GridItem{}, nil
@@ -311,12 +297,13 @@ func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.
 	var duration sql.NullInt64
 	var videoCodec, audioCodec sql.NullString
 	var lat, lon sql.NullFloat64
+	var thumb int64
 	err := q.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
 		CASE WHEN `+placeBlocked("assets.place_id")+` THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
-		duration_ms, video_codec, audio_codec
+		duration_ms, video_codec, audio_codec, thumb_version
 		FROM assets WHERE id = ? AND `+servableOf(unlocked), id).
 		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.PlaceID, &d.Favourite,
-			&duration, &videoCodec, &audioCodec)
+			&duration, &videoCodec, &audioCodec, &thumb)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -327,11 +314,12 @@ func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.
 	if lat.Valid && lon.Valid {
 		d.Lat, d.Lon = &lat.Float64, &lon.Float64
 	}
-	d.WebNative = core.WebNative(d.Ext)
+	var play core.Playback
 	if d.Kind == core.KindVideo {
-		d.Video = &core.Video{Duration: duration.Int64, Codec: videoCodec.String, Audio: audioCodec.String,
-			Play: core.PlaybackOf(d.Ext, videoCodec.String, audioCodec.String)}
+		play = core.PlaybackOf(d.Ext, videoCodec.String, audioCodec.String)
+		d.Video = &core.Video{Duration: duration.Int64, Codec: videoCodec.String, Audio: audioCodec.String, Play: play}
 	}
+	d.Caps = core.CapsOf(d.Kind, d.Ext, thumb != 0, play)
 
 	rows, err := q.QueryContext(ctx, "SELECT path, size FROM files WHERE asset_id = ? ORDER BY path", id)
 	if err != nil {

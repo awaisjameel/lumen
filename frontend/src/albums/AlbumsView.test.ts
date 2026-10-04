@@ -1,18 +1,26 @@
+import type * as Router from 'vue-router'
+import USelect from '@nuxt/ui/components/Select.vue'
+import { t } from '../shared/i18n'
+import { mountInApp } from '../shared/testing'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
-import { AlbumKind, engine, ErrorCode, MAX_NAME_LEN } from '../bridge'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
+import { AlbumKind, engine, ErrorCode, Kind, MAX_NAME_LEN } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Album } from '../bridge'
 import { blockRequest } from '../shared/block'
 import { emptyRule, useAlbums } from './store'
 import AlbumsView from './AlbumsView.vue'
 
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof Router>()),
+  useRouter: () => ({ push: vi.fn() }),
+}))
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
-  engine: { albums: vi.fn(), things: vi.fn(), people: vi.fn(), createAlbum: vi.fn() },
+  engine: { albums: vi.fn(), things: vi.fn(), people: vi.fn(), createAlbum: vi.fn(), updateAlbum: vi.fn() },
 }))
 
 const album: Album = {
@@ -24,7 +32,7 @@ const album: Album = {
   coverThumb: 0,
   rule: emptyRule(),
 }
-let wrapper: ReturnType<typeof mount> | undefined
+let wrapper: ReturnType<typeof mountInApp> | undefined
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -32,6 +40,7 @@ beforeEach(() => {
   vi.mocked(engine.things).mockResolvedValue([])
   vi.mocked(engine.people).mockResolvedValue([])
   vi.mocked(engine.createAlbum).mockReset().mockResolvedValue(2)
+  vi.mocked(engine.updateAlbum).mockReset().mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -41,50 +50,95 @@ afterEach(() => {
 })
 
 async function mounted() {
-  wrapper = mount(AlbumsView, { global: { stubs: { SearchBox: true, RouterLink: true } } })
-  wrapper.get<HTMLInputElement>('form input').element.scrollIntoView = vi.fn()
+  wrapper = mountInApp(AlbumsView, { plugins: [testRouter()] })
   await flushPromises()
   return wrapper
 }
 
 it('resets the edited album only after its block is saved successfully', async () => {
   const w = await mounted()
-  await w.get('button[title="Edit album"]').trigger('click')
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
   await flushPromises()
-  await w.get('button[title="Block"]').trigger('click')
+  await menuAction(
+    w,
+    t('blocked.confirmTitle', { name: album.name }),
+    '[role="dialog"] button[aria-label^="Actions for"]',
+  )
   blockRequest.value?.answer(false)
   await flushPromises()
-  expect(w.get<HTMLInputElement>('form input').element.value).toBe(album.name)
-  await w.get('button[title="Block"]').trigger('click')
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe(album.name)
+  await menuAction(
+    w,
+    t('blocked.confirmTitle', { name: album.name }),
+    '[role="dialog"] button[aria-label^="Actions for"]',
+  )
   blockRequest.value?.answer(true)
   await flushPromises()
-  expect(w.get<HTMLInputElement>('form input').element.value).toBe('')
-  expect(w.text()).toContain('New album')
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('')
+  expect(editor().text()).toContain('New album')
 })
 
 it('resets the editor when its album disappears from a reload', async () => {
   const w = await mounted()
-  await w.get('button[title="Edit album"]').trigger('click')
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
   await flushPromises()
   vi.mocked(engine.albums).mockResolvedValue([])
   await useAlbums().load()
   await flushPromises()
-  expect(w.get<HTMLInputElement>('form input').element.value).toBe('')
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('')
   expect(w.text()).not.toContain(album.name)
 })
 
 it('validates names by code point before creating an album', async () => {
   const w = await mounted()
-  expect(w.get('form input').attributes('maxlength')).toBeUndefined()
-  await w.get('form input').setValue('😀'.repeat(MAX_NAME_LEN + 1))
-  await w.get('form').trigger('submit')
+  await w.get('[data-action="new-album"]').trigger('click')
   await flushPromises()
-  expect(w.get('[role="alert"]').text()).toContain('80')
+  expect(editor().get('form input').attributes('maxlength')).toBeUndefined()
+  await editor()
+    .get('form input')
+    .setValue('😀'.repeat(MAX_NAME_LEN + 1))
+  await editor().get('form').trigger('submit')
+  await flushPromises()
+  expect(editor().get('[role="alert"]').text()).toContain('80')
   expect(engine.createAlbum).not.toHaveBeenCalled()
-  await w.get('form input').setValue(` ${'😀'.repeat(MAX_NAME_LEN)} `)
-  await w.get('form').trigger('submit')
+  await editor()
+    .get('form input')
+    .setValue(` ${'😀'.repeat(MAX_NAME_LEN)} `)
+  await editor().get('form').trigger('submit')
   await flushPromises()
   expect(engine.createAlbum).toHaveBeenCalledOnce()
+})
+
+it('keeps every smart rule field and maps all media back to the engine zero value', async () => {
+  const rule = { ...emptyRule(), kind: Kind.KindPhoto, favourites: true, from: '2024-01-01', to: '2024-02-01' }
+  vi.mocked(engine.albums).mockResolvedValue([{ ...album, kind: AlbumKind.AlbumSmart, rule }])
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  const media = w.findComponent(USelect)
+  expect(media.props()).toMatchObject({ modelValue: 1 })
+  expect(editor().get<HTMLInputElement>('input[type="date"][aria-label="Taken on or after"]').element.value).toBe(
+    rule.from,
+  )
+  expect(editor().get<HTMLInputElement>('input[type="date"][aria-label="Taken on or before"]').element.value).toBe(
+    rule.to,
+  )
+  expect(editor().get('[role="checkbox"]').attributes('aria-checked')).toBe('true')
+  media.vm.$emit('update:modelValue', 0)
+  await flushPromises()
+  await editor().get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.updateAlbum).toHaveBeenCalledWith(album.id, album.name, { ...rule, kind: Kind.$zero })
+})
+
+it('focuses the name in the modal and returns focus to New album when cancelled', async () => {
+  const w = await mounted()
+  const trigger = w.get('[data-action="new-album"]')
+  await trigger.trigger('click')
+  await flushPromises()
+  expect(document.activeElement).toBe(editor().get('form input').element)
+  await editor().get('[data-action="cancel-album"]').trigger('click')
+  await flushPromises()
+  expect(document.activeElement).toBe(trigger.element)
 })
 
 it.each([
@@ -101,9 +155,48 @@ it.each([
 ])('explains %s in the album editor and keeps the unsaved draft', async (code, message) => {
   vi.mocked(engine.createAlbum).mockRejectedValue(new Error('engine details', { cause: { code } }))
   const w = await mounted()
-  await w.get('form input').setValue('New trip')
-  await w.get('form').trigger('submit')
+  await w.get('[data-action="new-album"]').trigger('click')
   await flushPromises()
-  expect(w.get('[role="alert"]').text()).toBe(message)
-  expect(w.get<HTMLInputElement>('form input').element.value).toBe('New trip')
+  await editor().get('form input').setValue('New trip')
+  await editor().get('form').trigger('submit')
+  await flushPromises()
+  expect(editor().get('[role="alert"]').text()).toBe(message)
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('New trip')
 })
+
+function testRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { template: '<div />' } },
+      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
+        name,
+        path: `/${name}/:id?`,
+        component: { template: '<div />' },
+      })),
+    ],
+  })
+}
+
+vi.mock('../search/SearchBox.vue', () => ({ default: { render: () => null } }))
+
+async function menuAction(
+  _w: ReturnType<typeof mountInApp>,
+  label: string,
+  trigger = 'button[aria-label^="Actions for"]',
+) {
+  await new DOMWrapper(document.body).get(trigger).trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  const item = [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    (el) => el.textContent.trim() === label,
+  )
+  if (!item) throw new Error(`No menu item named ${label}`)
+  item.click()
+  await flushPromises()
+}
+
+function editor() {
+  const dialog = document.body.querySelector('[role="dialog"]')
+  if (!dialog) throw new Error('The album editor is closed')
+  return new DOMWrapper(dialog)
+}

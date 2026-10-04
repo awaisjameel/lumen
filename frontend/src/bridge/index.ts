@@ -2,7 +2,7 @@
 // functions, never the generated bindings directly (ESLint enforces it), so
 // engine communication can be understood (and mocked) from this file alone.
 
-import { CancelError, Events } from '@wailsio/runtime'
+import { Call, CancelError, CancelledRejectionError, Events } from '@wailsio/runtime'
 import type { CancellablePromise } from '@wailsio/runtime'
 import {
   LibraryService,
@@ -12,10 +12,12 @@ import {
   SystemService,
 } from '../../bindings/lumen/services'
 import {
+  Accent,
   AlbumKind,
   BlockKind,
   BlockMode,
   DateSource,
+  Density,
   Device,
   DuplicateKind,
   FailReason,
@@ -27,6 +29,7 @@ import {
   Playback,
   TagKind,
   TagSource,
+  Theme,
   WaitReason,
 } from '../../bindings/lumen/internal/core'
 import type {
@@ -55,22 +58,28 @@ import type {
   FailureGroup as RawFailureGroup,
   Face,
   GridItem,
+  LegacyPreferences,
+  MediaCaps,
   Person,
   Place,
+  Preferences,
   Progress,
   SearchResult,
   Settings,
   Source,
   Tag,
+  TrashSelection as RawTrashSelection,
   UIError,
   View,
 } from '../../bindings/lumen/internal/core'
 
 export {
+  Accent,
   AlbumKind,
   BlockKind,
   BlockMode,
   DateSource,
+  Density,
   Device,
   DuplicateKind,
   FailReason,
@@ -82,6 +91,7 @@ export {
   Playback,
   TagKind,
   TagSource,
+  Theme,
   WaitReason,
 }
 export type {
@@ -98,10 +108,13 @@ export type {
   Person,
   Event,
   FailedFile,
+  LegacyPreferences,
+  MediaCaps,
   OrganiseMove,
   OrganiseProgress,
   OrganiseRun,
   Place,
+  Preferences,
   Progress,
   Settings,
   Source,
@@ -129,6 +142,8 @@ export type DuplicateItem = NonNullLists<RawDuplicateItem, 'paths' | 'mtimes'>
 export type DuplicateGroup = Omit<RawDuplicateGroup, 'items'> & { items: DuplicateItem[] }
 /** What moving files to the Recycle Bin did; kept files were left as they were. */
 export type DiskDeletion = NonNullLists<RawDiskDeletion, 'kept'>
+/** Trashed assets and how many files they have: what Delete from disk asks the user to confirm. */
+export type TrashSelection = NonNullLists<RawTrashSelection, 'assets'>
 /** A photo a block covers, with the other blocks that also hide it. */
 export type CoveredItem = NonNullLists<RawCoveredItem, 'hiddenBy'>
 /** An organise preview: the moves a template would make. */
@@ -158,6 +173,18 @@ export const THUMB_CACHE_DEFAULT_MB = 2048 // core.ThumbCacheDefaultMB
 export const THUMB_CACHE_MIN_MB = 256 // core.ThumbCacheMinMB
 export const THUMB_CACHE_MAX_MB = 102400 // core.ThumbCacheMaxMB
 export const AWAY_MINUTES = 5 // index.AwayAfter: no input this long and idle-only indexing runs
+export const TEXT_SCALE_MIN = 90 // core.TextScaleMin: percent of the UI's base text size
+export const TEXT_SCALE_MAX = 130 // core.TextScaleMax
+export const TEXT_SCALE_DEFAULT = 100 // core.TextScaleDefault
+export const TILE_SIZE_MIN = 96 // core.TileSizeMin: the grid's target thumbnail edge
+export const TILE_SIZE_MAX = 320 // core.TileSizeMax
+export const TILE_SIZE_DEFAULT = 168 // core.TileSizeDefault
+export const SIDEBAR_WIDTH_MIN = 200 // core.SidebarWidthMin
+export const SIDEBAR_WIDTH_MAX = 360 // core.SidebarWidthMax
+export const SIDEBAR_WIDTH_DEFAULT = 232 // core.SidebarWidthDefault
+export const INSPECTOR_WIDTH_MIN = 280 // core.InspectorWidthMin
+export const INSPECTOR_WIDTH_MAX = 480 // core.InspectorWidthMax
+export const INSPECTOR_WIDTH_DEFAULT = 320 // core.InspectorWidthDefault
 export const ORGANISE_DEFAULT_TEMPLATE = '{Year}/{Month}/{Event}/{Name}' // fileops.DefaultTemplate
 /** The tokens an organise scheme may hold, in the order the editor offers them (fileops.Tokens). */
 export const ORGANISE_TOKENS = ['Year', 'Month', 'MonthName', 'Day', 'Event', 'Place', 'Camera', 'Name', 'Ext'] as const
@@ -214,6 +241,7 @@ export const ErrorCode = {
   UndoExpired: 'undo_expired',
   InvalidBlock: 'invalid_block',
   DeleteFailed: 'delete_failed',
+  TrashChanged: 'trash_changed',
   XMPOff: 'xmp_off',
   InvalidTemplate: 'invalid_template',
   OrganiseBusy: 'organise_busy',
@@ -241,7 +269,15 @@ export function errorCode(e: unknown): ErrorCode | undefined {
  * no longer wanted the answer, so there is nothing to report.
  */
 export function isCancelled(e: unknown): boolean {
-  return e instanceof CancelError
+  // Wails beta.26 reports a late Go cancellation response separately from
+  // the CancelError already handled by the read's owner. Only that known
+  // response is cancellation; other late rejections remain failures.
+  return (
+    e instanceof CancelError ||
+    (e instanceof CancelledRejectionError &&
+      e.cause instanceof Call.RuntimeError &&
+      e.cause.message === 'context canceled')
+  )
 }
 
 /** call, cancelled in the engine too (its context ends) if signal aborts. */
@@ -322,6 +358,12 @@ export const engine = {
   /** How many CPU threads indexing may keep busy; the engine holds it to the machine's. */
   setCPUThreads: (n: number): Promise<void> => LibraryService.SetCPUThreads(n),
   thumbCacheBytes: (): Promise<number> => MediaService.ThumbCacheBytes(),
+  /** How the user likes the interface to look. */
+  preferences: (): Promise<Preferences> => LibraryService.Preferences(),
+  /** Stores every interface preference; resolves to them as stored (held to their ranges). */
+  setPreferences: (p: Preferences): Promise<Preferences> => LibraryService.SetPreferences(p),
+  /** Offers the library, once, what an older Lumen kept in the WebView's storage; resolves to the preferences afterwards. */
+  migratePreferences: (legacy: LegacyPreferences): Promise<Preferences> => LibraryService.MigratePreferences(legacy),
   setOCR: (on: boolean): Promise<void> => LibraryService.SetOCR(on),
   setXMP: (on: boolean): Promise<void> => LibraryService.SetXMP(on),
   /** Writes every out-of-date XMP sidecar now. */
@@ -342,15 +384,14 @@ export const engine = {
   restoreAssets: (ids: number[]): Promise<void> => LibraryService.RestoreAssets(ids),
   restoreAllTrash: (): Promise<void> => LibraryService.RestoreAllTrash(),
   trashCount: (): Promise<number> => LibraryService.TrashCount(),
-  /** How many files Delete from disk would move for these trashed assets (none given: all of the Trash). */
-  trashFileCount: (ids: number[]): Promise<number> => LibraryService.TrashFileCount(ids),
-  /** Moves trashed assets' files to the Windows Recycle Bin. */
-  deleteFromDisk: async (ids: number[]): Promise<DiskDeletion> => {
-    const r = await LibraryService.DeleteFromDisk(ids)
-    return { ...r, kept: r.kept ?? [] }
+  /** What Delete from disk would take for these trashed assets (none given: all of the Trash), to confirm. */
+  trashSelection: async (ids: number[]): Promise<TrashSelection> => {
+    const r = await LibraryService.TrashSelection(ids)
+    return { ...r, assets: r.assets ?? [] }
   },
-  deleteAllTrashFromDisk: async (): Promise<DiskDeletion> => {
-    const r = await LibraryService.DeleteAllTrashFromDisk()
+  /** Moves the files of a confirmed selection to the Windows Recycle Bin; refused if the Trash changed since. */
+  deleteFromDisk: async (sel: TrashSelection): Promise<DiskDeletion> => {
+    const r = await LibraryService.DeleteFromDisk(sel)
     return { ...r, kept: r.kept ?? [] }
   },
 
@@ -384,8 +425,9 @@ export const engine = {
     const r = await cancellable(SearchService.Search(query), signal)
     return { ...r, items: r.items ?? [], people: r.people ?? [] }
   },
-  visibleAssets: async (ids: number[], signal?: AbortSignal): Promise<number[]> =>
-    (await cancellable(SearchService.VisibleAssets(ids), signal)) ?? [],
+  /** Search results again as they are now, in order: hidden ones left out, thumbnails current. */
+  searchHits: async (ids: number[], signal?: AbortSignal): Promise<GridItem[]> =>
+    (await cancellable(SearchService.Hits(ids), signal)) ?? [],
   suggestTags: async (text: string): Promise<Tag[]> => (await SearchService.SuggestTags(text)) ?? [],
   prepareSearch: (): Promise<void> => SearchService.PrepareSearch(),
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],

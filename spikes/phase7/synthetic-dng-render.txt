@@ -1,0 +1,18 @@
+Input #0, tiff_pipe, from 'spikes/phase7/fixtures/synthetic-cfa.dng':
+  Duration: N/A, bitrate: N/A
+  Stream #0:0: Video: tiff, bayer_rggb16le, 64x48, 25 fps, 25 tbr, 25 tbn
+Stream mapping:
+  Stream #0:0 -> #0:0 (tiff (native) -> png (native))
+Press [q] to stop, [?] for help
+Output #0, image2, to 'spikes/phase7/synthetic-dng-render.png':
+  Metadata:
+    encoder         : Lavf63.1.102
+  Stream #0:0: Video: png, rgb24(pc, gbr/unknown/linear, progressive), 64x48, q=2-31, 200 kb/s, 25 fps, 25 tbn
+    Metadata:
+      encoder         : Lavc63.1.102 png
+    Side data:
+      EXIF metadata: (275 bytes)
+[image2 @ 00000225753b8fc0] The specified filename 'spikes/phase7/synthetic-dng-render.png' does not contain an image sequence pattern or a pattern is invalid.
+[image2 @ 00000225753b8fc0] Use a pattern such as %03d for an image sequence or use the -update option (with -frames:v 1 if needed) to write a single image.
+[out#0/image2 @ 00000225753dac80] video:1KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+frame=    1 fps=0.0 q=-0.0 Lsize=N/A time=00:00:00.04 bitrate=N/A speed=6.81x elapsed=0:00:00.00    

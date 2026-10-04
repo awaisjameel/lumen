@@ -101,12 +101,6 @@ var trashReaders = []struct {
 		check(t, err)
 		return len(items)
 	}},
-	{"the visible subset", 1, func(t *testing.T, f trashFixture) int {
-		t.Helper()
-		ids, err := f.st.VisibleAssets(f.ctx, []int64{f.a, f.b})
-		check(t, err)
-		return len(ids)
-	}},
 	{"search's exclusions", 1, func(t *testing.T, f trashFixture) int {
 		t.Helper()
 		gone, err := f.st.UnavailableAssets(f.ctx)

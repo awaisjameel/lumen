@@ -1,19 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { flushPromises, DOMWrapper } from '@vue/test-utils'
 import { DuplicateKind, engine } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { DuplicateGroup, DuplicateItem } from '../bridge'
 import { showBlocksChanged } from '../shared/block'
-import { notice } from '../shared/errors'
-import { clearTrashUndo, trashUndo } from '../trash/undo'
+import { commands, runCommand } from '../shared/commands'
+import { mountInApp, recordNotifications } from '../shared/testing'
+import type { RecordedNotifications } from '../shared/testing'
+import { KEPT_NOTIFICATION } from '../trash/actions'
+import { TRASH_UNDO_NOTIFICATION } from '../trash/undo'
 import { useDuplicates } from './store'
 import DuplicatesView from './DuplicatesView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
-  engine: { duplicateGroups: vi.fn(), showInFolder: vi.fn(), trashAssets: vi.fn(), deleteCopies: vi.fn() },
+  engine: {
+    duplicateGroups: vi.fn(),
+    showInFolder: vi.fn(),
+    trashAssets: vi.fn(),
+    deleteCopies: vi.fn(),
+    restoreAssets: vi.fn(),
+    trashCount: vi.fn(),
+  },
 }))
 
 const photo = (id: number, path: string): DuplicateItem => ({
@@ -32,13 +43,13 @@ const photo = (id: number, path: string): DuplicateItem => ({
   mtimes: [0],
   best: false,
 })
-let wrapper: ReturnType<typeof mount> | undefined
+let wrapper: ReturnType<typeof mountInApp> | undefined
 
 function height(element: Element): number {
-  return element.classList.contains('page-body')
+  return element.hasAttribute('data-duplicates-scroll')
     ? 600
     : element.classList.contains('virtual-row')
-      ? element.querySelector('.group')
+      ? element.querySelector('[data-duplicate-group]')
         ? 180 + (Number(element.getAttribute('data-index')) % 3) * 95
         : 88
       : 40
@@ -65,8 +76,18 @@ class TestResizeObserver implements ResizeObserver {
   disconnect = vi.fn()
 }
 
+let notifications: RecordedNotifications
+
+function mountView() {
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: DuplicatesView }] })
+  return mountInApp(DuplicatesView, { plugins: [router] })
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
+  notifications = recordNotifications()
+  vi.mocked(engine.restoreAssets).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.trashCount).mockReset().mockResolvedValue(0)
   vi.stubGlobal('ResizeObserver', TestResizeObserver)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     return new DOMRect(
@@ -89,16 +110,16 @@ beforeEach(() => {
 afterEach(() => {
   wrapper?.unmount()
   vi.unstubAllGlobals()
-  clearTrashUndo()
-  notice.value = ''
+  notifications.stop()
+  wrapper = undefined
 })
 
 it('names each similar photo and shows the copy it lists', async () => {
-  wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
+  wrapper = mountView()
   await flushPromises()
   const previews = wrapper.findAll('.preview-button').map((b) => b.attributes('aria-label'))
   expect(previews).toEqual(['Preview “one.jpg”', 'Preview “two.jpg”'])
-  await wrapper.findAll('.similar-item .btn')[1]?.trigger('click')
+  await wrapper.findAll('[data-show-file]')[1]?.trigger('click')
   expect(engine.showInFolder).toHaveBeenCalledWith(2, 'C:\\b\\two.jpg')
 })
 
@@ -109,17 +130,17 @@ it('keeps the DOM bounded and jumps directly to the final similar groups', async
       items: [photo(index + 1, `C:\\Photos\\photo-${index + 1}.jpg`)],
     })),
   )
-  wrapper = mount(DuplicatesView, { attachTo: document.body, global: { stubs: { SearchBox: true } } })
+  wrapper = mountView()
   await flushPromises()
-  expect(wrapper.findAll('.group').length).toBeGreaterThan(0)
-  expect(wrapper.findAll('.group').length).toBeLessThan(15)
-  const scroller = wrapper.get<HTMLElement>('.page-body')
+  expect(wrapper.findAll('[data-duplicate-group]').length).toBeGreaterThan(0)
+  expect(wrapper.findAll('[data-duplicate-group]').length).toBeLessThan(15)
+  const scroller = wrapper.get<HTMLElement>('[data-duplicates-scroll]')
   const total = Number.parseFloat(wrapper.get<HTMLElement>('.virtual-list').element.style.height)
   scroller.element.scrollTop = total - 600
   await scroller.trigger('scroll')
   await flushPromises()
   expect(wrapper.text()).toContain('photo-1005.jpg')
-  expect(wrapper.findAll('.group').length).toBeLessThan(15)
+  expect(wrapper.findAll('[data-duplicate-group]').length).toBeLessThan(15)
   expect(wrapper.text()).not.toContain('photo-1.jpg')
   vi.mocked(engine.duplicateGroups).mockResolvedValue([
     { kind: DuplicateKind.DuplicateExact, items: [photo(1, 'C:\\Photos\\photo-1.jpg')] },
@@ -132,45 +153,43 @@ it('keeps the DOM bounded and jumps directly to the final similar groups', async
   expect(wrapper.text()).not.toContain('photo-1005.jpg')
 })
 
+function previewDialog() {
+  return document.body.querySelector('[role="dialog"][data-state="open"]')
+}
+function previewImage(): HTMLImageElement {
+  const image = document.body.querySelector<HTMLImageElement>('[data-duplicate-preview] img')
+  if (!image) throw new Error('the preview has no image')
+  return image
+}
+
 it('opens the preview from a virtual row', async () => {
-  wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
+  wrapper = mountView()
   await flushPromises()
-  const dialog = wrapper.get<HTMLDialogElement>('dialog').element
-  const showModal = vi.fn()
-  dialog.showModal = showModal
   await wrapper.get('.preview-button').trigger('click')
   await flushPromises()
-  expect(showModal).toHaveBeenCalledOnce()
-  expect(wrapper.get('dialog img').attributes('alt')).toBe('one.jpg')
+  expect(previewDialog()).not.toBeNull()
+  expect(previewImage().alt).toBe('one.jpg')
 })
 
 it('closes the preview when its asset disappears from refreshed groups', async () => {
-  wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
+  wrapper = mountView()
   await flushPromises()
-  const dialog = wrapper.get<HTMLDialogElement>('dialog').element
-  dialog.showModal = vi.fn(() => (dialog.open = true))
-  const close = vi.fn(() => (dialog.open = false))
-  dialog.close = close
   await wrapper.get('.preview-button').trigger('click')
   await flushPromises()
+  expect(previewDialog()).not.toBeNull()
   vi.mocked(engine.duplicateGroups).mockResolvedValue([
     { kind: DuplicateKind.DuplicateSimilar, items: [photo(2, 'C:\\b\\two.jpg')] },
   ])
   await useDuplicates().load()
   await flushPromises()
-  expect(close).toHaveBeenCalledOnce()
-  expect(dialog.open).toBe(false)
-  expect(wrapper.find('dialog img').exists()).toBe(false)
-  expect(wrapper.get('dialog').text()).not.toContain('one.jpg')
+  expect(previewDialog()).toBeNull()
+  expect(document.body.querySelector('[data-duplicate-preview] img')).toBeNull()
+  expect(document.body.querySelector('[data-duplicate-preview]')?.textContent ?? '').not.toContain('one.jpg')
 })
 
 it('updates the open preview when its paths and thumbnail change', async () => {
-  wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
+  wrapper = mountView()
   await flushPromises()
-  const dialog = wrapper.get<HTMLDialogElement>('dialog').element
-  dialog.showModal = vi.fn()
-  const close = vi.fn()
-  dialog.close = close
   await wrapper.get('.preview-button').trigger('click')
   await flushPromises()
   vi.mocked(engine.duplicateGroups).mockResolvedValue([
@@ -178,27 +197,28 @@ it('updates the open preview when its paths and thumbnail change', async () => {
   ])
   await useDuplicates().load()
   await flushPromises()
-  expect(close).not.toHaveBeenCalled()
-  expect(wrapper.get('dialog img').attributes('src')).toContain('?v=2')
-  expect(wrapper.get('dialog img').attributes('alt')).toBe('renamed.jpg')
-  expect(wrapper.get('dialog').text()).toContain('C:\\renamed.jpg')
-  expect(wrapper.get('dialog').text()).not.toContain('one.jpg')
+  expect(previewDialog()).not.toBeNull()
+  expect(previewImage().src).toContain('?v=2')
+  expect(previewImage().alt).toBe('renamed.jpg')
+  expect(previewDialog()?.textContent).toContain('C:\\renamed.jpg')
+  expect(previewDialog()?.textContent).not.toContain('one.jpg')
 })
 
 it('does not show cached paths on remount after visibility changes, even if the refresh fails', async () => {
-  wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
+  wrapper = mountView()
   await flushPromises()
   expect(wrapper.text()).toContain('one.jpg')
   wrapper.unmount()
-  let finish!: (value: Bridge.DuplicateGroup[]) => void
+  let finish: ((value: Bridge.DuplicateGroup[]) => void) | undefined
   vi.mocked(engine.duplicateGroups)
     .mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
     .mockRejectedValue(new Error('read failed'))
   const invalidated = useDuplicates().invalidate()
   const rejected = expect(invalidated).rejects.toThrow('read failed')
-  wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
+  wrapper = mountView()
   await flushPromises()
   expect(wrapper.text()).not.toContain('one.jpg')
+  if (!finish) throw new Error('the duplicate read did not start')
   finish([{ kind: DuplicateKind.DuplicateSimilar, items: [photo(1, 'C:\\a\\one.jpg')] }])
   await rejected
   await flushPromises()
@@ -212,17 +232,20 @@ it('retains unequal measured heights and the deep scroll position on an unchange
     items: [photo(index + 1, `C:\\Photos\\photo-${index + 1}.jpg`)],
   }))
   vi.mocked(engine.duplicateGroups).mockResolvedValue(groups)
-  wrapper = mount(DuplicatesView, { attachTo: document.body, global: { stubs: { SearchBox: true } } })
+  wrapper = mountView()
   await flushPromises()
-  const scroller = wrapper.get<HTMLElement>('.page-body')
+  const scroller = wrapper.get<HTMLElement>('[data-duplicates-scroll]')
   scroller.element.scrollTop = 120000
   await scroller.trigger('scroll')
   await flushPromises()
   const measured = wrapper.findAll('.virtual-row').map((row) => height(row.element))
   expect(new Set(measured).size).toBeGreaterThan(1)
   const total = wrapper.get<HTMLElement>('.virtual-list').element.style.height
-  const positions = () =>
-    wrapper?.findAll('.virtual-row').map((row) => [row.attributes('data-index'), row.attributes('style')])
+  const positions = (): [string, string][] =>
+    (wrapper?.findAll('.virtual-row') ?? []).map((row) => [
+      row.attributes('data-index') ?? '',
+      row.attributes('style') ?? '',
+    ])
   const before = positions()
   expect(Number(wrapper.get('.virtual-row').attributes('data-index'))).toBeGreaterThan(400)
   vi.mocked(engine.duplicateGroups).mockResolvedValue(groups.map((group) => ({ ...group, items: [...group.items] })))
@@ -230,7 +253,14 @@ it('retains unequal measured heights and the deep scroll position on an unchange
   await flushPromises()
   expect(scroller.element.scrollTop).toBe(120000)
   expect(wrapper.get<HTMLElement>('.virtual-list').element.style.height).toBe(total)
-  expect(positions()).toEqual(before)
+  // Every row still drawn sits exactly where it was. (How many rows the
+  // virtualiser keeps past the edge can differ by one between two renders,
+  // so the rows are compared by index rather than as one list.)
+  const after = new Map(positions())
+  const kept = before.filter(([index]) => after.has(index))
+  expect(kept.length).toBeGreaterThan(5)
+  expect(after.keys().next().value).toBe(before[0]?.[0])
+  for (const [index, style] of kept) expect(after.get(index), `row ${index}`).toBe(style)
 })
 
 describe('choosing the copy to keep', () => {
@@ -252,13 +282,6 @@ describe('choosing the copy to keep', () => {
   }
 
   beforeEach(() => {
-    // jsdom has no modal dialogs: opening one marks it open.
-    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
-      this.setAttribute('open', '')
-    })
-    HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
-      this.removeAttribute('open')
-    })
     vi.mocked(engine.trashAssets).mockReset().mockResolvedValue(undefined)
     vi.mocked(engine.deleteCopies).mockReset().mockResolvedValue({ recycled: 1, kept: [] })
   })
@@ -266,48 +289,49 @@ describe('choosing the copy to keep', () => {
   async function mountWith(...groups: DuplicateGroup[]) {
     wrapper?.unmount()
     vi.mocked(engine.duplicateGroups).mockResolvedValue(groups)
-    wrapper = mount(DuplicatesView, { global: { stubs: { SearchBox: true } } })
+    wrapper = mountView()
     await flushPromises()
   }
-  const radios = () => wrapper?.findAll<HTMLInputElement>('input[type="radio"]') ?? []
-  const checked = () => radios().map((r) => r.element.checked)
+  const radios = () => wrapper?.findAll('[role="radio"]') ?? []
+  const checked = () => radios().map((r) => r.attributes('aria-checked') === 'true')
   const reviewDialog = () => {
-    const found = wrapper?.find<HTMLDialogElement>('dialog.review')
-    if (!found?.exists()) throw new Error('no review dialog')
-    return found
+    const found = document.body.querySelector<HTMLElement>('[role="dialog"][data-state="open"]')
+    if (!found) throw new Error('the review did not open')
+    return new DOMWrapper(found)
   }
-  const opened = () => reviewDialog().element.hasAttribute('open')
+  const reviewText = () => document.body.querySelector('[data-duplicate-review]')?.textContent ?? ''
+  const opened = () => document.body.querySelector('[data-duplicate-review]') !== null
   const review = async () => {
-    await wrapper?.get('.group-actions .btn').trigger('click')
+    await wrapper?.get('[data-review]').trigger('click')
     await flushPromises()
   }
   const confirm = async () => {
-    await reviewDialog().get('.btn-primary').trigger('click')
+    await reviewDialog().get('[data-review-confirm]').trigger('click')
     await flushPromises()
   }
 
   it('pre-selects the copy the engine suggests in each similar group and marks it', async () => {
     await mountWith(similar(2))
     expect(checked()).toEqual([false, true, false])
-    expect(wrapper?.findAll('.keep em').map((e) => e.text())).toEqual(['Suggested'])
-    expect(wrapper?.get('.similar-item:nth-child(2) .keep').text()).toContain('Suggested')
+    expect(wrapper?.findAll('[data-suggested]').map((e) => e.text())).toEqual(['Suggested'])
+    expect(wrapper?.get('[data-slot="item"]:nth-of-type(2)').text()).toContain('Suggested')
   })
 
   it('pre-selects the suggested file of an exact copy', async () => {
     await mountWith(exact)
     expect(checked()).toEqual([false, true])
-    expect(wrapper?.get('.item li:nth-child(2) .keep').text()).toContain('Suggested')
+    expect(wrapper?.get('[data-slot="item"]:nth-of-type(2)').text()).toContain('Suggested')
   })
 
   it('lets the user pick another copy without changing anything', async () => {
     await mountWith(similar(2))
-    await radios()[0]?.setValue()
-    expect(wrapper?.findAll('.keep em').map((e) => e.text())).toEqual(['Suggested']) // the suggestion stays marked
+    await radios()[0]?.trigger('click')
+    expect(wrapper?.findAll('[data-suggested]').map((e) => e.text())).toEqual(['Suggested']) // the suggestion stays marked
     await review()
     expect(reviewDialog().get('.keeps').text()).toBe('C:\\Photos\\p1.jpg')
     expect(reviewDialog().get('.removes').text()).toContain('p2.jpg')
     await mountWith(exact)
-    await radios()[0]?.setValue()
+    await radios()[0]?.trigger('click')
     await review()
     expect(reviewDialog().get('.keeps').text()).toBe('C:\\Photos\\a\\IMG_9.jpg')
     expect(reviewDialog().get('.removes').text()).toBe('C:\\Photos\\b\\IMG_9 copy.jpg')
@@ -327,7 +351,7 @@ describe('choosing the copy to keep', () => {
     expect(reviewDialog().get('.removes').text()).not.toContain('p2.jpg')
     expect(text).toContain('These 2 photos move to Lumen’s Trash')
     expect(engine.trashAssets).not.toHaveBeenCalled()
-    await reviewDialog().findAll('.btn')[0]?.trigger('click') // Cancel
+    await reviewDialog().find('[data-review-cancel]').trigger('click') // Cancel
     expect(opened()).toBe(false)
     expect(engine.trashAssets).not.toHaveBeenCalled()
     expect(engine.deleteCopies).not.toHaveBeenCalled()
@@ -335,12 +359,15 @@ describe('choosing the copy to keep', () => {
 
   it('moves the similar photos that are not kept to the Trash once confirmed, and offers to undo it', async () => {
     await mountWith(similar(2))
-    await radios()[0]?.setValue() // keep photo 1
+    await radios()[0]?.trigger('click') // keep photo 1
     await review()
     await confirm()
     expect(engine.trashAssets).toHaveBeenCalledExactlyOnceWith([2, 3])
     expect(engine.deleteCopies).not.toHaveBeenCalled()
-    expect(trashUndo.value).toEqual([2, 3])
+    expect(notifications.find(TRASH_UNDO_NOTIFICATION)?.title).toBe('Moved 2 items to the Trash.')
+    notifications.find(TRASH_UNDO_NOTIFICATION)?.actions?.[0]?.run()
+    await flushPromises()
+    expect(engine.restoreAssets).toHaveBeenCalledExactlyOnceWith([2, 3])
     expect(opened()).toBe(false)
     expect(engine.duplicateGroups).toHaveBeenCalledTimes(2) // reloaded
   })
@@ -357,12 +384,12 @@ describe('choosing the copy to keep', () => {
       'C:\\Photos\\a\\IMG_9.jpg',
     ])
     expect(engine.trashAssets).not.toHaveBeenCalled()
-    expect(trashUndo.value).toBeNull() // recycled files are not in the Trash to restore
+    expect(notifications.find(TRASH_UNDO_NOTIFICATION)).toBeUndefined() // recycled files are not in the Trash to restore
   })
 
   it('recycles the other files when the user keeps another file of an exact copy', async () => {
     await mountWith(exact)
-    await radios()[0]?.setValue()
+    await radios()[0]?.trigger('click')
     await review()
     await confirm()
     expect(engine.deleteCopies).toHaveBeenCalledExactlyOnceWith(9, 'C:\\Photos\\a\\IMG_9.jpg', [
@@ -375,7 +402,7 @@ describe('choosing the copy to keep', () => {
     await mountWith(exact)
     await review()
     await confirm()
-    expect(notice.value).toContain('1 file couldn’t be moved')
+    expect(notifications.find(KEPT_NOTIFICATION)?.title).toContain('1 file couldn’t be moved')
   })
 
   it('shows why a confirmed move failed and reloads the groups', async () => {
@@ -384,13 +411,13 @@ describe('choosing the copy to keep', () => {
     await review()
     await confirm()
     expect(wrapper?.get('[role="alert"]').text()).toContain('disk on fire')
-    expect(trashUndo.value).toBeNull()
+    expect(notifications.find(TRASH_UNDO_NOTIFICATION)).toBeUndefined()
     expect(engine.duplicateGroups).toHaveBeenCalledTimes(2)
   })
 
   it('keeps the user’s choice across a reload while the group still exists', async () => {
     await mountWith(similar(2))
-    await radios()[2]?.setValue()
+    await radios()[2]?.trigger('click')
     // A reload brings the same group with a new member in front and the suggestion elsewhere.
     vi.mocked(engine.duplicateGroups).mockResolvedValue([
       { kind: DuplicateKind.DuplicateSimilar, items: [photo(4, 'C:\\Photos\\p4.jpg'), ...similar(1).items] },
@@ -400,7 +427,7 @@ describe('choosing the copy to keep', () => {
     expect(checked()).toEqual([false, false, false, true])
     // The same for an exact copy's file.
     await mountWith(exact)
-    await radios()[0]?.setValue()
+    await radios()[0]?.trigger('click')
     vi.mocked(engine.duplicateGroups).mockResolvedValue([{ ...exact, items: exact.items.map((it) => ({ ...it })) }])
     await useDuplicates().load()
     await flushPromises()
@@ -409,7 +436,7 @@ describe('choosing the copy to keep', () => {
 
   it('forgets a choice once its photo has left the groups', async () => {
     await mountWith(similar(2))
-    await radios()[2]?.setValue()
+    await radios()[2]?.trigger('click')
     vi.mocked(engine.duplicateGroups).mockResolvedValue([])
     await useDuplicates().load()
     await flushPromises()
@@ -424,7 +451,7 @@ describe('choosing the copy to keep', () => {
       kind: DuplicateKind.DuplicateExact,
       items: [{ ...photo(1, 'C:\\one.jpg'), best: true, keep: 'C:\\one.jpg' }],
     })
-    expect(wrapper?.get<HTMLButtonElement>('.group-actions .btn').element.disabled).toBe(true)
+    expect(wrapper?.get<HTMLButtonElement>('[data-review]').element.disabled).toBe(true)
   })
 
   it('closes an open review when a reload no longer holds one of its photos', async () => {
@@ -437,8 +464,8 @@ describe('choosing the copy to keep', () => {
     await useDuplicates().load()
     await flushPromises()
     expect(opened()).toBe(false)
-    expect(reviewDialog().text()).not.toContain('p3.jpg')
-    expect(reviewDialog().text()).toBe('')
+    expect(reviewText()).not.toContain('p3.jpg')
+    expect(reviewText()).toBe('')
     expect(engine.trashAssets).not.toHaveBeenCalled()
   })
 
@@ -450,7 +477,7 @@ describe('choosing the copy to keep', () => {
     await useDuplicates().load()
     await flushPromises()
     expect(opened()).toBe(false)
-    expect(reviewDialog().text()).toBe('')
+    expect(reviewText()).toBe('')
   })
 
   it('closes an open review when a copy it did not list joins the group', async () => {
@@ -480,27 +507,28 @@ describe('choosing the copy to keep', () => {
   })
 
   it('disables Review and the confirmation while a confirmed move is under way, and acts once', async () => {
-    let finish!: (value: { recycled: number; kept: string[] }) => void
+    let finish: ((value: { recycled: number; kept: string[] }) => void) | undefined
     vi.mocked(engine.deleteCopies).mockReturnValue(new Promise((resolve) => (finish = resolve)))
     await mountWith(exact)
     await review()
     await confirm()
-    expect(wrapper?.get<HTMLButtonElement>('.group-actions .btn').element.disabled).toBe(true)
-    expect(reviewDialog().get<HTMLButtonElement>('.btn-primary').element.disabled).toBe(true)
-    await reviewDialog().get('.btn-primary').trigger('click')
-    await reviewDialog().findAll('.btn')[0]?.trigger('click') // Cancel does not close it either
+    expect(wrapper?.get<HTMLButtonElement>('[data-review]').element.disabled).toBe(true)
+    expect(reviewDialog().get<HTMLButtonElement>('[data-review-confirm]').element.disabled).toBe(true)
+    await reviewDialog().get('[data-review-confirm]').trigger('click')
+    await reviewDialog().find('[data-review-cancel]').trigger('click') // Cancel does not close it either
     expect(opened()).toBe(true)
     expect(engine.deleteCopies).toHaveBeenCalledTimes(1)
+    if (!finish) throw new Error('the file operation did not start')
     finish({ recycled: 1, kept: [] })
     await flushPromises()
     expect(opened()).toBe(false)
-    expect(wrapper?.get<HTMLButtonElement>('.group-actions .btn').element.disabled).toBe(false)
+    expect(wrapper?.get<HTMLButtonElement>('[data-review]').element.disabled).toBe(false)
     expect(engine.deleteCopies).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the user’s choice when an unrelated block change refreshes the list', async () => {
     await mountWith(similar(2))
-    await radios()[0]?.setValue()
+    await radios()[0]?.trigger('click')
     await showBlocksChanged()
     await flushPromises()
     await review()
@@ -509,7 +537,7 @@ describe('choosing the copy to keep', () => {
 
   it('still forgets the choice when the refresh after a block shows its photo is gone', async () => {
     await mountWith(similar(2))
-    await radios()[0]?.setValue()
+    await radios()[0]?.trigger('click')
     vi.mocked(engine.duplicateGroups).mockResolvedValue([{ ...similar(2), items: similar(2).items.slice(1) }])
     await showBlocksChanged()
     await flushPromises()
@@ -518,5 +546,50 @@ describe('choosing the copy to keep', () => {
     await useDuplicates().load()
     await flushPromises()
     expect(checked()).toEqual([false, true, false])
+  })
+
+  it('shows the keep choice and removal count together before opening confirmation', async () => {
+    await mountWith(similar(2))
+    const summary = wrapper?.get('[role="toolbar"]')
+    expect(summary?.text()).toContain('Keep: p2.jpg')
+    expect(summary?.text()).toContain('2 other photos will go to the Trash after confirmation.')
+    await radios()[0]?.trigger('click')
+    expect(summary?.text()).toContain('Keep: p1.jpg')
+    expect(engine.trashAssets).not.toHaveBeenCalled()
+    await mountWith(exact)
+    expect(wrapper?.get('[role="toolbar"]').text()).toContain(
+      '1 extra file will go to the Recycle Bin after confirmation.',
+    )
+    expect(engine.deleteCopies).not.toHaveBeenCalled()
+  })
+
+  it('returns focus to the Review trigger after cancelling the modal', async () => {
+    await mountWith(similar(2))
+    const trigger = wrapper?.get<HTMLButtonElement>('[data-review]').element
+    if (!trigger) throw new Error('the group has no Review action')
+    trigger.focus()
+    await review()
+    await reviewDialog().get('[data-review-cancel]').trigger('click')
+    await flushPromises()
+    expect(opened()).toBe(false)
+    expect(document.activeElement).toBe(trigger)
+    expect(engine.trashAssets).not.toHaveBeenCalled()
+    expect(engine.deleteCopies).not.toHaveBeenCalled()
+  })
+
+  it('uses the same confirmation when a group is reviewed from the command registry', async () => {
+    await mountWith(similar(2))
+    const command = commands.value.find((entry) => entry.id.startsWith('duplicates.review.'))
+    if (!command) throw new Error('the group did not register its Review action')
+    expect(await runCommand(command.id)).toBe(true)
+    await flushPromises()
+    expect(opened()).toBe(true)
+    expect(reviewDialog().get('.keeps').text()).toBe('C:\\Photos\\p2.jpg')
+    expect(engine.trashAssets).not.toHaveBeenCalled()
+    await confirm()
+    expect(engine.trashAssets).toHaveBeenCalledExactlyOnceWith([1, 3])
+    wrapper?.unmount()
+    wrapper = undefined
+    expect(commands.value.some((entry) => entry.id === command.id)).toBe(false)
   })
 })

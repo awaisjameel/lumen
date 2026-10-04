@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ErrorCode, logUIError } from '../bridge'
 import type * as Bridge from '../bridge'
-import { errorText, logError, notice, reportUnexpected } from './errors'
+import { ERROR_NOTIFICATION, errorText, logError, reportUnexpected } from './errors'
+import { dismiss } from './notify'
+import { recordNotifications } from './testing'
+import type { RecordedNotifications } from './testing'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -33,7 +36,9 @@ it('shows the message of other failures, and of codes it does not know', () => {
 })
 
 describe('failures reach Lumen’s log', () => {
+  let notified: RecordedNotifications
   beforeEach(() => {
+    notified = recordNotifications()
     vi.useFakeTimers()
     vi.mocked(logUIError).mockClear()
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
@@ -41,7 +46,7 @@ describe('failures reach Lumen’s log', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
-    notice.value = ''
+    notified.stop()
   })
 
   it('logs a failure once a minute at most, however often it repeats', () => {
@@ -67,11 +72,14 @@ describe('failures reach Lumen’s log', () => {
 
   it('says something went wrong when a bug surfaces, unless asked only to log it', () => {
     reportUnexpected(new TypeError('x is undefined'), 'vue: render function')
-    expect(notice.value).toBe('Something went wrong. Lumen saved the details in its log.')
+    expect(notified.find(ERROR_NOTIFICATION)).toMatchObject({
+      kind: 'error',
+      title: 'Something went wrong. Lumen saved the details in its log.',
+    })
     expect(logUIError).toHaveBeenCalledWith(expect.objectContaining({ where: 'vue: render function' }))
-    notice.value = ''
+    dismiss(ERROR_NOTIFICATION)
     reportUnexpected('ResizeObserver loop completed with undelivered notifications', 'window', false)
-    expect(notice.value).toBe('')
+    expect(notified.shown).toEqual([])
     expect(logUIError).toHaveBeenCalledTimes(2)
   })
 
@@ -79,6 +87,6 @@ describe('failures reach Lumen’s log', () => {
     const { CancelError } = await vi.importActual<{ CancelError: new (message: string) => Error }>('@wailsio/runtime')
     reportUnexpected(new CancelError('superseded'), 'promise')
     expect(logUIError).not.toHaveBeenCalled()
-    expect(notice.value).toBe('')
+    expect(notified.shown).toEqual([])
   })
 })

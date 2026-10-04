@@ -4,6 +4,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DayBucket } from '../bridge'
 import { monthLabel } from '../shared/format'
+import { observeResize } from '../shared/observeResize'
 import { rowAt } from './layout'
 import type { Layout } from './layout'
 
@@ -82,16 +83,13 @@ function up() {
 }
 
 // Measure once mounted and whenever the window resizes.
-const ro = new ResizeObserver(() => {
-  if (track.value) trackH.value = track.value.clientHeight
-})
+let stopResize: (() => void) | undefined
 onMounted(() => {
-  if (track.value) {
-    ro.observe(track.value)
-    trackH.value = track.value.clientHeight
-  }
+  stopResize = observeResize(track.value ? [track.value] : [], () => {
+    if (track.value) trackH.value = track.value.clientHeight
+  })
 })
-onBeforeUnmount(() => ro.disconnect())
+onBeforeUnmount(() => stopResize?.())
 </script>
 
 <template>
@@ -129,9 +127,9 @@ onBeforeUnmount(() => ro.disconnect())
   position: absolute;
   right: 12px;
   transform: translateY(-2px);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
-  color: var(--text-3);
+  color: var(--ui-text-dimmed);
   pointer-events: none;
 }
 .dot {
@@ -140,7 +138,7 @@ onBeforeUnmount(() => ro.disconnect())
   width: 3px;
   height: 3px;
   border-radius: 50%;
-  background: var(--text-3);
+  background: var(--ui-text-dimmed);
   opacity: 0.5;
   pointer-events: none;
 }
@@ -149,7 +147,7 @@ onBeforeUnmount(() => ro.disconnect())
   right: 8px;
   width: 28px;
   height: 2px;
-  background: var(--accent);
+  background: var(--ui-primary);
   border-radius: 1px;
   pointer-events: none;
 }
@@ -158,10 +156,12 @@ onBeforeUnmount(() => ro.disconnect())
   right: 48px;
   transform: translateY(-50%);
   padding: 4px 10px;
-  border-radius: var(--radius-m);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  font-size: 12px;
+  border-radius: calc(var(--ui-radius) * 1.5);
+  border: 1px solid var(--ui-border);
+  background: var(--ui-bg);
+  color: var(--ui-text-highlighted);
+  box-shadow: var(--lumen-shadow);
+  font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
   pointer-events: none;

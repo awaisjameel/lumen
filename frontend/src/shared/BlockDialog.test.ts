@@ -1,47 +1,55 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
+import type { VueWrapper } from '@vue/test-utils'
+import { mountInApp, recordNotifications } from './testing'
+import type { RecordedNotifications } from './testing'
+import { t } from './i18n'
 import { BlockKind, BlockMode, engine } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { BlockChange } from '../bridge'
-import { block, blockRequest, blockUndo, clearBlockUndo } from './block'
+import { block, blockRequest, BLOCK_UNDO_NOTIFICATION } from './block'
 import BlockDialog from './BlockDialog.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
-  engine: { blockPINConfigured: vi.fn(), setBlock: vi.fn(), blockFace: vi.fn() },
+  engine: { blockPINConfigured: vi.fn(), setBlock: vi.fn(), blockFace: vi.fn(), undoBlock: vi.fn() },
 }))
 
 function deferred<T>() {
-  let resolve!: (value: T) => void
+  let resolve: (value: T) => void = () => {
+    throw new Error('the promise has no resolver')
+  }
   const promise = new Promise<T>((done) => (resolve = done))
   return { promise, resolve }
 }
 
-let wrapper: ReturnType<typeof mount> | undefined
+let wrapper: VueWrapper | undefined
+let notifications: RecordedNotifications
+const body = new DOMWrapper(document.body)
 
 function mountDialog() {
-  const mounted = mount(BlockDialog)
-  const dialog = mounted.get<HTMLDialogElement>('dialog').element
-  dialog.showModal = vi.fn(() => {
-    dialog.open = true
-  })
-  dialog.close = vi.fn(() => {
-    dialog.open = false
-  })
-  return mounted
+  return mountInApp(BlockDialog)
 }
 
+async function choose(label: string) {
+  const field = body.findAll('label').find((item) => item.text() === label)
+  const id = field?.attributes('for')
+  if (!id) throw new Error(`the dialog has no radio labelled ${label}`)
+  await body.get(`[id="${id}"][role="radio"]`).trigger('click')
+}
 beforeEach(() => {
   setActivePinia(createPinia())
+  notifications = recordNotifications()
   vi.mocked(engine.blockPINConfigured).mockReset().mockResolvedValue(true)
   vi.mocked(engine.setBlock).mockReset()
   vi.mocked(engine.blockFace).mockReset()
+  vi.mocked(engine.undoBlock).mockReset().mockResolvedValue(undefined)
 })
 afterEach(() => {
   blockRequest.value?.answer(false)
   blockRequest.value = null
-  clearBlockUndo()
+  notifications.stop()
   wrapper?.unmount()
   wrapper = undefined
 })
@@ -52,15 +60,15 @@ it('does not close a replacement request when an earlier save completes', async 
   wrapper = mountDialog()
   const first = block(BlockKind.BlockTag, 1, 'First')
   await flushPromises()
-  await wrapper.get('form').trigger('submit')
+  await body.get('[data-block-form]').trigger('submit')
   const second = block(BlockKind.BlockTag, 2, 'Second')
   await flushPromises()
   pending.resolve({ id: 3, created: true })
   await flushPromises()
   expect(await first).toBe(false)
   expect(blockRequest.value?.targetID).toBe(2)
-  expect(wrapper.text()).toContain('Second')
-  await wrapper.get('button[type="button"]').trigger('click')
+  expect(body.text()).toContain('Second')
+  await body.get('[data-block="cancel"]').trigger('click')
   expect(await second).toBe(false)
 })
 
@@ -74,9 +82,9 @@ it('does not apply stale PIN configuration to a replacement request', async () =
   await flushPromises()
   pending.resolve(false)
   await flushPromises()
-  expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+  expect(body.find('input[type="password"]').exists()).toBe(false)
   expect(blockRequest.value?.targetID).toBe(2)
-  await wrapper.get('button[type="button"]').trigger('click')
+  await body.get('[data-block="cancel"]').trigger('click')
   expect(await first).toBe(false)
   expect(await second).toBe(false)
 })
@@ -86,14 +94,18 @@ it('blocks just one face by default, and offers Undo for the new block', async (
   wrapper = mountDialog()
   const saved = block(BlockKind.BlockFace, 11, 'Ali')
   await flushPromises()
-  expect(wrapper.text()).toContain('Only this face')
-  expect(wrapper.text()).toContain('This face and look-alikes')
-  await wrapper.get('form').trigger('submit')
+  expect(body.text()).toContain('Only this face')
+  expect(body.text()).toContain('This face and look-alikes')
+  await body.get('[data-block-form]').trigger('submit')
   await flushPromises()
   expect(await saved).toBe(true)
   expect(engine.blockFace).toHaveBeenCalledWith(11, BlockMode.BlockPhotos, false)
   expect(engine.setBlock).not.toHaveBeenCalled()
-  expect(blockUndo.value).toEqual({ id: 9, name: 'Ali' })
+  expect(notifications.find(BLOCK_UNDO_NOTIFICATION)?.title).toBe(t('blocked.saved', { name: 'Ali' }))
+  expect(notifications.find(BLOCK_UNDO_NOTIFICATION)?.actions?.[0]?.label).toBe(t('blocked.undo'))
+  notifications.find(BLOCK_UNDO_NOTIFICATION)?.actions?.[0]?.run()
+  await flushPromises()
+  expect(engine.undoBlock).toHaveBeenCalledExactlyOnceWith(9)
 })
 
 it('blocks the face and its look-alikes in label mode when the user chooses so', async () => {
@@ -101,14 +113,9 @@ it('blocks the face and its look-alikes in label mode when the user chooses so',
   wrapper = mountDialog()
   const saved = block(BlockKind.BlockFace, 11, 'this face')
   await flushPromises()
-  const radios = wrapper.findAll<HTMLInputElement>('input[type="radio"]')
-  const choose = async (label: string) => {
-    const radio = radios.find((r) => r.element.parentElement?.textContent === label)
-    await radio?.setValue(true)
-  }
   await choose('This face and look-alikes')
   await choose('Label only')
-  await wrapper.get('form').trigger('submit')
+  await body.get('[data-block-form]').trigger('submit')
   await flushPromises()
   expect(await saved).toBe(true)
   expect(engine.blockFace).toHaveBeenCalledWith(11, BlockMode.BlockLabel, true)
@@ -120,25 +127,42 @@ it('does not offer the face choice for other kinds of block, nor keep it for the
   wrapper = mountDialog()
   const tag = block(BlockKind.BlockTag, 1, 'Cat')
   await flushPromises()
-  expect(wrapper.text()).not.toContain('look-alikes')
-  await wrapper.get('form').trigger('submit')
+  expect(body.text()).not.toContain('look-alikes')
+  await body.get('[data-block-form]').trigger('submit')
   await flushPromises()
   expect(await tag).toBe(true)
   expect(engine.setBlock).toHaveBeenCalledWith(BlockKind.BlockTag, 1, '', BlockMode.BlockPhotos)
+  expect(notifications.find(BLOCK_UNDO_NOTIFICATION)).toBeUndefined()
 
   const first = block(BlockKind.BlockFace, 11, 'Ali')
   await flushPromises()
-  await wrapper
-    .findAll<HTMLInputElement>('input[type="radio"]')
-    .find((r) => r.element.value === 'true')
-    ?.setValue(true)
-  await wrapper.get('form').trigger('submit')
+  await choose(t('blocked.faceLookalikes'))
+  await body.get('[data-block-form]').trigger('submit')
   await flushPromises()
   expect(await first).toBe(true)
   const second = block(BlockKind.BlockFace, 12, 'Sara')
   await flushPromises()
-  await wrapper.get('form').trigger('submit')
+  await body.get('[data-block-form]').trigger('submit')
   await flushPromises()
   expect(await second).toBe(true)
   expect(vi.mocked(engine.blockFace).mock.calls.map((c) => c[2])).toEqual([true, false])
+  expect(notifications.find(BLOCK_UNDO_NOTIFICATION)).toBeUndefined()
+})
+
+it('returns focus to the initiating control when the modal is cancelled', async () => {
+  const trigger = document.createElement('button')
+  document.body.append(trigger)
+  try {
+    trigger.focus()
+    wrapper = mountDialog()
+    const saved = block(BlockKind.BlockTag, 1, 'Cat')
+    await flushPromises()
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
+    await body.get('[data-block="cancel"]').trigger('click')
+    expect(await saved).toBe(false)
+    await flushPromises()
+    expect(document.activeElement).toBe(trigger)
+  } finally {
+    trigger.remove()
+  }
 })

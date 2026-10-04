@@ -339,11 +339,15 @@ func TestDeleteFromDiskWaitsForACopyDeletionInProgress(t *testing.T) {
 		}
 	}()
 	<-slow.entered
+	sel, err := f.svc.TrashSelection(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		if _, err := f.svc.DeleteAllTrashFromDisk(ctx); err != nil {
-			t.Errorf("DeleteAllTrashFromDisk: %v", err)
+		if _, err := f.svc.DeleteFromDisk(ctx, sel); err != nil {
+			t.Errorf("DeleteFromDisk: %v", err)
 		}
 	}()
 	time.Sleep(200 * time.Millisecond)

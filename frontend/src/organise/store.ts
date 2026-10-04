@@ -90,22 +90,28 @@ export const useOrganise = defineStore('organise', () => {
     }
   }
 
-  /** A preview no longer matches the scheme or folder being edited. */
+  /** A preview no longer matches the scheme or folder being edited; one being worked out is abandoned. */
+  let planRevision = 0
   function discardPlan() {
+    planRevision++
     plan.value = null
+    planning.value = false
   }
 
   /** Works out the moves the scheme would make (a dry run: nothing moves). */
   async function preview() {
+    const revision = ++planRevision
     planning.value = true
     error.value = ''
     try {
-      plan.value = await engine.planOrganise(template.value, sourceId.value)
+      const planned = await engine.planOrganise(template.value, sourceId.value)
+      if (revision === planRevision) plan.value = planned
     } catch (e) {
+      if (revision !== planRevision) return
       plan.value = null
       error.value = errorText(e)
     } finally {
-      planning.value = false
+      if (revision === planRevision) planning.value = false
     }
   }
 

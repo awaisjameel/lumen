@@ -1,44 +1,28 @@
 <script setup lang="ts">
-// The "Find text in screenshots and documents" toggle. Off by default. Its
-// saves are queued in the library store, so they stay in order across
-// remounts.
+// Saves remain in the library store so rapid choices survive remounts.
+import USwitch from '@nuxt/ui/components/Switch.vue'
 import { useLibrary } from '../library/store'
 import { t } from '../shared/i18n'
+import PrefRow from '../shared/PrefRow.vue'
+import { useSaveFeedback } from './saveFeedback'
 
 const lib = useLibrary()
-
-function toggle(e: Event) {
-  if (e.target instanceof HTMLInputElement) void lib.saveOCR(e.target.checked)
-}
+const { save, hint } = useSaveFeedback(() => lib.settingErrors.ocr)
 </script>
-
 <template>
-  <label class="toggle">
-    <input type="checkbox" :checked="lib.settings.ocr" @change="toggle" />
-    <span>
-      {{ t('settings.ocr') }}
-      <small class="muted">{{ t('settings.ocrHint') }}</small>
-    </span>
-  </label>
+  <PrefRow
+    :label="t('settings.ocr')"
+    :description="t('settings.ocrHint')"
+    :error="lib.settingErrors.ocr"
+    :hint="hint('ocr')"
+  >
+    <template #default="{ labelledBy, describedBy }">
+      <USwitch
+        :model-value="lib.settings.ocr"
+        :aria-labelledby="labelledBy"
+        :aria-describedby="describedBy"
+        @update:model-value="(value) => save('ocr', () => lib.saveOCR(value))"
+      />
+    </template>
+  </PrefRow>
 </template>
-
-<style scoped>
-.toggle {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 8px 0;
-  cursor: pointer;
-}
-
-.toggle input {
-  accent-color: var(--accent);
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-}
-
-.toggle small {
-  display: block;
-}
-</style>

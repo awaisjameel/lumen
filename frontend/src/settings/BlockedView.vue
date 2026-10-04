@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import UAlert from '@nuxt/ui/components/Alert.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import USwitch from '@nuxt/ui/components/Switch.vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   BLOCK_UNLOCK_IDLE_MINUTES,
   BlockKind,
@@ -12,14 +15,22 @@ import {
 } from '../bridge'
 import type { Block } from '../bridge'
 import { showBlocksChanged } from '../shared/block'
+import { icons } from '../design/icons'
+import { registerCommands, runCommand, useCommands } from '../shared/commands'
+import type { Command } from '../shared/commands'
 import { confirm } from '../shared/confirm'
 import { errorText, reportError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import PinFields from '../shared/PinFields.vue'
+import Page from '../shared/Page.vue'
+import PageHeader from '../shared/PageHeader.vue'
+import FeatureState from '../shared/FeatureState.vue'
+import Icon from '../shared/Icon.vue'
 import CoveredBrowser from './CoveredBrowser.vue'
 import { useCoveredPhotos } from './covered'
 
 const configured = ref(true)
+const loading = ref(true)
 const unlocked = ref(false)
 const pin = ref('')
 const confirmPIN = ref('')
@@ -30,6 +41,7 @@ const resetting = ref(false) // the forgotten-PIN form is open
 const changed = ref(false) // the PIN was just reset: say so above the unlock form
 const unlockForm = ref<HTMLFormElement | null>(null)
 const resetForm = ref<HTMLFormElement | null>(null)
+const blockList = ref<HTMLElement | null>(null)
 let active = true
 let idleTimer = 0
 let sessionRevision = 0
@@ -100,6 +112,8 @@ onMounted(async () => {
     if (isActive()) configured.value = got
   } catch (e) {
     failed(e)
+  } finally {
+    if (isActive()) loading.value = false
   }
 })
 onBeforeUnmount(() => {
@@ -238,110 +252,220 @@ function kindName(kind: BlockKind): string {
   }
   return kind
 }
+
+useCommands([
+  {
+    id: 'blocked.lock',
+    group: 'view',
+    title: () => t('blocked.lock'),
+    icon: 'lock',
+    available: () => unlocked.value,
+    run: expire,
+  },
+])
+
+let removeBlockCommands: () => void = () => undefined
+watch(
+  blocks,
+  (items) => {
+    removeBlockCommands()
+    const commands: Command[] = items.flatMap((item) => [
+      {
+        id: `blocked.mode.${item.id}`,
+        group: 'library',
+        title: () => t('blocked.actionFor', { action: t('blocked.switchMode'), name: item.name }),
+        icon: 'refresh',
+        available: () =>
+          unlocked.value && !covered.block && item.kind !== BlockKind.BlockAsset && item.kind !== BlockKind.BlockFolder,
+        enabled: () => !busy.value,
+        run: () => changeMode(item),
+      },
+      {
+        id: `blocked.show.${item.id}`,
+        group: 'view',
+        title: () => t('blocked.actionFor', { action: t('covered.show'), name: item.name }),
+        icon: 'eye',
+        available: () => unlocked.value && !covered.block,
+        enabled: () => !busy.value,
+        run: () => covered.open(item),
+      },
+      {
+        id: `blocked.unblock.${item.id}`,
+        group: 'library',
+        title: () => t('blocked.actionFor', { action: t('blocked.unblock'), name: item.name }),
+        icon: 'unlock',
+        available: () => unlocked.value && !covered.block,
+        enabled: () => !busy.value,
+        run: () => unblock(item),
+      },
+    ])
+    removeBlockCommands = registerCommands(commands)
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => removeBlockCommands())
+
+// The browser replaces its trigger's list; once that list is back, restore
+// focus to the same block rather than leaving it on the document body.
+watch(
+  () => covered.block?.id,
+  (id, previous) => {
+    if (id !== undefined || previous === undefined) return
+    void nextTick(() => {
+      if (unlocked.value) blockList.value?.querySelector<HTMLElement>(`[data-block-id="${previous}"]`)?.focus()
+    })
+  },
+)
 </script>
 
 <template>
-  <div class="page">
-    <header class="topbar">
-      <h1>{{ t('blocked.title') }}</h1>
-    </header>
-    <div class="page-body">
-      <RouterLink to="/settings" class="btn btn-subtle">{{ t('blocked.back') }}</RouterLink>
-      <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-      <form v-if="!unlocked && !resetting" ref="unlockForm" class="unlock" @submit.prevent="unlock">
-        <p v-if="changed" role="status">{{ t('blocked.pinChanged') }}</p>
-        <p v-if="configured">{{ t('blocked.enterPINHint') }}</p>
-        <p v-else>{{ t('blocked.createPINHint', { pinMin: PIN_MIN_LEN, pinMax: PIN_MAX_LEN }) }}</p>
-        <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" :creating="!configured" />
-        <div class="actions">
-          <button class="btn btn-primary" :disabled="busy">{{ t('blocked.unlock') }}</button>
-          <button v-if="configured" type="button" class="btn btn-subtle" :disabled="busy" @click="openReset">
-            {{ t('blocked.forgotPIN') }}
-          </button>
-        </div>
-      </form>
-      <form v-else-if="resetting" ref="resetForm" class="unlock" @submit.prevent="reset">
-        <p>{{ t('blocked.resetHint') }}</p>
-        <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" creating />
-        <div class="actions">
-          <button class="btn btn-primary" :disabled="busy">{{ t('blocked.reset') }}</button>
-          <button type="button" class="btn btn-subtle" :disabled="busy" @click="closeReset">
-            {{ t('blocked.resetCancel') }}
-          </button>
-        </div>
-      </form>
-      <CoveredBrowser v-else-if="covered.block" :covered="covered" />
-      <template v-else>
-        <p class="muted">{{ t('blocked.privacy') }}</p>
-        <ul v-if="blocks.length" class="list">
-          <li v-for="item in blocks" :key="item.id">
-            <div class="item-name">
-              <strong>{{ item.name }}</strong
-              ><small
-                >{{ kindName(item.kind) }} ·
-                {{ t(item.mode === BlockMode.BlockPhotos ? 'blocked.labelPhotos' : 'blocked.labelOnly') }}</small
-              >
-            </div>
-            <button
-              v-if="item.kind !== BlockKind.BlockAsset && item.kind !== BlockKind.BlockFolder"
-              class="btn"
-              :disabled="busy"
-              @click="changeMode(item)"
+  <Page>
+    <template #header>
+      <PageHeader :title="t('blocked.title')" :back="{ to: '/settings', label: t('blocked.back') }">
+        <UButton v-if="unlocked" :icon="icons.lock" @click="runCommand('blocked.lock')">{{
+          t('blocked.lock')
+        }}</UButton>
+      </PageHeader>
+    </template>
+    <UAlert v-if="error" data-blocked-error color="error" variant="subtle" :title="error" role="alert" class="mb-4" />
+    <FeatureState v-if="loading" kind="loading" :title="t('blocked.loading')" />
+    <form v-else-if="!unlocked && !resetting" ref="unlockForm" class="pin-form lumen-surface" @submit.prevent="unlock">
+      <Icon name="lock" :size="32" />
+      <h2>{{ t(configured ? 'blocked.locked' : 'blocked.createPIN') }}</h2>
+      <p v-if="changed" role="status">{{ t('blocked.pinChanged') }}</p>
+      <p class="text-muted">
+        {{
+          configured
+            ? t('blocked.enterPINHint')
+            : t('blocked.createPINHint', { pinMin: PIN_MIN_LEN, pinMax: PIN_MAX_LEN })
+        }}
+      </p>
+      <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" :creating="!configured" />
+      <div class="flex flex-wrap gap-2">
+        <UButton type="submit" color="primary" variant="solid" :disabled="busy" :loading="busy">{{
+          t('blocked.unlock')
+        }}</UButton>
+        <UButton
+          v-if="configured"
+          type="button"
+          data-blocked="forgot"
+          variant="ghost"
+          :disabled="busy"
+          @click="openReset"
+          >{{ t('blocked.forgotPIN') }}</UButton
+        >
+      </div>
+    </form>
+    <form v-else-if="resetting" ref="resetForm" class="pin-form lumen-surface" @submit.prevent="reset">
+      <Icon name="key" :size="32" />
+      <h2>{{ t('blocked.forgotPIN') }}</h2>
+      <p class="text-muted">{{ t('blocked.resetHint') }}</p>
+      <PinFields v-model:pin="pin" v-model:confirm="confirmPIN" creating />
+      <div class="flex flex-wrap gap-2">
+        <UButton type="submit" color="primary" variant="solid" :disabled="busy" :loading="busy">{{
+          t('blocked.reset')
+        }}</UButton>
+        <UButton type="button" data-blocked="cancel-reset" variant="ghost" :disabled="busy" @click="closeReset">{{
+          t('blocked.resetCancel')
+        }}</UButton>
+      </div>
+    </form>
+    <CoveredBrowser v-else-if="covered.block" :covered="covered" />
+    <template v-else>
+      <UAlert color="neutral" variant="subtle" :icon="icons.info" :title="t('blocked.privacy')" />
+      <ul v-if="blocks.length" ref="blockList" class="list">
+        <li v-for="item in blocks" :key="item.id" class="block-entry">
+          <div class="item-name">
+            <strong>{{ item.name }}</strong>
+            <small
+              >{{ kindName(item.kind) }} ·
+              {{ t(item.mode === BlockMode.BlockPhotos ? 'blocked.labelPhotos' : 'blocked.labelOnly') }}</small
             >
-              {{ t('blocked.switchMode') }}
-            </button>
-            <button class="btn" :disabled="busy" @click="covered.open(item)">{{ t('covered.show') }}</button>
-            <button class="btn" :disabled="busy" @click="unblock(item)">{{ t('blocked.unblock') }}</button>
-          </li>
-        </ul>
-        <p v-else>{{ t('blocked.empty') }}</p>
-      </template>
-    </div>
-  </div>
+          </div>
+          <div class="block-actions">
+            <USwitch
+              v-if="item.kind !== BlockKind.BlockAsset && item.kind !== BlockKind.BlockFolder"
+              data-blocked="mode"
+              :model-value="item.mode === BlockMode.BlockPhotos"
+              :label="t('blocked.labelPhotos')"
+              :aria-label="t('blocked.actionFor', { action: t('blocked.switchMode'), name: item.name })"
+              :disabled="busy"
+              @update:model-value="runCommand(`blocked.mode.${item.id}`)"
+            />
+            <UButton
+              data-blocked="show"
+              :data-block-id="item.id"
+              :icon="icons.eye"
+              :disabled="busy"
+              @click="runCommand(`blocked.show.${item.id}`)"
+              >{{ t('covered.show') }}</UButton
+            >
+            <UButton
+              data-blocked="unblock"
+              :icon="icons.unlock"
+              :disabled="busy"
+              @click="runCommand(`blocked.unblock.${item.id}`)"
+              >{{ t('blocked.unblock') }}</UButton
+            >
+          </div>
+        </li>
+      </ul>
+      <FeatureState v-else kind="empty" icon="blocked" :title="t('blocked.empty')" />
+    </template>
+  </Page>
 </template>
 
 <style scoped>
-.unlock {
+.pin-form {
   display: grid;
-  justify-items: start;
-  gap: 10px;
-  max-width: 360px;
-  margin-top: 20px;
+  gap: 1rem;
+  max-width: 28rem;
+  margin: 1rem auto;
+  padding: 1.5rem;
+  border: 1px solid var(--ui-border);
+  border-radius: calc(var(--ui-radius) * 2);
+  background: var(--ui-bg-muted);
 }
-
-.unlock :deep(.field) {
-  width: 100%;
+h2,
+p {
+  margin: 0;
 }
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+h2 {
+  color: var(--ui-text-highlighted);
+  font-size: 1.125rem;
+  font-weight: 600;
 }
-
 .list {
   list-style: none;
   padding: 0;
-  margin: 20px 0;
+  margin: 1rem 0;
 }
-
-.list li {
+.block-entry {
   display: flex;
   align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid var(--border);
-  padding: 12px 0;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--ui-border);
+  padding: 0.75rem 0;
 }
-
 .item-name {
   display: grid;
-  gap: 3px;
-  flex: 1;
+  gap: 0.25rem;
+  flex: 1 1 12rem;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-
 .item-name small {
-  color: var(--text-2);
+  color: var(--ui-text-muted);
+}
+.block-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+@container (max-width: 40rem) {
+  .block-actions {
+    width: 100%;
+  }
 }
 </style>

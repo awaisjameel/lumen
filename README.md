@@ -67,13 +67,24 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 - **Performance pass** ([docs/performance-2026-10-03.md](docs/performance-2026-10-03.md)), measured in the real app: cold start to a usable grid in about a second, 60 fps scrolling, searches in 120–200 ms once the text model is loaded, 454 MB in all when idle. On mains power 3,000 photos are browsable in 55 s and fully understood in 264 s on the integrated GPU, with indexing on half the processor.
 - Onboarding, empty states and the beta guide for testers ([docs/beta-testing.md](docs/beta-testing.md)). Design and decisions: [docs/phase6-design-2026-10-03.md](docs/phase6-design-2026-10-03.md).
 
-**Next development is planned:** a complete Nuxt UI frontend and shared
-design system, richer image/video viewing and file tools, RAW/DNG-first
-format support, expanded customisation, and individual/bulk lossless image
-compression. The phased scope, architecture,
+**Phase 7 (the Nuxt UI frontend and design system)** is built
+([record](docs/phase7-design-2026-10-04.md), [baseline inventory](docs/phase7-inventory-2026-10-04.md), [implementation review](docs/phase7-review-2026-10-04.md)):
+
+- Every screen is rebuilt on Nuxt UI 4 and Tailwind CSS 4 inside the same standalone Vue app: one shell (resizable, collapsible sidebar; icon rail at medium width; navigation drawer when narrow), one page header, one set of loading, empty and failure states, one card, tile, selection bar and settings row.
+- Design tokens for light and dark themes, six accent colours, comfortable and compact density and a 90–130 % text size, all in Settings → Appearance. They are saved with the library (SQLite), not in the WebView; an older Lumen's theme and thumbnail size are carried over once.
+- A command registry behind toolbars, menus, shortcuts and the command palette (Ctrl+K); a shortcut reference (`?`); one overlay coordinator; one notification channel (toasts, with Undo).
+- Icons, fonts and styles are local: the build bundles only the icons the manifest names, and nothing is ever fetched. Reduced motion and Windows contrast themes are honoured.
+- Contracts for later phases: per-asset media capabilities (`AssetDetail.caps`), the typed preference contract, and feasibility records for [RAW and rendered images](docs/phase7-media-feasibility-2026-10-04.md) and [the updater](docs/phase7-updater-feasibility-2026-10-04.md). No updater exists yet and Lumen still makes no network request.
+
+**Next development is planned:** richer image/video viewing and file tools,
+RAW/DNG-first format support, expanded customisation, individual/bulk
+lossless image compression, and automatic update checking with background
+preparation and a user-approved restart. The updater's limited network exception and
+recovery design are in [the automatic update plan](docs/automatic-updates-plan-2026-10-04.md).
+The phased scope, architecture,
 migration rules and acceptance gates are in
 [the next development plan](docs/next-development-plan-2026-10-04.md).
-Implementation has not started.
+Phases 8–12 have not started.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
@@ -104,7 +115,7 @@ Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), what
 | Code     | Formatting       | Linting                                                                                                   | Config                                                                             |
 | -------- | ---------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | Go       | gofmt, goimports | golangci-lint 2.13 (vet, staticcheck, errcheck, gosec, errorlint, revive and more), deadcode, govulncheck | `.golangci.yml`                                                                    |
-| Frontend | Prettier 3.9     | ESLint 10 with typescript-eslint (strict, type-aware) and eslint-plugin-vue, plus `vue-tsc`               | `frontend/eslint.config.js`, `frontend/.prettierrc.json`, `frontend/tsconfig.json` |
+| Frontend | Prettier 3.9     | ESLint 10 with typescript-eslint (strict, type-aware) and eslint-plugin-vue, plus `vue-tsc`; import boundaries between `design`, `shared`, features and `app` | `frontend/eslint.config.js`, `frontend/.prettierrc.json`, `frontend/tsconfig.json` |
 | Python   | Ruff             | Ruff                                                                                                      | `ruff.toml`                                                                        |
 | Shell    |                  | ShellCheck                                                                                                |                                                                                    |
 
@@ -167,7 +178,10 @@ internal/parallel    the worker pool loops run on
 internal/testenv     finds deps/runtime for tests, skipping cleanly without it
 services/            Wails services (Library, Search, People, Media, System), the block gate, the loopback video server, error codes
 frontend/src/bridge  the only place the UI calls the engine
-frontend/src/{library,search,things,people,onboarding,settings,shared}   UI by feature
+frontend/src/design  design tokens (tokens.css), the icon manifest, how the appearance preferences are applied
+frontend/src/shared  compositions (Page, PageHeader, FeatureState, CollectionCard, MediaTile…), the preference store, command registry, overlay coordinator, notifications, i18n
+frontend/src/app     the shell: navigation, global overlays, command palette, shortcut reference; a development-only component showcase
+frontend/src/{library,search,things,people,onboarding,settings}   UI by feature
 frontend/src/albums  manual and smart album browser and rule editor
 frontend/src/{places,events}   GPS places and automatic event groups
 frontend/src/duplicates  exact-copy and similar-photo review, best copy pre-selected
@@ -175,7 +189,7 @@ frontend/src/trash   Trash actions and Undo
 frontend/src/organise  the organise-on-disk template, preview, progress and undo
 frontend/src/about   Settings → About Lumen, and the notice after a crash
 scripts/             deps.sh (native dependencies), prepare_models.py, env.sh, lint.sh, build_places.py, notices.py, installer_payload.py
-docs/                audits (dated records), the blocking note, the Phase 5 and 6 designs, GeoNames provenance, the beta guide
+docs/                audits (dated records), the blocking note, the Phase 5, 6 and 7 records, the development plans, GeoNames provenance, the beta guide
 build/windows/nsis   the installer (project.nsi; wails_tools.nsh is generated from build/config.yml)
 spikes/              Phase 0 experiments (own Go module; models in spikes/.cache)
 ```

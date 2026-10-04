@@ -13,6 +13,12 @@ build/android/gen/
 spikes/.cache
 spikes/out
 spikes/*.local
+# Phase 7 feasibility probes: generated fixtures, renders and the probe
+# binary are reproducible from the scripts beside them.
+spikes/phase7/fixtures/
+spikes/phase7/*.exe
+spikes/phase7/*.jpg
+spikes/phase7/*.png
 
 # Native dependencies and prepared models (scripts/deps.sh)
 deps/

@@ -1,5 +1,6 @@
 import { nextTick, ref, shallowRef } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
+import { whenPortalsClosed } from './overlay'
 
 type ElementRef = Element | ComponentPublicInstance | null
 
@@ -8,7 +9,9 @@ type ElementRef = Element | ComponentPublicInstance | null
  * person's): opening one focuses its field with the name selected, and
  * closing it (saved, cancelled with Escape) puts focus back on the control
  * that opened it, which is drawn again in the field's place. key says which
- * item is being renamed, for lists; a single editor uses one key.
+ * item is being renamed, for lists; a single editor uses one key. Opened
+ * from a menu or the command palette, the field takes the focus once that
+ * overlay has closed: while open it holds the focus itself.
  */
 export function useRename<K>() {
   const editing = shallowRef<K | null>(null)
@@ -33,6 +36,8 @@ export function useRename<K>() {
     editing.value = key
     draft.value = name
     await nextTick()
+    await whenPortalsClosed()
+    if (editing.value !== key) return // closed, or another opened, meanwhile
     field?.focus()
     field?.select()
   }

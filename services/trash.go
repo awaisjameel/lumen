@@ -17,6 +17,10 @@ import (
 // failing are already forgotten by the library; the others were not touched.
 var ErrDeleteFailed = errors.New("could not move the files to the Recycle Bin")
 
+// ErrTrashChanged means what the user confirmed for Delete from disk is no
+// longer in the Trash as it was: nothing was deleted.
+var ErrTrashChanged = errors.New("the Trash changed since it was confirmed")
+
 // recycler moves files to the Recycle Bin, saying what happened to each
 // (fileops.Recycle; tests pass a fake).
 type recycler func(ctx context.Context, paths []string) ([]fileops.Outcome, error)
@@ -54,11 +58,11 @@ func (s *LibraryService) TrashCount(ctx context.Context) (int, error) {
 	return s.store.TrashCount(ctx)
 }
 
-// TrashFileCount is how many files the trashed assets ids have on disk (an
-// asset with exact copies has several), or, with no ids, how many everything
-// in the Trash has: what Delete from disk will move to the Recycle Bin. Ids
-// that are not in the Trash are refused.
-func (s *LibraryService) TrashFileCount(ctx context.Context, ids []int64) (int, error) {
+// TrashSelection is what Delete from disk would take for the trashed assets
+// ids, or, with no ids, for everything in the Trash: the assets and how many
+// files they have (an asset with exact copies has several), for the user to
+// confirm. Ids that are not in the Trash are refused.
+func (s *LibraryService) TrashSelection(ctx context.Context, ids []int64) (core.TrashSelection, error) {
 	var files []store.TrashedFile
 	var err error
 	if len(ids) == 0 {
@@ -66,29 +70,36 @@ func (s *LibraryService) TrashFileCount(ctx context.Context, ids []int64) (int, 
 	} else {
 		files, err = s.store.TrashedFiles(ctx, ids)
 	}
-	return len(files), err
+	if err != nil {
+		return core.TrashSelection{}, err
+	}
+	sel := core.TrashSelection{Assets: []int64{}, Files: len(files)}
+	seen := make(map[int64]bool, len(files))
+	for _, f := range files {
+		if !seen[f.AssetID] {
+			seen[f.AssetID] = true
+			sel.Assets = append(sel.Assets, f.AssetID)
+		}
+	}
+	return sel, nil
 }
 
-// DeleteFromDisk moves the files of trashed assets to the Windows Recycle
-// Bin. Assets that are not in the Trash are refused.
-func (s *LibraryService) DeleteFromDisk(ctx context.Context, ids []int64) (core.DiskDeletion, error) {
+// DeleteFromDisk moves the files of a confirmed TrashSelection to the Windows
+// Recycle Bin. If any of its assets left the Trash, or their files are no
+// longer the number confirmed, it deletes nothing and fails with
+// ErrTrashChanged: what was trashed meanwhile is never taken unasked.
+func (s *LibraryService) DeleteFromDisk(ctx context.Context, sel core.TrashSelection) (core.DiskDeletion, error) {
 	s.recycling.Lock()
 	defer s.recycling.Unlock()
-	files, err := s.store.TrashedFiles(ctx, ids)
+	files, err := s.store.TrashedFiles(ctx, sel.Assets)
+	if errors.Is(err, store.ErrNotFound) {
+		return core.DiskDeletion{}, fmt.Errorf("%w: %w", ErrTrashChanged, err)
+	}
 	if err != nil {
 		return core.DiskDeletion{}, err
 	}
-	return s.recycleFiles(ctx, files)
-}
-
-// DeleteAllTrashFromDisk moves the files of everything in the Trash to the
-// Windows Recycle Bin.
-func (s *LibraryService) DeleteAllTrashFromDisk(ctx context.Context) (core.DiskDeletion, error) {
-	s.recycling.Lock()
-	defer s.recycling.Unlock()
-	files, err := s.store.AllTrashedFiles(ctx)
-	if err != nil {
-		return core.DiskDeletion{}, err
+	if len(files) != sel.Files {
+		return core.DiskDeletion{}, fmt.Errorf("%w: %d files, %d confirmed", ErrTrashChanged, len(files), sel.Files)
 	}
 	return s.recycleFiles(ctx, files)
 }

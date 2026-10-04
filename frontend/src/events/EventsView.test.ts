@@ -1,10 +1,14 @@
+import { t } from '../shared/i18n'
+import { mountInApp } from '../shared/testing'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import { BlockKind, engine, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event } from '../bridge'
 import { blockRequest, showBlocksChanged } from '../shared/block'
+import { commands, runCommand } from '../shared/commands'
 import EventsView from './EventsView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -24,7 +28,7 @@ const trip: Event = {
   placeId: 0,
   pinned: false,
 }
-let wrapper: ReturnType<typeof mount> | undefined
+let wrapper: ReturnType<typeof mountInApp> | undefined
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -41,24 +45,21 @@ afterEach(() => {
 })
 
 async function mounted() {
-  wrapper = mount(EventsView, {
-    attachTo: document.body,
-    global: { stubs: { SearchBox: true, RouterLink: { template: '<a><slot /></a>' } } },
-  })
+  wrapper = mountInApp(EventsView, { plugins: [testRouter()] })
   await flushPromises()
   return wrapper
 }
 
 it('focuses the name to edit, and Escape puts focus back on the pencil', async () => {
   const w = await mounted()
-  await w.get('button.icon-btn').trigger('click')
+  await menuAction(w, `Rename ${trip.name}`)
   await flushPromises()
   const input = w.get<HTMLInputElement>('form.rename input').element
   expect(document.activeElement).toBe(input)
   await w.get('form.rename').trigger('keydown', { key: 'Escape' })
   await flushPromises()
   expect(w.find('form.rename').exists()).toBe(false)
-  expect(document.activeElement).toBe(w.get('button.icon-btn').element)
+  expect(document.activeElement).toBe(w.get('button[aria-label^="Actions for"]').element)
 })
 
 it('keeps a rename failure on screen while the list reloads around it', async () => {
@@ -69,7 +70,7 @@ it('keeps a rename failure on screen while the list reloads around it', async ()
   })
   vi.mocked(engine.setEventName).mockRejectedValue(new Error('disk full'))
   const w = await mounted()
-  await w.get('button.icon-btn').trigger('click')
+  await menuAction(w, `Rename ${trip.name}`)
   await flushPromises()
   await w.get('form.rename').trigger('submit')
   await flushPromises()
@@ -83,7 +84,7 @@ it('keeps a rename failure on screen while the list reloads around it', async ()
 
 it('validates emoji names by code point and still allows resetting an overlong draft', async () => {
   const w = await mounted()
-  await w.get('button.icon-btn').trigger('click')
+  await menuAction(w, `Rename ${trip.name}`)
   await flushPromises()
   expect(w.get('form.rename input').attributes('maxlength')).toBeUndefined()
   await w.get('form.rename input').setValue('😀'.repeat(MAX_NAME_LEN + 1))
@@ -95,7 +96,7 @@ it('validates emoji names by code point and still allows resetting an overlong d
   await w.get('form.rename').trigger('submit')
   await flushPromises()
   expect(engine.setEventName).toHaveBeenCalledWith(trip.id, '😀'.repeat(MAX_NAME_LEN))
-  await w.get('button.icon-btn').trigger('click')
+  await menuAction(w, `Rename ${trip.name}`)
   await flushPromises()
   await w.get('form.rename input').setValue('😀'.repeat(MAX_NAME_LEN + 1))
   await w.findAll('form.rename button')[2]?.trigger('click')
@@ -110,7 +111,7 @@ it('discards a rename draft when its event disappears and later returns', async 
     return () => undefined
   })
   const w = await mounted()
-  await w.get('button.icon-btn').trigger('click')
+  await menuAction(w, `Rename ${trip.name}`)
   await w.get('form.rename input').setValue('Unsaved name')
   vi.mocked(engine.events).mockResolvedValue([])
   changed?.({ assets: true, thumbs: false, tags: false, people: false })
@@ -122,29 +123,29 @@ it('discards a rename draft when its event disappears and later returns', async 
   await vi.advanceTimersByTimeAsync(3000)
   await flushPromises()
   expect(w.find('form.rename').exists()).toBe(false)
-  await w.get('button.icon-btn').trigger('click')
+  await menuAction(w, `Rename ${trip.name}`)
   expect(w.get<HTMLInputElement>('form.rename input').element.value).toBe(trip.name)
 })
 
 it('pins an event, shows the pin and unpins it again', async () => {
   const w = await mounted()
-  expect(w.find('.pin-badge').exists()).toBe(false)
+  expect(w.find('[data-pinned]').exists()).toBe(false)
   vi.mocked(engine.events).mockResolvedValue([{ ...trip, pinned: true }])
-  await w.get(`button[aria-label="Pin ${trip.name}"]`).trigger('click')
+  await menuAction(w, `Pin ${trip.name}`)
   await flushPromises()
   expect(engine.setEventPinned).toHaveBeenCalledWith(7, true)
-  expect(w.get('.pin-badge').attributes('aria-label')).toBe('Pinned')
+  expect(w.get('[data-pinned]').attributes('aria-label')).toBe('Pinned')
   vi.mocked(engine.events).mockResolvedValue([trip])
-  await w.get(`button[aria-label="Unpin ${trip.name}"]`).trigger('click')
+  await menuAction(w, `Unpin ${trip.name}`)
   await flushPromises()
   expect(engine.setEventPinned).toHaveBeenLastCalledWith(7, false)
-  expect(w.find('.pin-badge').exists()).toBe(false)
+  expect(w.find('[data-pinned]').exists()).toBe(false)
 })
 
 it('says why a pin failed', async () => {
   vi.mocked(engine.setEventPinned).mockRejectedValue(new Error('disk full'))
   const w = await mounted()
-  await w.get(`button[aria-label="Pin ${trip.name}"]`).trigger('click')
+  await menuAction(w, `Pin ${trip.name}`)
   await flushPromises()
   expect(w.get('[role="alert"]').text()).toContain('disk full')
 })
@@ -152,7 +153,7 @@ it('says why a pin failed', async () => {
 it('offers to block an event through the shared block flow', async () => {
   const w = await mounted()
   expect(blockRequest.value).toBeNull()
-  await w.get(`button[aria-label="Block “${trip.name}”?"]`).trigger('click')
+  await menuAction(w, t('blocked.confirmTitle', { name: trip.name }))
   expect(blockRequest.value).toMatchObject({
     kind: BlockKind.BlockEvent,
     targetID: trip.id,
@@ -164,15 +165,15 @@ it('offers to block an event through the shared block flow', async () => {
 
 it('drops a blocked event from the list and shows it again when the block is undone', async () => {
   const w = await mounted()
-  expect(w.findAll('.group-card')).toHaveLength(1)
+  expect(w.findAll('.collection-card')).toHaveLength(1)
   vi.mocked(engine.events).mockResolvedValue([])
   await showBlocksChanged() // what the block dialog does once the block is saved
   await flushPromises()
-  expect(w.findAll('.group-card')).toHaveLength(0)
+  expect(w.findAll('.collection-card')).toHaveLength(0)
   vi.mocked(engine.events).mockResolvedValue([trip])
   await showBlocksChanged() // and what Undo, or unblocking, does
   await flushPromises()
-  expect(w.findAll('.group-card')).toHaveLength(1)
+  expect(w.findAll('.collection-card')).toHaveLength(1)
 })
 
 it('stops reloading for block changes once the view is gone', async () => {
@@ -183,3 +184,47 @@ it('stops reloading for block changes once the view is gone', async () => {
   await flushPromises()
   expect(engine.events).toHaveBeenCalledTimes(1)
 })
+
+it('shares event actions with the command palette and removes commands for hidden events', async () => {
+  const w = await mounted()
+  expect(commands.value.some((command) => command.id === 'event.7.pin')).toBe(true)
+  await runCommand('event.7.pin')
+  expect(engine.setEventPinned).toHaveBeenCalledWith(trip.id, true)
+  vi.mocked(engine.events).mockResolvedValue([])
+  await showBlocksChanged()
+  await flushPromises()
+  expect(commands.value.some((command) => command.id.startsWith('event.7.'))).toBe(false)
+  w.unmount()
+  expect(commands.value.some((command) => command.id.startsWith('events.'))).toBe(false)
+})
+
+function testRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { template: '<div />' } },
+      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
+        name,
+        path: `/${name}/:id?`,
+        component: { template: '<div />' },
+      })),
+    ],
+  })
+}
+
+vi.mock('../search/SearchBox.vue', () => ({ default: { render: () => null } }))
+
+async function menuAction(
+  _w: ReturnType<typeof mountInApp>,
+  label: string,
+  trigger = 'button[aria-label^="Actions for"]',
+) {
+  await new DOMWrapper(document.body).get(trigger).trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  const item = [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    (el) => el.textContent.trim() === label,
+  )
+  if (!item) throw new Error(`No menu item named ${label}`)
+  item.click()
+  await flushPromises()
+}

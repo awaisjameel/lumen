@@ -1,20 +1,24 @@
 # Lumen: frontend and media development plan
 
-Date: 4 October 2026. Status: planned; implementation has not started.
+Date: 4 October 2026. Status: Phase 7 is implemented (see
+[the Phase 7 record](phase7-design-2026-10-04.md)); Phases 8–12 are planned
+and not started.
 
 This plan covers the product owner's four requests: rebuild the complete
 frontend with the latest stable Nuxt UI, expand viewing and file tools,
 support more formats, and provide more useful customisation. The owner chose
 a calm, photo-focused visual direction and camera RAW/DNG as the first
 format priority. The owner also requested individual and bulk lossless
-image compression, specified in Phase 11 below.
+image compression, specified in Phase 11 below, and automatic update
+checking, background preparation and a prompted restart in Phase 12.
 Installation and reinstallation acceptance were reported
 as passed by the owner; the existing beta remains the regression baseline.
 
-The sequence below extends the roadmap with Phases 7–11. These are planned
+The sequence below extends the roadmap with Phases 7–12. These are planned
 development phases, not claims of completion or a decision to publish a
 new version. Existing Phase 5/6 decisions and AUDIT_CONVENTIONS.md still
-apply. Version numbering is settled when a release candidate is assembled.
+apply except the owner's explicit update-only network policy change in
+Phase 12. Version numbering is settled when a release candidate is assembled.
 
 ## 1. Architecture and scope
 
@@ -310,8 +314,10 @@ Define persistence contracts in 7A and add preferences alongside the
 features that use them. Phase 10 completes their settings experience and
 migration verification; it does not create a second settings store.
 
-The library's SQLite settings are the durable owner of user preferences,
-including UI choices. The frontend keeps reactive session state and a
+The library's SQLite settings are the durable owner of library and UI
+preferences. Phase 12's install-wide updater policy/journal has one separate
+application-scoped owner and does not change when switching libraries.
+The frontend keeps reactive session state and a
 small last-applied appearance cache for startup painting. The cache is
 derived, never a competing authority. Migrate the existing `lumen.theme`
 and grid-size preference only when a new durable value is absent; never
@@ -327,7 +333,8 @@ tests for interrupted/repeated migration and switching data directories.
 | Indexing and resources      | Retain all CPU/battery/fullscreen/busy/idle controls; add supported format-family inclusion, preview quality and cache controls backed by measured capabilities.                                        |
 | Organisation and export     | Existing event gap, tag confidence, OCR, XMP and organiser template; supported export presets with size, quality and metadata policy.                                                                   |
 | Accessibility and shortcuts | Text scale, reduced motion, focus visibility, shortcut reference and reassignment of supported commands with collision checks. Keep essential Escape/recovery behaviour available.                      |
-| Privacy and diagnostics     | Existing blocking/PIN recovery; playback-history clearing, local logs and reports. No network or telemetry switches.                                                                                    |
+| Privacy and diagnostics     | Existing blocking/PIN recovery; playback-history clearing, local logs and reports. No telemetry or library uploads.                                                                                     |
+| Application updates         | Opt-in automatic checks, Check now, Stable/Preview channel, connection/resource preferences and staged-update status; application scoped as Phase 12 defines.                                           |
 
 Every preference has a type, default, allowed range, persistence owner,
 application rule and reset behaviour. Presentation labels come from i18n;
@@ -371,7 +378,34 @@ The preservation definitions, codec choices, workspace flow, transaction
 rules, library/sidecar integration and milestones are specified in
 [the lossless compression plan](lossless-compression-plan-2026-10-04.md).
 
-## 7. Implementation sequence and acceptance
+## 7. Phase 12 — Automatic checks and in-app updates
+
+After the user enables automatic checks, discover new releases shortly
+after startup and daily while running, and show a quiet notification.
+**Update** downloads, authenticates and stages the complete application
+runtime in the background while the existing app stays usable. When ready,
+offer **Restart now** or **Later**. A separate helper safely activates the
+release after shutdown, relaunches the same library and confirms health.
+No manual uninstall is part of the update flow.
+
+Include signed release metadata and Windows executable signing, bounded
+downloads/extraction, persistent progress, cancellation/retry, safe job
+checkpoints and runtime/database recovery. Preserve photos, annotations,
+sources and preferences. Checking/downloading is the only planned network
+exception; library processing stays local with no telemetry or uploads.
+Existing users need one ordinary over-install to obtain an updater-capable
+version before future upgrades can use this workflow.
+
+Establish trust, installer and shutdown contracts in 7A. Phase 12 can ship
+after the new shell is available, independently of finishing compression;
+the numbering does not impose a release delay. The inspected Wails updater
+needs an explicit check-only scheduler and whole-runtime integration.
+
+The product flow, privacy policy, Wails/NSIS integration, release pipeline,
+settings scope and recovery acceptance are specified in
+[the automatic update plan](automatic-updates-plan-2026-10-04.md).
+
+## 8. Implementation sequence and acceptance
 
 ```mermaid
 flowchart LR
@@ -384,26 +418,31 @@ flowchart LR
     F --> H[11 Lossless compression]
     D --> H
     E --> H
+    B --> I[12 Signed in-app updates]
+    A --> I
     H --> G[Native regression and release candidate]
+    I --> G
 ```
 
 This shows dependencies, not a request for parallel agents. Render and RAW
 spikes happen in 7A; their shared contracts are available when Phase 8
 starts. Complete high-resolution rendering before claiming actual-size
 RAW viewing. New preference controls ship with their features rather than
-being placeholders waiting for Phase 10.
+being placeholders waiting for Phase 10. Updater packaging/trust/shutdown
+spikes belong in 7A and can yield a separate release after shell integration.
 
-| Milestone | Concrete deliverable                                                        | Required evidence                                                                                                      |
-| --------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 7A        | Inventory, screen baseline, contracts and compatible Nuxt UI integration.   | Production build, representative overlays/forms, offline assets and RAW/render feasibility record.                     |
-| 7B        | Token/theme reference, reusable compositions, shell and component showcase. | Light/dark, keyboard, narrow window, DPI, forced colours and reduced-motion review.                                    |
-| 7C        | Every existing route and workflow migrated; old presentation code removed.  | Module matrix passes; existing state, privacy and file-operation regression tests still pass.                          |
-| 8A/B      | Image and video controllers with new viewing tools.                         | Native zoom/gestures, source navigation, rapid seek, track/fallback and resource-lifetime checks.                      |
-| 8C        | Inspector, media tiles, selection and file tools.                           | Cross-surface command parity; batch cancellation, collisions, journalling, Undo and visibility rechecks.               |
-| 9         | Tested RAW-first capability catalogue and bundled decoders.                 | Real-format fixtures, selected camera variants, stage upgrade/retry and clean offline packaging.                       |
-| 10        | Complete settings categories and migrated preferences.                      | Persistence, rapid-save order, failure rollback, category resets and validated preset import/export.                   |
-| 11        | Individual/bulk verified lossless compression and reversible JPEG XL.       | Per-output preservation checks, measured savings, durable jobs, source safety, library/sidecar integrity and recovery. |
-| Final     | Regression record and a packaged candidate.                                 | Repository gates, native acceptance, performance comparison and install/upgrade/reinstall/uninstall regression.        |
+| Milestone | Concrete deliverable                                                        | Required evidence                                                                                                                  |
+| --------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 7A        | Inventory, screen baseline, contracts and compatible Nuxt UI integration.   | Production build, representative overlays/forms, offline assets and RAW/render feasibility record.                                 |
+| 7B        | Token/theme reference, reusable compositions, shell and component showcase. | Light/dark, keyboard, narrow window, DPI, forced colours and reduced-motion review.                                                |
+| 7C        | Every existing route and workflow migrated; old presentation code removed.  | Module matrix passes; existing state, privacy and file-operation regression tests still pass.                                      |
+| 8A/B      | Image and video controllers with new viewing tools.                         | Native zoom/gestures, source navigation, rapid seek, track/fallback and resource-lifetime checks.                                  |
+| 8C        | Inspector, media tiles, selection and file tools.                           | Cross-surface command parity; batch cancellation, collisions, journalling, Undo and visibility rechecks.                           |
+| 9         | Tested RAW-first capability catalogue and bundled decoders.                 | Real-format fixtures, selected camera variants, stage upgrade/retry and clean offline packaging.                                   |
+| 10        | Complete settings categories and migrated preferences.                      | Persistence, rapid-save order, failure rollback, category resets and validated preset import/export.                               |
+| 11        | Individual/bulk verified lossless compression and reversible JPEG XL.       | Per-output preservation checks, measured savings, durable jobs, source safety, library/sidecar integrity and recovery.             |
+| 12        | Automatic checks, background preparation and safe prompted update/restart.  | Authenticated signed releases, native whole-runtime activation, job checkpoints, schema-safe recovery and real installed upgrades. |
+| Final     | Regression record and a packaged candidate.                                 | Repository gates, native acceptance, performance comparison and install/upgrade/reinstall/uninstall regression.                    |
 
 For each implementation slice, run the relevant frontend behaviour tests,
 type/lint/format checks and backend tests affected by changed contracts.
@@ -431,6 +470,10 @@ The final acceptance matrix includes:
 - Lossless compression fixtures and mandatory per-output verification;
   original JPEG reconstruction, sample/metadata equality, no-gain cases and
   interrupted commit/backup recovery as the dedicated compression plan specifies.
+- Automatic update checks and requested downloads, signed metadata/payload
+  verification, staged restart, safe shutdown, whole-runtime and compatible
+  database recovery; native installed-version fixtures and privacy checks
+  from the dedicated update plan.
 - Real-library performance: first usable grid, warm and first search,
   scroll frame times, detail/viewer navigation, idle/active memory, render
   cache size and conversion lifetime. Compare on the same machine and
@@ -444,11 +487,12 @@ record the actual budgets from 7A measurements. Motion must not introduce
 layout thrashing or break virtualisation. No unsupported format is called
 supported solely because its extension was added.
 
-## 8. First implementation slice
+## 9. First implementation slice
 
 Begin with **7A and 7B**: the screen/action inventory, Nuxt UI compatibility
 spike, semantic tokens, offline icon manifest, theme/preference migration
-contracts and the new shell with one fully migrated Library screen.
+contracts, updater trust/packaging/shutdown feasibility, and the new shell
+with one fully migrated Library screen.
 Validate that concrete slice in the native app before converting the
 remaining modules. This is the first implementation target after planning;
 the current document does not modify application code or release state.

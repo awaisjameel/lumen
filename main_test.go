@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -331,5 +333,28 @@ func TestVersionsAgree(t *testing.T) {
 func TestInstallerNamesTheReleasesPage(t *testing.T) {
 	if !strings.Contains(readRepoFile(t, "build/windows/nsis/project.nsi"), `!define LUMEN_RELEASES "`+services.ReleasesURL+`"`) {
 		t.Fatalf("project.nsi's LUMEN_RELEASES is not services.ReleasesURL (%s)", services.ReleasesURL)
+	}
+}
+
+// Client-side routes are answered with the page; files and the development
+// server's own modules are asked for as they are.
+func TestSPAServesRoutesAsThePageAndLeavesFilesAndDevModulesAlone(t *testing.T) {
+	var asked string
+	h := spa(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { asked = r.URL.Path }))
+	for path, want := range map[string]string{
+		"/":                                   "/",
+		"/things":                             "/",
+		"/settings/blocked":                   "/",
+		"/people/3/faces":                     "/",
+		"/assets/index-abc.js":                "/assets/index-abc.js",
+		"/lumen.png":                          "/lumen.png",
+		"/@vite/client":                       "/@vite/client",
+		"/@id/__x00__virtual:nuxt-ui-plugins": "/@id/__x00__virtual:nuxt-ui-plugins",
+		"/@fs/D:/Downloads/Lumen/frontend/x":  "/@fs/D:/Downloads/Lumen/frontend/x",
+	} {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
+		if asked != want {
+			t.Errorf("spa asked the files for %q on a request for %q, want %q", asked, path, want)
+		}
 	}
 }

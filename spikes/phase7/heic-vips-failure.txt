@@ -1,0 +1,113 @@
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 0
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 1
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 2
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 3
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 4
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 5
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 6
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 7
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 8
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 9
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 10
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 11
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 12
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 13
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 14
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 15
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 16
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 17
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 18
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 19
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 20
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 21
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 22
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 23
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 24
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 25
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 26
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 27
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 28
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 29
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 30
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 31
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 32
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 33
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 34
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 35
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 36
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 37
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 38
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 39
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 40
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 41
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 42
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 43
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 44
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 45
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 46
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 47
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 48
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 49
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 50
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 51
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 0
+System.Management.Automation.RemoteException
+(vips.exe:29936): VIPS-WARNING **: 00:53:04.613: error in tile 0 x 10
+spikes/.cache/heic/iphone.heic: bad seek to 2994426
+spikes/.cache/heic/iphone.heic: bad seek to 2994403
+spikes/.cache/heic/iphone.heic: bad seek to 2994397
+spikes/.cache/heic/iphone.heic: bad seek to 2994395
+heif: Decoder plugin generated an error: Unspecified (7.0)

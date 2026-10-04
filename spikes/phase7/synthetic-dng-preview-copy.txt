@@ -1,0 +1,17 @@
+[tiff @ 00000147eb004940] No embedded thumbnail present
+[in#0/tiff_pipe @ 00000147eaf35680] Could not find codec parameters for stream 0 (Video: tiff, none): unspecified size
+Consider increasing the value for the 'analyzeduration' (0) and 'probesize' (5000000) options
+Input #0, tiff_pipe, from 'spikes/phase7/fixtures/synthetic-cfa.dng':
+  Duration: N/A, bitrate: N/A
+  Stream #0:0: Video: tiff, none, 25 fps, 25 tbr, 25 tbn
+Stream mapping:
+  Stream #0:0 -> #0:0 (copy)
+Output #0, image2, to 'spikes/phase7/synthetic-dng-preview-copy.jpg':
+  Metadata:
+    encoder         : Lavf63.1.102
+  Stream #0:0: Video: tiff, none, q=2-31, 25 fps, 25 tbr, 25 tbn
+Press [q] to stop, [?] for help
+[image2 @ 00000147eaf36d00] The specified filename 'spikes/phase7/synthetic-dng-preview-copy.jpg' does not contain an image sequence pattern or a pattern is invalid.
+[image2 @ 00000147eaf36d00] Use a pattern such as %03d for an image sequence or use the -update option (with -frames:v 1 if needed) to write a single image.
+[out#0/image2 @ 00000147eafe9e80] video:351KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+frame=    1 fps=0.0 q=-1.0 Lsize=N/A time=00:00:00.04 bitrate=N/A speed=39.6x elapsed=0:00:00.00    

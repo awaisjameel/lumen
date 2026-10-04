@@ -2,17 +2,23 @@
 // The small, calm status card in the sidebar. The app is fully usable while
 // indexing runs; this says what it is doing now and offers a pause. Hovering
 // it, or focusing it, lists everything at work, what comes next, and why the
-// files that couldn't be read failed.
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId } from 'vue'
+// files that couldn't be read failed. In the collapsed sidebar it is a
+// single button (pause or resume, or a tick when there is nothing to do),
+// with the same list beside it.
+import UButton from '@nuxt/ui/components/Button.vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { engine, FailReason, WaitReason } from '../bridge'
 import type { FailureGroup } from '../bridge'
 import { fileName } from '../shared/format'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
+import { icons } from '../design/icons'
 import Icon from '../shared/Icon.vue'
 import { isAI, lead, tasks } from './activity'
 import type { Task } from './activity'
 import { useLibrary } from './store'
+
+defineProps<{ compact?: boolean }>()
 
 const lib = useLibrary()
 const p = computed(() => lib.progress)
@@ -81,6 +87,19 @@ async function loadFailures() {
     failuresAt = 0 // read again next time
   }
 }
+const card = ref<HTMLElement | null>(null)
+watch(
+  () => p.value?.errors ?? 0,
+  (n) => {
+    if (!n) {
+      // Cleared (retried, removed): the same count later is other files.
+      failuresAt = 0
+      failures.value = []
+    } else if (card.value?.matches(':hover, :focus-within')) {
+      void loadFailures() // the list is showing: keep its reasons current
+    }
+  },
+)
 
 const reasonText: Record<FailReason, MessageKey> = {
   [FailReason.FailDamaged]: 'status.failure.damaged',
@@ -110,19 +129,24 @@ function open() {
 </script>
 
 <template>
-  <div v-if="p" class="status" @mouseenter="open" @focusin="open">
+  <div v-if="p" ref="card" class="status" :class="{ compact }" @mouseenter="open" @focusin="open">
     <div class="line">
       <span class="label" role="status">{{ label }}</span>
-      <button
+      <UButton
         v-if="list.length || p.paused"
-        class="icon-btn small"
+        :icon="p.paused ? icons.play : icons.pause"
         :title="p.paused ? t('status.resume') : t('status.pause')"
         :aria-label="p.paused ? t('status.resume') : t('status.pause')"
         :aria-describedby="hasList ? id : undefined"
+        color="neutral"
+        variant="ghost"
+        size="xs"
+        square
         @click="togglePause"
-      >
-        <Icon :name="p.paused ? 'play' : 'pause'" :size="14" />
-      </button>
+      />
+      <span v-else-if="compact" class="idle" :title="label">
+        <Icon name="check" :size="16" />
+      </span>
     </div>
     <div v-if="list.length" class="bar" :class="{ indeterminate: shown?.kind === 'scan' }">
       <span :style="{ width: fraction * 100 + '%' }" />
@@ -177,56 +201,96 @@ function open() {
 .status {
   position: relative;
   padding: 12px;
-  border-radius: var(--radius-m);
-  background: var(--surface-hover);
-  font-size: 12px;
+  border-radius: calc(var(--ui-radius) * 1.5);
+  background: var(--ui-bg-elevated);
+  font-size: 0.75rem;
 }
+
 .line {
   display: flex;
   align-items: center;
   gap: 4px;
   min-height: 24px;
 }
+
 .label {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: var(--text-2);
+  color: var(--ui-text-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.icon-btn.small {
+
+/* Collapsed sidebar: only the button (or the tick) shows; what it says is
+   still read out, and the list opens beside the rail. */
+.status.compact {
+  padding: 6px;
+}
+
+.status.compact .label,
+.status.compact .sub,
+.status.compact .bar {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.status.compact .line {
+  justify-content: center;
+}
+
+.status.compact .queue {
+  left: calc(100% + 6px);
+  bottom: 0;
+  min-width: 240px;
+}
+
+.idle {
+  display: grid;
+  place-items: center;
   width: 24px;
   height: 24px;
+  color: var(--ui-text-dimmed);
 }
+
 .bar {
   height: 3px;
   margin-top: 6px;
   border-radius: 2px;
-  background: var(--border);
+  background: var(--ui-border);
   overflow: hidden;
 }
+
 .bar span {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: var(--ui-primary);
   transition: width 0.6s ease;
 }
+
 .bar.indeterminate span {
   width: 30% !important;
   animation: slide 1.4s ease-in-out infinite;
 }
+
 @keyframes slide {
   from {
     transform: translateX(-100%);
   }
+
   to {
     transform: translateX(340%);
   }
 }
+
 .sub {
   margin: 4px 0 0;
-  color: var(--text-2); /* --text-3 is under 4.5:1 on this tinted panel */
+  color: var(--ui-text-muted);
+  /* the dimmed text is under 4.5:1 on this tinted panel */
 }
 
 /* The list behind the card: above it, shown a moment after the pointer or
@@ -235,28 +299,30 @@ function open() {
   position: absolute;
   left: 0;
   bottom: calc(100% + 6px);
-  z-index: 20;
+  z-index: var(--lumen-z-panel);
   min-width: 100%;
   width: max-content;
   max-width: 320px;
   max-height: min(75vh, 640px);
   overflow-y: auto;
   padding: 8px 12px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  border: 1px solid var(--ui-border);
+  border-radius: calc(var(--ui-radius) * 1.5);
+  background: var(--ui-bg);
+  box-shadow: var(--lumen-shadow);
   visibility: hidden;
   opacity: 0;
   transition:
     opacity 0.12s,
     visibility 0s 0.12s;
 }
+
 .status:is(:hover, :focus-within) .queue:not(.dismissed) {
   visibility: visible;
   opacity: 1;
   transition-delay: 0.2s;
 }
+
 /* The pointer crosses the gap to the list over this bridge. It hangs off the
    card: off the list, which scrolls, it would be cut off and scroll with it. */
 .status:is(:hover, :focus-within):has(.queue:not(.dismissed))::before {
@@ -265,86 +331,109 @@ function open() {
   inset: auto 0 100%;
   height: 8px;
 }
+
 .head {
   margin: 4px 0 2px;
-  color: var(--text-3);
-  font-size: 11px;
+  color: var(--ui-text-dimmed);
+  font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
 .queue ul {
   margin: 0;
   padding: 0;
   list-style: none;
 }
+
 .queue li {
   display: flex;
   align-items: baseline;
   gap: 8px;
   padding: 3px 0;
-  color: var(--text-2);
+  color: var(--ui-text-muted);
 }
+
 .queue li.now {
-  color: var(--text);
+  color: var(--ui-text-highlighted);
 }
+
 .dot {
   flex-shrink: 0;
   width: 7px;
   height: 7px;
-  border: 1.5px solid var(--text-3);
+  border: 1.5px solid var(--ui-text-dimmed);
   border-radius: 50%;
   translate: 0 -1px;
 }
+
 .now .dot {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--ui-primary);
+  background: var(--ui-primary);
   animation: pulse 1.6s ease-in-out infinite;
 }
+
 @keyframes pulse {
   50% {
     opacity: 0.35;
   }
 }
+
 .what {
   flex: 1;
   min-width: 0;
 }
+
 .path {
   display: block;
   overflow: hidden;
-  color: var(--text-3);
-  font-size: 11px;
+  color: var(--ui-text-dimmed);
+  font-size: 0.6875rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .count {
   flex-shrink: 0;
-  color: var(--text-3);
+  color: var(--ui-text-dimmed);
   font-variant-numeric: tabular-nums;
 }
+
 .note {
   margin: 6px 0 0;
   padding-top: 6px;
-  border-top: 1px solid var(--border);
-  color: var(--text-3);
+  border-top: 1px solid var(--ui-border);
+  color: var(--ui-text-dimmed);
 }
+
 .failures.apart {
   margin-top: 8px;
   padding-top: 4px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--ui-border);
 }
+
 .reason {
   padding: 4px 0;
 }
+
 .reason .what {
-  color: var(--text);
+  color: var(--ui-text-highlighted);
 }
+
 .failed-count {
-  border-radius: var(--radius-s);
+  border-radius: var(--ui-radius);
 }
+
 .failed-count:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ui-primary);
   outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  .now .dot {
+    background: Highlight;
+    border-color: Highlight;
+  }
 }
 </style>

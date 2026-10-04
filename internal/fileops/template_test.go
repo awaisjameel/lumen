@@ -1,12 +1,50 @@
 package fileops
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 )
+
+// The Organise editor draws its example in the UI (frontend/src/organise/
+// template.ts). Its tests check these same cases, so the two cannot drift.
+func TestRenderMatchesTheEditorsExample(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "frontend", "src", "organise", "template.parity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Case     string
+		Template string
+		Example  struct {
+			TakenAt                    int64
+			Event, Place, Camera, Path string
+		}
+		Want string
+	}
+	if err := json.Unmarshal(data, &cases); err != nil || len(cases) == 0 {
+		t.Fatalf("cases: %v, %v", cases, err)
+	}
+	for _, c := range cases {
+		tmpl, err := ParseTemplate(c.Template)
+		if err != nil {
+			t.Errorf("%s: %v", c.Case, err)
+			continue
+		}
+		file := c.Example.Path[strings.LastIndexAny(c.Example.Path, `\/`)+1:]
+		ext := filepath.Ext(file)
+		r := tmpl.Render(Values{Taken: time.Unix(c.Example.TakenAt, 0).UTC(), Event: c.Example.Event, Place: c.Example.Place,
+			Camera: c.Example.Camera, Stem: strings.TrimSuffix(file, ext), Ext: ext})
+		if got := strings.Join(append(r.Dirs, r.Stem+r.Ext), `\`); got != c.Want {
+			t.Errorf("%s: %q, want %q", c.Case, got, c.Want)
+		}
+	}
+}
 
 func TestTemplatesTheUserMayWrite(t *testing.T) {
 	for _, text := range []string{

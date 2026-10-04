@@ -1,10 +1,14 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
+import { mountInApp } from '../shared/testing'
 import { engine } from '../bridge'
 import type * as Bridge from '../bridge'
 import { useLibrary } from '../library/store'
+import { t } from '../shared/i18n'
 import OcrSetting from './OcrSetting.vue'
+
+enableAutoUnmount(afterEach)
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -17,8 +21,8 @@ beforeEach(() => {
 })
 
 it('is off until the user turns it on, and says what it does', () => {
-  const box = mount(OcrSetting)
-  expect(box.get('input').element.checked).toBe(false)
+  const box = mountInApp(OcrSetting)
+  expect(box.get('[role="switch"]').attributes('aria-checked')).toBe('false')
   expect(box.text()).toContain('Find text in screenshots and documents')
   expect(box.text()).toContain('processor')
   expect(box.text()).toContain('only on those photos')
@@ -26,7 +30,7 @@ it('is off until the user turns it on, and says what it does', () => {
 
 it('reflects the saved setting', () => {
   useLibrary().settings.ocr = true
-  expect(mount(OcrSetting).get('input').element.checked).toBe(true)
+  expect(mountInApp(OcrSetting).get('[role="switch"]').attributes('aria-checked')).toBe('true')
 })
 
 it('saves clicks in order, one at a time, ending with the last', async () => {
@@ -37,9 +41,9 @@ it('saves clicks in order, one at a time, ending with the last', async () => {
   vi.mocked(engine.setOCR)
     .mockReturnValueOnce(new Promise<void>((resolve) => (finishFirst = resolve)))
     .mockResolvedValueOnce(undefined)
-  const box = mount(OcrSetting)
-  await box.get('input').setValue(true)
-  await box.get('input').setValue(false)
+  const box = mountInApp(OcrSetting)
+  await box.get('[role="switch"]').trigger('click')
+  await box.get('[role="switch"]').trigger('click')
   expect(engine.setOCR).toHaveBeenCalledExactlyOnceWith(true) // the second waits for the first
   finishFirst()
   await flushPromises()
@@ -50,11 +54,13 @@ it('saves clicks in order, one at a time, ending with the last', async () => {
 it('puts the box back and says why when the newest save fails', async () => {
   const lib = useLibrary()
   vi.mocked(engine.setOCR).mockRejectedValueOnce(new Error('the models are missing'))
-  const box = mount(OcrSetting)
-  await box.get('input').setValue(true)
+  const box = mountInApp(OcrSetting)
+  await box.get('[role="switch"]').trigger('click')
   await flushPromises()
   expect(lib.settings.ocr).toBe(false)
-  expect(lib.settingsError).toContain('the models are missing')
+  expect(lib.settingErrors.ocr).toContain('the models are missing')
+  expect(box.get('[role="alert"]').text()).toContain('the models are missing')
+  expect(box.text()).not.toContain(t('settings.saved'))
 })
 
 it('keeps saves in order when Settings is closed and opened again', async () => {
@@ -65,11 +71,11 @@ it('keeps saves in order when Settings is closed and opened again', async () => 
   vi.mocked(engine.setOCR)
     .mockReturnValueOnce(new Promise<void>((resolve) => (finishFirst = resolve)))
     .mockResolvedValueOnce(undefined)
-  const first = mount(OcrSetting)
-  await first.get('input').setValue(true)
+  const first = mountInApp(OcrSetting)
+  await first.get('[role="switch"]').trigger('click')
   first.unmount()
-  const next = mount(OcrSetting)
-  await next.get('input').setValue(false)
+  const next = mountInApp(OcrSetting)
+  await next.get('[role="switch"]').trigger('click')
   expect(engine.setOCR).toHaveBeenCalledExactlyOnceWith(true) // the newer click waits for the older save
   finishFirst()
   await flushPromises()

@@ -4,6 +4,13 @@ import { computed, onMounted, ref } from 'vue'
 import { engine } from '../bridge'
 import { useLibrary } from '../library/store'
 import { errorText, orFallback } from '../shared/errors'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
+import UAlert from '@nuxt/ui/components/Alert.vue'
+import FeatureState from '../shared/FeatureState.vue'
+import WorkProgress from '../shared/WorkProgress.vue'
+import { icons } from '../design/icons'
+import { useCommands, runCommand } from '../shared/commands'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 
@@ -14,10 +21,15 @@ const busy = ref(false)
 const error = ref('')
 
 onMounted(async () => {
-  const suggested = await orFallback(engine.suggestedFolders(), [])
-  // A folder picked while the suggestions were being found stays.
-  for (const path of suggested) await add(path)
-  loaded.value = true
+  try {
+    const suggested = await orFallback(engine.suggestedFolders(), [])
+    // A folder picked while the suggestions were being found stays.
+    for (const path of suggested) await add(path)
+  } catch (e) {
+    error.value = errorText(e)
+  } finally {
+    loaded.value = true
+  }
 })
 
 const chosen = computed(() => folders.value.filter((f) => f.on).map((f) => f.path))
@@ -53,122 +65,141 @@ async function start() {
     busy.value = false
   }
 }
+useCommands([
+  {
+    id: 'welcome.addFolder',
+    group: 'library',
+    title: () => t('welcome.addFolder'),
+    icon: 'folder-add',
+    enabled: () => !busy.value,
+    run: addFolder,
+  },
+  {
+    id: 'welcome.start',
+    group: 'library',
+    title: () => t('welcome.start'),
+    icon: 'play',
+    enabled: () => !!chosen.value.length && !busy.value,
+    run: start,
+  },
+])
 </script>
 
 <template>
   <main class="welcome">
-    <div class="card">
+    <div class="welcome-content">
       <img src="/lumen.png" alt="" class="logo" />
       <h1>{{ t('welcome.title') }}</h1>
       <p class="question">{{ t('welcome.question') }}</p>
-
-      <p v-if="loaded && !folders.length" class="muted">{{ t('welcome.none') }}</p>
+      <FeatureState v-if="!loaded" kind="loading" :title="t('welcome.loading')" />
+      <FeatureState v-else-if="!folders.length" kind="empty" icon="folder" :title="t('welcome.none')" />
       <ul v-if="folders.length" class="folders">
-        <li v-for="f in folders" :key="f.path">
-          <label>
-            <input v-model="f.on" type="checkbox" />
-            <Icon name="folder" :size="18" />
-            <span class="path" :title="f.path">{{ f.path }}</span>
-          </label>
+        <li v-for="f in folders" :key="f.key">
+          <UCheckbox
+            :model-value="f.on"
+            :disabled="busy"
+            :label="f.path"
+            :title="f.path"
+            @update:model-value="f.on = $event === true"
+            ><template #label
+              ><span class="folder-label"
+                ><Icon name="folder" :size="18" /><span class="path lumen-selectable">{{ f.path }}</span></span
+              ></template
+            ></UCheckbox
+          >
         </li>
       </ul>
-
-      <button class="btn add" @click="addFolder">
-        <Icon name="plus" :size="16" />
-        {{ t('welcome.addFolder') }}
-      </button>
-
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-
-      <button class="btn btn-primary btn-large start" :disabled="!chosen.length || busy" @click="start">
-        {{ t('welcome.start') }}
-      </button>
-
-      <p class="privacy">
-        <Icon name="lock" :size="16" />
-        {{ t('welcome.privacy') }}
-      </p>
+      <UButton
+        class="add"
+        :icon="icons['folder-add']"
+        :disabled="busy"
+        loading-auto
+        @click="runCommand('welcome.addFolder')"
+        >{{ t('welcome.addFolder') }}</UButton
+      >
+      <UAlert v-if="error" :description="error" color="error" variant="subtle" role="alert" />
+      <WorkProgress v-if="busy" :label="t('welcome.scanning')" :detail="t('welcome.scanHint')" indeterminate />
+      <UButton
+        class="start"
+        color="primary"
+        variant="solid"
+        size="lg"
+        block
+        :disabled="!chosen.length || busy"
+        :loading="busy"
+        @click="runCommand('welcome.start')"
+        >{{ t('welcome.start') }}</UButton
+      >
+      <p class="privacy"><Icon name="lock" :size="16" />{{ t('welcome.privacy') }}</p>
     </div>
   </main>
 </template>
-
 <style scoped>
 .welcome {
   display: grid;
   place-items: center;
   height: 100%;
-  padding: 24px;
+  padding: 1.5rem;
   overflow-y: auto;
+  background: var(--ui-bg);
 }
-.card {
-  width: min(520px, 100%);
+.welcome-content {
+  width: min(36rem, 100%);
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
+  gap: 1rem;
+  min-width: 0;
 }
 .logo {
-  width: 56px;
-  height: 56px;
-  margin-bottom: 20px;
+  width: 3.5rem;
+  height: 3.5rem;
 }
 h1 {
   margin: 0;
-  font: 600 28px/1.2 var(--font-display);
+  color: var(--ui-text-highlighted);
+  font-size: 1.75rem;
+  font-weight: 600;
 }
 .question {
-  margin: 8px 0 20px;
-  font-size: 16px;
-  color: var(--text-2);
+  margin: 0;
+  font-size: 1rem;
+  color: var(--ui-text-muted);
 }
 .folders {
   list-style: none;
   padding: 0;
-  margin: 0 0 12px;
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  background: var(--surface);
-  overflow: hidden;
+  margin: 0;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  background: var(--ui-bg-muted);
+}
+.folders li {
+  padding: 0.75rem;
 }
 .folders li + li {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--ui-border);
 }
-.folders label {
+.folders :deep([data-slot='wrapper']) {
+  min-width: 0;
+}
+.folder-label {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  cursor: pointer;
-}
-.folders label:hover {
-  background: var(--surface-hover);
-}
-.folders input {
-  accent-color: var(--accent);
-  width: 16px;
-  height: 16px;
+  gap: 0.625rem;
+  min-width: 0;
 }
 .path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .add {
-  margin-bottom: 28px;
-}
-.start {
-  align-self: stretch;
-  justify-content: center;
+  align-self: flex-start;
 }
 .privacy {
   display: flex;
-  gap: 8px;
-  margin: 16px 0 0;
-  font-size: 12px;
-  color: var(--text-3);
-}
-.privacy svg {
-  flex-shrink: 0;
-  margin-top: 1px;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--ui-text-muted);
+  font-size: 0.8125rem;
 }
 </style>

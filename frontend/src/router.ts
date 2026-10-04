@@ -1,16 +1,20 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { Filter } from './bridge'
 import LibraryView from './library/LibraryView.vue'
-import PeopleView from './people/PeopleView.vue'
-import PersonFaces from './people/PersonFaces.vue'
-import SettingsView from './settings/SettingsView.vue'
-import BlockedView from './settings/BlockedView.vue'
-import ThingsView from './things/ThingsView.vue'
-import AlbumsView from './albums/AlbumsView.vue'
-import DuplicatesView from './duplicates/DuplicatesView.vue'
-import PlacesView from './places/PlacesView.vue'
-import EventsView from './events/EventsView.vue'
-import OrganiseView from './organise/OrganiseView.vue'
+
+// The grid is where Lumen starts, so it is part of the first script. Every
+// other screen is loaded when it is first opened, from the app's own
+// embedded files, which keeps the start quick as screens are added.
+const PeopleView = () => import('./people/PeopleView.vue')
+const PersonFaces = () => import('./people/PersonFaces.vue')
+const SettingsView = () => import('./settings/SettingsView.vue')
+const BlockedView = () => import('./settings/BlockedView.vue')
+const ThingsView = () => import('./things/ThingsView.vue')
+const AlbumsView = () => import('./albums/AlbumsView.vue')
+const DuplicatesView = () => import('./duplicates/DuplicatesView.vue')
+const PlacesView = () => import('./places/PlacesView.vue')
+const EventsView = () => import('./events/EventsView.vue')
+const OrganiseView = () => import('./organise/OrganiseView.vue')
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -45,6 +49,12 @@ export const router = createRouter({
     { path: '/settings', name: 'settings', component: SettingsView },
     { path: '/settings/blocked', name: 'blocked', component: BlockedView },
     { path: '/settings/organise', name: 'organise', component: OrganiseView },
+    // The component showcase is a development tool. DEV is a build-time
+    // constant, so a production build drops this branch and never emits the
+    // showcase: the shipped app has no such route.
+    ...(import.meta.env.DEV
+      ? [{ path: '/__showcase', name: 'showcase', component: () => import('./app/showcase/Showcase.vue') }]
+      : []),
     { path: '/:rest(.*)*', redirect: '/' },
   ],
 })

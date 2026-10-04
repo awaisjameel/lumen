@@ -2,6 +2,14 @@
 // Things: what's in the photos, as cards (cover, name, count). The AI fills
 // the built-in ones; people add their own ("Eiffel Tower") and the AI finds
 // those across the library straight away. User labels can be deleted.
+import UAlert from '@nuxt/ui/components/Alert.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UInput from '@nuxt/ui/components/Input.vue'
+import { icons } from '../design/icons'
+import CardGrid from '../shared/CardGrid.vue'
+import { useCommands } from '../shared/commands'
+import Page from '../shared/Page.vue'
+import PageHeader from '../shared/PageHeader.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { BlockKind, engine, MAX_NAME_LEN, TagKind } from '../bridge'
@@ -10,7 +18,7 @@ import { confirm } from '../shared/confirm'
 import { block } from '../shared/block'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
-import EmptyState from '../shared/EmptyState.vue'
+import FeatureState from '../shared/FeatureState.vue'
 import { useLiveReload } from '../shared/liveReload'
 import { nameTooLong, trimName } from '../shared/names'
 import { useLibrary } from '../library/store'
@@ -23,13 +31,20 @@ const lib = useLibrary()
 const things = useThings()
 
 const name = ref('')
+const query = ref('')
 const busy = ref(false)
 const error = ref('')
 let active = true
 onBeforeUnmount(() => (active = false))
 
 // Built-ins without photos and the internal sink kind never show.
-const listed = computed(() => things.list.filter((x) => x.kind !== TagKind.TagBuiltin || x.count > 0))
+const listed = computed(() =>
+  things.list.filter(
+    (x) =>
+      (x.kind !== TagKind.TagBuiltin || x.count > 0) &&
+      [x.name, x.original].some((n) => n.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())),
+  ),
+)
 // Pinned Things come first whoever made them (the engine sends them newest pin first).
 const pinned = computed(() => listed.value.filter((x) => x.pinned))
 const mine = computed(() => listed.value.filter((x) => !x.pinned && x.kind !== TagKind.TagBuiltin))
@@ -47,7 +62,8 @@ async function create() {
   error.value = ''
   try {
     const id = await engine.createLabel(n) // the first one loads the text model: seconds
-    await things.load()
+    // It exists now: a list that fails to refresh does not undo that.
+    await things.load().catch(logError)
     if (!active) return // the user went elsewhere meanwhile: stay there
     name.value = ''
     void router.push({ name: 'thing', params: { id } })
@@ -91,114 +107,124 @@ async function remove(tag: Tag) {
     await act(() => engine.deleteTag(tag.id))
   }
 }
+useCommands([
+  {
+    id: 'things.create',
+    group: 'library',
+    title: () => t('things.find'),
+    icon: 'plus',
+    enabled: () => !busy.value && !aiError.value && !!trimName(name.value) && !nameTooLong(name.value),
+    run: create,
+  },
+])
 </script>
 
 <template>
-  <div class="page">
-    <header class="topbar">
-      <h1>{{ t('nav.things') }}</h1>
-      <SearchBox />
-      <div class="spacer" />
-    </header>
-
-    <div class="page-body">
-      <p class="muted intro">{{ t('things.intro') }}</p>
-
-      <form class="new" @submit.prevent="create">
-        <input
+  <Page>
+    <template #header>
+      <PageHeader :title="t('nav.things')">
+        <SearchBox />
+      </PageHeader>
+    </template>
+    <p class="mb-4 text-muted">{{ t('things.intro') }}</p>
+    <div class="mb-4 flex flex-wrap gap-2">
+      <UInput
+        v-model="query"
+        :icon="icons.search"
+        :placeholder="t('things.search')"
+        :aria-label="t('things.search')"
+        class="min-w-48 flex-1"
+      />
+      <form class="new flex min-w-0 flex-1 gap-2" @submit.prevent="create">
+        <UInput
           v-model="name"
-          class="field"
+          class="min-w-0 flex-1"
           :placeholder="t('things.new')"
           :aria-label="t('things.new')"
           :disabled="busy || !!aiError"
           :aria-invalid="nameTooLong(name) || undefined"
         />
-        <button class="btn btn-primary" :disabled="busy || !trimName(name) || nameTooLong(name) || !!aiError">
-          {{ busy ? t('things.finding') : t('things.find') }}
-        </button>
+        <UButton
+          type="submit"
+          color="primary"
+          variant="solid"
+          :loading="busy"
+          :disabled="busy || !trimName(name) || nameTooLong(name) || !!aiError"
+          >{{ busy ? t('things.finding') : t('things.find') }}</UButton
+        >
       </form>
-      <p v-if="nameTooLong(name)" class="page-error" role="alert">
-        {{ t('error.invalidName', { max: MAX_NAME_LEN }) }}
-      </p>
-      <p v-if="error || things.error || aiError" class="page-error" role="alert">
-        {{ error || things.error || t('settings.aiError', { error: aiError }) }}
-      </p>
-
-      <template v-if="pinned.length">
-        <h2>{{ t('things.pinnedHeading') }}</h2>
-        <div class="cards">
-          <ThingCard
-            v-for="x in pinned"
-            :key="x.id"
-            :tag="x"
-            :icon="x.kind === TagKind.TagBuiltin ? 'things' : 'tag'"
-            :deletable="x.kind !== TagKind.TagBuiltin"
-            :rename="rename"
-            @pin="pin(x)"
-            @block="blockTag(x)"
-            @remove="remove(x)"
-          />
-        </div>
-      </template>
-
-      <template v-if="mine.length">
-        <h2>{{ t('things.yours') }}</h2>
-        <div class="cards">
-          <ThingCard
-            v-for="x in mine"
-            :key="x.id"
-            :tag="x"
-            icon="tag"
-            deletable
-            :rename="rename"
-            @pin="pin(x)"
-            @block="blockTag(x)"
-            @remove="remove(x)"
-          />
-        </div>
-      </template>
-
-      <h2 v-if="mine.length && builtin.length">{{ t('nav.things') }}</h2>
-      <div v-if="builtin.length" class="cards">
+    </div>
+    <UAlert
+      v-if="nameTooLong(name)"
+      class="mb-3"
+      role="alert"
+      color="error"
+      variant="subtle"
+      :title="t('error.invalidName', { max: MAX_NAME_LEN })"
+    />
+    <FeatureState
+      v-if="error || things.error || aiError"
+      kind="error"
+      :title="error || things.error || t('settings.aiError', { error: aiError })"
+    />
+    <FeatureState v-else-if="!things.loaded" kind="loading" :title="t('things.loading')" />
+    <template v-if="pinned.length">
+      <h2 class="mb-3 mt-5 text-sm font-semibold">{{ t('things.pinnedHeading') }}</h2>
+      <CardGrid>
         <ThingCard
-          v-for="x in builtin"
+          v-for="x in pinned"
           :key="x.id"
           :tag="x"
-          icon="things"
-          :deletable="false"
+          :icon="x.kind === TagKind.TagBuiltin ? 'things' : 'tag'"
+          :deletable="x.kind !== TagKind.TagBuiltin"
           :rename="rename"
           @pin="pin(x)"
           @block="blockTag(x)"
+          @remove="remove(x)"
         />
-      </div>
-
-      <EmptyState
-        v-else-if="things.loaded && !mine.length && !pinned.length"
-        class="empty"
+      </CardGrid>
+    </template>
+    <template v-if="mine.length">
+      <h2 class="mb-3 mt-5 text-sm font-semibold">{{ t('things.yours') }}</h2>
+      <CardGrid>
+        <ThingCard
+          v-for="x in mine"
+          :key="x.id"
+          :tag="x"
+          icon="tag"
+          deletable
+          :rename="rename"
+          @pin="pin(x)"
+          @block="blockTag(x)"
+          @remove="remove(x)"
+        />
+      </CardGrid>
+    </template>
+    <h2 v-if="mine.length && builtin.length" class="mb-3 mt-5 text-sm font-semibold">{{ t('nav.things') }}</h2>
+    <CardGrid v-if="builtin.length">
+      <ThingCard
+        v-for="x in builtin"
+        :key="x.id"
+        :tag="x"
         icon="things"
-        :title="t('things.empty')"
-        :text="understanding ? t('things.emptyWorking', { n: understanding }) : t('things.emptyHint')"
+        :deletable="false"
+        :rename="rename"
+        @pin="pin(x)"
+        @block="blockTag(x)"
       />
-    </div>
-  </div>
+    </CardGrid>
+    <FeatureState
+      v-if="things.loaded && !listed.length && !error && !things.error && !aiError"
+      kind="empty"
+      icon="things"
+      :title="query ? t('things.noMatches') : t('things.empty')"
+      :text="
+        query
+          ? t('things.noMatchesHint')
+          : understanding
+            ? t('things.emptyWorking', { n: understanding })
+            : t('things.emptyHint')
+      "
+    />
+  </Page>
 </template>
-
-<style scoped>
-.new {
-  display: flex;
-  gap: 8px;
-  max-width: 520px;
-  margin-bottom: 8px;
-}
-.new .field {
-  flex: 1;
-}
-h2 {
-  margin: 20px 0 10px;
-  font-size: 14px;
-  font-weight: 600;
-}
-.empty {
-  margin-top: 36px;
-}
-</style>

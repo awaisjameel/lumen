@@ -4,7 +4,7 @@ import { nextTick, watch } from 'vue'
 import { Device, engine, Filter, onLibraryChanged, onProgress, startMedia, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Errors from '../shared/errors'
-import type { Changes, DayBucket, DayItems, Progress, SearchResults } from '../bridge'
+import type { Changes, DayBucket, DayItems, GridItem, Progress, SearchResults } from '../bridge'
 import { affects, scopeKey, useLibrary } from './store'
 import { reportError } from '../shared/errors'
 
@@ -19,7 +19,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     timeline: vi.fn(),
     days: vi.fn(),
     search: vi.fn(),
-    visibleAssets: vi.fn(),
+    searchHits: vi.fn(),
     sources: vi.fn(),
     settings: vi.fn(),
     progress: vi.fn(),
@@ -45,6 +45,8 @@ const buckets: DayBucket[] = [{ day, count: 1 }]
 const all = { kind: 'timeline', view: { filter: Filter.FilterAll } } as const
 const favourites = { kind: 'timeline', view: { filter: Filter.FilterFavourites } } as const
 const result = (id: number): DayItems[] => [{ day, items: [{ id, w: 100, h: 100, t: 1 }] }]
+/** Search hits as the engine has them now. */
+const hits = (...ids: number[]): GridItem[] => ids.map((id) => ({ id, w: 100, h: 100, t: 1 }))
 const progress: Progress = {
   scanning: false,
   scanPath: '',
@@ -77,7 +79,7 @@ beforeEach(() => {
   vi.mocked(engine.timeline).mockReset().mockResolvedValue(buckets)
   vi.mocked(engine.days).mockReset()
   vi.mocked(engine.search).mockReset()
-  vi.mocked(engine.visibleAssets).mockReset()
+  vi.mocked(engine.searchHits).mockReset()
   vi.mocked(engine.sources).mockReset().mockResolvedValue([])
   vi.mocked(engine.settings).mockReset().mockResolvedValue({
     videos: false,
@@ -199,9 +201,9 @@ describe('library requests', () => {
   it('keeps a pre-change search answer out of the grid until visibility is confirmed', async () => {
     const lib = shownLibrary()
     const search = deferred<SearchResults>()
-    const visibility = deferred<number[]>()
+    const visibility = deferred<GridItem[]>()
     vi.mocked(engine.search).mockReturnValueOnce(search.promise)
-    vi.mocked(engine.visibleAssets).mockResolvedValueOnce([]).mockReturnValueOnce(visibility.promise)
+    vi.mocked(engine.searchHits).mockResolvedValueOnce([]).mockReturnValueOnce(visibility.promise)
     const loading = lib.setScope({ kind: 'search', query: 'beach' })
     await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
     search.resolve({
@@ -213,7 +215,7 @@ describe('library requests', () => {
       blocked: false,
     })
     await nextTick()
-    expect(engine.visibleAssets).toHaveBeenLastCalledWith([1], expect.any(AbortSignal))
+    expect(engine.searchHits).toHaveBeenLastCalledWith([1], expect.any(AbortSignal))
     expect(lib.days.size).toBe(0)
     expect(lib.total).toBe(0)
     visibility.resolve([])
@@ -225,12 +227,9 @@ describe('library requests', () => {
   it('checks a pending search again when visibility changes during its check', async () => {
     const lib = shownLibrary()
     const search = deferred<SearchResults>()
-    const visibility = deferred<number[]>()
+    const visibility = deferred<GridItem[]>()
     vi.mocked(engine.search).mockReturnValueOnce(search.promise)
-    vi.mocked(engine.visibleAssets)
-      .mockResolvedValueOnce([])
-      .mockReturnValueOnce(visibility.promise)
-      .mockResolvedValue([])
+    vi.mocked(engine.searchHits).mockResolvedValueOnce([]).mockReturnValueOnce(visibility.promise).mockResolvedValue([])
     const loading = lib.setScope({ kind: 'search', query: 'beach' })
     await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
     search.resolve({
@@ -243,18 +242,18 @@ describe('library requests', () => {
     })
     await nextTick()
     await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
-    visibility.resolve([1])
+    visibility.resolve(hits(1))
     await loading
-    expect(engine.visibleAssets).toHaveBeenCalledTimes(4)
+    expect(engine.searchHits).toHaveBeenCalledTimes(4)
     expect(lib.days.size).toBe(0)
   })
 
   it('does not let a prune of previous results clear a newly verified search', async () => {
     const lib = shownLibrary()
     const search = deferred<SearchResults>()
-    const oldPrune = deferred<number[]>()
+    const oldPrune = deferred<GridItem[]>()
     vi.mocked(engine.search).mockReturnValueOnce(search.promise)
-    vi.mocked(engine.visibleAssets).mockReturnValueOnce(oldPrune.promise).mockResolvedValueOnce([1])
+    vi.mocked(engine.searchHits).mockReturnValueOnce(oldPrune.promise).mockResolvedValueOnce(hits(1))
     const loading = lib.setScope({ kind: 'search', query: 'beach' })
     const refreshing = lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
     search.resolve({
@@ -307,7 +306,7 @@ describe('library requests', () => {
     await lib.setScope({ kind: 'search', query: 'Ali' })
     lib.selected = { day: 'results', id: 1 }
     lib.viewer = { day: 'results', id: 1 }
-    vi.mocked(engine.visibleAssets).mockResolvedValueOnce([2, 3])
+    vi.mocked(engine.searchHits).mockResolvedValueOnce(hits(3, 2))
     await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
     expect(lib.days.get('results')?.map((item) => item.id)).toEqual([3, 2])
     expect(lib.total).toBe(2)
@@ -318,7 +317,30 @@ describe('library requests', () => {
     expect(engine.search).toHaveBeenCalledTimes(1)
   })
 
-  it('ignores a superseded visibility prune even if its response arrives last', async () => {
+  it('shows a search hit’s new thumbnail in place, keeping its moment and the order', async () => {
+    const lib = shownLibrary()
+    vi.mocked(engine.search).mockResolvedValueOnce({
+      items: [
+        { id: 2, w: 100, h: 100, t: 0, v: true, at: 4000 },
+        { id: 1, w: 100, h: 100, t: 1 },
+      ],
+      people: [],
+      pending: 0,
+      complete: true,
+      noAI: false,
+      blocked: false,
+    })
+    await lib.setScope({ kind: 'search', query: 'beach' })
+    vi.mocked(engine.searchHits).mockResolvedValueOnce([{ id: 2, w: 100, h: 100, t: 3, v: true }, ...hits(1)])
+    await lib.refresh({ assets: false, thumbs: true, tags: false, people: false })
+    expect(engine.searchHits).toHaveBeenCalledWith([2, 1], expect.any(AbortSignal))
+    expect(lib.days.get('results')).toEqual([{ id: 2, w: 100, h: 100, t: 3, v: true, at: 4000 }, ...hits(1)])
+    expect(engine.search).toHaveBeenCalledTimes(1)
+    await lib.refresh({ assets: false, thumbs: false, tags: true, people: true })
+    expect(engine.searchHits).toHaveBeenCalledOnce()
+  })
+
+  it('ignores a superseded refresh of search hits even if its response arrives last', async () => {
     const lib = shownLibrary()
     vi.mocked(engine.search).mockResolvedValueOnce({
       items: [1, 2, 3].map((id) => ({ id, w: 100, h: 100, t: 1 })),
@@ -329,13 +351,13 @@ describe('library requests', () => {
       blocked: false,
     })
     await lib.setScope({ kind: 'search', query: 'beach' })
-    const old = deferred<number[]>()
-    vi.mocked(engine.visibleAssets).mockReturnValueOnce(old.promise).mockResolvedValueOnce([2, 3])
+    const old = deferred<GridItem[]>()
+    vi.mocked(engine.searchHits).mockReturnValueOnce(old.promise).mockResolvedValueOnce(hits(2, 3))
     const first = lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
-    const signal = vi.mocked(engine.visibleAssets).mock.calls[0]?.[1]
+    const signal = vi.mocked(engine.searchHits).mock.calls[0]?.[1]
     await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
     expect(signal?.aborted).toBe(true)
-    old.resolve([1])
+    old.resolve(hits(1))
     await first
     expect(lib.days.get('results')?.map((item) => item.id)).toEqual([2, 3])
   })
@@ -351,7 +373,7 @@ describe('library requests', () => {
       blocked: false,
     })
     await lib.setScope({ kind: 'search', query: 'beach' })
-    vi.mocked(engine.visibleAssets).mockResolvedValueOnce([])
+    vi.mocked(engine.searchHits).mockResolvedValueOnce([])
     await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
     expect(lib.days.size).toBe(0)
     expect(lib.buckets).toEqual([])
@@ -371,7 +393,7 @@ describe('library requests', () => {
     await lib.setScope({ kind: 'search', query: 'beach' })
     lib.detach()
     await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
-    expect(engine.visibleAssets).not.toHaveBeenCalled()
+    expect(engine.searchHits).not.toHaveBeenCalled()
     lib.attach()
     await lib.setScope({ kind: 'search', query: 'beach' })
     expect(engine.search).toHaveBeenCalledTimes(2)
@@ -381,7 +403,7 @@ describe('library requests', () => {
     const lib = shownLibrary()
     const pending = deferred<SearchResults>()
     vi.mocked(engine.search).mockReturnValueOnce(pending.promise)
-    vi.mocked(engine.visibleAssets).mockResolvedValue([])
+    vi.mocked(engine.searchHits).mockResolvedValue([])
     const loading = lib.setScope({ kind: 'search', query: 'beach' })
     await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
     pending.resolve({
@@ -423,6 +445,32 @@ describe('library requests', () => {
       for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0))
       expect(calls).toBeGreaterThan(1)
       expect(lib.days.get(day)?.[0]?.id).toBeGreaterThan(1)
+    } finally {
+      stop()
+    }
+  })
+
+  it('says why a day did not load, and asks again for it only when told to', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    vi.mocked(engine.days).mockRejectedValueOnce(new Error('disk busy')).mockResolvedValueOnce(result(1))
+    // As the grid does: it asks for the days it shows whenever they change.
+    const stop = watch(
+      () => lib.days,
+      () => void lib.ensureDays([day]),
+      { flush: 'post' },
+    )
+    try {
+      await lib.ensureDays([day])
+      await nextTick()
+      expect(lib.daysError).toBe('Something went wrong: disk busy')
+      expect(engine.days).toHaveBeenCalledOnce()
+      lib.retryDays()
+      expect(lib.daysError).toBe('')
+      await vi.waitFor(() => expect(lib.days.get(day)?.[0]?.id).toBe(1))
+      expect(engine.days).toHaveBeenCalledTimes(2)
+      expect(lib.daysError).toBe('')
     } finally {
       stop()
     }

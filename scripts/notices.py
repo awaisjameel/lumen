@@ -7,7 +7,10 @@ It reads what the build really holds, so the notices can't drift from it:
   from there) and their licence texts, which deps.sh puts in deps/licenses;
 - the Go modules linked into the production Lumen.exe (`go list -deps`);
 - the JavaScript packages bundled into the UI (the licence list Vite writes to
-  frontend/dist/.vite/license.json, so the UI must be built first).
+  frontend/dist/.vite/license.json, so the UI must be built first);
+- the icon collection the UI's icons are bundled from. Its icons reach the
+  bundle as data, which Vite's list does not name, and its package carries no
+  licence file: the text is kept in frontend/licenses.
 """
 
 from __future__ import annotations
@@ -23,6 +26,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DEPS_SH = ROOT / "scripts" / "deps.sh"
 LICENSES = ROOT / "deps" / "licenses"
 UI_LICENSES = ROOT / "frontend" / "dist" / ".vite" / "license.json"
+ICON_PACKAGE = ROOT / "frontend" / "node_modules" / "@iconify-json" / "lucide" / "package.json"
+ICON_LICENCE = ROOT / "frontend" / "licenses" / "lucide.LICENSE.txt"
 LICENSE_NAMES = ("LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE", "COPYING", "LICENSE-MIT")
 RULE = "=" * 78
 MODULE_FORMAT = "{{with .Module}}{{if not .Main}}{{.Path}}\t{{.Version}}\t{{.Dir}}{{end}}{{end}}"
@@ -81,6 +86,16 @@ def ui_packages() -> list[dict[str, str]]:
     return sorted(packages, key=lambda p: p["name"])
 
 
+def icon_set() -> tuple[str, str]:
+    """The Lucide collection the UI's icons come from: its package version and its licence."""
+    if not ICON_PACKAGE.is_file():
+        raise SystemExit(f"notices: {ICON_PACKAGE} is missing; run npm install in frontend/")
+    if not ICON_LICENCE.is_file():
+        raise SystemExit(f"notices: {ICON_LICENCE} is missing")
+    version: str = json.loads(ICON_PACKAGE.read_text(encoding="utf-8"))["version"]
+    return version, ICON_LICENCE.read_text(encoding="utf-8").strip()
+
+
 def wrap(items: list[str], width: int = 88) -> str:
     """items as a comma-separated list, indented, broken between items only."""
     lines: list[str] = []
@@ -112,6 +127,7 @@ def main() -> None:
     go_version, go_text = go_licence()
     modules = go_modules()
     packages = ui_packages()
+    icons_version, icons_text = icon_set()
     module_texts = {path: module_licence(folder) for path, _, folder in modules}
     # @wailsio/runtime is published without its licence file; it is Wails' own, MIT.
     wails_text = next(text for path, text in module_texts.items() if path.startswith("github.com/wailsapp/wails"))
@@ -170,7 +186,9 @@ def main() -> None:
         ),
         section(
             "JavaScript in Lumen's window",
-            "".join(f"{p['name']} {p['version']}: {p['identifier']}\n" for p in packages).rstrip(),
+            "".join(f"{p['name']} {p['version']}: {p['identifier']}\n" for p in packages)
+            + f"Icons: Lucide (@iconify-json/lucide {icons_version}): ISC; those derived from Feather: MIT.\n"
+            "  https://lucide.dev/",
         ),
         "\nLICENCE TEXTS\n",
         section("libvips: GNU Lesser General Public License 2.1", licence("libvips.LICENSE.txt")),
@@ -190,6 +208,7 @@ def main() -> None:
             )
             for p in packages
         ),
+        section(f"Lucide icons (@iconify-json/lucide {icons_version})", icons_text),
     ]
     # Windows line ends: the file is opened in Notepad from Settings.
     out.write_text("\n".join(parts).replace("\r\n", "\n"), encoding="utf-8", newline="\r\n")

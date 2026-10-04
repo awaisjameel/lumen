@@ -1,0 +1,262 @@
+/* Lumen's design tokens, over Tailwind CSS 4 and Nuxt UI. Photo-first:
+   neutral surfaces so images carry the colour, one restrained accent, system
+   fonts and Windows 11 proportions. Nothing here is fetched: fonts are the
+   system's and icons are bundled (see icons.ts).
+
+   Nuxt UI's semantic variables (--ui-bg, --ui-text, --ui-primary…) are the
+   colour tokens; components use its utilities (bg-default, text-muted,
+   border-default, text-primary). The --lumen-* tokens add what Nuxt UI has
+   no name for: layout sizes, density, motion, layers and the viewer. */
+@import 'tailwindcss';
+@import '@nuxt/ui';
+
+@theme static {
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  /* Content-width breakpoints (see breakpoints.ts): the shell and pages
+     respond to the room they have, as container queries. */
+  --container-medium: 900px;
+  --container-wide: 1200px;
+}
+
+:root {
+  color-scheme: light;
+  --ui-radius: 0.375rem;
+
+  /* Surfaces and text, light. Small counts keep 4.5:1 on every surface. */
+  --ui-bg: #ffffff;
+  --ui-bg-muted: #f5f5f6;
+  --ui-bg-elevated: #ececef;
+  --ui-bg-accented: #e2e2e6;
+  --ui-border: rgb(0 0 0 / 0.09);
+  --ui-border-muted: rgb(0 0 0 / 0.06);
+  --ui-border-accented: rgb(0 0 0 / 0.16);
+  --ui-text-dimmed: #6c6c76;
+  --ui-text-muted: #5c5c66;
+  --ui-text-toned: #45454d;
+  --ui-text: #2c2c33;
+  --ui-text-highlighted: #1b1b1f;
+  /* White text on the accent needs a deeper shade than Nuxt UI's 500. */
+  --ui-primary: var(--ui-color-primary-600);
+
+  /* Layout */
+  --lumen-topbar-h: 3.25rem;
+  --lumen-page-x: 1.25rem;
+  --lumen-control-h: 2rem;
+  --lumen-row-h: 2.25rem;
+  --lumen-gap: 0.75rem;
+  --lumen-card-min: 9.75rem;
+
+  /* Motion: quick for controls, a little longer for panels. Opacity and
+     transform only; grid tiles do not animate. */
+  --lumen-motion-control: 120ms;
+  --lumen-motion-panel: 190ms;
+  --lumen-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layers. Nuxt UI's portalled overlays sit above all of these. */
+  --lumen-z-sticky: 10;
+  --lumen-z-panel: 20;
+  --lumen-z-viewer: 30;
+
+  /* Elevation */
+  --lumen-shadow: 0 8px 32px rgb(0 0 0 / 0.14);
+  --lumen-backdrop: rgb(0 0 0 / 0.45);
+  --lumen-placeholder: #e2e2e6;
+
+  /* The viewer is dark in either theme, as photo viewers are. */
+  --lumen-viewer-bg: #0c0c0e;
+  --lumen-viewer-text: #ececef;
+  --lumen-viewer-text-muted: #b4b4bc;
+  --lumen-viewer-control: rgb(255 255 255 / 0.1);
+}
+
+/* The theme owner (appearance.ts) sets .dark from the user's choice and,
+   for "system", from Windows. */
+.dark {
+  color-scheme: dark;
+  --ui-bg: #111113;
+  --ui-bg-muted: #1a1a1d;
+  --ui-bg-elevated: #242428;
+  --ui-bg-accented: #303036;
+  --ui-border: rgb(255 255 255 / 0.08);
+  --ui-border-muted: rgb(255 255 255 / 0.06);
+  --ui-border-accented: rgb(255 255 255 / 0.16);
+  --ui-text-dimmed: #8f8f99;
+  --ui-text-muted: #a4a4ad;
+  --ui-text-toned: #c4c4cc;
+  --ui-text: #dedee3;
+  --ui-text-highlighted: #f4f4f6;
+  --ui-primary: var(--ui-color-primary-400);
+  --lumen-shadow: 0 8px 32px rgb(0 0 0 / 0.5);
+  --lumen-placeholder: #1f1f23;
+}
+
+/* Accents whose 600 is too light for white text use their 700 in light. */
+:root:not(.dark)[data-accent='teal'],
+:root:not(.dark)[data-accent='green'],
+:root:not(.dark)[data-accent='amber'] {
+  --ui-primary: var(--ui-color-primary-700);
+}
+
+/* Each accent as --ui-primary shows it, for the accent choice's swatches. */
+:root {
+  --lumen-accent-blue: var(--color-blue-600);
+  --lumen-accent-teal: var(--color-teal-700);
+  --lumen-accent-green: var(--color-green-700);
+  --lumen-accent-violet: var(--color-violet-600);
+  --lumen-accent-rose: var(--color-rose-600);
+  --lumen-accent-amber: var(--color-amber-700);
+}
+.dark {
+  --lumen-accent-blue: var(--color-blue-400);
+  --lumen-accent-teal: var(--color-teal-400);
+  --lumen-accent-green: var(--color-green-400);
+  --lumen-accent-violet: var(--color-violet-400);
+  --lumen-accent-rose: var(--color-rose-400);
+  --lumen-accent-amber: var(--color-amber-400);
+}
+
+/* Compact density: the same hierarchy with less air. Control sizes follow
+   through Nuxt UI's size variants (appearance.ts). */
+:root[data-density='compact'] {
+  --lumen-topbar-h: 2.75rem;
+  --lumen-page-x: 1rem;
+  --lumen-control-h: 1.75rem;
+  --lumen-row-h: 1.875rem;
+  --lumen-gap: 0.5rem;
+  --lumen-card-min: 8.5rem;
+}
+
+html {
+  /* Text scale: rem follows, so controls and spacing grow with the text
+     and no label is cut off. Photo tiles are sized in px and do not. */
+  font-size: calc(16px * var(--lumen-text-scale, 1));
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Text the user may want to copy: paths, names, messages. */
+.lumen-selectable {
+  user-select: text;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+}
+
+/* Overlays and tooltips (see nuxt-ui.config.ts) take the panel motion. */
+.lumen-overlay,
+.lumen-tooltip {
+  animation-duration: var(--lumen-motion-panel);
+  animation-timing-function: var(--lumen-ease);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ui-border-accented);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* Coarse pointers (touch): every control is a comfortable target. */
+@media (pointer: coarse) {
+  button,
+  [role='button'],
+  [role='menuitem'],
+  [role='option'],
+  [role='tab'],
+  [role='switch'] {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+}
+
+/* Reduced motion: nothing slides or pulses. Loading states say so in
+   words as well (FeatureState), so they still inform. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Forced colours (Windows contrast themes): shadows and background tints
+   disappear, so focus, selection and surface edges are drawn as outlines
+   and borders in system colours. Nuxt UI draws a control's edge as a ring
+   (a shadow) and its state as a fill, both of which are dropped: each
+   control gets an edge back, and its "on" state the system highlight. */
+@media (forced-colors: active) {
+  button[data-slot='base'],
+  a[data-slot='base'],
+  input[data-slot='base'],
+  textarea[data-slot='base'],
+  [data-slot='base'][role='combobox'] {
+    outline: 1px solid ButtonBorder;
+    outline-offset: -1px;
+  }
+  [role='radio'],
+  [role='checkbox'],
+  [role='switch'],
+  [role='slider'],
+  [data-slot='track'],
+  [role='progressbar'] {
+    outline: 1px solid ButtonText;
+    outline-offset: -1px;
+  }
+  [role='radio'][data-state='checked'],
+  [role='checkbox'][data-state='checked'],
+  [role='switch'][data-state='checked'],
+  [data-slot='range'],
+  [data-slot='indicator'] {
+    background-color: Highlight;
+  }
+  [role='slider'],
+  [role='switch'] [data-slot='thumb'] {
+    background-color: ButtonText;
+  }
+  [role='switch'][data-state='checked'] [data-slot='thumb'] {
+    background-color: HighlightText;
+  }
+
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px;
+  }
+  [aria-selected='true'],
+  [aria-pressed='true'],
+  [aria-current='page'],
+  [data-state='checked'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .lumen-overlay,
+  .lumen-tooltip,
+  .lumen-surface {
+    border: 1px solid CanvasText;
+  }
+}

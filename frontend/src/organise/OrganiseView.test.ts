@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
+import type { VueWrapper } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { mountInApp } from '../shared/testing'
 import {
   DateSource,
   engine,
@@ -39,7 +42,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   },
 }))
 
-let wrapper: ReturnType<typeof mount> | undefined
+let wrapper: VueWrapper | undefined
 let emit: (p: OrganiseProgress) => void = () => undefined
 
 const asset: AssetDetail = {
@@ -57,7 +60,7 @@ const asset: AssetDetail = {
   paths: ['D:\\Photos\\IMG_0042.JPG'],
   size: 100,
   ext: '.jpg',
-  webNative: true,
+  caps: { preview: true, original: true, render: false, directPlay: false, convertPlay: false },
   video: null,
 }
 const beachDay: Event = {
@@ -163,12 +166,30 @@ afterEach(() => {
 })
 
 async function open() {
-  wrapper = mount(OrganiseView, { attachTo: document.body, global: { stubs: { RouterLink: true } } })
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { render: () => null } },
+      { path: '/settings', component: { render: () => null } },
+    ],
+  })
+  wrapper = mountInApp(OrganiseView, { plugins: [router] })
   await flushPromises()
   return wrapper
 }
 
-const button = (w: ReturnType<typeof mount>, text: string) => w.findAll('button').find((b) => b.text().includes(text))
+async function chooseSource(view: VueWrapper, path: string) {
+  // Opened from the keyboard, as someone without a pointer would.
+  await view.get('#organise-source').trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  const body = new DOMWrapper(document.body)
+  const option = body.findAll('[role="option"]').find((item) => item.text() === path)
+  if (!option) throw new Error(`the source selector has no ${path}`)
+  await option.trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(view.get('#organise-source').text()).toBe(path)
+}
+const button = (w: VueWrapper, text: string) => w.findAll('button').find((b) => b.text().includes(text))
 
 it('starts with the default scheme and an example drawn from a real photo', async () => {
   const w = await open()
@@ -228,7 +249,7 @@ it('previews the scheme for the chosen folder and shows what will move, stay and
     ),
   )
   const w = await open()
-  await w.get('#organise-source').setValue('3')
+  await chooseSource(w, 'D:\\Photos')
   await button(w, 'Preview the moves')?.trigger('click')
   await flushPromises()
   expect(engine.planOrganise).toHaveBeenCalledWith('{Year}/{Month}/{Event}/{Name}', 3)
@@ -280,7 +301,7 @@ it('explains a scheme the engine refuses, in the page', async () => {
   const w = await open()
   await button(w, 'Preview the moves')?.trigger('click')
   await flushPromises()
-  expect(w.get('.page-error[role="alert"]').text()).toContain('folder scheme can’t be used')
+  expect(w.get('[data-organise-error][role="alert"]').text()).toContain('folder scheme can’t be used')
   expect(w.find('.preview').exists()).toBe(false)
 })
 
@@ -295,7 +316,7 @@ it('drops the preview when the scheme or the folder changes', async () => {
 
   await button(w, 'Preview the moves')?.trigger('click')
   await flushPromises()
-  await w.get('#organise-source').setValue('3')
+  await chooseSource(w, 'D:\\Photos')
   expect(w.find('.preview').exists()).toBe(false)
 })
 
@@ -323,9 +344,9 @@ it('shows live progress from the engine’s events and the result when the run e
   const w = await open()
   emit({ runId: 7, state: OrganiseRunState.OrganiseRunning, done: 40, total: 100 })
   await flushPromises()
-  const bar = w.get<HTMLProgressElement>('.progress progress')
-  expect(bar.element.value).toBe(40)
-  expect(bar.element.max).toBe(100)
+  const bar = w.get('.progress [role="progressbar"]')
+  expect(bar.attributes('aria-valuenow')).toBe('40')
+  expect(bar.attributes('aria-valuemax')).toBe('100')
   expect(w.get('.progress').text()).toBe('Moving files: 40 of 100')
 
   vi.mocked(engine.organiseRuns).mockResolvedValue([run(7, OrganiseRunState.OrganiseDone, 100, 100)])

@@ -3,17 +3,25 @@
 // original when the WebView can display it (JPEG, PNG, WebP, AVIF). Its
 // photos, the one beside each and what may be done with it come from a
 // source: the library grid unless one is given (the Blocked screen's browser).
+import UAlert from '@nuxt/ui/components/Alert.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { engine, originalUrl, Playback, playUrl, THUMB_LARGE, thumbUrl, videosAvailable, videoUrl } from '../bridge'
+import { engine, isCancelled, originalUrl, THUMB_LARGE, thumbUrl, videosAvailable } from '../bridge'
 import type { AssetDetail } from '../bridge'
-import { orFallback } from '../shared/errors'
-import { dateTime, duration } from '../shared/format'
+import { icons } from '../design/icons'
+import { dispatchKey, runCommand, useCommands } from '../shared/commands'
+import { errorText } from '../shared/errors'
+import FeatureState from '../shared/FeatureState.vue'
+import { dateTime } from '../shared/format'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { isTyping, ownsArrows } from '../shared/keys'
+import { useLayer } from '../shared/overlay'
 import { libraryViewerSource, useLibrary } from './store'
 import type { ViewerSource } from './store'
 import DetailsPanel from './DetailsPanel.vue'
+import VideoPlayer from './VideoPlayer.vue'
 
 const props = defineProps<{ source?: ViewerSource }>()
 const lib = useLibrary()
@@ -23,18 +31,11 @@ const actions = computed(() => src.value.actions)
 const detail = ref<AssetDetail | null>(null)
 const originalReady = ref(false)
 const root = ref<HTMLElement | null>(null)
-const video = ref<HTMLVideoElement | null>(null)
-const videoMode = ref<Playback>(Playback.PlayConvert)
-const videoStart = ref(0)
-const videoPosition = ref(0)
-const videoFailed = ref(false)
+const loading = ref(false)
+const loadError = ref('')
+const layer = useLayer()
+let previousFocus: Element | null = null
 let detailRequest = 0
-const converting = computed(() => videoMode.value === Playback.PlayConvert)
-const videoSrc = computed(() => {
-  const d = detail.value
-  if (!d?.video) return ''
-  return converting.value ? playUrl(d.id, videoStart.value) : videoUrl(d.id)
-})
 
 watch(
   () => src.value.id,
@@ -43,17 +44,17 @@ watch(
     onCleanup(() => detailRequest++)
     originalReady.value = false
     detail.value = null
-    videoStart.value = item.value?.at ?? 0
-    videoPosition.value = videoStart.value
-    videoFailed.value = false
+    loadError.value = ''
+    loading.value = !!id
     if (!id) return
-    const d = await orFallback(engine.asset(id), null)
-    if (request === detailRequest) {
+    try {
+      const d = await engine.asset(id)
+      if (request !== detailRequest) return
       detail.value = d
-      if (d?.video) {
-        const hevc = document.createElement('video').canPlayType('video/mp4; codecs="hvc1"')
-        videoMode.value = d.video.play === Playback.PlayHEVC && !hevc ? Playback.PlayConvert : d.video.play
-      }
+    } catch (e) {
+      if (request === detailRequest && !isCancelled(e)) loadError.value = errorText(e)
+    } finally {
+      if (request === detailRequest) loading.value = false
     }
   },
   { immediate: true },
@@ -67,47 +68,6 @@ function close() {
   src.value.close()
 }
 
-function videoReady() {
-  if (video.value && !converting.value && videoStart.value > 0) {
-    video.value.currentTime = videoStart.value / 1000
-  }
-}
-
-// While the seek slider is dragged, playback must not move its thumb back.
-let seeking = false
-
-function videoTime() {
-  src.value.touch?.()
-  if (video.value && !seeking)
-    videoPosition.value = (converting.value ? videoStart.value : 0) + video.value.currentTime * 1000
-}
-
-function startSeek() {
-  seeking = true
-}
-
-function seekVideo(e: Event) {
-  const target = e.target
-  if (!(target instanceof HTMLInputElement)) return
-  const at = Number(target.value)
-  seeking = false
-  videoPosition.value = at
-  if (converting.value) {
-    videoStart.value = at // a new stream starts here; no full converted copy is kept
-  } else if (video.value) {
-    video.value.currentTime = at / 1000
-  }
-}
-
-function videoError() {
-  if (!converting.value) {
-    videoMode.value = Playback.PlayConvert
-    videoStart.value = videoPosition.value
-  } else {
-    videoFailed.value = true
-  }
-}
-
 function onMediaDoubleClick() {
   if (!detail.value?.video) close()
 }
@@ -116,35 +76,120 @@ function onMediaDoubleClick() {
 // picker closing its menu on Escape) stops it before it reaches the viewer.
 function onKey(e: KeyboardEvent) {
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return
-  if (document.querySelector('dialog[open]')) return // a confirmation above the viewer owns the keys
+  if (!layer.owns()) return
+  // Escape belongs to the browser while the player is fullscreen.
+  if (e.key === 'Escape' && document.fullscreenElement) return
+  if (e.key === 'Tab') {
+    trapTab(e)
+    return
+  }
   // Typing in the details panel (adding a tag): only Escape still closes.
   if (isTyping(e) && e.key !== 'Escape') return
-  // The seek slider and the video's own controls move with the arrows.
-  if (ownsArrows(e) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
-  switch (e.key) {
-    case 'Escape':
-      close()
-      break
-    case 'ArrowLeft':
-      go(-1)
-      break
-    case 'ArrowRight':
-      go(1)
-      break
-    case 'f':
-    case 'F':
-      if (!actions.value.favourite) return // a trashed photo can't be edited
-      actions.value.favourite()
-      break
-    case 'i':
-    case 'I':
-      if (!actions.value.details) return
-      lib.showDetails = !lib.showDetails
-      break
-    default:
-      return
+  // Playback controls keep their own arrow keys.
+  const slider = e.target instanceof Element && e.target.closest('[role="slider"], [role="separator"]')
+  if ((ownsArrows(e) || slider) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
+  // These viewer shortcuts ignored Shift before the command registry did the matching.
+  if (e.shiftKey && (/^[fi]$/i.test(e.key) || ['Escape', 'ArrowLeft', 'ArrowRight'].includes(e.key))) {
+    const plain = new KeyboardEvent('keydown', { key: e.key.toLowerCase() })
+    if (dispatchKey(plain, 'viewer')) e.preventDefault()
+    return
   }
-  e.preventDefault()
+  dispatchKey(e, 'viewer')
+}
+
+useCommands([
+  {
+    id: 'viewer.close',
+    group: 'view',
+    title: () => t('common.close'),
+    icon: 'close',
+    keys: 'Escape',
+    zone: 'viewer',
+    run: close,
+  },
+  {
+    id: 'viewer.previous',
+    group: 'view',
+    title: () => t('viewer.prev'),
+    icon: 'chevron-left',
+    keys: 'ArrowLeft',
+    zone: 'viewer',
+    run: () => go(-1),
+  },
+  {
+    id: 'viewer.next',
+    group: 'view',
+    title: () => t('viewer.next'),
+    icon: 'chevron-right',
+    keys: 'ArrowRight',
+    zone: 'viewer',
+    run: () => go(1),
+  },
+  {
+    id: 'viewer.favourite',
+    group: 'media',
+    title: () => t(item.value?.f ? 'details.unfavourite' : 'details.favourite'),
+    icon: 'heart',
+    keys: 'F',
+    zone: 'viewer',
+    available: () => !!actions.value.favourite,
+    run: () => actions.value.favourite?.(),
+  },
+  {
+    id: 'viewer.details',
+    group: 'view',
+    title: () => t('library.info'),
+    icon: 'info',
+    keys: 'I',
+    zone: 'viewer',
+    available: () => actions.value.details,
+    run: () => (lib.showDetails = !lib.showDetails),
+  },
+  {
+    id: 'viewer.trash',
+    group: 'media',
+    title: () => t('trash.move'),
+    icon: 'trash',
+    zone: 'viewer',
+    available: () => !!actions.value.moveToTrash,
+    run: () => actions.value.moveToTrash?.(),
+  },
+  {
+    id: 'viewer.restore',
+    group: 'media',
+    title: () => t('trash.restore'),
+    icon: 'restore',
+    zone: 'viewer',
+    available: () => !!actions.value.restore,
+    run: () => actions.value.restore?.(),
+  },
+  {
+    id: 'viewer.delete',
+    group: 'media',
+    title: () => t('trash.deleteFromDisk'),
+    icon: 'trash',
+    zone: 'viewer',
+    available: () => !!actions.value.deleteFromDisk,
+    run: () => actions.value.deleteFromDisk?.(),
+  },
+])
+
+function trapTab(e: KeyboardEvent) {
+  const controls = (document.fullscreenElement ?? root.value)?.querySelectorAll<HTMLElement>(
+    'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex="0"]',
+  )
+  const first = controls?.[0]
+  const last = controls?.[controls.length - 1]
+  if (!first || !last) {
+    e.preventDefault()
+    root.value?.focus()
+  } else if (e.shiftKey && (document.activeElement === first || document.activeElement === root.value)) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && (document.activeElement === last || document.activeElement === root.value)) {
+    e.preventDefault()
+    first.focus()
+  }
 }
 
 // A modal: the app behind it can't be tabbed to or clicked while it is open
@@ -154,6 +199,7 @@ function setBehind(inert: boolean) {
 }
 
 onMounted(() => {
+  previousFocus = document.activeElement
   window.addEventListener('keydown', onKey)
   setBehind(true)
   root.value?.focus()
@@ -161,6 +207,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   setBehind(false)
+  if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
 })
 </script>
 
@@ -171,122 +218,156 @@ onBeforeUnmount(() => {
       class="viewer"
       role="dialog"
       aria-modal="true"
+      :aria-busy="loading"
       :aria-label="detail ? dateTime(detail.takenAt) : t('viewer.title')"
       tabindex="-1"
     >
       <div class="stage">
         <header class="bar">
-          <button
-            class="icon-btn"
-            :title="t('common.withKey', { label: t('common.close'), key: 'Esc' })"
-            :aria-label="t('common.close')"
-            @click="close"
-          >
-            <Icon name="close" />
-          </button>
+          <UTooltip :text="t('common.withKey', { label: t('common.close'), key: 'Esc' })">
+            <UButton
+              class="viewer-control"
+              :icon="icons.close"
+              :aria-label="t('common.close')"
+              variant="ghost"
+              square
+              @click="runCommand('viewer.close')"
+            />
+          </UTooltip>
           <span class="date">{{ detail ? dateTime(detail.takenAt) : '' }}</span>
-          <div class="spacer" />
-          <button v-if="actions.restore" class="text-btn" @click="actions.restore">{{ t('trash.restore') }}</button>
-          <button v-if="actions.deleteFromDisk" class="text-btn" @click="actions.deleteFromDisk">
+          <span v-if="loading" class="date" role="status">{{ t('details.loading') }}</span>
+          <div class="grow" />
+          <!-- In the Trash the two actions are spelt out: what each does to
+               the file must be read without hovering. -->
+          <UButton
+            v-if="actions.restore"
+            class="viewer-control"
+            :icon="icons.restore"
+            variant="ghost"
+            @click="runCommand('viewer.restore')"
+          >
+            {{ t('trash.restore') }}
+          </UButton>
+          <UButton
+            v-if="actions.deleteFromDisk"
+            class="viewer-control"
+            :icon="icons.recycle"
+            variant="ghost"
+            @click="runCommand('viewer.delete')"
+          >
             {{ t('trash.deleteFromDisk') }}
-          </button>
-          <button
+          </UButton>
+          <UTooltip
             v-if="actions.favourite"
-            class="icon-btn"
-            :aria-pressed="!!item?.f"
-            :title="t('common.withKey', { label: t('details.favourite'), key: 'F' })"
-            :aria-label="t('details.favourite')"
-            @click="actions.favourite"
+            :text="t('common.withKey', { label: t(item?.f ? 'details.unfavourite' : 'details.favourite'), key: 'F' })"
           >
-            <Icon :name="item?.f ? 'heart-filled' : 'heart'" />
-          </button>
-          <button
-            v-if="actions.moveToTrash"
-            class="icon-btn"
-            :title="t('trash.move')"
-            :aria-label="t('trash.move')"
-            @click="actions.moveToTrash"
-          >
-            <Icon name="trash" />
-          </button>
-          <button
-            v-if="actions.details"
-            class="icon-btn"
-            :aria-pressed="lib.showDetails"
-            :title="t('common.withKey', { label: t('library.info'), key: 'I' })"
-            :aria-label="t('library.info')"
-            @click="lib.showDetails = !lib.showDetails"
-          >
-            <Icon name="info" />
-          </button>
+            <UButton
+              class="viewer-control"
+              :aria-pressed="!!item?.f"
+              :aria-label="t(item?.f ? 'details.unfavourite' : 'details.favourite')"
+              variant="ghost"
+              square
+              @click="runCommand('viewer.favourite')"
+            >
+              <Icon name="heart" :filled="!!item?.f" />
+            </UButton>
+          </UTooltip>
+          <UTooltip v-if="actions.moveToTrash" :text="t('trash.move')">
+            <UButton
+              class="viewer-control"
+              :icon="icons.trash"
+              :aria-label="t('trash.move')"
+              variant="ghost"
+              square
+              @click="runCommand('viewer.trash')"
+            />
+          </UTooltip>
+          <UTooltip v-if="actions.details" :text="t('common.withKey', { label: t('library.info'), key: 'I' })">
+            <UButton
+              class="viewer-control"
+              :icon="icons.info"
+              :aria-pressed="lib.showDetails"
+              :aria-label="t('library.info')"
+              variant="ghost"
+              square
+              @click="runCommand('viewer.details')"
+            />
+          </UTooltip>
         </header>
 
-        <div v-if="item" class="media" @dblclick="onMediaDoubleClick">
-          <video
-            v-if="detail?.video && detail.id === item.id && videosAvailable()"
-            ref="video"
-            :key="videoSrc"
-            :src="videoSrc"
-            :poster="item.t ? thumbUrl(detail.id, item.t, THUMB_LARGE) : undefined"
-            controls
-            autoplay
-            @loadedmetadata="videoReady"
-            @timeupdate="videoTime"
-            @error="videoError"
-          />
-          <p v-if="detail?.video && !videosAvailable()" class="video-error" role="alert">
-            {{ t('viewer.videoUnavailable') }}
-          </p>
-          <p v-else-if="videoFailed" class="video-error" role="alert">{{ t('viewer.videoFailed') }}</p>
-          <template v-else-if="!detail?.video">
-            <img
-              v-if="item.t"
-              v-show="!originalReady"
-              :key="'p' + item.id"
-              class="preview"
-              :src="thumbUrl(item.id, item.t, THUMB_LARGE)"
-              alt=""
-              draggable="false"
+        <div class="media" @dblclick="onMediaDoubleClick">
+          <FeatureState v-if="loadError" kind="error" :title="loadError" />
+          <FeatureState v-else-if="!item && !loading" kind="empty" icon="image-off" :title="t('viewer.notFound')" />
+          <template v-else-if="item">
+            <VideoPlayer
+              v-if="detail?.video && detail.id === item.id && videosAvailable()"
+              :key="detail.id"
+              :detail="detail"
+              :at="item.at ?? 0"
+              :thumb-version="item.t"
+              @timeupdate="src.touch?.()"
             />
-            <img
-              v-if="detail?.webNative && detail.id === item.id"
-              v-show="originalReady"
-              :key="'o' + detail.id"
-              class="original"
-              :src="originalUrl(detail.id)"
-              alt=""
-              draggable="false"
-              @load="originalReady = true"
+            <UAlert
+              v-if="detail?.video && !videosAvailable()"
+              class="playback-message"
+              role="alert"
+              color="error"
+              variant="subtle"
+              :title="t('viewer.videoUnavailable')"
             />
-            <div v-if="!item.t && !detail?.webNative" class="none">
-              <Icon name="image-off" :size="40" />
-              <p>{{ t('viewer.noPreview') }}</p>
-            </div>
+            <template v-else-if="!detail?.video">
+              <img
+                v-if="item.t"
+                v-show="!originalReady"
+                :key="'p' + item.id"
+                class="preview"
+                :src="thumbUrl(item.id, item.t, THUMB_LARGE)"
+                alt=""
+                draggable="false"
+              />
+              <img
+                v-if="detail?.caps.original && detail.id === item.id"
+                v-show="originalReady"
+                :key="'o' + detail.id"
+                class="original"
+                :src="originalUrl(detail.id)"
+                alt=""
+                draggable="false"
+                @load="originalReady = true"
+              />
+              <FeatureState
+                v-if="!item.t && !detail?.caps.original"
+                :kind="loading ? 'loading' : 'empty'"
+                icon="image-off"
+                :title="loading ? t('details.loading') : t('viewer.noPreview')"
+              />
+            </template>
           </template>
+          <FeatureState v-else kind="loading" :title="t('details.loading')" />
         </div>
 
-        <div v-if="detail?.video && detail.video.duration" class="video-seek">
-          <span>{{ duration(videoPosition) }}</span>
-          <input
-            type="range"
-            min="0"
-            :max="detail.video.duration"
-            :value="videoPosition"
-            :aria-label="t('viewer.seek')"
-            @input="startSeek"
-            @change="seekVideo"
+        <UTooltip :text="t('viewer.prev')" :content="{ side: 'right' }">
+          <UButton
+            class="viewer-control nav prev"
+            :icon="icons['chevron-left']"
+            :aria-label="t('viewer.prev')"
+            variant="ghost"
+            square
+            @click="runCommand('viewer.previous')"
           />
-          <span>{{ duration(detail.video.duration) }}</span>
-        </div>
-
-        <button class="nav prev" :title="t('viewer.prev')" :aria-label="t('viewer.prev')" @click="go(-1)">
-          <Icon name="chevron-left" :size="28" />
-        </button>
-        <button class="nav next" :title="t('viewer.next')" :aria-label="t('viewer.next')" @click="go(1)">
-          <Icon name="chevron-right" :size="28" />
-        </button>
+        </UTooltip>
+        <UTooltip :text="t('viewer.next')" :content="{ side: 'left' }">
+          <UButton
+            class="viewer-control nav next"
+            :icon="icons['chevron-right']"
+            :aria-label="t('viewer.next')"
+            variant="ghost"
+            square
+            @click="runCommand('viewer.next')"
+          />
+        </UTooltip>
       </div>
-      <DetailsPanel v-if="lib.showDetails && actions.details" :sel="src.sel" class="panel" />
+      <DetailsPanel v-if="lib.showDetails && actions.details" :sel="src.sel" />
     </div>
   </Teleport>
 </template>
@@ -295,66 +376,76 @@ onBeforeUnmount(() => {
 .viewer {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--lumen-z-viewer);
   display: flex;
-  background: var(--viewer-bg);
-  color: var(--viewer-text);
+  background: var(--lumen-viewer-bg);
+  color: var(--lumen-viewer-text);
+  color-scheme: dark;
   outline: none;
+  /* Shared states and playback alerts keep the viewer's contrast in either theme. */
+  --ui-bg: var(--lumen-viewer-bg);
+  --ui-bg-muted: var(--lumen-viewer-control);
+  --ui-bg-elevated: var(--lumen-viewer-control);
+  --ui-text: var(--lumen-viewer-text);
+  --ui-text-highlighted: var(--lumen-viewer-text);
+  --ui-text-muted: var(--lumen-viewer-text-muted);
+  --ui-text-dimmed: var(--lumen-viewer-text-muted);
 }
+
 .stage {
   position: relative;
   flex: 1;
   min-width: 0;
+  container-type: inline-size;
 }
+
 .bar {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  inset: 0 0 auto;
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: var(--topbar-h);
-  padding: 0 12px;
-  background: linear-gradient(rgb(0 0 0 / 0.55), transparent);
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-height: var(--lumen-topbar-h);
+  padding: 0.375rem 0.75rem;
+  background: var(--lumen-viewer-bg);
 }
-.bar .icon-btn {
-  color: var(--viewer-text);
+
+.viewer-control {
+  flex-shrink: 0;
+  color: var(--lumen-viewer-text);
 }
-.bar .icon-btn:hover {
-  background: var(--viewer-control);
-  color: var(--viewer-text);
+
+.viewer-control:hover,
+.viewer-control[aria-pressed='true'] {
+  background: var(--lumen-viewer-control);
+  color: var(--lumen-viewer-text);
 }
-.bar .text-btn {
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--viewer-control);
-  border-radius: var(--radius-m);
-  background: transparent;
-  color: var(--viewer-text);
-  cursor: pointer;
-}
-.bar .text-btn:hover {
-  background: var(--viewer-control);
-}
+
 .date {
-  font-size: 13px;
-  color: var(--viewer-text-2);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.8125rem;
+  color: var(--lumen-viewer-text-muted);
 }
-.spacer {
+
+.grow {
   flex: 1;
 }
+
 .media {
   position: absolute;
-  inset: 0;
+  inset: var(--lumen-topbar-h) 0 0;
   display: grid;
-  /* Bound the shared image/video cell to the stage. Auto tracks can grow
-     to the original's intrinsic size before percentage heights resolve. */
+  /* Bounded tracks stop intrinsic image sizes expanding the stage. */
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   place-items: center;
 }
+
 .media img,
 .media video {
   grid-area: 1 / 1;
@@ -364,69 +455,56 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
 }
-.video-seek {
-  position: absolute;
-  z-index: 2;
-  left: 64px;
-  right: 64px;
-  bottom: 56px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  border-radius: var(--radius-m);
-  background: rgb(0 0 0 / 0.68);
-  color: var(--viewer-text);
-  font-size: 12px;
-}
-.video-seek input {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--accent);
-}
-.video-error {
+
+.playback-message {
   position: absolute;
   z-index: 3;
-  padding: 10px 14px;
-  border-radius: var(--radius-m);
-  background: rgb(0 0 0 / 0.8);
+  max-width: min(28rem, calc(100% - 2rem));
 }
-.none {
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  color: var(--viewer-text-2);
-}
+
 .nav {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 72px;
-  border: 0;
-  border-radius: var(--radius-m);
-  background: rgb(0 0 0 / 0.25);
-  color: var(--viewer-text);
-  cursor: pointer;
+  width: 3rem;
+  height: 4.5rem;
+  background: var(--lumen-viewer-control);
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--lumen-motion-control) var(--lumen-ease);
 }
+
 .stage:hover .nav,
 .nav:focus-visible {
   opacity: 1;
 }
-.nav:hover {
-  background: rgb(0 0 0 / 0.5);
-}
+
 .prev {
-  left: 12px;
+  left: 0.75rem;
 }
+
 .next {
-  right: 12px;
+  right: 0.75rem;
 }
-.panel {
-  color: var(--text);
+
+@container (max-width: 30rem) {
+  .date {
+    flex: 1 1 8rem;
+  }
+
+  .grow {
+    display: none;
+  }
+}
+
+@media (pointer: coarse), (forced-colors: active) {
+  .nav {
+    opacity: 1;
+  }
+}
+
+@media (forced-colors: active) {
+  .viewer-control {
+    border: 1px solid ButtonText;
+  }
 }
 </style>

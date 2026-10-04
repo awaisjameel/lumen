@@ -45,6 +45,27 @@ export interface About {
 }
 
 /**
+ * Accent is the UI's one accent colour, from the curated set.
+ */
+export enum Accent {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The accents. Status colours (danger, success) keep their meaning under
+     * every one of them.
+     */
+    AccentBlue = "blue",
+    AccentTeal = "teal",
+    AccentGreen = "green",
+    AccentViolet = "violet",
+    AccentRose = "rose",
+    AccentAmber = "amber",
+};
+
+/**
  * Album is a manual collection or a saved rule with its current visible count and cover.
  */
 export interface Album {
@@ -117,9 +138,9 @@ export interface AssetDetail {
     "ext": string;
 
     /**
-     * a photo the WebView can show directly
+     * what can be done with it (see CapsOf)
      */
-    "webNative": boolean;
+    "caps": MediaCaps;
 
     /**
      * nil for photos
@@ -312,6 +333,22 @@ export interface DayItems {
     "day": string;
     "items": GridItem[] | null;
 }
+
+/**
+ * Density is how much room controls and rows take.
+ */
+export enum Density {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The densities.
+     */
+    DensityComfortable = "comfortable",
+    DensityCompact = "compact",
+};
 
 /**
  * Device is where a model runs.
@@ -625,6 +662,16 @@ export enum Kind {
 };
 
 /**
+ * LegacyPreferences are the choices an older Lumen kept in the WebView's own
+ * storage ("lumen.theme", "lumen.zoom"). The zero value of each means it was
+ * never chosen.
+ */
+export interface LegacyPreferences {
+    "theme": Theme;
+    "tileSize": number;
+}
+
+/**
  * Link is a page outside Lumen that the user can open in their browser.
  */
 export enum Link {
@@ -645,6 +692,44 @@ export enum Link {
      */
     LinkGeoNames = "geonames",
 };
+
+/**
+ * MediaCaps says what Lumen can do with one asset, as file inspection and
+ * the available decoder, viewer and playback paths have shown rather than as
+ * the file's extension suggests. Screens offer an action from these, so a
+ * format gains a capability in one place. A false field means "not offered
+ * now", not "never": why (pending, unsupported, failed) stays with the job
+ * that would make it true.
+ */
+export interface MediaCaps {
+    /**
+     * Preview: a still preview of the current file has been made.
+     */
+    "preview": boolean;
+
+    /**
+     * Original: the WebView shows the original photo as it is, through the
+     * original endpoint. A native decoder for the format is not enough.
+     */
+    "original": boolean;
+
+    /**
+     * Render: a developed, full-resolution rendered copy can be made within
+     * the render budget. No such path exists before Phase 8, so it is always
+     * false; a larger preview or a RAW file's embedded JPEG never counts.
+     */
+    "render": boolean;
+
+    /**
+     * DirectPlay: the WebView may play the video file itself.
+     */
+    "directPlay": boolean;
+
+    /**
+     * ConvertPlay: Lumen can convert the video while it plays.
+     */
+    "convertPlay": boolean;
+}
 
 /**
  * OrganiseMove is one file's move, planned or made.
@@ -843,6 +928,38 @@ export enum Playback {
      */
     PlayConvert = "convert",
 };
+
+/**
+ * Preferences are how the user likes the interface to look. The library's
+ * settings are their one durable owner: the UI keeps only a copy for
+ * painting its first frame.
+ */
+export interface Preferences {
+    "theme": Theme;
+    "accent": Accent;
+    "density": Density;
+
+    /**
+     * TextScaleMin..TextScaleMax, percent
+     */
+    "textScale": number;
+
+    /**
+     * TileSizeMin..TileSizeMax
+     */
+    "tileSize": number;
+    "sidebarCollapsed": boolean;
+
+    /**
+     * SidebarWidthMin..SidebarWidthMax
+     */
+    "sidebarWidth": number;
+
+    /**
+     * InspectorWidthMin..InspectorWidthMax
+     */
+    "inspectorWidth": number;
+}
 
 /**
  * Progress is the payload of the index:progress event.
@@ -1072,6 +1189,32 @@ export enum TagSource {
      */
     TagRejected = "rejected",
 };
+
+/**
+ * Theme is which colours the UI uses.
+ */
+export enum Theme {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The themes. ThemeSystem follows Windows' light or dark setting.
+     */
+    ThemeSystem = "system",
+    ThemeLight = "light",
+    ThemeDark = "dark",
+};
+
+/**
+ * TrashSelection is what Delete from disk asks the user to confirm: trashed
+ * assets and how many files they have on disk.
+ */
+export interface TrashSelection {
+    "assets": number[] | null;
+    "files": number;
+}
 
 /**
  * UIError is a failure in the UI, for Lumen's log.

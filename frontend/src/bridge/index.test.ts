@@ -1,7 +1,8 @@
 import { expect, it, vi } from 'vitest'
-import { CancellablePromise } from '@wailsio/runtime'
+import { Call, CancelError, CancellablePromise, CancelledRejectionError } from '@wailsio/runtime'
 import { LibraryService, SearchService, SystemService } from '../../bindings/lumen/services'
-import { engine, ErrorCode, logUIError } from './index'
+import { engine, ErrorCode, isCancelled, logUIError } from './index'
+import type { GridItem } from './index'
 import { errorText } from '../shared/errors'
 
 vi.mock('../../bindings/lumen/services', () => ({
@@ -12,7 +13,7 @@ vi.mock('../../bindings/lumen/services', () => ({
   },
   MediaService: {},
   PeopleService: {},
-  SearchService: { VisibleAssets: vi.fn() },
+  SearchService: { Hits: vi.fn() },
   SystemService: { LogUIError: vi.fn() },
 }))
 
@@ -28,19 +29,28 @@ it('cannot recursively report either a synchronous or asynchronous logging failu
   expect(SystemService.LogUIError).toHaveBeenCalledTimes(2)
 })
 
-it('normalizes an empty visible subset and passes cancellation to the engine', async () => {
+it('normalizes no remaining search hits and passes cancellation to the engine', async () => {
   const controller = new AbortController()
-  const call = CancellablePromise.resolve<number[] | null>(null)
+  const call = CancellablePromise.resolve<GridItem[] | null>(null)
   const cancelled = vi.spyOn(call, 'cancelOn')
-  vi.mocked(SearchService.VisibleAssets).mockReturnValueOnce(call)
-  expect(await engine.visibleAssets([1, 2], controller.signal)).toEqual([])
-  expect(SearchService.VisibleAssets).toHaveBeenCalledWith([1, 2])
+  vi.mocked(SearchService.Hits).mockReturnValueOnce(call)
+  expect(await engine.searchHits([1, 2], controller.signal)).toEqual([])
+  expect(SearchService.Hits).toHaveBeenCalledWith([1, 2])
   expect(cancelled).toHaveBeenCalledWith(controller.signal)
 })
 
 it('uses asset-first album membership arguments end to end', async () => {
   await engine.setAlbumItem(17, 43, true)
   expect(LibraryService.SetAlbumItem).toHaveBeenCalledWith(17, 43, true)
+})
+
+it('recognises a late cancelled runtime read without hiding another late failure', () => {
+  const promise = CancellablePromise.resolve()
+  expect(isCancelled(new CancelError('superseded'))).toBe(true)
+  expect(isCancelled(new CancelledRejectionError(promise, new Call.RuntimeError('context canceled')))).toBe(true)
+  expect(isCancelled(new Call.RuntimeError('context canceled'))).toBe(false)
+  expect(isCancelled(new CancelledRejectionError(promise, new Call.RuntimeError('disk full')))).toBe(false)
+  expect(isCancelled(new CancelledRejectionError(promise, new Error('context canceled')))).toBe(false)
 })
 
 it('localizes every invalid-album reason without showing engine prose', () => {
