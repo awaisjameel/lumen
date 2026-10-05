@@ -238,7 +238,7 @@ func (s *Store) DayItems(ctx context.Context, from, to string, v core.View, minS
 
 // gridColumns are the columns a core.GridItem needs besides its id, in
 // gridFields order.
-const gridColumns = "COALESCE(width, 0), COALESCE(height, 0), kind = 'video', COALESCE(duration_ms, 0), favourite, thumb_version"
+const gridColumns = "COALESCE(CASE WHEN display_rotation % 2 = 1 THEN height ELSE width END, 0), COALESCE(CASE WHEN display_rotation % 2 = 1 THEN width ELSE height END, 0), kind = 'video', COALESCE(duration_ms, 0), favourite, CASE WHEN thumb_version > 0 THEN thumb_version + display_version ELSE 0 END"
 
 func gridFields(it *core.GridItem) []any {
 	return []any{&it.W, &it.H, &it.Video, &it.Duration, &it.Favourite, &it.Thumb}
@@ -292,6 +292,7 @@ func (s *Store) AssetDetail(ctx context.Context, id int64, unlocked bool) (core.
 
 func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.AssetDetail, error) {
 	var d core.AssetDetail
+	d.Adjustment = &core.DisplayAdjustment{}
 	var w, h sql.NullInt64
 	var camera sql.NullString
 	var duration sql.NullInt64
@@ -300,10 +301,10 @@ func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.
 	var thumb int64
 	err := q.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
 		CASE WHEN `+placeBlocked("assets.place_id")+` THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
-		duration_ms, video_codec, audio_codec, thumb_version
+		duration_ms, video_codec, audio_codec, thumb_version, display_rotation, display_flip
 		FROM assets WHERE id = ? AND `+servableOf(unlocked), id).
 		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.PlaceID, &d.Favourite,
-			&duration, &videoCodec, &audioCodec, &thumb)
+			&duration, &videoCodec, &audioCodec, &thumb, &d.Adjustment.Rotation, &d.Adjustment.Flip)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -377,7 +378,11 @@ func (s *Store) AssetFile(ctx context.Context, id int64, unlocked bool) (MediaFi
 
 // SetFavourite marks or unmarks an asset as a favourite.
 func (s *Store) SetFavourite(ctx context.Context, id int64, fav bool) error {
-	return affected(s.w.ExecContext(ctx, "UPDATE assets SET favourite = ? WHERE id = ? AND "+present, fav, id))
+	return s.tx(ctx, func(tx *sql.Tx) error { return setFavourite(ctx, tx, id, fav) })
+}
+
+func setFavourite(ctx context.Context, tx *sql.Tx, id int64, fav bool) error {
+	return affected(tx.ExecContext(ctx, "UPDATE assets SET favourite = ? WHERE id = ? AND "+present, fav, id))
 }
 
 // CountVisible returns how many assets the grid shows.

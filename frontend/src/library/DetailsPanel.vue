@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import USlideover from '@nuxt/ui/components/Slideover.vue'
-import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { createReusableTemplate } from '@vueuse/core'
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import {
@@ -19,8 +19,10 @@ import {
   Kind,
   MAX_NAME_LEN,
   TagSource,
+  TrackKind,
 } from '../bridge'
-import type { AssetDetail, AssetTag, Face } from '../bridge'
+import type { AssetDetail, AssetTag, Face, MediaInspection } from '../bridge'
+import { FileTools } from '../media/lazy'
 import { errorText, logError, orFallback } from '../shared/errors'
 import { block } from '../shared/block'
 import { bytes, dateTime, duration, megapixels } from '../shared/format'
@@ -51,6 +53,8 @@ const trigger = document.activeElement
 const loading = ref(false)
 const albums = useAlbums()
 const detail = ref<AssetDetail | null>(null)
+const inspection = ref<MediaInspection | null>(null)
+const filesOpen = ref(false)
 const placeName = ref('') // the city near the photo, once known
 const tags = ref<AssetTag[]>([])
 const faces = ref<Face[]>([])
@@ -69,7 +73,9 @@ let detailRequest = 0
 let tagsRequest = 0
 let facesRequest = 0
 let albumsRequest = 0
+let inspectionAbort: AbortController | undefined
 onBeforeUnmount(() => {
+  inspectionAbort?.abort()
   selectionRevision++
   detailRequest++
   tagsRequest++
@@ -84,6 +90,7 @@ watch(
   [() => props.sel?.id, () => lib.itemAt(props.sel)?.f],
   ([id], old) => {
     if (id !== old[0]) {
+      inspection.value = null
       error.value = ''
       detail.value = null
       placeName.value = ''
@@ -94,6 +101,9 @@ watch(
 )
 
 async function loadDetails(id: number | undefined) {
+  inspectionAbort?.abort()
+  inspectionAbort = new AbortController()
+  const signal = inspectionAbort.signal
   const request = ++detailRequest
   detailError.value = ''
   loading.value = !!id
@@ -102,6 +112,16 @@ async function loadDetails(id: number | undefined) {
     const d = await engine.asset(id)
     if (request !== detailRequest) return
     detail.value = d
+    if (!lib.inTrash) {
+      void engine
+        .inspect(id, signal)
+        .then((value) => {
+          if (request === detailRequest) inspection.value = value
+        })
+        .catch((e: unknown) => {
+          if (!isCancelled(e)) logError(e)
+        })
+    }
     const place = d.placeId ? await orFallback(engine.place(d.placeId), null) : null
     if (request === detailRequest) placeName.value = place?.name ?? ''
   } catch (e) {
@@ -368,6 +388,20 @@ function showInFolder(id: number, path = '') {
     if (props.sel?.id === id) error.value = errorText(e)
   })
 }
+async function openCopy(id: number, path: string, choose: boolean) {
+  try {
+    await engine.openMedia(id, path, choose)
+  } catch (e) {
+    if (props.sel?.id === id) error.value = errorText(e)
+  }
+}
+async function copyName(path: string) {
+  try {
+    await navigator.clipboard.writeText(path.split(/[\\/]/).at(-1) ?? path)
+  } catch (e) {
+    error.value = errorText(e)
+  }
+}
 
 function returnFocus(e: Event) {
   if (trigger instanceof HTMLElement && trigger.isConnected) {
@@ -376,9 +410,63 @@ function returnFocus(e: Event) {
   }
 }
 
+/**
+ * What the file says about itself. A row it has no value for says so; a
+ * video is not asked for what only a photo records.
+ */
+const metadata = computed(() => {
+  const d = detail.value
+  if (!d) return []
+  const i = inspection.value
+  const row = (label: MessageKey, value: string | number | undefined) => ({
+    key: label as string,
+    label: t(label),
+    value: value ? String(value) : '',
+  })
+  const rows = [row('details.camera', d.camera)]
+  if (d.video) rows.push(row('details.frameRate', i?.frameRate))
+  else
+    rows.push(
+      row('details.lens', i?.lens),
+      row('details.exposure', i?.exposure),
+      row('details.aperture', i?.aperture),
+      row('details.iso', i?.iso),
+      row('details.profile', i?.hasProfile ? i.profile || t('details.profileEmbedded') : undefined),
+      row('details.orientation', i?.orientation),
+      row('details.pages', i?.pages),
+    )
+  for (const track of i?.tracks ?? [])
+    rows.push({
+      key: `track.${track.index}`,
+      label: t(track.kind === TrackKind.TrackAudio ? 'viewer.audioTrack' : 'viewer.subtitleTrack'),
+      value: `${track.index}: ${[track.codec, track.language, track.title].filter(Boolean).join(' · ')}`,
+    })
+  return rows
+})
+
 const hasDetail = () => detail.value !== null
 const editable = () => hasDetail() && !lib.inTrash
 useCommands([
+  {
+    id: 'inspector.files',
+    group: 'media',
+    title: () => t('files.title'),
+    icon: 'files',
+    available: editable,
+    run: () => {
+      filesOpen.value = true
+    },
+  },
+  {
+    id: 'inspector.open',
+    group: 'media',
+    title: () => t('files.open'),
+    icon: 'external',
+    available: editable,
+    run: async () => {
+      if (detail.value) await engine.openMedia(detail.value.id)
+    },
+  },
   {
     id: 'inspector.close',
     group: 'view',
@@ -504,10 +592,18 @@ useCommands([
         >
       </section>
 
-      <section :aria-label="t('details.camera')">
-        <h3>{{ t('details.camera') }}</h3>
-        <MetaRow :label="t('details.camera')" :value="detail.camera || t('details.missing')" />
+      <section :aria-label="t('details.metadata')">
+        <h3>{{ t('details.metadata') }}</h3>
+        <MetaRow
+          v-for="row in metadata"
+          :key="row.key"
+          :copyable="!!row.value"
+          :label="row.label"
+          :value="row.value || t('details.missing')"
+        />
       </section>
+
+      <h3 v-if="!lib.inTrash">{{ t('details.organisation') }}</h3>
 
       <section :aria-label="t('details.location')">
         <h3>{{ t('details.location') }}</h3>
@@ -545,26 +641,20 @@ useCommands([
                 :ui="{ label: 'truncate' }"
                 >{{ f.name || t('person.unnamed') }}
               </UButton>
-              <UTooltip :text="t('details.notThisPerson', { name: f.name || t('person.unnamed') })">
-                <UButton
-                  :icon="icons.close"
-                  :aria-label="t('details.notThisPerson', { name: f.name || t('person.unnamed') })"
-                  variant="ghost"
-                  size="xs"
-                  square
-                  @click="notThem(f)"
-                />
-              </UTooltip>
-              <UTooltip :text="t('blocked.confirmTitle', { name: f.name || t('person.unnamed') })">
-                <UButton
-                  :icon="icons['eye-off']"
-                  :aria-label="t('blocked.confirmTitle', { name: f.name || t('person.unnamed') })"
-                  variant="ghost"
-                  size="xs"
-                  square
-                  @click="blockPerson(f)"
-                />
-              </UTooltip>
+              <IconButton
+                :icon="icons.close"
+                :label="t('details.notThisPerson', { name: f.name || t('person.unnamed') })"
+                variant="ghost"
+                size="xs"
+                @click="notThem(f)"
+              />
+              <IconButton
+                :icon="icons['eye-off']"
+                :label="t('blocked.blockNamed', { name: f.name || t('person.unnamed') })"
+                variant="ghost"
+                size="xs"
+                @click="blockPerson(f)"
+              />
             </template>
             <PersonPicker v-else class="who" :placeholder="t('details.whoIsThis')" @pick="(n) => nameFace(f, n)" />
             <UButton class="block-face" :icon="icons['eye-off']" variant="ghost" size="sm" @click="blockFace(f)">{{
@@ -588,26 +678,20 @@ useCommands([
               :ui="{ label: 'truncate' }"
               >{{ tag.name }}</UButton
             >
-            <UTooltip :text="t('details.removeTag', { name: tag.name })">
-              <UButton
-                :icon="icons.close"
-                :aria-label="t('details.removeTag', { name: tag.name })"
-                variant="ghost"
-                size="xs"
-                square
-                @click="removeTag(tag)"
-              />
-            </UTooltip>
-            <UTooltip :text="t('blocked.confirmTitle', { name: tag.name })">
-              <UButton
-                :icon="icons['eye-off']"
-                :aria-label="t('blocked.confirmTitle', { name: tag.name })"
-                variant="ghost"
-                size="xs"
-                square
-                @click="blockThing(tag)"
-              />
-            </UTooltip>
+            <IconButton
+              :icon="icons.close"
+              :label="t('details.removeTag', { name: tag.name })"
+              variant="ghost"
+              size="xs"
+              @click="removeTag(tag)"
+            />
+            <IconButton
+              :icon="icons['eye-off']"
+              :label="t('blocked.blockNamed', { name: tag.name })"
+              variant="ghost"
+              size="xs"
+              @click="blockThing(tag)"
+            />
             <UBadge color="neutral" variant="subtle" size="sm">{{
               t(tag.source === TagSource.TagByAI ? 'details.byAI' : 'details.byYou')
             }}</UBadge>
@@ -653,16 +737,13 @@ useCommands([
             :aria-label="t('albums.createForItem')"
             :aria-invalid="nameTooLong(newAlbum) || undefined"
           />
-          <UTooltip :text="t('albums.createForItem')">
-            <UButton
-              type="submit"
-              :icon="icons.plus"
-              :aria-label="t('albums.createForItem')"
-              :loading="creatingAlbum"
-              :disabled="creatingAlbum || !trimName(newAlbum) || nameTooLong(newAlbum)"
-              square
-            />
-          </UTooltip>
+          <IconButton
+            type="submit"
+            :icon="icons.plus"
+            :label="t('albums.createForItem')"
+            :loading="creatingAlbum"
+            :disabled="creatingAlbum || !trimName(newAlbum) || nameTooLong(newAlbum)"
+          />
         </form>
         <UAlert
           v-if="nameTooLong(newAlbum)"
@@ -678,30 +759,56 @@ useCommands([
         <p v-if="detail.paths.length > 1" class="text-sm text-muted">
           {{ t('details.copies', { n: detail.paths.length }) }}
         </p>
-        <MetaRow v-for="p in detail.paths" :key="p" :label="t('details.path')" icon="files" class="path" :value="p">
+        <MetaRow
+          v-for="p in detail.paths"
+          :key="p"
+          copyable
+          :label="t('details.path')"
+          icon="files"
+          class="path"
+          :value="p"
+        >
           <template #action>
             <div class="flex flex-col items-end gap-1">
-              <UTooltip :text="t('common.showInFolder')">
-                <UButton
-                  :icon="icons.folder"
-                  :aria-label="t('common.showInFolder')"
-                  variant="ghost"
-                  size="sm"
-                  square
-                  @click="showInFolder(detail.id, p)"
-                />
-              </UTooltip>
-              <UTooltip v-if="!lib.inTrash" :text="t('blocked.blockFolder', { path: p })">
-                <UButton
-                  data-block-folder
-                  :icon="icons['eye-off']"
-                  :aria-label="t('blocked.blockFolder', { path: p })"
-                  variant="ghost"
-                  size="sm"
-                  square
-                  @click="blockFolder(p)"
-                />
-              </UTooltip>
+              <IconButton
+                v-if="!lib.inTrash"
+                :icon="icons.external"
+                :label="t('files.open')"
+                variant="ghost"
+                size="sm"
+                @click="openCopy(detail.id, p, false)"
+              />
+              <IconButton
+                v-if="!lib.inTrash"
+                :icon="icons.more"
+                :label="t('files.openWith')"
+                variant="ghost"
+                size="sm"
+                @click="openCopy(detail.id, p, true)"
+              />
+              <IconButton
+                :icon="icons.copy"
+                :label="t('files.copyName')"
+                variant="ghost"
+                size="sm"
+                @click="copyName(p)"
+              />
+              <IconButton
+                :icon="icons.folder"
+                :label="t('common.showInFolder')"
+                variant="ghost"
+                size="sm"
+                @click="showInFolder(detail.id, p)"
+              />
+              <IconButton
+                v-if="!lib.inTrash"
+                data-block-folder
+                :icon="icons['eye-off']"
+                :label="t('blocked.blockFolder', { path: p })"
+                variant="ghost"
+                size="sm"
+                @click="blockFolder(p)"
+              />
             </div>
           </template>
         </MetaRow>
@@ -718,6 +825,8 @@ useCommands([
           }}</UButton>
         </template>
         <template v-else>
+          <UButton :icon="icons.files" @click="runCommand('inspector.files')">{{ t('files.title') }}</UButton>
+          <UButton :icon="icons.external" @click="runCommand('inspector.open')">{{ t('files.open') }}</UButton>
           <UButton :icon="icons['eye-off']" @click="runCommand('inspector.block')">{{ t('blocked.block') }}</UButton>
           <UButton
             :icon="icons.heart"
@@ -734,6 +843,7 @@ useCommands([
       <UAlert v-if="shownError" role="alert" color="error" variant="subtle" :title="shownError" />
     </div>
   </InspectorContent>
+  <FileTools v-model:open="filesOpen" :ids="detail ? [detail.id] : []" @changed="loadDetails(props.sel?.id)" />
 
   <aside
     v-if="mode !== 'narrow'"
@@ -751,15 +861,7 @@ useCommands([
     />
     <header class="inspector-header">
       <h2>{{ t('details.title') }}</h2>
-      <UTooltip :text="t('common.close')">
-        <UButton
-          :icon="icons.close"
-          :aria-label="t('common.close')"
-          variant="ghost"
-          square
-          @click="lib.showDetails = false"
-        />
-      </UTooltip>
+      <IconButton :icon="icons.close" :label="t('common.close')" variant="ghost" @click="lib.showDetails = false" />
     </header>
     <div class="inspector-scroll">
       <ReuseInspectorContent />
@@ -780,7 +882,7 @@ useCommands([
     "
   >
     <template #close>
-      <UButton :icon="icons.close" :aria-label="t('common.close')" variant="ghost" square />
+      <IconButton :icon="icons.close" :label="t('common.close')" variant="ghost" />
     </template>
     <template #body>
       <ReuseInspectorContent />

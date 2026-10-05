@@ -18,7 +18,10 @@ vi.mock('../bridge', async (importOriginal) => ({
   onLibraryChanged: vi.fn<typeof Bridge.onLibraryChanged>(),
 }))
 
-let changed!: (changes: Changes) => void
+const listeners = new Set<(changes: Changes) => void>()
+function changed(change: Changes) {
+  for (const callback of listeners) callback(change)
+}
 const progressIdle: Progress = {
   scanning: false,
   scanPath: '',
@@ -52,11 +55,14 @@ const event = (id: number, name: string): Event => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  listeners.clear()
   vi.useFakeTimers()
   vi.mocked(engine.event).mockReset()
   vi.mocked(onLibraryChanged).mockImplementation((callback) => {
-    changed = callback
-    return vi.fn()
+    listeners.add(callback)
+    return () => {
+      listeners.delete(callback)
+    }
   })
   vi.stubGlobal(
     'ResizeObserver',

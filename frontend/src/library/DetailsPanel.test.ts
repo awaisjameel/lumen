@@ -8,7 +8,7 @@ import { mountInApp } from '../shared/testing'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import type { Sel } from './store'
-import { AlbumKind, BlockKind, DateSource, engine, Kind, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
+import { AlbumKind, BlockKind, DateSource, engine, Kind, MAX_NAME_LEN, onLibraryChanged, Playback } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Block from '../shared/block'
 import type { AssetDetail, Changes, Event, Face } from '../bridge'
@@ -30,6 +30,18 @@ vi.mock('../bridge', async (importOriginal) => ({
       Promise.resolve({ ...usePreferences().prefs }),
     ),
     asset: vi.fn(),
+    inspect: vi.fn<typeof Bridge.engine.inspect>().mockResolvedValue({
+      orientation: 1,
+      hasProfile: false,
+      profile: '',
+      lens: '',
+      exposure: '',
+      aperture: '',
+      iso: '',
+      frameRate: '',
+      pages: 0,
+      tracks: [],
+    }),
     assetTags: vi.fn(),
     assetFaces: vi.fn(),
     assetAlbums: vi.fn(),
@@ -393,7 +405,7 @@ it('states missing metadata rather than inventing a date, camera or location', a
   for (const title of ['Overview', 'Camera', 'Location', 'People', 'Tags', 'Albums', 'Files']) {
     expect(wrapper.text()).toContain(title)
   }
-  expect(wrapper.findAll('.meta-row').filter((row) => row.text().includes('Not available'))).toHaveLength(6)
+  expect(wrapper.findAll('.meta-row').filter((row) => row.text().includes('Not available'))).toHaveLength(12)
   expect(wrapper.text()).toContain('Photo')
   expect(wrapper.text()).toContain(t('details.dateFrom.file'))
 })
@@ -459,4 +471,61 @@ it('does not roll back an album checkbox on the next photo when an earlier edit 
   await flushPromises()
   expect(wrapper.get('[role="checkbox"]').attributes('aria-checked')).toBe('false')
   expect(wrapper.text()).not.toContain('old edit failed')
+})
+
+it('names the colour profile a photo embeds, or says only that it has one', async () => {
+  const inspection = {
+    orientation: 1,
+    hasProfile: true,
+    profile: 'Display P3',
+    lens: '',
+    exposure: '',
+    aperture: '',
+    iso: '',
+    frameRate: '',
+    pages: 1,
+    tracks: [],
+  }
+  const profileRow = () =>
+    wrapper
+      ?.get(`section[aria-label="${t('details.metadata')}"]`)
+      .findAll('.meta-row')
+      .find((row) => row.text().includes(t('details.profile')))
+      ?.text()
+  vi.mocked(engine.inspect).mockResolvedValueOnce(inspection)
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(profileRow()).toContain('Display P3')
+  wrapper.unmount()
+
+  vi.mocked(engine.inspect).mockResolvedValueOnce({ ...inspection, profile: '' })
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(profileRow()).toContain(t('details.profileEmbedded'))
+  wrapper.unmount()
+
+  vi.mocked(engine.inspect).mockResolvedValueOnce({ ...inspection, hasProfile: false, profile: '' })
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(profileRow()).not.toContain(t('details.profileEmbedded'))
+})
+
+it('lists only what a video records and offers to copy only the values it has', async () => {
+  vi.mocked(engine.asset).mockResolvedValueOnce({
+    ...detail(1, 'Fixture Cam'),
+    kind: Kind.KindVideo,
+    video: { duration: 1000, codec: 'h264', audio: 'aac', play: Playback.PlayDirect },
+  })
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  const section = wrapper.get(`section[aria-label="${t('details.metadata')}"]`)
+  const labels = section.findAll('.meta-row').map((row) => row.text())
+  expect(labels.some((text) => text.includes(t('details.frameRate')))).toBe(true)
+  expect(labels.some((text) => text.includes(t('details.lens')))).toBe(false)
+  expect(section.find(`button[aria-label="${t('files.copyField', { name: t('details.camera') })}"]`).exists()).toBe(
+    true,
+  )
+  expect(section.find(`button[aria-label="${t('files.copyField', { name: t('details.frameRate') })}"]`).exists()).toBe(
+    false,
+  )
 })

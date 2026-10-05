@@ -53,7 +53,7 @@ func faceLibrary(t *testing.T) (s *LibraryService, st *store.Store, assets, face
 		}
 		faces = append(faces, fs[0].ID)
 	}
-	return NewLibraryService(st, nil, nil), st, assets, faces
+	return NewLibraryService(st, nil, nil, nil), st, assets, faces
 }
 
 func shownAssets(t *testing.T, st *store.Store, assets []int64) []bool {

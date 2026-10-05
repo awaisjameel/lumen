@@ -449,14 +449,16 @@ func (s *Store) AssetTags(ctx context.Context, assetID int64, minScore float64) 
 // TagAsset puts a tag on an asset as the user's own choice (this also
 // confirms an AI tag, or takes back an earlier removal).
 func (s *Store) TagAsset(ctx context.Context, assetID, tagID int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
-		if err := assetAndTagExist(ctx, tx, assetID, tagID); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO asset_tags (asset_id, tag_id, source) VALUES (?, ?, 'user')
-			ON CONFLICT (asset_id, tag_id) DO UPDATE SET source = 'user'`, assetID, tagID)
+	return s.tx(ctx, func(tx *sql.Tx) error { return tagAsset(ctx, tx, assetID, tagID) })
+}
+
+func tagAsset(ctx context.Context, tx *sql.Tx, assetID, tagID int64) error {
+	if err := assetAndTagExist(ctx, tx, assetID, tagID); err != nil {
 		return err
-	})
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO asset_tags (asset_id, tag_id, source) VALUES (?, ?, 'user')
+		ON CONFLICT (asset_id, tag_id) DO UPDATE SET source = 'user'`, assetID, tagID)
+	return err
 }
 
 // assetAndTagExist returns ErrNotFound unless both exist.

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Naming someone once confirms their identity; grouping remains the engine's.
-import UButton from '@nuxt/ui/components/Button.vue'
+import IconButton from '../shared/IconButton.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
 import { computed, onMounted } from 'vue'
 import { BlockKind } from '../bridge'
@@ -89,12 +89,11 @@ useCommands([
           >
             <template #cover><FaceThumb :face="p.cover" :size="128" round /></template>
             <UDropdownMenu :items="personItems(p.id)">
-              <UButton
+              <IconButton
                 :icon="icons.more"
-                :aria-label="t('people.actions', { name: p.name || t('person.unnamed') })"
+                :label="t('people.actions', { name: p.name || t('person.unnamed') })"
                 color="neutral"
                 variant="subtle"
-                square
               />
             </UDropdownMenu>
           </CollectionCard>

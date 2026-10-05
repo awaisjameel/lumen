@@ -16,6 +16,7 @@ const features = [
   'duplicates',
   'events',
   'library',
+  'media',
   'onboarding',
   'organise',
   'people',

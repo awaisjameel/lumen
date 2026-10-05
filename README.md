@@ -1,6 +1,10 @@
 # Lumen
 
+<img src="frontend/public/lumen.png" width="64" height="64" alt="Lumen aperture logo" />
+
 A Windows-first desktop photo gallery that organises large libraries with on-device AI. Fully local: no accounts, no uploads, no telemetry. See [the plan](Local%20AI%20Photo%20Gallery%20—%20End-to-End%20Plan.md) for the full vision and roadmap.
+
+Brand assets and their regeneration workflow are documented in [the branding guide](docs/branding.md).
 
 ## Status
 
@@ -76,15 +80,22 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 - Icons, fonts and styles are local: the build bundles only the icons the manifest names, and nothing is ever fetched. Reduced motion and Windows contrast themes are honoured.
 - Contracts for later phases: per-asset media capabilities (`AssetDetail.caps`), the typed preference contract, and feasibility records for [RAW and rendered images](docs/phase7-media-feasibility-2026-10-04.md) and [the updater](docs/phase7-updater-feasibility-2026-10-04.md). No updater exists yet and Lumen still makes no network request.
 
-**Next development is planned:** richer image/video viewing and file tools,
-RAW/DNG-first format support, expanded customisation, individual/bulk
+**Phase 8 (viewing, playback, details and file tools)** is implemented locally:
+
+- Image fit/actual size, pointer-centred wheel/pinch zoom and pan, fullscreen, a virtual filmstrip, slideshow, comparison and reversible display rotation/flip. Canonical source and AI pixels remain unchanged.
+- Cancellable HEIC/TIFF viewing renders report the available resolution. Native workers are bounded to 4096 pixels on the long side; very large sources retain their preview until tiled decoding is available.
+- Configurable playback, audio conversion and text subtitles, opt-in resume history, and explicit frame export. The Blocked browser does not record playback history.
+- A resizable metadata inspector, multi-selection across virtual pages, shared batch actions, validated Windows hand-off, previewed rename/move with journal recovery and Undo, and original/JPEG/PNG export with per-file outcomes.
+- Implementation, verification evidence and limits: [Phase 8 record](docs/phase8-implementation-2026-10-05.md).
+
+**Next development is planned:** RAW/DNG-first format support, expanded customisation, individual/bulk
 lossless image compression, and automatic update checking with background
 preparation and a user-approved restart. The updater's limited network exception and
 recovery design are in [the automatic update plan](docs/automatic-updates-plan-2026-10-04.md).
 The phased scope, architecture,
 migration rules and acceptance gates are in
 [the next development plan](docs/next-development-plan-2026-10-04.md).
-Phases 8–12 have not started.
+Phases 9–12 have not started.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 

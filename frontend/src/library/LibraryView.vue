@@ -1,17 +1,18 @@
 <script setup lang="ts">
+import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UPopover from '@nuxt/ui/components/Popover.vue'
 import USlider from '@nuxt/ui/components/Slider.vue'
-import UTooltip from '@nuxt/ui/components/Tooltip.vue'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { AlbumKind, engine, Filter, TILE_SIZE_MAX, TILE_SIZE_MIN } from '../bridge'
 import type { GridItem } from '../bridge'
 import { icons } from '../design/icons'
 import type { IconName } from '../design/icons'
-import { dispatchKey, useCommands } from '../shared/commands'
+import { dispatchKey, runCommand, useCommands } from '../shared/commands'
 import { logError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { useLiveReload } from '../shared/liveReload'
@@ -38,12 +39,36 @@ import { RESULTS, scopeKey, useLibrary } from './store'
 import type { Scope, Sel } from './store'
 import TimelineScrubber from './TimelineScrubber.vue'
 import DetailsPanel from './DetailsPanel.vue'
-import Viewer from './Viewer.vue'
 import VideoThumb from './VideoThumb.vue'
+import SelectionBar from '../shared/SelectionBar.vue'
+import { BatchTools, FileTools } from '../media/lazy'
 
 const PAD = 20 // horizontal padding of the grid
 
 const lib = useLibrary()
+// The viewer is as large as the grid itself, and a session may never open it.
+const Viewer = defineAsyncComponent(() => import('./Viewer.vue'))
+const filesOpen = ref(false)
+const batchOpen = ref(false)
+const fileIDs = computed(() => (lib.selectedIDs.size ? [...lib.selectedIDs] : lib.selected ? [lib.selected.id] : []))
+const fileMenu = computed(() => [
+  {
+    label: t('files.title'),
+    icon: icons.files,
+    disabled: !fileIDs.value.length || lib.inTrash,
+    onSelect: () => {
+      void runCommand('library.files')
+    },
+  },
+  {
+    label: t('files.open'),
+    icon: icons.external,
+    disabled: fileIDs.value.length !== 1 || lib.inTrash,
+    onSelect: () => {
+      void runCommand('library.open')
+    },
+  },
+])
 const prefs = usePreferences()
 const mode = useLayoutMode()
 const things = useThings()
@@ -260,9 +285,33 @@ function seek(y: number) {
 
 // --- Selection, keyboard, viewer ------------------------------------------
 
-function select(day: string, item: GridItem | null) {
+function select(day: string, item: GridItem | null, event?: MouseEvent) {
   if (!item) return
-  lib.selected = { day, id: item.id }
+  void lib.selectItems({ day, id: item.id }, event ? event.ctrlKey || event.metaKey : false, event?.shiftKey ?? false)
+}
+
+/** In the selection, or the one item focused while nothing is selected. */
+function isSelected(item: GridItem | null): boolean {
+  if (!item) return false
+  return lib.selectedIDs.size ? lib.selectedIDs.has(item.id) : lib.selected?.id === item.id
+}
+
+function selectVisible() {
+  lib.selectVisible(
+    visible.value
+      .filter(
+        (v) =>
+          v.top + rowHeight(v.row, layout.value.cell) > scrollTop.value && v.top < scrollTop.value + viewportH.value,
+      )
+      .flatMap((row) => row.items.flatMap((item) => (item ? [item.id] : []))),
+  )
+}
+function contextSelect(day: string, item: GridItem | null) {
+  if (item && !lib.selectedIDs.has(item.id)) select(day, item)
+}
+function clearSelection() {
+  lib.clearSelection()
+  lib.selected = null
 }
 
 /**
@@ -304,6 +353,40 @@ function setTileSize(v: number) {
   void prefs.set({ tileSize: Math.min(TILE_SIZE_MAX, Math.max(TILE_SIZE_MIN, v)) })
 }
 useCommands([
+  {
+    id: 'library.files',
+    group: 'media',
+    title: () => t('files.title'),
+    icon: 'files',
+    zone: 'grid',
+    available: () => !!fileIDs.value.length && !lib.inTrash && !lib.viewer,
+    run: () => {
+      filesOpen.value = true
+    },
+  },
+  {
+    id: 'library.batch',
+    group: 'media',
+    title: () => t('files.batch'),
+    icon: 'check',
+    zone: 'grid',
+    available: () => !!fileIDs.value.length && !lib.viewer,
+    run: () => {
+      batchOpen.value = true
+    },
+  },
+  {
+    id: 'library.open',
+    group: 'media',
+    title: () => t('files.open'),
+    icon: 'external',
+    zone: 'grid',
+    available: () => fileIDs.value.length === 1 && !lib.inTrash && !lib.viewer,
+    run: async () => {
+      const id = fileIDs.value[0]
+      if (id) await engine.openMedia(id)
+    },
+  },
   {
     id: 'media.favourite',
     group: 'media',
@@ -363,10 +446,10 @@ async function onKey(e: KeyboardEvent) {
   if (dir) {
     e.preventDefault()
     // Loading a day takes a moment: a click or Escape meanwhile wins.
-    const select = (day: string, i: number) => {
+    const select = async (day: string, i: number) => {
       const next = lib.selected === sel ? lib.selAt(day, i) : undefined
       if (next) {
-        lib.selected = next
+        await lib.selectItems(next, false, e.shiftKey)
         scrollIntoView(next)
       }
     }
@@ -374,16 +457,16 @@ async function onKey(e: KeyboardEvent) {
       const first = lib.buckets[0]
       if (first) {
         await lib.ensureDays([first.day])
-        select(first.day, 0)
+        await select(first.day, 0)
       }
       return
     }
     const pos = move(layout.value, { day: sel.day, i: lib.indexOf(sel) }, dir)
     if (!pos) return
     await lib.ensureDays([pos.day])
-    select(pos.day, pos.i)
+    await select(pos.day, pos.i)
   } else if (e.key === 'Escape') {
-    lib.selected = null
+    clearSelection()
   }
 }
 
@@ -485,13 +568,12 @@ const searchNotes = computed(() => {
           <!-- Wide windows keep the size slider in the toolbar; narrower ones
                fold it into a button so the search box keeps its room. -->
           <label v-if="mode === 'wide'" class="zoom" :title="t('library.zoom')">
-            <UButton
+            <IconButton
               :icon="icons['zoom-out']"
-              :aria-label="t('library.zoomOut')"
+              :label="t('library.zoomOut')"
               color="neutral"
               variant="ghost"
               size="xs"
-              square
               :disabled="prefs.prefs.tileSize <= TILE_SIZE_MIN"
               @click="setTileSize(prefs.prefs.tileSize - ZOOM_STEP * 3)"
             />
@@ -505,21 +587,18 @@ const searchNotes = computed(() => {
               :aria-label="t('library.zoom')"
               @update:model-value="onZoom"
             />
-            <UButton
+            <IconButton
               :icon="icons['zoom-in']"
-              :aria-label="t('library.zoomIn')"
+              :label="t('library.zoomIn')"
               color="neutral"
               variant="ghost"
               size="xs"
-              square
               :disabled="prefs.prefs.tileSize >= TILE_SIZE_MAX"
               @click="setTileSize(prefs.prefs.tileSize + ZOOM_STEP * 3)"
             />
           </label>
           <UPopover v-else>
-            <UTooltip :text="t('library.zoom')">
-              <UButton :icon="icons.grid" :aria-label="t('library.zoom')" color="neutral" variant="ghost" square />
-            </UTooltip>
+            <IconButton :icon="icons.grid" :label="t('library.zoom')" color="neutral" variant="ghost" />
             <template #content>
               <div class="zoom-pop">
                 <span>{{ t('library.zoom') }}</span>
@@ -534,17 +613,16 @@ const searchNotes = computed(() => {
               </div>
             </template>
           </UPopover>
-          <UTooltip :text="t('library.info')" :kbds="['I']">
-            <UButton
-              :icon="icons.inspector"
-              :aria-label="t('library.info')"
-              :aria-pressed="lib.showDetails"
-              color="neutral"
-              :variant="lib.showDetails ? 'soft' : 'ghost'"
-              square
-              @click="lib.showDetails = !lib.showDetails"
-            />
-          </UTooltip>
+          <IconButton
+            :kbds="['I']"
+            :icon="icons.inspector"
+            :label="t('library.info')"
+            :tip="t(lib.showDetails ? 'library.hideInfo' : 'library.showInfo')"
+            :aria-pressed="lib.showDetails"
+            color="neutral"
+            :variant="lib.showDetails ? 'soft' : 'ghost'"
+            @click="lib.showDetails = !lib.showDetails"
+          />
         </PageHeader>
       </template>
 
@@ -568,14 +646,31 @@ const searchNotes = computed(() => {
           {{ t('search.blocked') }}
           <RouterLink to="/settings/blocked" class="link">{{ t('search.openBlocked') }}</RouterLink>
         </p>
+        <SelectionBar :summary="t('selection.count', { n: fileIDs.length })">
+          <UButton variant="ghost" @click="selectVisible">{{ t('selection.visible') }}</UButton>
+          <UButton variant="ghost" @click="lib.selectAllResults()">{{ t('selection.all') }}</UButton>
+          <UButton :disabled="!fileIDs.length" variant="ghost" @click="clearSelection">{{
+            t('selection.clear')
+          }}</UButton>
+          <UButton
+            v-if="!lib.inTrash"
+            :disabled="!fileIDs.length"
+            :icon="icons.files"
+            @click="runCommand('library.files')"
+            >{{ t('files.title') }}</UButton
+          >
+          <UButton :disabled="!fileIDs.length" :icon="icons.check" @click="runCommand('library.batch')">{{
+            t('files.batch')
+          }}</UButton>
+        </SelectionBar>
       </template>
-
       <div class="grid-wrap">
         <div
           ref="scroller"
           class="scroller"
           tabindex="0"
           role="listbox"
+          aria-multiselectable="true"
           :aria-label="title"
           :aria-activedescendant="activeCell"
           :aria-busy="searching"
@@ -610,27 +705,29 @@ const searchNotes = computed(() => {
                   :id="it ? cellId(it.id) : undefined"
                   :key="it?.id ?? `p${k}`"
                   class="cell"
-                  :class="{ selected: it && lib.selected?.id === it.id }"
+                  :class="{ selected: isSelected(it) }"
                   :style="{ width: layout.cell + 'px', height: layout.cell + 'px' }"
                   :role="it ? 'option' : undefined"
                   :aria-label="it ? cellLabel(v.row.day, it) : undefined"
-                  :aria-selected="it ? lib.selected?.id === it.id : undefined"
+                  :aria-selected="it ? isSelected(it) : undefined"
                   :aria-hidden="it ? undefined : 'true'"
-                  @click="select(v.row.day, it)"
+                  @click="select(v.row.day, it, $event)"
                   @dblclick="open(v.row.day, it)"
                 >
-                  <MediaTile
-                    :id="it?.id ?? 0"
-                    :thumb="it?.t ?? 0"
-                    :video="it?.v"
-                    :duration-ms="it?.d"
-                    :favourite="it?.f"
-                    :selected="!!it && lib.selected?.id === it.id"
-                  >
-                    <template v-if="it?.v && it.t" #media>
-                      <VideoThumb :key="it.id" :item="it" :cell="layout.cell" />
-                    </template>
-                  </MediaTile>
+                  <UContextMenu :items="fileMenu" @contextmenu="contextSelect(v.row.day, it)">
+                    <MediaTile
+                      :id="it?.id ?? 0"
+                      :thumb="it?.t ?? 0"
+                      :video="it?.v"
+                      :duration-ms="it?.d"
+                      :favourite="it?.f"
+                      :selected="isSelected(it)"
+                    >
+                      <template v-if="it?.v && it.t" #media>
+                        <VideoThumb :key="it.id" :item="it" :cell="layout.cell" />
+                      </template>
+                    </MediaTile>
+                  </UContextMenu>
                 </div>
               </div>
             </div>
@@ -651,6 +748,14 @@ const searchNotes = computed(() => {
     <!-- The viewer has its own panel; this one would only load the same again behind it. -->
     <DetailsPanel v-if="lib.showDetails && !lib.viewer" :sel="lib.selected" />
     <Viewer v-if="lib.viewer" />
+    <FileTools v-model:open="filesOpen" :ids="fileIDs" :selection="lib.selectionSnapshot" @changed="lib.refresh()" />
+    <BatchTools
+      v-model:open="batchOpen"
+      :ids="fileIDs"
+      :selection="lib.selectionSnapshot"
+      :trash="lib.inTrash"
+      @changed="lib.trashChanged()"
+    />
   </div>
 </template>
 

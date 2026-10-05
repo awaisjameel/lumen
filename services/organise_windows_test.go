@@ -86,7 +86,7 @@ func newOrganiseLibrary(t *testing.T) *organiseLibrary {
 	}
 	ix := index.New(st, paths, media.NewCache(paths.ThumbDir, media.Decoders{}), index.Models{}, quietEvents{})
 	l := &organiseLibrary{t: t, st: st, ix: ix, root: root, src: src}
-	l.s = NewLibraryService(st, ix, nil)
+	l.s = NewLibraryService(st, ix, nil, nil)
 	l.s.organise.emit = func(p core.OrganiseProgress) {
 		l.mu.Lock()
 		l.events = append(l.events, p)
@@ -552,7 +552,7 @@ func TestARunInterruptedByAShutdownIsSettledAtTheNextStartAndCanBeResumed(t *tes
 	l.wantFile("IMG_1.jpg", true)
 
 	// The next start finds the run still marked running and makes it resumable.
-	again := NewLibraryService(l.st, l.ix, nil)
+	again := NewLibraryService(l.st, l.ix, nil, nil)
 	again.organise.emit = l.s.organise.emit
 	check(t, again.ServiceStartup(ctx, application.ServiceOptions{}))
 	t.Cleanup(func() { check(t, again.ServiceShutdown()) })
@@ -709,7 +709,7 @@ func TestARunInDoubtIsSettledByTheIndexerBeforeItsFirstScanWithoutTheServiceStar
 
 	// The next start: a service over the indexer (as main builds them), and the
 	// indexer starting. Nobody calls ServiceStartup.
-	fresh := NewLibraryService(l.st, l.ix, nil)
+	fresh := NewLibraryService(l.st, l.ix, nil, nil)
 	t.Cleanup(func() { check(t, fresh.ServiceShutdown()) })
 	l.ix.Start(ctx)
 	t.Cleanup(l.ix.Stop)

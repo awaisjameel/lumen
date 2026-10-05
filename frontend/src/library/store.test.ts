@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, watch } from 'vue'
-import { Device, engine, Filter, onLibraryChanged, onProgress, startMedia, WaitReason } from '../bridge'
+import { Device, engine, ErrorCode, Filter, onLibraryChanged, onProgress, startMedia, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Errors from '../shared/errors'
-import type { Changes, DayBucket, DayItems, GridItem, Progress, SearchResults } from '../bridge'
+import type { Changes, DayBucket, DayItems, GridItem, Progress, SearchResults, Selection } from '../bridge'
 import { affects, scopeKey, useLibrary } from './store'
 import { reportError } from '../shared/errors'
 
@@ -26,6 +26,8 @@ vi.mock('../bridge', async (importOriginal) => ({
     setFavourite: vi.fn(),
     setPaused: vi.fn(),
     trashCount: vi.fn(),
+    selection: vi.fn(),
+    validateSelection: vi.fn(),
   },
   onLibraryChanged: vi.fn(),
   onProgress: vi.fn(),
@@ -104,6 +106,71 @@ beforeEach(() => {
   vi.mocked(engine.setPaused).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.trashCount).mockReset().mockResolvedValue(0)
   vi.mocked(reportError).mockClear()
+})
+
+it('drops stale selected IDs before binding an additive range to a newer snapshot', async () => {
+  const lib = useLibrary()
+  await lib.selectItems({ day, id: 1 }, false, false)
+  await lib.selectItems({ day, id: 2 }, true, false)
+  vi.mocked(engine.selection).mockResolvedValueOnce({ ids: [2, 3, 4], revision: 10 })
+  await lib.selectItems({ day, id: 4 }, true, true)
+  expect([...lib.selectedIDs]).toEqual([2, 3, 4])
+  expect(lib.selectionSnapshot).toEqual({ ids: [2, 3, 4], revision: 10 })
+})
+
+it('reads every id of the view once, then asks only whether membership changed', async () => {
+  const lib = useLibrary()
+  vi.mocked(engine.selection)
+    .mockReset()
+    .mockResolvedValue({ ids: [1, 2, 3, 4], revision: 7 })
+  vi.mocked(engine.validateSelection).mockReset().mockResolvedValue(undefined)
+  await lib.selectItems({ day, id: 1 }, false, false)
+  await lib.selectItems({ day, id: 3 }, false, true)
+  await lib.selectItems({ day, id: 4 }, false, true)
+  expect(engine.selection).toHaveBeenCalledTimes(1)
+  expect(engine.validateSelection).toHaveBeenCalledExactlyOnceWith({ ids: [1, 2, 3, 4], revision: 7 })
+  expect([...lib.selectedIDs]).toEqual([1, 2, 3, 4])
+
+  // A photo left the view: the range is taken from what is there now.
+  vi.mocked(engine.validateSelection).mockRejectedValueOnce(
+    new Error('changed', { cause: { code: ErrorCode.SelectionChanged } }),
+  )
+  vi.mocked(engine.selection).mockResolvedValueOnce({ ids: [1, 3, 4], revision: 8 })
+  await lib.selectItems({ day, id: 3 }, false, true)
+  expect(engine.selection).toHaveBeenCalledTimes(2)
+  expect([...lib.selectedIDs]).toEqual([1, 3])
+  expect(lib.selectionSnapshot).toEqual({ ids: [1, 3], revision: 8 })
+
+  // Any other failure of the check is reported, and nothing is selected by guesswork.
+  vi.mocked(engine.validateSelection).mockRejectedValueOnce(new Error('the database could not be read'))
+  await lib.selectItems({ day, id: 4 }, false, true)
+  expect(engine.selection).toHaveBeenCalledTimes(2)
+  expect(reportError).toHaveBeenCalledOnce()
+  expect([...lib.selectedIDs]).toEqual([1, 3])
+})
+
+it('keeps the visible selection when an older select-all request finishes', async () => {
+  const lib = useLibrary()
+  const pending = deferred<Selection>()
+  vi.mocked(engine.selection).mockReturnValueOnce(pending.promise)
+  const selecting = lib.selectAllResults()
+  lib.selectVisible([2])
+  pending.resolve({ ids: [1, 2, 3], revision: 7 })
+  await selecting
+  expect([...lib.selectedIDs]).toEqual([2])
+  expect(lib.selectionSnapshot).toBeNull()
+})
+
+it('does not publish a selection after the library store is disposed', async () => {
+  const lib = useLibrary()
+  const pending = deferred<Selection>()
+  vi.mocked(engine.selection).mockReturnValueOnce(pending.promise)
+  const selecting = lib.selectAllResults()
+  lib.$dispose()
+  pending.resolve({ ids: [1, 2, 3], revision: 7 })
+  await selecting
+  expect([...lib.selectedIDs]).toEqual([])
+  expect(lib.selectionSnapshot).toBeNull()
 })
 
 describe('library lifetime', () => {

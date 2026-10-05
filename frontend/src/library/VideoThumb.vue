@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { SPRITE_COLS, SPRITE_ROWS, spriteUrl, thumbUrl } from '../bridge'
+import { SPRITE_COLS, SPRITE_ROWS, thumbUrl } from '../bridge'
 import type { GridItem } from '../bridge'
+import { videoSpriteStyle } from '../shared/videoSprite'
 
 const props = defineProps<{ item: GridItem; cell: number }>()
 const frame = ref(-1)
@@ -18,16 +19,10 @@ const sprite = computed(() => {
   const ratio = props.item.w > 0 && props.item.h > 0 ? props.item.w / props.item.h : 16 / 9
   const w = Math.ceil(props.cell * Math.max(1, ratio))
   const h = Math.ceil(props.cell * Math.max(1, 1 / ratio))
-  const col = frame.value % SPRITE_COLS
-  const row = Math.floor(frame.value / SPRITE_COLS)
   return {
-    width: `${w}px`,
-    height: `${h}px`,
+    ...videoSpriteStyle(props.item.id, props.item.t, frame.value, w, h),
     left: `${(props.cell - w) / 2}px`,
     top: `${(props.cell - h) / 2}px`,
-    backgroundImage: `url("${spriteUrl(props.item.id, props.item.t)}")`,
-    backgroundSize: `${w * SPRITE_COLS}px ${h * SPRITE_ROWS}px`,
-    backgroundPosition: `${-col * w}px ${-row * h}px`,
   }
 })
 </script>

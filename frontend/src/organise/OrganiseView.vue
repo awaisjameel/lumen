@@ -11,8 +11,9 @@ import USelect from '@nuxt/ui/components/Select.vue'
 import UFormField from '@nuxt/ui/components/FormField.vue'
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from 'vue'
-import { ORGANISE_TOKENS, OrganiseMoveState, OrganiseReason, OrganiseRunState } from '../bridge'
-import type { OrganiseMove, OrganiseRun } from '../bridge'
+import { ORGANISE_TOKENS, OrganiseMoveState, OrganiseRunState } from '../bridge'
+import type { OrganiseRun } from '../bridge'
+import { reasonText } from '../shared/fileReasons'
 import { confirm } from '../shared/confirm'
 import { icons } from '../design/icons'
 import { registerCommands, runCommand, useCommands } from '../shared/commands'
@@ -72,34 +73,6 @@ async function insertToken(token: string) {
   await nextTick()
   input?.focus()
   input?.setSelectionRange(start + text.length, start + text.length)
-}
-
-const reasons: readonly string[] = Object.values(OrganiseReason)
-
-/** Why a move is left out, in words; Windows's own message when it is not one of ours. */
-function reasonText(move: OrganiseMove): string {
-  const error = move.error ?? ''
-  if (!reasons.includes(error)) return error
-  switch (error) {
-    case OrganiseReason.Missing:
-      return t('organise.reason.missing')
-    case OrganiseReason.NotVisible:
-      return t('organise.reason.not_visible')
-    case OrganiseReason.BlockedFolder:
-      return t('organise.reason.blocked_folder')
-    case OrganiseReason.Changed:
-      return t('organise.reason.changed')
-    case OrganiseReason.Taken:
-      return t('organise.reason.taken')
-    case OrganiseReason.TooLong:
-      return t('organise.reason.too_long')
-    case OrganiseReason.NotAFolder:
-      return t('organise.reason.not_a_folder')
-    case OrganiseReason.SidecarTaken:
-      return t('organise.reason.sidecar_taken')
-    default:
-      return error
-  }
 }
 
 // The preview can hold every file of a library, so only the rows in view exist.
@@ -328,9 +301,12 @@ onScopeDispose(() => removeRunCommands())
             :style="{ height: `${rowHeight}px`, transform: `translateY(${item.start}px)` }"
           >
             <span class="path" :title="move.from">{{ move.from }}</span>
-            <span v-if="move.state === OrganiseMoveState.MoveSkipped" class="path reason" :title="reasonText(move)">{{
-              reasonText(move)
-            }}</span>
+            <span
+              v-if="move.state === OrganiseMoveState.MoveSkipped"
+              class="path reason"
+              :title="reasonText(move.error)"
+              >{{ reasonText(move.error) }}</span
+            >
             <span v-else class="path" :title="move.to"
               ><span class="sr-only">{{ t('organise.movesTo') }}</span
               ><span aria-hidden="true">→</span> {{ move.to }}
@@ -341,8 +317,8 @@ onScopeDispose(() => removeRunCommands())
             <span
               v-if="move.state !== OrganiseMoveState.MoveSkipped && move.error"
               class="path note"
-              :title="reasonText(move)"
-              >{{ reasonText(move) }}</span
+              :title="reasonText(move.error)"
+              >{{ reasonText(move.error) }}</span
             >
           </div>
         </div>
@@ -402,7 +378,8 @@ onScopeDispose(() => removeRunCommands())
             >
           </WorkProgress>
           <p v-if="run.sidecarsKept" class="text-muted text-xs">{{ t('organise.runKept', { n: run.sidecarsKept }) }}</p>
-          <p class="text-muted text-xs font-mono break-words">{{ run.template }}</p>
+          <p v-if="run.template" class="text-muted text-xs font-mono break-words">{{ run.template }}</p>
+          <p v-else class="text-muted text-xs">{{ t('organise.chosenFiles') }}</p>
         </li>
       </ul>
     </section>

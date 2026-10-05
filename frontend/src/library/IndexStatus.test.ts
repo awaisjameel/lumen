@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises } from '@vue/test-utils'
+import type { VueWrapper } from '@vue/test-utils'
 import { Device, engine, FailReason, WaitReason } from '../bridge'
 import type { Progress } from '../bridge'
 import { useLibrary } from './store'
 import IndexStatus from './IndexStatus.vue'
+import { mountInApp } from '../shared/testing'
+
+let mounted: VueWrapper | undefined
 
 const idle: Progress = {
   scanning: false,
@@ -28,14 +32,20 @@ const idle: Progress = {
 
 function show(progress: Partial<Progress>, working: Partial<Progress['working']> = {}) {
   useLibrary().progress = { ...idle, ...progress, working: { ...idle.working, ...working } }
-  return mount(IndexStatus)
+  mounted?.unmount()
+  mounted = mountInApp(IndexStatus)
+  return mounted.findComponent(IndexStatus)
 }
 
 const label = (status: ReturnType<typeof show>) => status.find('.label').text()
 const rows = (status: ReturnType<typeof show>) => status.findAll('.queue li').map((li) => li.text())
 
 beforeEach(() => setActivePinia(createPinia()))
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  mounted?.unmount()
+  mounted = undefined
+  vi.restoreAllMocks()
+})
 
 it('says what is at work, not only that a scan runs', () => {
   const status = show(
@@ -97,7 +107,7 @@ it('shows a pause with the work left', () => {
   const status = show({ ocr: 3, paused: true })
   expect(label(status)).toBe('Paused')
   expect(status.text()).toContain('3 left')
-  expect(status.find('button').attributes('aria-label')).toBe('Resume')
+  expect(status.find('button').attributes('aria-label')).toBe('Resume indexing')
   expect(status.find('.queue .note').text()).toBe('Everything waits until you resume.')
 })
 

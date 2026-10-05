@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconButton from '../shared/IconButton.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
@@ -144,7 +145,7 @@ function fieldRef(el: unknown) {
   )
 }
 function triggerRef(el: unknown, key: number) {
-  rename.triggerRef(key)(el && typeof el === 'object' && '$el' in el && el.$el instanceof HTMLElement ? el.$el : null)
+  rename.triggerRef(key)(el)
 }
 </script>
 
@@ -204,12 +205,11 @@ function triggerRef(el: unknown, key: number) {
           }}</UButton>
         </form>
         <UDropdownMenu v-else :items="eventItems(event.id)" :content="{ onCloseAutoFocus: keepEditorFocus }">
-          <UButton
+          <IconButton
             :ref="(el) => triggerRef(el, event.id)"
             :icon="icons.more"
-            :aria-label="t('events.actions', { name: event.name })"
+            :label="t('events.actions', { name: event.name })"
             :disabled="busy"
-            square
           />
         </UDropdownMenu>
       </CollectionCard>

@@ -216,8 +216,18 @@ static int lumen_header(const char *path, int *w, int *h) {
 	return 0;
 }
 
-// lumen_profile reads only the header: a copy of the embedded colour
-// profile in *out (g_malloc'd; NULL if there is none).
+// lumen_pages reads the declared frame or page count from the header.
+static int lumen_pages(const char *path, int *n) {
+	VipsImage *im = vips_image_new_from_file(path, NULL);
+	if (!im) return -1;
+	*n = 1;
+	if (vips_image_get_typeof(im, "n-pages") && vips_image_get_int(im, "n-pages", n)) {
+		g_object_unref(im); return -1;
+	}
+	g_object_unref(im); return 0;
+}
+
+// lumen_profile copies the embedded ICC profile from the image header.
 static int lumen_profile(const char *path, void **out, size_t *n) {
 	const void *data = NULL;
 	size_t len = 0;
@@ -497,6 +507,20 @@ func Profile(path string) ([]byte, error) {
 	}
 	defer C.g_free(C.gpointer(buf))
 	return C.GoBytes(buf, C.int(n)), nil
+}
+
+// Pages reads the page or animation frame count supplied by the image loader.
+func Pages(path string) (int, error) {
+	if err := Init(); err != nil {
+		return 0, err
+	}
+	cpath := C.CString(path)
+	defer C.free(unsafe.Pointer(cpath))
+	var n C.int
+	if C.lumen_pages(cpath, &n) != 0 {
+		return 0, lastError()
+	}
+	return int(n), nil
 }
 
 func lastError() error {

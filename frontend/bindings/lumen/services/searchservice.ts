@@ -99,6 +99,14 @@ export function TagAsset(assetID: number, name: string): $CancellablePromise<voi
 }
 
 /**
+ * TagAssets is TagAsset for a selection: the tag is found or made once, and
+ * each photo has its own outcome (see LibraryService.ApplyBatch).
+ */
+export function TagAssets(ids: number[] | null, name: string): $CancellablePromise<core$0.BatchOutcome[] | null> {
+    return $Call.ByID(1431612141, ids, name);
+}
+
+/**
  * Things lists every tag with its count and cover, most used first.
  */
 export function Things(): $CancellablePromise<core$0.Tag[] | null> {

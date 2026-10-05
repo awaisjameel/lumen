@@ -673,7 +673,7 @@ it('filters by descriptions and categories and recovers from a search with no ma
     const reset = wrapper.findAll('button').find((button) => button.text() === t('settings.clearSearch'))
     if (!reset) throw new Error('missing clear search action')
     await reset.trigger('click')
-    expect(wrapper.findAll('[data-category]')).toHaveLength(7)
+    expect(wrapper.findAll('[data-category]')).toHaveLength(8)
     expect(
       wrapper.get('input[type="search"]').element instanceof HTMLInputElement &&
         wrapper.get<HTMLInputElement>('input[type="search"]').element.value,

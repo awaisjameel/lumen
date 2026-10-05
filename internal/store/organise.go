@@ -128,10 +128,10 @@ func blockedFolders(ctx context.Context, q querier) ([]string, error) {
 
 // The states of a move's XMP sidecar (OrganiseMove.Sidecar); "" is none.
 const (
-	SidecarPlanned = "planned" // one to move with the photo
-	SidecarMoved   = "moved"
-	SidecarKept    = "kept"   // left where it was; the move's error says why
-	SidecarUndone  = "undone" // put back with the photo
+	SidecarPlanned = string(core.SidecarPlanned)
+	SidecarMoved   = string(core.SidecarMoved)
+	SidecarKept    = string(core.SidecarKept)
+	SidecarUndone  = string(core.SidecarUndone)
 )
 
 // OrganiseSidecar is what became of a photo's sidecar in a move, handed to
@@ -268,6 +268,13 @@ func (s *Store) OrganiseMoves(ctx context.Context, runID int64, descending bool,
 func scanOrganiseMove(r *sql.Rows) (m OrganiseMove, err error) {
 	err = r.Scan(&m.Seq, &m.FileID, &m.AssetID, &m.Root, &m.From, &m.To, &m.Size, &m.MTime, &m.Renamed, &m.Sidecar, &m.State, &m.Error)
 	return m, err
+}
+
+// VisibleOrganiseMoves is the public file-operation outcome list.
+func (s *Store) VisibleOrganiseMoves(ctx context.Context, runID int64) ([]OrganiseMove, error) {
+	return queryAll(ctx, s.r, scanOrganiseMove, `SELECT seq, COALESCE(file_id, 0), asset_id, root, from_path, to_path, size, mtime,
+		renamed, sidecar, state, COALESCE(error, '') FROM organise_moves WHERE run_id = ?
+		AND asset_id IN (SELECT id FROM assets WHERE `+visible+`) ORDER BY seq`, runID)
 }
 
 // SetOrganiseRunState records where a run stands.

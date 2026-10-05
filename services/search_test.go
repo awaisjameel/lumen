@@ -238,7 +238,7 @@ func TestAddSourcesIsAllOrNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil, nil, nil)
 	dir := t.TempDir()
 	if _, err := s.AddSources(ctx, []string{dir, filepath.Join(dir, "missing")}); !errors.Is(err, ErrFolderNotFound) {
 		t.Fatalf("AddSources with a missing folder: %v", err)
@@ -515,7 +515,7 @@ func TestTurningTextReadingOnAndOffThroughTheLibraryService(t *testing.T) {
 	}
 	defer st.Close()
 	ix := index.New(st, paths, nil, index.Models{}, &quietEvents{})
-	s := NewLibraryService(st, ix, nil)
+	s := NewLibraryService(st, ix, nil, nil)
 	if got, err := s.Settings(ctx); err != nil || got.OCR {
 		t.Fatalf("settings of a new library: OCR %v, %v; want it off", got.OCR, err)
 	}
@@ -577,6 +577,29 @@ func TestTaggingAPhotoAScreenshotQueuesItsTextWhileOCRIsOn(t *testing.T) {
 	}
 }
 
+func TestBatchTaggingKeepsCommittedOutcomesWhenOCRQueueingFails(t *testing.T) {
+	l, _ := screenshotLibrary(t)
+	ctx := t.Context()
+	check(t, l.st.SetOCR(ctx, true))
+	w, err := sql.Open("sqlite3", l.db)
+	check(t, err)
+	defer w.Close()
+	// Fail only the background queue write, after the tag edit has committed.
+	_, err = w.ExecContext(ctx, `CREATE TRIGGER refuse_ocr_queue BEFORE INSERT ON asset_jobs
+		WHEN NEW.stage = 'ocr' BEGIN SELECT RAISE(ABORT, 'queue unavailable'); END`)
+	check(t, err)
+	results, err := l.svc.TagAssets(ctx, []int64{l.a}, "Screenshots")
+	check(t, err)
+	if len(results) != 1 || results[0].Error != "" {
+		t.Fatalf("committed tag reported as failed: %+v", results)
+	}
+	tags, err := l.st.AssetTags(ctx, l.a, core.TagConfidenceDefault)
+	check(t, err)
+	if len(tags) != 1 || tags[0].Name != "Screenshots" {
+		t.Fatalf("tag was not committed: %+v", tags)
+	}
+}
+
 func TestLoweringTheTagConfidenceQueuesPhotosThatBecomeScreenshots(t *testing.T) {
 	l, shots := screenshotLibrary(t)
 	ctx := t.Context()
@@ -584,7 +607,7 @@ func TestLoweringTheTagConfidenceQueuesPhotosThatBecomeScreenshots(t *testing.T)
 		t.Fatal(err)
 	}
 	ix := index.New(l.st, core.PathsIn(t.TempDir()), nil, index.Models{}, &quietEvents{})
-	lib := NewLibraryService(l.st, ix, nil)
+	lib := NewLibraryService(l.st, ix, nil, nil)
 	if err := lib.SetTagConfidence(ctx, 0.2); err != nil {
 		t.Fatal(err)
 	}

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -48,6 +49,15 @@ func (s *Store) Preferences(ctx context.Context) (core.Preferences, error) {
 		return core.Preferences{}, err
 	}
 	p.SidebarCollapsed = collapsed
+	viewer, ok, err := s.setting(ctx, core.SettingUIViewer)
+	if err != nil {
+		return core.Preferences{}, err
+	}
+	if ok {
+		if err := json.Unmarshal([]byte(viewer), &p.Viewer); err != nil {
+			return core.Preferences{}, err
+		}
+	}
 	return p.Normalised(), nil
 }
 
@@ -55,9 +65,13 @@ func (s *Store) Preferences(ctx context.Context) (core.Preferences, error) {
 // returns what was stored: a save is all of one request's values or none.
 func (s *Store) SetPreferences(ctx context.Context, p core.Preferences) (core.Preferences, error) {
 	p = p.Normalised()
+	viewer, err := json.Marshal(p.Viewer)
+	if err != nil {
+		return core.Preferences{}, err
+	}
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
-	return p, s.writeSettings(ctx, preferenceSettings(p))
+	return p, s.writeSettings(ctx, append(preferenceSettings(p), setting{core.SettingUIViewer, string(viewer)}))
 }
 
 // MigrateLegacyPreferences offers this library the choices an older Lumen

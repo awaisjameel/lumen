@@ -3,15 +3,15 @@
 // original when the WebView can display it (JPEG, PNG, WebP, AVIF). Its
 // photos, the one beside each and what may be done with it come from a
 // source: the library grid unless one is given (the Blocked screen's browser).
+import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
-import UTooltip from '@nuxt/ui/components/Tooltip.vue'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { engine, isCancelled, originalUrl, THUMB_LARGE, thumbUrl, videosAvailable } from '../bridge'
-import type { AssetDetail } from '../bridge'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { engine, isCancelled, videosAvailable } from '../bridge'
+import type { AssetDetail, GridItem } from '../bridge'
 import { icons } from '../design/icons'
 import { dispatchKey, runCommand, useCommands } from '../shared/commands'
-import { errorText } from '../shared/errors'
+import { errorText, reportError } from '../shared/errors'
 import FeatureState from '../shared/FeatureState.vue'
 import { dateTime } from '../shared/format'
 import { t } from '../shared/i18n'
@@ -22,17 +22,40 @@ import { libraryViewerSource, useLibrary } from './store'
 import type { ViewerSource } from './store'
 import DetailsPanel from './DetailsPanel.vue'
 import VideoPlayer from './VideoPlayer.vue'
+import ImageSurface from '../media/ImageSurface.vue'
+import type { ImageControls, ViewGeometry } from '../media/viewport'
+import Filmstrip from '../media/Filmstrip.vue'
+import { usePreferences } from '../shared/preferences'
+import { useLiveReload } from '../shared/liveReload'
 
 const props = defineProps<{ source?: ViewerSource }>()
 const lib = useLibrary()
+const prefs = usePreferences()
+const viewing = computed(() => prefs.viewer)
+const neighbours = shallowRef<GridItem[]>([])
+const comparing = ref(false)
+const comparison = ref<AssetDetail | null>(null)
+const comparisonItem = ref<GridItem | null>(null)
+const linked = ref(true)
+const geometry = ref<ViewGeometry>()
+const sliding = ref(false)
+const hidden = ref(false)
+let hideTimer: ReturnType<typeof setTimeout> | undefined
+let slideTimer: ReturnType<typeof setTimeout> | undefined
+let neighbourhoodRequest = 0
+let comparisonRequest = 0
 const src = computed(() => props.source ?? libraryViewerSource(lib))
 const item = computed(() => src.value.item)
 const actions = computed(() => src.value.actions)
+// Only an ordinary library photo can be a favourite; the same ones keep
+// display adjustments and playback history. The Trash and Blocked do not.
+const ordinary = computed(() => !!actions.value.favourite)
 const detail = ref<AssetDetail | null>(null)
-const originalReady = ref(false)
+const image = ref<ImageControls | null>(null)
 const root = ref<HTMLElement | null>(null)
 const loading = ref(false)
 const loadError = ref('')
+const adjusting = ref(false)
 const layer = useLayer()
 let previousFocus: Element | null = null
 let detailRequest = 0
@@ -40,9 +63,9 @@ let detailRequest = 0
 watch(
   () => src.value.id,
   async (id, _old, onCleanup) => {
+    geometry.value = undefined
     const request = ++detailRequest
     onCleanup(() => detailRequest++)
-    originalReady.value = false
     detail.value = null
     loadError.value = ''
     loading.value = !!id
@@ -61,20 +84,154 @@ watch(
 )
 
 function go(dir: 1 | -1) {
-  void src.value.step(dir)
+  void src.value.step(dir).catch(reportError)
 }
 
 function close() {
   src.value.close()
 }
 
-function onMediaDoubleClick() {
-  if (!detail.value?.video) close()
+async function fullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen()
+    else await root.value?.requestFullscreen()
+  } catch (e) {
+    reportError(e)
+  }
+}
+
+function activity() {
+  hidden.value = false
+  clearTimeout(hideTimer)
+  if (viewing.value.autoHide)
+    hideTimer = setTimeout(() => {
+      if (layer.owns()) hidden.value = true
+    }, 3000)
+}
+
+watch([() => src.value.id, () => viewing.value.filmstrip, comparing], loadNeighbours, { immediate: true })
+
+async function loadNeighbours() {
+  const request = ++neighbourhoodRequest
+  neighbours.value = []
+  if (!viewing.value.filmstrip && !comparing.value) return
+  try {
+    const items = await src.value.window?.()
+    if (request === neighbourhoodRequest) neighbours.value = items ?? []
+  } catch (e) {
+    if (request === neighbourhoodRequest && !isCancelled(e)) reportError(e)
+  }
+}
+
+watch([comparing, () => src.value.id], async ([value]) => {
+  const request = ++comparisonRequest
+  comparison.value = null
+  comparisonItem.value = null
+  if (!value) return
+  const id = src.value.id
+  try {
+    const items = await src.value.window?.()
+    if (request !== comparisonRequest) return
+    const other = items?.find((entry) => entry.id !== id && !entry.v)
+    if (!other) {
+      comparing.value = false
+      return
+    }
+    const data = await engine.asset(other.id)
+    if (request === comparisonRequest && comparing.value && src.value.id === id) {
+      comparison.value = data
+      comparisonItem.value = other
+    }
+  } catch (e) {
+    if (request === comparisonRequest) {
+      comparing.value = false
+      if (!isCancelled(e)) reportError(e)
+    }
+  }
+})
+
+useLiveReload(
+  async () => {
+    await loadNeighbours()
+    const currentID = src.value.id
+    const request = ++detailRequest
+    if (currentID) {
+      try {
+        const data = await engine.asset(currentID)
+        if (request === detailRequest && src.value.id === currentID) {
+          detail.value = data
+          loadError.value = ''
+          loading.value = false
+        }
+      } catch (e) {
+        if (request === detailRequest && !isCancelled(e)) {
+          detail.value = null
+          loadError.value = errorText(e)
+          loading.value = false
+        }
+      }
+    }
+    const current = comparison.value
+    if (!current) return
+    const comparisonRevision = comparisonRequest
+    try {
+      const data = await engine.asset(current.id)
+      if (comparisonRevision === comparisonRequest && comparison.value?.id === current.id) comparison.value = data
+    } catch (e) {
+      if (comparisonRevision === comparisonRequest && !isCancelled(e)) {
+        comparing.value = false
+        comparison.value = null
+        comparisonItem.value = null
+      }
+    }
+  },
+  (c) => c.assets || c.thumbs,
+  1,
+)
+watch(() => viewing.value.autoHide, activity)
+
+watch([sliding, () => src.value.id, () => viewing.value.slideshowSeconds], () => {
+  clearTimeout(slideTimer)
+  if (!sliding.value) return
+  slideTimer = setTimeout(() => {
+    if (!layer.owns() || document.hidden) {
+      sliding.value = false
+      return
+    }
+    const id = src.value.id
+    void src.value
+      .step(1)
+      .then(async () => {
+        if (src.value.id === id) {
+          if (viewing.value.loop && src.value.first) await src.value.first()
+          else sliding.value = false
+        }
+      })
+      .catch((e: unknown) => {
+        sliding.value = false
+        reportError(e)
+      })
+  }, viewing.value.slideshowSeconds * 1000)
+})
+
+async function adjust(rotation: number, flip: boolean) {
+  const current = detail.value
+  if (!current || !ordinary.value || adjusting.value) return
+  adjusting.value = true
+  try {
+    const adjustment = await engine.setAdjustment(current.id, rotation, flip)
+    if (detail.value?.id === current.id) detail.value = { ...detail.value, adjustment }
+  } catch (e) {
+    reportError(e)
+  } finally {
+    adjusting.value = false
+  }
 }
 
 // Listens in the bubble phase, so a control that handles a key itself (a
 // picker closing its menu on Escape) stops it before it reaches the viewer.
 function onKey(e: KeyboardEvent) {
+  activity()
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return
   if (!layer.owns()) return
   // Escape belongs to the browser while the player is fullscreen.
@@ -85,6 +242,11 @@ function onKey(e: KeyboardEvent) {
   }
   // Typing in the details panel (adding a tag): only Escape still closes.
   if (isTyping(e) && e.key !== 'Escape') return
+  if (e.key === '+') {
+    e.preventDefault()
+    void runCommand('viewer.zoomIn')
+    return
+  }
   // Playback controls keep their own arrow keys.
   const slider = e.target instanceof Element && e.target.closest('[role="slider"], [role="separator"]')
   if ((ownsArrows(e) || slider) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
@@ -98,6 +260,107 @@ function onKey(e: KeyboardEvent) {
 }
 
 useCommands([
+  {
+    id: 'viewer.fullscreen',
+    group: 'view',
+    title: () => t('viewer.fullscreen'),
+    icon: 'maximize',
+    zone: 'viewer',
+    run: fullscreen,
+  },
+  {
+    id: 'viewer.filmstrip',
+    group: 'view',
+    title: () => t('viewer.filmstrip'),
+    icon: 'film',
+    zone: 'viewer',
+    available: () => !!src.value.window,
+    run: () => prefs.setViewer({ filmstrip: !viewing.value.filmstrip }),
+  },
+  {
+    id: 'viewer.slideshow',
+    group: 'view',
+    title: () => t('viewer.slideshow'),
+    icon: 'play',
+    zone: 'viewer',
+    run: () => (sliding.value = !sliding.value),
+  },
+  {
+    id: 'viewer.compare',
+    group: 'view',
+    title: () => t('viewer.compare'),
+    icon: 'layers',
+    zone: 'viewer',
+    available: () => !!image.value && !!src.value.window,
+    run: () => (comparing.value = !comparing.value),
+  },
+  {
+    id: 'viewer.rotate',
+    group: 'media',
+    title: () => t('viewer.rotate'),
+    icon: 'rotate',
+    zone: 'viewer',
+    available: () => !!image.value && ordinary.value && !adjusting.value,
+    run: () => adjust((detail.value?.adjustment?.rotation ?? 0) + 1, detail.value?.adjustment?.flip ?? false),
+  },
+  {
+    id: 'viewer.flip',
+    group: 'media',
+    title: () => t('viewer.flip'),
+    icon: 'flip',
+    zone: 'viewer',
+    available: () => !!image.value && ordinary.value && !adjusting.value,
+    run: () => adjust(detail.value?.adjustment?.rotation ?? 0, !detail.value?.adjustment?.flip),
+  },
+  {
+    id: 'viewer.resetAdjustment',
+    group: 'media',
+    title: () => t('viewer.resetAdjustment'),
+    icon: 'undo',
+    zone: 'viewer',
+    available: () => !!image.value && ordinary.value && !adjusting.value,
+    run: () => adjust(0, false),
+  },
+  {
+    id: 'viewer.zoomIn',
+    group: 'view',
+    title: () => t('viewer.zoomIn'),
+    icon: 'zoom-in',
+    keys: '=',
+    zone: 'viewer',
+    available: () => !!image.value,
+    run: () => image.value?.zoom(1.25),
+  },
+  {
+    id: 'viewer.zoomOut',
+    group: 'view',
+    title: () => t('viewer.zoomOut'),
+    icon: 'zoom-out',
+    keys: '-',
+    zone: 'viewer',
+    available: () => !!image.value,
+    run: () => image.value?.zoom(0.8),
+  },
+  {
+    id: 'viewer.fit',
+    group: 'view',
+    title: () => t('viewer.fit'),
+    icon: 'maximize',
+    keys: '0',
+    zone: 'viewer',
+    available: () => !!image.value,
+    run: () => image.value?.fit(),
+  },
+  {
+    id: 'viewer.actual',
+    group: 'view',
+    title: () => t('viewer.actual'),
+    icon: 'image',
+    keys: '1',
+    zone: 'viewer',
+    available: () => !!image.value,
+    run: () => image.value?.actual(),
+  },
   {
     id: 'viewer.close',
     group: 'view',
@@ -203,8 +466,14 @@ onMounted(() => {
   window.addEventListener('keydown', onKey)
   setBehind(true)
   root.value?.focus()
+  activity()
 })
 onBeforeUnmount(() => {
+  detailRequest++
+  comparisonRequest++
+  neighbourhoodRequest++
+  clearTimeout(slideTimer)
+  clearTimeout(hideTimer)
   window.removeEventListener('keydown', onKey)
   setBehind(false)
   if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
@@ -216,26 +485,36 @@ onBeforeUnmount(() => {
     <div
       ref="root"
       class="viewer"
+      :class="{ 'controls-hidden': hidden }"
       role="dialog"
       aria-modal="true"
       :aria-busy="loading"
       :aria-label="detail ? dateTime(detail.takenAt) : t('viewer.title')"
       tabindex="-1"
+      @pointermove="activity"
+      @focusin="activity"
     >
       <div class="stage">
         <header class="bar">
-          <UTooltip :text="t('common.withKey', { label: t('common.close'), key: 'Esc' })">
-            <UButton
-              class="viewer-control"
-              :icon="icons.close"
-              :aria-label="t('common.close')"
-              variant="ghost"
-              square
-              @click="runCommand('viewer.close')"
-            />
-          </UTooltip>
+          <IconButton
+            :kbds="['Esc']"
+            class="viewer-control"
+            :icon="icons.close"
+            :label="t('common.close')"
+            variant="ghost"
+            @click="runCommand('viewer.close')"
+          />
           <span class="date">{{ detail ? dateTime(detail.takenAt) : '' }}</span>
           <span v-if="loading" class="date" role="status">{{ t('details.loading') }}</span>
+          <IconButton
+            v-if="sliding && !image"
+            :icon="icons.pause"
+            :label="t('viewer.slideshow')"
+            :tip="t('viewer.stopSlideshow')"
+            :aria-pressed="sliding"
+            variant="ghost"
+            @click="runCommand('viewer.slideshow')"
+          />
           <div class="grow" />
           <!-- In the Trash the two actions are spelt out: what each does to
                the file must be read without hovering. -->
@@ -257,45 +536,42 @@ onBeforeUnmount(() => {
           >
             {{ t('trash.deleteFromDisk') }}
           </UButton>
-          <UTooltip
+          <IconButton
             v-if="actions.favourite"
-            :text="t('common.withKey', { label: t(item?.f ? 'details.unfavourite' : 'details.favourite'), key: 'F' })"
+            class="viewer-control"
+            :label="t(item?.f ? 'details.unfavourite' : 'details.favourite')"
+            :kbds="['F']"
+            :aria-pressed="!!item?.f"
+            variant="ghost"
+            @click="runCommand('viewer.favourite')"
           >
-            <UButton
-              class="viewer-control"
-              :aria-pressed="!!item?.f"
-              :aria-label="t(item?.f ? 'details.unfavourite' : 'details.favourite')"
-              variant="ghost"
-              square
-              @click="runCommand('viewer.favourite')"
-            >
-              <Icon name="heart" :filled="!!item?.f" />
-            </UButton>
-          </UTooltip>
-          <UTooltip v-if="actions.moveToTrash" :text="t('trash.move')">
-            <UButton
-              class="viewer-control"
-              :icon="icons.trash"
-              :aria-label="t('trash.move')"
-              variant="ghost"
-              square
-              @click="runCommand('viewer.trash')"
-            />
-          </UTooltip>
-          <UTooltip v-if="actions.details" :text="t('common.withKey', { label: t('library.info'), key: 'I' })">
-            <UButton
-              class="viewer-control"
-              :icon="icons.info"
-              :aria-pressed="lib.showDetails"
-              :aria-label="t('library.info')"
-              variant="ghost"
-              square
-              @click="runCommand('viewer.details')"
-            />
-          </UTooltip>
+            <Icon name="heart" :filled="!!item?.f" />
+          </IconButton>
+          <IconButton
+            v-if="actions.moveToTrash"
+            class="viewer-control"
+            :icon="icons.trash"
+            :label="t('trash.move')"
+            variant="ghost"
+            @click="runCommand('viewer.trash')"
+          />
+          <IconButton
+            v-if="actions.details"
+            class="viewer-control"
+            :icon="icons.info"
+            :label="t('library.info')"
+            :tip="t(lib.showDetails ? 'library.hideInfo' : 'library.showInfo')"
+            :kbds="['I']"
+            :aria-pressed="lib.showDetails"
+            variant="ghost"
+            @click="runCommand('viewer.details')"
+          />
         </header>
 
-        <div class="media" @dblclick="onMediaDoubleClick">
+        <div
+          class="media"
+          :class="{ comparing: comparison && comparisonItem, 'with-filmstrip': viewing.filmstrip && neighbours.length }"
+        >
           <FeatureState v-if="loadError" kind="error" :title="loadError" />
           <FeatureState v-else-if="!item && !loading" kind="empty" icon="image-off" :title="t('viewer.notFound')" />
           <template v-else-if="item">
@@ -305,6 +581,7 @@ onBeforeUnmount(() => {
               :detail="detail"
               :at="item.at ?? 0"
               :thumb-version="item.t"
+              :private="!ordinary"
               @timeupdate="src.touch?.()"
             />
             <UAlert
@@ -316,24 +593,16 @@ onBeforeUnmount(() => {
               :title="t('viewer.videoUnavailable')"
             />
             <template v-else-if="!detail?.video">
-              <img
-                v-if="item.t"
-                v-show="!originalReady"
-                :key="'p' + item.id"
-                class="preview"
-                :src="thumbUrl(item.id, item.t, THUMB_LARGE)"
-                alt=""
-                draggable="false"
-              />
-              <img
-                v-if="detail?.caps.original && detail.id === item.id"
-                v-show="originalReady"
-                :key="'o' + detail.id"
-                class="original"
-                :src="originalUrl(detail.id)"
-                alt=""
-                draggable="false"
-                @load="originalReady = true"
+              <ImageSurface
+                :id="item.id"
+                ref="image"
+                :key="item.id"
+                :thumb="item.t"
+                :width="item.w"
+                :height="item.h"
+                :detail="detail"
+                :linked="comparing && linked ? geometry : undefined"
+                @change="geometry = $event"
               />
               <FeatureState
                 v-if="!item.t && !detail?.caps.original"
@@ -344,28 +613,122 @@ onBeforeUnmount(() => {
             </template>
           </template>
           <FeatureState v-else kind="loading" :title="t('details.loading')" />
+          <ImageSurface
+            v-if="comparison && comparisonItem"
+            :id="comparisonItem.id"
+            :key="comparisonItem.id"
+            :thumb="comparisonItem.t"
+            :width="comparisonItem.w"
+            :height="comparisonItem.h"
+            :detail="comparison"
+            :linked="linked ? geometry : undefined"
+            @change="geometry = $event"
+          />
         </div>
 
-        <UTooltip :text="t('viewer.prev')" :content="{ side: 'right' }">
-          <UButton
-            class="viewer-control nav prev"
-            :icon="icons['chevron-left']"
-            :aria-label="t('viewer.prev')"
+        <div
+          v-if="image && !detail?.video"
+          class="image-controls"
+          :class="{ raised: viewing.filmstrip && neighbours.length }"
+        >
+          <IconButton
+            :icon="icons['zoom-out']"
+            :label="t('viewer.zoomOut')"
             variant="ghost"
-            square
-            @click="runCommand('viewer.previous')"
+            @click="runCommand('viewer.zoomOut')"
           />
-        </UTooltip>
-        <UTooltip :text="t('viewer.next')" :content="{ side: 'left' }">
-          <UButton
-            class="viewer-control nav next"
-            :icon="icons['chevron-right']"
-            :aria-label="t('viewer.next')"
+          <span role="status">{{ image.scale }}%</span>
+          <IconButton
+            :icon="icons['zoom-in']"
+            :label="t('viewer.zoomIn')"
             variant="ghost"
-            square
-            @click="runCommand('viewer.next')"
+            @click="runCommand('viewer.zoomIn')"
           />
-        </UTooltip>
+          <UButton variant="ghost" @click="runCommand('viewer.fit')">{{ t('viewer.fit') }}</UButton>
+          <UButton variant="ghost" @click="runCommand('viewer.actual')">{{ t('viewer.actual') }}</UButton>
+          <IconButton
+            :icon="icons.maximize"
+            :label="t('viewer.fullscreen')"
+            variant="ghost"
+            @click="runCommand('viewer.fullscreen')"
+          />
+          <IconButton
+            v-if="src.window"
+            :icon="icons.film"
+            :label="t('viewer.filmstrip')"
+            :tip="t(viewing.filmstrip ? 'viewer.hideFilmstrip' : 'viewer.showFilmstrip')"
+            :aria-pressed="viewing.filmstrip"
+            variant="ghost"
+            @click="runCommand('viewer.filmstrip')"
+          />
+          <IconButton
+            :icon="icons[sliding ? 'pause' : 'play']"
+            :label="t('viewer.slideshow')"
+            :tip="t(sliding ? 'viewer.stopSlideshow' : 'viewer.startSlideshow')"
+            :aria-pressed="sliding"
+            variant="ghost"
+            @click="runCommand('viewer.slideshow')"
+          />
+          <IconButton
+            v-if="src.window"
+            :icon="icons.layers"
+            :label="t('viewer.compare')"
+            :tip="t(comparing ? 'viewer.stopComparing' : 'viewer.compare')"
+            :aria-pressed="comparing"
+            variant="ghost"
+            @click="runCommand('viewer.compare')"
+          />
+          <UButton v-if="comparing" :aria-pressed="linked" variant="ghost" @click="linked = !linked">{{
+            t('viewer.linked')
+          }}</UButton>
+          <IconButton
+            v-if="ordinary"
+            :icon="icons.rotate"
+            :label="t('viewer.rotate')"
+            :disabled="adjusting"
+            variant="ghost"
+            @click="runCommand('viewer.rotate')"
+          />
+          <IconButton
+            v-if="ordinary"
+            :icon="icons.flip"
+            :label="t('viewer.flip')"
+            :disabled="adjusting"
+            variant="ghost"
+            @click="runCommand('viewer.flip')"
+          />
+          <IconButton
+            v-if="ordinary"
+            :icon="icons.undo"
+            :label="t('viewer.resetAdjustment')"
+            :disabled="adjusting"
+            variant="ghost"
+            @click="runCommand('viewer.resetAdjustment')"
+          />
+        </div>
+        <Filmstrip
+          v-if="viewing.filmstrip && neighbours.length && item"
+          :items="neighbours"
+          :selected="item.id"
+          @select="src.jump?.($event)"
+        />
+
+        <IconButton
+          side="right"
+          class="viewer-control nav prev"
+          :icon="icons['chevron-left']"
+          :label="t('viewer.prev')"
+          variant="ghost"
+          @click="runCommand('viewer.previous')"
+        />
+        <IconButton
+          side="left"
+          class="viewer-control nav next"
+          :icon="icons['chevron-right']"
+          :label="t('viewer.next')"
+          variant="ghost"
+          @click="runCommand('viewer.next')"
+        />
       </div>
       <DetailsPanel v-if="lib.showDetails && actions.details" :sel="src.sel" />
     </div>
@@ -382,6 +745,7 @@ onBeforeUnmount(() => {
   color: var(--lumen-viewer-text);
   color-scheme: dark;
   outline: none;
+  --lumen-filmstrip-h: 84px;
   /* Shared states and playback alerts keep the viewer's contrast in either theme. */
   --ui-bg: var(--lumen-viewer-bg);
   --ui-bg-muted: var(--lumen-viewer-control);
@@ -444,6 +808,43 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   place-items: center;
+}
+
+.image-controls {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.25rem;
+  width: max-content;
+  max-width: calc(100% - 1rem);
+  background: var(--lumen-viewer-bg);
+  border-radius: var(--ui-radius);
+}
+.image-controls.raised {
+  bottom: calc(var(--lumen-filmstrip-h) + 0.375rem);
+}
+.media.with-filmstrip {
+  bottom: var(--lumen-filmstrip-h);
+}
+.media.comparing {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.controls-hidden .bar,
+.controls-hidden .image-controls,
+.controls-hidden .nav {
+  opacity: 0;
+  pointer-events: none;
+}
+.controls-hidden .bar:focus-within,
+.controls-hidden .image-controls:focus-within,
+.controls-hidden .nav:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .media img,

@@ -7,6 +7,7 @@
 // labels and the loading, empty and failure states.
 // Its wording is a developer's sample text, not the product's, so it is
 // written here and not in the dictionary (shared/i18n.ts).
+import IconButton from '../../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
@@ -19,7 +20,6 @@ import URadioGroup from '@nuxt/ui/components/RadioGroup.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
 import USlider from '@nuxt/ui/components/Slider.vue'
 import USwitch from '@nuxt/ui/components/Switch.vue'
-import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Accent, Density, TEXT_SCALE_MAX, TEXT_SCALE_MIN, Theme } from '../../bridge'
 import { applyAppearance } from '../../design/appearance'
@@ -150,7 +150,7 @@ function ask() {
         <PageHeader :title="LONG" subtitle="1,234 items" :back="{ to: '/', label: 'Back to Library' }">
           <UInput :leading-icon="icons.search" placeholder="Search" class="flex-1 max-w-80" />
           <UButton :icon="icons.plus" color="primary" variant="solid">New album</UButton>
-          <UButton :icon="icons.more" aria-label="More actions" color="neutral" variant="ghost" square />
+          <IconButton :icon="icons.more" label="More actions" color="neutral" variant="ghost" />
         </PageHeader>
       </section>
 
@@ -164,9 +164,7 @@ function ask() {
           <UButton color="error" variant="soft" :icon="icons.trash">Destructive</UButton>
           <UButton disabled>Disabled</UButton>
           <UButton loading>Busy</UButton>
-          <UTooltip text="Favourite" :kbds="['F']">
-            <UButton :icon="icons.heart" aria-label="Favourite" variant="ghost" square />
-          </UTooltip>
+          <IconButton :icon="icons.heart" label="Favourite" :kbds="['F']" variant="ghost" />
         </div>
       </section>
 
@@ -227,7 +225,7 @@ function ask() {
           <CollectionCard to="/" title="Ali" count="124 items" icon="user" round />
           <CollectionCard to="/" :title="LONG" count="1 item" icon="things">
             <template #badge><UBadge size="sm" color="neutral" variant="solid">Built in</UBadge></template>
-            <UButton :icon="icons.more" aria-label="More actions" size="xs" color="neutral" variant="solid" square />
+            <IconButton :icon="icons.more" label="More actions" size="xs" color="neutral" variant="solid" />
           </CollectionCard>
           <CollectionCard to="/" title="Holiday 2024" subtitle="Smart album" count="2,301 items" icon="albums" />
         </CardGrid>
@@ -241,8 +239,8 @@ function ask() {
             layout="row"
           />
           <CollectionCard to="/" :title="LONG" :subtitle="LONG" count="12 items" icon="events" layout="row">
-            <UButton :icon="icons.pin" aria-label="Pin" variant="ghost" square />
-            <UButton :icon="icons.more" aria-label="More actions" variant="ghost" square />
+            <IconButton :icon="icons.pin" label="Pin" variant="ghost" />
+            <IconButton :icon="icons.more" label="More actions" variant="ghost" />
           </CollectionCard>
         </CardGrid>
       </section>
@@ -267,7 +265,7 @@ function ask() {
         <MetaRow icon="calendar" label="Taken" value="14 August 2024, 18:32 (from the photo)" />
         <MetaRow icon="folder" label="File" :value="`D:\\Photos\\2024\\${LONG}.jpg`">
           <template #action
-            ><UButton :icon="icons['folder-open']" aria-label="Show in folder" variant="ghost" square
+            ><IconButton :icon="icons['folder-open']" label="Show in folder" variant="ghost"
           /></template>
         </MetaRow>
         <MetaRow icon="places" label="Place" value="Not recorded" />
@@ -285,7 +283,7 @@ function ask() {
         </div>
         <div class="work">
           <WorkProgress label="Making thumbnails" detail="1,234 left" :done="766" :total="2000">
-            <UButton :icon="icons.pause" aria-label="Pause" size="xs" variant="ghost" square />
+            <IconButton :icon="icons.pause" label="Pause" size="xs" variant="ghost" />
           </WorkProgress>
           <WorkProgress label="Looking for photos" detail="3,500 found" indeterminate />
           <WorkProgress label="Moving files stopped" detail="12 of 40 moved" :done="12" :total="40" failed />

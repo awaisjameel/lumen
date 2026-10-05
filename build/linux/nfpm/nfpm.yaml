@@ -19,7 +19,7 @@ release: "1"
 contents:
   - src: "./bin/Lumen"
     dst: "/usr/local/bin/Lumen"
-  - src: "./build/appicon.png"
+  - src: "./build/linux/lumen.png"
     dst: "/usr/share/icons/hicolor/128x128/apps/Lumen.png"
   - src: "./build/linux/Lumen.desktop"
     dst: "/usr/share/applications/Lumen.desktop"

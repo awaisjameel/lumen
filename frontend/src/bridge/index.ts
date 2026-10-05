@@ -14,12 +14,15 @@ import {
 import {
   Accent,
   AlbumKind,
+  BatchAction,
   BlockKind,
   BlockMode,
   DateSource,
   Density,
   Device,
   DuplicateKind,
+  ExportFormat,
+  ExportState,
   FailReason,
   Filter,
   Kind,
@@ -27,14 +30,17 @@ import {
   OrganiseMoveState,
   OrganiseRunState,
   Playback,
+  SidecarState,
   TagKind,
   TagSource,
   Theme,
+  TrackKind,
   WaitReason,
 } from '../../bindings/lumen/internal/core'
 import type {
   About,
   Album,
+  BatchOutcome,
   Block,
   BlockChange,
   CoveredItem as RawCoveredItem,
@@ -64,6 +70,14 @@ import type {
   Place,
   Preferences,
   Progress,
+  RenderInfo,
+  DisplayAdjustment,
+  ViewerPreferences,
+  MediaInspection as RawMediaInspection,
+  MediaTrack,
+  Selection as RawSelection,
+  ExportOptions,
+  ExportJob,
   SearchResult,
   Settings,
   Source,
@@ -76,12 +90,15 @@ import type {
 export {
   Accent,
   AlbumKind,
+  BatchAction,
   BlockKind,
   BlockMode,
   DateSource,
   Density,
   Device,
   DuplicateKind,
+  ExportFormat,
+  ExportState,
   FailReason,
   Filter,
   Kind,
@@ -89,14 +106,17 @@ export {
   OrganiseMoveState,
   OrganiseRunState,
   Playback,
+  SidecarState,
   TagKind,
   TagSource,
   Theme,
+  TrackKind,
   WaitReason,
 }
 export type {
   About,
   Album,
+  BatchOutcome,
   AlbumRule,
   Block,
   BlockChange,
@@ -116,6 +136,12 @@ export type {
   Place,
   Preferences,
   Progress,
+  RenderInfo,
+  DisplayAdjustment,
+  ViewerPreferences,
+  MediaTrack,
+  ExportOptions,
+  ExportJob,
   Settings,
   Source,
   Tag,
@@ -146,6 +172,10 @@ export type DiskDeletion = NonNullLists<RawDiskDeletion, 'kept'>
 export type TrashSelection = NonNullLists<RawTrashSelection, 'assets'>
 /** A photo a block covers, with the other blocks that also hide it. */
 export type CoveredItem = NonNullLists<RawCoveredItem, 'hiddenBy'>
+/** What a file says about itself, with the audio and subtitle tracks it has. */
+export type MediaInspection = NonNullLists<RawMediaInspection, 'tracks'>
+/** Resolved ids and the library revision they were resolved at. */
+export type Selection = NonNullLists<RawSelection, 'ids'>
 /** An organise preview: the moves a template would make. */
 export type OrganisePlan = NonNullLists<RawOrganisePlan, 'moves'>
 
@@ -156,6 +186,8 @@ export type FailureGroup = NonNullLists<RawFailureGroup, 'files'>
 // services/contract_test.go checks each against its Go original.
 export const THUMB_SMALL = 256 // core.ThumbSmall
 export const THUMB_LARGE = 1024 // core.ThumbLarge
+export const RENDER_SIDE = 4096 // media.RenderSide
+export const RENDER_SIDE_MIN = 256 // media.RenderSideMin
 export const SPRITE_COLS = 4 // core.SpriteCols
 export const SPRITE_ROWS = 4 // core.SpriteRows
 export const TAG_CONFIDENCE_DEFAULT = 0.02 // core.TagConfidenceDefault
@@ -185,14 +217,20 @@ export const SIDEBAR_WIDTH_DEFAULT = 232 // core.SidebarWidthDefault
 export const INSPECTOR_WIDTH_MIN = 280 // core.InspectorWidthMin
 export const INSPECTOR_WIDTH_MAX = 480 // core.InspectorWidthMax
 export const INSPECTOR_WIDTH_DEFAULT = 320 // core.InspectorWidthDefault
+export const SLIDESHOW_SECONDS_MIN = 1 // core.SlideshowSecondsMin
+export const SLIDESHOW_SECONDS_MAX = 60 // core.SlideshowSecondsMax
+export const SKIP_SECONDS_MIN = 1 // core.SkipSecondsMin
+export const SKIP_SECONDS_MAX = 60 // core.SkipSecondsMax
+export const PLAYBACK_SPEED_MIN = 0.25 // core.PlaybackSpeedMin
+export const PLAYBACK_SPEED_MAX = 2 // core.PlaybackSpeedMax
 export const ORGANISE_DEFAULT_TEMPLATE = '{Year}/{Month}/{Event}/{Name}' // fileops.DefaultTemplate
 /** The tokens an organise scheme may hold, in the order the editor offers them (fileops.Tokens). */
 export const ORGANISE_TOKENS = ['Year', 'Month', 'MonthName', 'Day', 'Event', 'Place', 'Camera', 'Name', 'Ext'] as const
 /** What a token stands for when a photo has no value for it (fileops.FallbackEvent, FallbackPlace, FallbackCamera). */
 export const ORGANISE_FALLBACKS = { Event: 'Unknown event', Place: 'Unknown place', Camera: 'Unknown camera' } as const
 /**
- * Why a file is left out of an organise run (fileops.Reason*): a move's error
- * is one of these, or else a message from Windows.
+ * Why a file is left out of a move, a rename or an export (fileops.Reason*):
+ * the error of its row is one of these, or else a message from Windows.
  */
 export const OrganiseReason = {
   Missing: 'missing',
@@ -203,6 +241,8 @@ export const OrganiseReason = {
   TooLong: 'too_long',
   NotAFolder: 'not_a_folder',
   SidecarTaken: 'sidecar_taken',
+  Unsupported: 'unsupported',
+  Interrupted: 'interrupted',
 } as const
 export type OrganiseReason = (typeof OrganiseReason)[keyof typeof OrganiseReason]
 /** The pattern attribute of a PIN field: PIN_MIN_LEN to PIN_MAX_LEN digits. */
@@ -246,6 +286,16 @@ export const ErrorCode = {
   InvalidTemplate: 'invalid_template',
   OrganiseBusy: 'organise_busy',
   OrganiseState: 'organise_state',
+  SelectionChanged: 'selection_changed',
+  Stopping: 'stopping',
+  InvalidFileName: 'invalid_file_name',
+  DestinationOutside: 'destination_outside',
+  DestinationFolder: 'destination_folder',
+  DestinationExcluded: 'destination_excluded',
+  DestinationBlocked: 'destination_blocked',
+  DestinationTaken: 'destination_taken',
+  SourceChanged: 'source_changed',
+  Unsupported: 'unsupported',
   SigninFailed: 'signin_failed',
   SigninUnavailable: 'signin_unavailable',
 } as const
@@ -253,7 +303,8 @@ export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 
 const errorCodes: ReadonlySet<unknown> = new Set<ErrorCode>(Object.values(ErrorCode))
 
-function isErrorCode(code: unknown): code is ErrorCode {
+/** Whether a value is one of the engine's error codes. */
+export function isErrorCode(code: unknown): code is ErrorCode {
   return errorCodes.has(code)
 }
 
@@ -294,6 +345,37 @@ function queueBlockSession(action: () => Promise<void>): Promise<void> {
 }
 
 export const engine = {
+  selection: async (view: View, ids: number[], search: boolean): Promise<Selection> => {
+    const result = await LibraryService.Selection(view, ids, search)
+    return { ...result, ids: result.ids ?? [] }
+  },
+  validateSelection: (sel: Selection): Promise<void> => LibraryService.ValidateSelection(sel),
+  /** Does one thing to each asset; one that fails is in the outcomes, not thrown. albumID is the album actions'. */
+  applyBatch: async (ids: number[], action: BatchAction, albumID = 0): Promise<BatchOutcome[]> =>
+    (await LibraryService.ApplyBatch(ids, action, albumID)) ?? [],
+  planFileMoves: async (ids: number[], directory: string, name: string): Promise<OrganisePlan> => {
+    const result = await LibraryService.PlanFileMoves(ids, directory, name)
+    return { ...result, moves: result.moves ?? [] }
+  },
+  openMedia: (id: number, path = '', choose = false): Promise<void> => LibraryService.OpenMedia(id, path, choose),
+  planExport: async (ids: number[], directory: string, options: ExportOptions): Promise<ExportJob[]> =>
+    (await LibraryService.PlanExport(ids, directory, options)) ?? [],
+  runExport: async (batch: number, signal?: AbortSignal): Promise<ExportJob[]> =>
+    (await cancellable(LibraryService.RunExport(batch), signal)) ?? [],
+  exportJobs: async (batch = 0): Promise<ExportJob[]> => (await LibraryService.ExportJobs(batch)) ?? [],
+  cancelExport: (batch: number): Promise<void> => LibraryService.CancelExport(batch),
+  inspect: async (id: number, signal?: AbortSignal): Promise<MediaInspection> => {
+    const r = await cancellable(MediaService.Inspect(id), signal)
+    return { ...r, tracks: r.tracks ?? [] }
+  },
+  setAdjustment: (id: number, rotation: number, flip: boolean): Promise<DisplayAdjustment> =>
+    LibraryService.SetAdjustment(id, rotation, flip),
+  playbackPosition: (id: number): Promise<number> => LibraryService.PlaybackPosition(id),
+  setPlaybackPosition: (id: number, position: number): Promise<void> =>
+    LibraryService.SetPlaybackPosition(id, Math.round(position)),
+  clearPlaybackHistory: (): Promise<void> => LibraryService.ClearPlaybackHistory(),
+  render: (id: number, signal?: AbortSignal): Promise<RenderInfo> =>
+    cancellable(MediaService.Render(id, RENDER_SIDE), signal),
   sources: async (): Promise<Source[]> => (await LibraryService.Sources()) ?? [],
   suggestedFolders: async (): Promise<string[]> => (await LibraryService.SuggestedFolders()) ?? [],
   sourcePathKey: (path: string): Promise<string> => LibraryService.SourcePathKey(path),
@@ -379,6 +461,8 @@ export const engine = {
   startOrganise: (runID: number): Promise<void> => LibraryService.StartOrganise(runID),
   undoOrganise: (runID: number): Promise<void> => LibraryService.UndoOrganise(runID),
   organiseRuns: async (): Promise<OrganiseRun[]> => (await LibraryService.OrganiseRuns()) ?? [],
+  fileMoveOutcomes: async (runID: number): Promise<OrganiseMove[]> =>
+    (await LibraryService.FileMoveOutcomes(runID)) ?? [],
 
   trashAssets: (ids: number[]): Promise<void> => LibraryService.TrashAssets(ids),
   restoreAssets: (ids: number[]): Promise<void> => LibraryService.RestoreAssets(ids),
@@ -437,6 +521,9 @@ export const engine = {
   setThingPinned: (id: number, pinned: boolean): Promise<void> => SearchService.SetThingPinned(id, pinned),
   assetTags: async (id: number): Promise<AssetTag[]> => (await SearchService.AssetTags(id)) ?? [],
   tagAsset: (id: number, name: string): Promise<void> => SearchService.TagAsset(id, name),
+  /** tagAsset for many photos, with an outcome for each (see applyBatch). */
+  tagAssets: async (ids: number[], name: string): Promise<BatchOutcome[]> =>
+    (await SearchService.TagAssets(ids, name)) ?? [],
   untagAsset: (id: number, tagID: number): Promise<void> => SearchService.UntagAsset(id, tagID),
 
   people: async (): Promise<Person[]> => (await PeopleService.People()) ?? [],
@@ -508,6 +595,10 @@ export function originalUrl(id: number): string {
   return `/media/original/${id}`
 }
 
+export function renderUrl(id: number, revision: string): string {
+  return `/media/render/${id}/${RENDER_SIDE}?v=${encodeURIComponent(revision)}`
+}
+
 export function spriteUrl(id: number, version: number): string {
   return `/media/sprite/${id}?v=${version}`
 }
@@ -536,6 +627,10 @@ export function videoUrl(id: number): string {
 }
 
 /** A video converted to H.264 while it plays, from at ms. */
-export function playUrl(id: number, at = 0): string {
-  return `${videoBase}/play/${id}?at=${Math.max(0, Math.round(at))}`
+export function playUrl(id: number, at = 0, audio = -1): string {
+  return `${videoBase}/play/${id}?at=${Math.max(0, Math.round(at))}${audio >= 0 ? `&audio=${audio}` : ''}`
+}
+
+export function subtitleUrl(id: number, track: number, at: number): string {
+  return `/media/subtitle/${id}?track=${track}&at=${Math.max(0, Math.round(at))}`
 }

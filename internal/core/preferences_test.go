@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestNormalisedPreferencesReplaceWhatTheUICannotApply(t *testing.T) {
 	got := Preferences{Theme: "sepia", Accent: "neon", Density: "tiny", TextScale: 400, TileSize: 1,
@@ -8,7 +11,8 @@ func TestNormalisedPreferencesReplaceWhatTheUICannotApply(t *testing.T) {
 	want := Preferences{Theme: ThemeSystem, Accent: AccentBlue, Density: DensityComfortable,
 		TextScale: TextScaleMax, TileSize: TileSizeMin, SidebarWidth: SidebarWidthMax,
 		InspectorWidth: InspectorWidthMin, SidebarCollapsed: true}
-	if got != want {
+	want = want.Normalised()
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Normalised() = %+v, want %+v", got, want)
 	}
 }
@@ -16,10 +20,12 @@ func TestNormalisedPreferencesReplaceWhatTheUICannotApply(t *testing.T) {
 func TestNormalisedPreferencesKeepValidChoices(t *testing.T) {
 	p := Preferences{Theme: ThemeDark, Accent: AccentRose, Density: DensityCompact, TextScale: 110,
 		TileSize: 200, SidebarWidth: 300, InspectorWidth: 400}
-	if got := p.Normalised(); got != p {
+	viewer := DefaultViewerPreferences()
+	p.Viewer = &viewer
+	if got := p.Normalised(); !reflect.DeepEqual(got, p) {
 		t.Errorf("Normalised() = %+v, want it unchanged: %+v", got, p)
 	}
-	if def := DefaultPreferences(); def.Normalised() != def {
+	if def := DefaultPreferences(); !reflect.DeepEqual(def.Normalised(), def) {
 		t.Errorf("the defaults are not valid: %+v", def)
 	}
 }

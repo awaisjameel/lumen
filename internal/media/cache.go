@@ -30,8 +30,10 @@ type Original struct {
 // the bytes the thumbnails and sprites take, and which assets were shown
 // since the database last heard of it.
 type Cache struct {
-	Dir     string
-	Decoder Decoder
+	Dir       string
+	Decoder   Decoder
+	Renderer  Renderer
+	rendering chan struct{} // one process and cache mutation at a time
 
 	rebuilding stripes        // one rebuild per asset at a time; waiting for it can be cancelled
 	writing    [64]sync.Mutex // one writer per asset at a time: Windows refuses two renames onto one file
@@ -42,7 +44,7 @@ type Cache struct {
 
 // NewCache returns the cache in dir, rebuilding with d.
 func NewCache(dir string, d Decoder) *Cache {
-	c := &Cache{Dir: dir, Decoder: d}
+	c := &Cache{Dir: dir, Decoder: d, rendering: make(chan struct{}, 1)}
 	for i := range c.rebuilding {
 		c.rebuilding[i] = make(chan struct{}, 1)
 	}

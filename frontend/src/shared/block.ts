@@ -2,7 +2,7 @@ import { getActivePinia } from 'pinia'
 import type { Pinia } from 'pinia'
 import { shallowRef } from 'vue'
 import { engine } from '../bridge'
-import type { BlockKind } from '../bridge'
+import { BlockKind } from '../bridge'
 import { reportError } from './errors'
 import { t } from './i18n'
 import { notify } from './notify'
@@ -10,6 +10,9 @@ import { notify } from './notify'
 export interface BlockRequest {
   kind: BlockKind
   targetID: number
+  ids?: number[]
+  outcome?: (id: number, error: string) => void
+  stopped?: () => boolean
   path: string
   name: string
   labelOnly: boolean
@@ -18,6 +21,29 @@ export interface BlockRequest {
 }
 
 export const blockRequest = shallowRef<BlockRequest | null>(null)
+
+/** Uses the same PIN and privacy dialog for an explicit group of assets. */
+export function blockAssets(
+  ids: number[],
+  outcome?: (id: number, error: string) => void,
+  stopped?: () => boolean,
+): Promise<boolean> {
+  blockRequest.value?.answer(false)
+  return new Promise((resolve) => {
+    blockRequest.value = {
+      kind: BlockKind.BlockAsset,
+      targetID: ids[0] ?? 0,
+      ids: [...ids],
+      outcome,
+      stopped,
+      path: '',
+      name: t('selection.count', { n: ids.length }),
+      labelOnly: false,
+      photosAllowed: true,
+      answer: resolve,
+    }
+  })
+}
 
 /** The id of the notification that offers to undo a block. */
 export const BLOCK_UNDO_NOTIFICATION = 'block.undo'

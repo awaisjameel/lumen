@@ -10,6 +10,7 @@ import { icons } from '../design/icons'
 import MetaRow from '../shared/MetaRow.vue'
 import PrefRow from '../shared/PrefRow.vue'
 import FeatureState from '../shared/FeatureState.vue'
+import BrandMark from '../shared/BrandMark.vue'
 import { useCommands, runCommand } from '../shared/commands'
 import type { MessageKey } from '../shared/i18n'
 import { engine, Link } from '../bridge'
@@ -70,6 +71,10 @@ useCommands([
 
 <template>
   <div class="about-content">
+    <div v-if="!query.trim()" class="about-brand">
+      <BrandMark class="about-mark" />
+      <span>{{ t('app.name') }}</span>
+    </div>
     <FeatureState v-if="!about.about && !about.loadError" kind="loading" :title="t('about.loading')" />
     <MetaRow
       v-if="about.about && matches('about.versionLabel')"
@@ -152,5 +157,18 @@ useCommands([
   overflow-wrap: anywhere;
   white-space: normal;
   text-align: left;
+}
+
+.about-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  color: var(--ui-text-highlighted);
+  font: 600 1.25rem var(--font-display);
+}
+.about-mark {
+  width: 2.5rem;
+  height: 2.5rem;
 }
 </style>

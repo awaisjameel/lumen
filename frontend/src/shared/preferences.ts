@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import {
   Accent,
   Density,
@@ -17,10 +17,13 @@ import { applyAppearance, cachedAppearance } from '../design/appearance'
 import { reportError } from './errors'
 import { latestSave } from './latestSave'
 import type { LatestSave } from './latestSave'
+import { viewerDefaults } from './viewing'
+import type { ViewerPreferences } from '../bridge'
 
 /** What a library starts with (core.DefaultPreferences). */
 function defaults(): Preferences {
   return {
+    viewer: viewerDefaults(),
     theme: Theme.ThemeSystem,
     accent: Accent.AccentBlue,
     density: Density.DensityComfortable,
@@ -133,5 +136,17 @@ export const usePreferences = defineStore('preferences', () => {
     }
   }
 
-  return { prefs, loaded, saving, load, set }
+  /** The viewing and playback choices; the fallback holds only until the library answers. */
+  const viewer = computed(() => prefs.value.viewer ?? viewerDefaults())
+
+  async function setViewer(patch: Partial<ViewerPreferences>): Promise<void> {
+    try {
+      if (!loaded.value) await load()
+      await set({ viewer: { ...viewer.value, ...patch } })
+    } catch (e) {
+      reportError(e)
+    }
+  }
+
+  return { prefs, viewer, loaded, saving, load, set, setViewer }
 })

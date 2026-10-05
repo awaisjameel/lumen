@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The top of a person's page: their face, their name (click to change it),
 // how many photos, and what can be done about them.
+import IconButton from '../shared/IconButton.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
@@ -142,7 +143,7 @@ function fieldRef(el: unknown) {
   )
 }
 function triggerRef(el: unknown, key: true) {
-  rename.triggerRef(key)(el && typeof el === 'object' && '$el' in el && el.$el instanceof HTMLElement ? el.$el : null)
+  rename.triggerRef(key)(el)
 }
 </script>
 
@@ -190,7 +191,7 @@ function triggerRef(el: unknown, key: true) {
       >{{ t('person.review') }}</UButton
     >
     <UDropdownMenu :items="actions">
-      <UButton :icon="icons.more" :aria-label="t('person.actions')" color="neutral" variant="ghost" square />
+      <IconButton :icon="icons.more" :label="t('person.actions')" color="neutral" variant="ghost" />
     </UDropdownMenu>
   </div>
   <p v-else-if="error" class="text-error" role="alert">{{ error }}</p>

@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import {
   engine,
+  ErrorCode,
+  errorCode,
   EVENT_GAP_DEFAULT,
   THUMB_CACHE_DEFAULT_MB,
   Filter,
@@ -11,7 +13,17 @@ import {
   startMedia,
   TAG_CONFIDENCE_DEFAULT,
 } from '../bridge'
-import type { Changes, DayBucket, GridItem, Progress, SearchResults, Settings, Source, View } from '../bridge'
+import type {
+  Changes,
+  DayBucket,
+  GridItem,
+  Progress,
+  SearchResults,
+  Selection,
+  Settings,
+  Source,
+  View,
+} from '../bridge'
 import { onBlocksChanged } from '../shared/block'
 import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
@@ -170,6 +182,91 @@ export const useLibrary = defineStore('library', () => {
   let stale = false // the library changed while no grid showed it
 
   const selected = ref<Sel | null>(null)
+  const selectedIDs = shallowRef(new Set<number>())
+  const selectionSnapshot = shallowRef<Selection | null>(null)
+  let selectionRequest = 0
+  let selectionAnchor: Sel | null = null
+
+  // Every id of the timeline scope, as last read. A Shift range needs them all
+  // to know what lies between two photos; the next step asks the engine only
+  // whether membership has changed since, not for a whole library again.
+  let timelineIDs: { scope: Scope; result: Selection } | null = null
+
+  async function resultSelection() {
+    const current = scope.value
+    if (current.kind === 'search') {
+      const ids = (days.value.get(RESULTS) ?? []).map((item) => item.id)
+      return engine.selection({ filter: Filter.FilterAll }, ids, true)
+    }
+    const kept = timelineIDs?.scope === current ? timelineIDs.result : null
+    if (kept) {
+      try {
+        await engine.validateSelection(kept)
+        return kept
+      } catch (e) {
+        if (errorCode(e) !== ErrorCode.SelectionChanged) throw e
+      }
+    }
+    const result = await engine.selection(current.view, [], false)
+    timelineIDs = { scope: current, result }
+    return result
+  }
+
+  async function selectItems(sel: Sel, control: boolean, shift: boolean) {
+    const mine = ++selectionRequest
+    const anchor = selectionAnchor ?? selected.value
+    selected.value = sel
+    if (shift && anchor) {
+      try {
+        const result = await resultSelection()
+        if (mine !== selectionRequest) return
+        const ids = result.ids
+        const from = ids.indexOf(anchor.id),
+          to = ids.indexOf(sel.id)
+        if (from < 0 || to < 0) return
+        const range = ids.slice(Math.min(from, to), Math.max(from, to) + 1)
+        const present = new Set(ids)
+        selectedIDs.value = new Set(
+          control ? [...selectedIDs.value].filter((id) => present.has(id)).concat(range) : range,
+        )
+        selectionSnapshot.value = { ...result, ids: [...selectedIDs.value] }
+      } catch (e) {
+        if (mine === selectionRequest) reportError(e)
+      }
+    } else {
+      selectionAnchor = sel
+      const ids = control ? new Set(selectedIDs.value) : new Set<number>()
+      if (control && ids.has(sel.id)) ids.delete(sel.id)
+      else ids.add(sel.id)
+      selectedIDs.value = ids
+      selectionSnapshot.value = null
+      if (!ids.size) selected.value = null
+    }
+  }
+
+  async function selectAllResults() {
+    const mine = ++selectionRequest
+    try {
+      const result = await resultSelection()
+      if (mine !== selectionRequest) return
+      selectedIDs.value = new Set(result.ids)
+      selectionSnapshot.value = result
+    } catch (e) {
+      if (mine === selectionRequest) reportError(e)
+    }
+  }
+
+  function clearSelection() {
+    selectionAnchor = null
+    selectionRequest++
+    selectedIDs.value = new Set()
+    selectionSnapshot.value = null
+  }
+
+  function selectVisible(ids: number[]) {
+    clearSelection()
+    selectedIDs.value = new Set(ids)
+  }
   const viewer = ref<Sel | null>(null)
   const showDetails = ref(false)
 
@@ -237,6 +334,8 @@ export const useLibrary = defineStore('library', () => {
   onScopeDispose(() => {
     stopBlocks()
     disposed = true
+    clearSelection()
+    timelineIDs = null
     stopProgress?.()
     stopChanges?.()
     generation++
@@ -403,6 +502,7 @@ export const useLibrary = defineStore('library', () => {
 
   /** A privacy change must remove covered search hits immediately. */
   async function refreshVisibility() {
+    clearSelection()
     if (scope.value.kind === 'search') await setScope(scope.value)
     else {
       generation++
@@ -515,6 +615,7 @@ export const useLibrary = defineStore('library', () => {
     staleDays()
     inflight.clear()
     selected.value = null
+    clearSelection()
     viewer.value = null
     searchInfo.value = null
     days.value = new Map()
@@ -682,6 +783,12 @@ export const useLibrary = defineStore('library', () => {
     searchInfo,
     days,
     selected,
+    selectedIDs,
+    selectionSnapshot,
+    selectVisible,
+    selectItems,
+    selectAllResults,
+    clearSelection,
     viewer,
     showDetails,
     total,
@@ -734,6 +841,10 @@ export interface ViewerActions {
  * what it may do with it, so it knows nothing of days or blocks.
  */
 export interface ViewerSource {
+  first?: () => Promise<void>
+  /** A bounded neighbourhood, in this source's order. */
+  window?: () => Promise<GridItem[]>
+  jump?: (id: number) => void
   /** The id of the photo shown, even before its item has loaded. */
   readonly id: number | null
   /** The photo shown, or null while it is not in the source's items. */
@@ -755,6 +866,41 @@ export interface ViewerSource {
  */
 export function libraryViewerSource(lib: Library): ViewerSource {
   return {
+    async first() {
+      const day = lib.buckets[0]?.day
+      const from = lib.viewer
+      if (!day || !from) return
+      await lib.ensureDays([day])
+      if (lib.viewer === from) lib.viewer = lib.selAt(day, 0)
+    },
+    async window() {
+      const anchor = lib.viewer
+      if (!anchor) return []
+      const before: GridItem[] = []
+      const after: GridItem[] = []
+      for (const dir of [-1, 1] as const) {
+        let cursor: Sel | null = anchor
+        for (let i = 0; i < 12 && cursor; i++) {
+          cursor = await lib.neighbour(cursor, dir)
+          if (lib.viewer !== anchor) return []
+          const item = lib.itemAt(cursor)
+          if (item) {
+            if (dir === -1) before.unshift(item)
+            else after.push(item)
+          }
+        }
+      }
+      const current = lib.itemAt(anchor)
+      return [...before, ...(current ? [current] : []), ...after]
+    },
+    jump(id) {
+      for (const [day, items] of lib.days) {
+        if (items.some((item) => item.id === id)) {
+          lib.viewer = { day, id }
+          return
+        }
+      }
+    },
     get id() {
       return lib.viewer?.id ?? null
     },

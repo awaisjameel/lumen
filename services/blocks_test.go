@@ -34,7 +34,7 @@ func TestBlockedListRequiresPINAndUndoIsSingleUse(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatalf("asset: %+v, %v", items, err)
 	}
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil, nil, nil)
 	if _, err := s.SetBlock(ctx, core.BlockAsset, 1, "", core.BlockPhotos); !errors.Is(err, ErrBlockLocked) {
 		t.Fatalf("block before PIN: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestBlockPINRateLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil, nil, nil)
 	now := time.Now()
 	s.now = func() time.Time { return now }
 	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
@@ -183,7 +183,7 @@ func TestConcurrentPINGuessesShareOneCooldown(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil, nil, nil)
 	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestUndoExpiresAndOnlyRemovesTheLatestNewBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil, nil, nil)
 	now := time.Now()
 	s.now = func() time.Time { return now }
 	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
@@ -273,7 +273,7 @@ func resetFixture(t *testing.T) (s *LibraryService, st *store.Store, stub *signI
 		Hash: []byte("a"), Kind: core.KindPhoto, Ext: ".jpg", TakenAt: 1}}); err != nil {
 		t.Fatal(err)
 	}
-	s = NewLibraryService(st, nil, nil)
+	s = NewLibraryService(st, nil, nil, nil)
 	stub = new(signInStub)
 	s.verify = func(_ context.Context, owner uintptr, reason string) error {
 		stub.calls++
@@ -389,7 +389,7 @@ func TestResetBlockPINWithNoPINYetAsksNothingAndCreatesNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil, nil, nil)
 	asked := false
 	s.verify = func(context.Context, uintptr, string) error { asked = true; return nil }
 	if err := s.ResetBlockPIN(ctx, "654321"); !errors.Is(err, store.ErrNotFound) {
@@ -505,7 +505,7 @@ func coveredLibrary(t *testing.T) (s *LibraryService, st *store.Store, block int
 			t.Fatal(err)
 		}
 	}
-	s = NewLibraryService(st, nil, nil)
+	s = NewLibraryService(st, nil, nil, nil)
 	if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
 		t.Fatal(err)
 	}

@@ -73,7 +73,7 @@ func TestVideoPipeline(t *testing.T) {
 	if err != nil || frame.W != 320 || frame.H != 180 {
 		t.Fatalf("frame at 3s: %+v, %v", frame, err)
 	}
-	convert, err := d.ConvertMP4(ctx, src, 2000)
+	convert, err := d.ConvertMP4(ctx, src, 2000, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestVideoPipeline(t *testing.T) {
 	if err := convert(&converted); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.ConvertMP4(ctx, filepath.Join(t.TempDir(), "missing.mp4"), 0); err == nil {
+	if _, err := d.ConvertMP4(ctx, filepath.Join(t.TempDir(), "missing.mp4"), 0, -1); err == nil {
 		t.Fatal("converting a missing video did not fail before writing")
 	}
 	if converted.Len() == 0 {

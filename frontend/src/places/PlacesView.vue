@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import UButton from '@nuxt/ui/components/Button.vue'
+import IconButton from '../shared/IconButton.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
 import { BlockKind, engine, thumbUrl } from '../bridge'
 import { block } from '../shared/block'
@@ -69,7 +69,7 @@ useCommands([
         layout="row"
       >
         <UDropdownMenu :items="placeItems(place.id)">
-          <UButton :icon="icons.more" :aria-label="t('places.actions', { name: place.name })" square />
+          <IconButton :icon="icons.more" :label="t('places.actions', { name: place.name })" />
         </UDropdownMenu>
       </CollectionCard>
     </CardGrid>

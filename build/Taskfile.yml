@@ -85,6 +85,7 @@ tasks:
     generates:
       - dist/**/*
     deps:
+      - task: generate:branding
       - task: install:frontend:deps
       - task: generate:bindings
         vars:
@@ -190,18 +191,45 @@ tasks:
     cmds:
       - wails3 generate bindings -f '{{.BUILD_FLAGS}}' -clean=true{{if eq .OBFUSCATED "true"}} -obfuscated{{end}} -ts -i
 
+  generate:branding:
+    summary: Derives UI, favicon and platform PNGs from Lumen's logo master
+    run: once
+    dir: '{{.ROOT_DIR}}'
+    sources:
+      - build/appicon.png
+      - scripts/branding/main.go
+    generates:
+      - frontend/public/lumen.png
+      - frontend/public/favicon.png
+      - build/linux/lumen.png
+      - build/ios/icon.png
+      - build/appicon.icon/Assets/lumen.png
+      - build/darwin/dmg-file-icon.png
+      - build/darwin/dmg-background.png
+      - build/android/app/src/main/res/mipmap-*/ic_launcher*.png
+    cmds:
+      - go run ./scripts/branding
+    env:
+      GOOS: '{{OS}}'
+      GOARCH: '{{ARCH}}'
+      CGO_ENABLED: '0'
+
   generate:icons:
     summary: Generates Windows `.ico` and Mac `.icns` from an image; on macOS, `-iconcomposerinput appicon.icon -macassetdir darwin` also produces `Assets.car` from a `.icon` file (skipped on other platforms).
     run: once
     dir: build
+    deps:
+      - task: generate:branding
     sources:
       - "appicon.png"
-      - "appicon.icon"
+      - "appicon.icon/**/*"
     generates:
       - "darwin/icons.icns"
+      - "darwin/dmg-file-icon.icns"
       - "windows/icon.ico"
     cmds:
       - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico -iconcomposerinput appicon.icon -macassetdir darwin
+      - cp darwin/icons.icns darwin/dmg-file-icon.icns
 
   dev:frontend:
     summary: Runs the frontend in development mode

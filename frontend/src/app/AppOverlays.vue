@@ -11,6 +11,7 @@ import { onGlobalKey, useCommands } from '../shared/commands'
 import type { Command } from '../shared/commands'
 import ConfirmDialog from '../shared/ConfirmDialog.vue'
 import { t } from '../shared/i18n'
+import { startPortalLayers } from '../shared/overlay'
 import { navEntries } from './nav'
 
 const router = useRouter()
@@ -56,8 +57,15 @@ useCommands([
   },
 ])
 
-onMounted(() => window.addEventListener('keydown', onGlobalKey))
-onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
+let stopPortalLayers: (() => void) | undefined
+onMounted(() => {
+  stopPortalLayers = startPortalLayers()
+  window.addEventListener('keydown', onGlobalKey)
+})
+onBeforeUnmount(() => {
+  stopPortalLayers?.()
+  window.removeEventListener('keydown', onGlobalKey)
+})
 </script>
 
 <template>

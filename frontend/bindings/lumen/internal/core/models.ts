@@ -114,6 +114,7 @@ export interface AlbumRule {
  * AssetDetail is everything the details panel shows.
  */
 export interface AssetDetail {
+    "adjustment"?: DisplayAdjustment | null;
     "id": number;
     "kind": Kind;
 
@@ -161,6 +162,40 @@ export interface AssetTag {
      * AI probability; 0 for user tags
      */
     "score": number;
+}
+
+/**
+ * BatchAction is what a selection action does to each of its assets.
+ */
+export enum BatchAction {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The actions a selection can take in one call.
+     */
+    BatchFavourite = "favourite",
+    BatchUnfavourite = "unfavourite",
+
+    /**
+     * into a manual album
+     */
+    BatchAlbum = "album",
+    BatchRemoveAlbum = "removeAlbum",
+    BatchTrash = "trash",
+    BatchRestore = "restore",
+};
+
+/**
+ * BatchOutcome is what became of one asset of a selection action. Code is
+ * the failure's error code when it has one; Error is "" when it worked.
+ */
+export interface BatchOutcome {
+    "id": number;
+    "code": string;
+    "error": string;
 }
 
 /**
@@ -386,6 +421,21 @@ export interface DiskDeletion {
 }
 
 /**
+ * DisplayAdjustment changes presentation only, never source or AI pixels.
+ */
+export interface DisplayAdjustment {
+    /**
+     * clockwise quarter turns
+     */
+    "rotation": number;
+
+    /**
+     * horizontal flip after rotation
+     */
+    "flip": boolean;
+}
+
+/**
  * DuplicateGroup holds exact file copies or photos that look similar.
  * Similarity is a suggestion for review, never a deletion decision.
  */
@@ -492,6 +542,88 @@ export interface Event {
      */
     "pinned": boolean;
 }
+
+/**
+ * ExportFormat is what an export writes.
+ */
+export enum ExportFormat {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The formats an export can write.
+     *
+     * the file's own bytes, metadata included
+     */
+    ExportOriginal = "original",
+    ExportJPEG = "jpeg",
+    ExportPNG = "png",
+};
+
+/**
+ * ExportJob is a durable per-file outcome; completed exports have no Undo.
+ */
+export interface ExportJob {
+    "id": number;
+    "batch": number;
+    "assetId": number;
+    "from": string;
+    "to": string;
+    "size": number;
+    "mtime": number;
+    "state": ExportState;
+    "error": string;
+    "temp": string;
+    "digest": string;
+    "options": ExportOptions;
+}
+
+/**
+ * ExportOptions describes exactly what the new file includes. Originals
+ * retain their metadata; rendered JPEG/PNG copies contain upright sRGB
+ * pixels without source metadata and never replace an existing file.
+ */
+export interface ExportOptions {
+    "format": ExportFormat;
+    "side": number;
+    "quality": number;
+    "adjust": boolean;
+
+    /**
+     * -1 for originals/photos; source time for a video frame
+     */
+    "frame": number;
+}
+
+/**
+ * ExportState is where one file of an export stands in its journal.
+ */
+export enum ExportState {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The states of one exported file.
+     */
+    ExportPlanned = "planned",
+
+    /**
+     * a temporary file beside the destination is being written
+     */
+    ExportWriting = "writing",
+
+    /**
+     * its digest is journaled; publication is next
+     */
+    ExportReady = "ready",
+    ExportDone = "done",
+    ExportFailed = "failed",
+    ExportCancelled = "cancelled",
+};
 
 /**
  * Face is one face in a photo or video: where it is, and who it is.
@@ -714,9 +846,9 @@ export interface MediaCaps {
     "original": boolean;
 
     /**
-     * Render: a developed, full-resolution rendered copy can be made within
-     * the render budget. No such path exists before Phase 8, so it is always
-     * false; a larger preview or a RAW file's embedded JPEG never counts.
+     * Render: the runtime can prepare a bounded upright sRGB copy. The service
+     * supplies this capability from its renderer and known source dimensions;
+     * RenderInfo reports whether the available pixels were reduced.
      */
     "render": boolean;
 
@@ -729,6 +861,42 @@ export interface MediaCaps {
      * ConvertPlay: Lumen can convert the video while it plays.
      */
     "convertPlay": boolean;
+}
+
+/**
+ * MediaInspection is read from the available file rather than inferred.
+ */
+export interface MediaInspection {
+    "orientation": number;
+
+    /**
+     * a colour profile is embedded
+     */
+    "hasProfile": boolean;
+
+    /**
+     * what that profile calls itself; "" when it does not say
+     */
+    "profile": string;
+    "lens": string;
+    "exposure": string;
+    "aperture": string;
+    "iso": string;
+    "frameRate": string;
+    "pages": number;
+    "tracks": MediaTrack[] | null;
+}
+
+/**
+ * MediaTrack describes an actual audio or subtitle stream and its support.
+ */
+export interface MediaTrack {
+    "index": number;
+    "kind": TrackKind;
+    "codec": string;
+    "language": string;
+    "title": string;
+    "supported": boolean;
 }
 
 /**
@@ -750,6 +918,11 @@ export interface OrganiseMove {
      * why it was skipped or failed
      */
     "error"?: string;
+
+    /**
+     * what became of its XMP sidecar; "" is none
+     */
+    "sidecar"?: SidecarState;
 }
 
 /**
@@ -935,6 +1108,7 @@ export enum Playback {
  * painting its first frame.
  */
 export interface Preferences {
+    "viewer"?: ViewerPreferences | null;
     "theme": Theme;
     "accent": Accent;
     "density": Density;
@@ -1034,6 +1208,21 @@ export interface Progress {
 }
 
 /**
+ * RenderInfo describes the pixels actually available to a viewer. A bounded
+ * render must not claim to contain every source pixel when it was reduced.
+ */
+export interface RenderInfo {
+    "width": number;
+    "height": number;
+
+    /**
+     * fewer pixels than the source has
+     */
+    "limited": boolean;
+    "revision": string;
+}
+
+/**
  * SearchResult is the answer to a natural-language search, best match first.
  */
 export interface SearchResult {
@@ -1063,6 +1252,15 @@ export interface SearchResult {
      * a blocked named entity occurred in the query
      */
     "blocked": boolean;
+}
+
+/**
+ * Selection is an explicit snapshot of resolved ids. Batch actions check its
+ * library revision before using it, then revalidate each asset at execution.
+ */
+export interface Selection {
+    "ids": number[] | null;
+    "revision": number;
 }
 
 /**
@@ -1102,6 +1300,34 @@ export interface Settings {
     "pauseBusy": boolean;
     "idleOnly": boolean;
 }
+
+/**
+ * SidecarState is what a move does, or did, with the photo's XMP sidecar.
+ */
+export enum SidecarState {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The states of a move's sidecar.
+     *
+     * one to move with the photo
+     */
+    SidecarPlanned = "planned",
+    SidecarMoved = "moved",
+
+    /**
+     * left where it was; the move's error says why
+     */
+    SidecarKept = "kept",
+
+    /**
+     * put back with the photo
+     */
+    SidecarUndone = "undone",
+};
 
 /**
  * Source is a folder the user asked Lumen to watch.
@@ -1208,6 +1434,22 @@ export enum Theme {
 };
 
 /**
+ * TrackKind is which of a video's selectable streams a track is.
+ */
+export enum TrackKind {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The kinds of track.
+     */
+    TrackAudio = "audio",
+    TrackSubtitle = "subtitle",
+};
+
+/**
  * TrashSelection is what Delete from disk asks the user to confirm: trashed
  * assets and how many files they have on disk.
  */
@@ -1282,6 +1524,22 @@ export interface View {
      * 0 = any event
      */
     "event"?: number;
+}
+
+/**
+ * ViewerPreferences are saved with the library's interface preferences.
+ */
+export interface ViewerPreferences {
+    "filmstrip": boolean;
+    "autoHide": boolean;
+    "slideshowSeconds": number;
+    "loop": boolean;
+    "autoplay": boolean;
+    "volume": number;
+    "muted": boolean;
+    "speed": number;
+    "skipSeconds": number;
+    "resume": boolean;
 }
 
 /**

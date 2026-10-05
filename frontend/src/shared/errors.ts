@@ -2,6 +2,7 @@ import {
   ErrorCode,
   errorCode,
   isCancelled,
+  isErrorCode,
   logUIError,
   MAX_NAME_LEN,
   PIN_COOLDOWN_SECONDS,
@@ -47,15 +48,31 @@ const codeText: Record<ErrorCode, MessageKey> = {
   [ErrorCode.InvalidTemplate]: 'error.invalidTemplate',
   [ErrorCode.OrganiseBusy]: 'error.organiseBusy',
   [ErrorCode.OrganiseState]: 'error.organiseState',
+  [ErrorCode.SelectionChanged]: 'error.selectionChanged',
+  [ErrorCode.Stopping]: 'error.stopping',
+  [ErrorCode.InvalidFileName]: 'error.invalidFileName',
+  [ErrorCode.DestinationOutside]: 'error.destinationOutside',
+  [ErrorCode.DestinationFolder]: 'organise.reason.not_a_folder',
+  [ErrorCode.DestinationExcluded]: 'error.destinationExcluded',
+  [ErrorCode.DestinationBlocked]: 'organise.reason.blocked_folder',
+  [ErrorCode.DestinationTaken]: 'organise.reason.taken',
+  [ErrorCode.SourceChanged]: 'organise.reason.changed',
+  [ErrorCode.Unsupported]: 'error.unsupported',
   [ErrorCode.SigninFailed]: 'error.signinFailed',
   [ErrorCode.SigninUnavailable]: 'error.signinUnavailable',
 }
 
 /** A user-facing message for a failed engine call or other thrown value. */
 export function errorText(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e)
-  const code = errorCode(e)
-  return code
+  return failureText(errorCode(e), e instanceof Error ? e.message : String(e))
+}
+
+/**
+ * errorText for a failure that was not thrown: one asset's of a selection
+ * action, which arrives as the engine's code (if it has one) and message.
+ */
+export function failureText(code: string | undefined, msg: string): string {
+  return isErrorCode(code)
     ? t(codeText[code], {
         max: MAX_NAME_LEN,
         pinMin: PIN_MIN_LEN,

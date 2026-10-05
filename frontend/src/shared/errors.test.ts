@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ErrorCode, logUIError } from '../bridge'
 import type * as Bridge from '../bridge'
-import { ERROR_NOTIFICATION, errorText, logError, reportUnexpected } from './errors'
+import { ERROR_NOTIFICATION, errorText, failureText, logError, reportUnexpected } from './errors'
 import { dismiss } from './notify'
 import { recordNotifications } from './testing'
 import type { RecordedNotifications } from './testing'
@@ -27,6 +27,24 @@ it('explains failures the engine names in the UI’s own words', () => {
   expect(errorText(failure('a name must be 1 to 80 characters', ErrorCode.InvalidName))).toBe(
     'A name must be 1 to 80 characters.',
   )
+})
+
+it('explains why a file operation was refused instead of repeating the engine’s English', () => {
+  expect(errorText(failure('the file name cannot be used', ErrorCode.InvalidFileName))).toContain(
+    'That file name can’t be used.',
+  )
+  expect(errorText(failure('something is already at the destination', ErrorCode.DestinationTaken))).toBe(
+    'Something else is already at the new place.',
+  )
+  expect(errorText(failure('format not supported', ErrorCode.Unsupported))).toBe(
+    'Lumen can’t do that with this format.',
+  )
+})
+
+it('words one asset’s failure of a selection action as it words a thrown one', () => {
+  expect(failureText(ErrorCode.NotFound, 'not found')).toBe(errorText(failure('not found', ErrorCode.NotFound)))
+  expect(failureText('', 'Access is denied.')).toBe('Something went wrong: Access is denied.')
+  expect(failureText('not_a_code', 'odd')).toBe('Something went wrong: odd')
 })
 
 it('shows the message of other failures, and of codes it does not know', () => {

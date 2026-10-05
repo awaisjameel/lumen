@@ -2,7 +2,7 @@
 // The frame around every page. Wide windows: a sidebar the user can resize
 // or collapse. Medium: the sidebar is a rail of icons. Narrow: the page
 // takes the whole window and navigation opens as a drawer.
-import UButton from '@nuxt/ui/components/Button.vue'
+import IconButton from '../shared/IconButton.vue'
 import USlideover from '@nuxt/ui/components/Slideover.vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -13,6 +13,7 @@ import { t } from '../shared/i18n'
 import { useLayoutMode } from '../shared/layout'
 import { usePreferences } from '../shared/preferences'
 import ResizeHandle from '../shared/ResizeHandle.vue'
+import BrandMark from '../shared/BrandMark.vue'
 import AppNav from './AppNav.vue'
 
 const mode = useLayoutMode()
@@ -65,16 +66,15 @@ useCommands([
 
     <div class="main">
       <header v-if="mode === 'narrow'" class="narrow-bar">
-        <UButton
+        <IconButton
           :icon="icons.menu"
-          :aria-label="t('shell.openNavigation')"
+          :label="t('shell.openNavigation')"
           :aria-expanded="drawer"
           color="neutral"
           variant="ghost"
-          square
           @click="drawer = true"
         />
-        <img src="/lumen.png" alt="" />
+        <BrandMark class="narrow-mark" />
         <span>{{ t('app.name') }}</span>
       </header>
       <main class="content">
@@ -135,7 +135,7 @@ useCommands([
   font: 600 0.9375rem var(--font-display);
 }
 
-.narrow-bar img {
+.narrow-mark {
   width: 1.25rem;
   height: 1.25rem;
 }

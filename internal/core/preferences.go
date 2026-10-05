@@ -63,6 +63,7 @@ const (
 	SettingUISidebarCollapsed = "ui_sidebar_collapsed"
 	SettingUISidebarWidth     = "ui_sidebar_width"
 	SettingUIInspectorWidth   = "ui_inspector_width"
+	SettingUIViewer           = "ui_viewer"
 	// SettingUILegacyMigrated marks that what an older Lumen kept in the
 	// WebView's storage was offered to this library once (bool).
 	SettingUILegacyMigrated = "ui_legacy_migrated"
@@ -72,19 +73,22 @@ const (
 // settings are their one durable owner: the UI keeps only a copy for
 // painting its first frame.
 type Preferences struct {
-	Theme            Theme   `json:"theme"`
-	Accent           Accent  `json:"accent"`
-	Density          Density `json:"density"`
-	TextScale        int     `json:"textScale"` // TextScaleMin..TextScaleMax, percent
-	TileSize         int     `json:"tileSize"`  // TileSizeMin..TileSizeMax
-	SidebarCollapsed bool    `json:"sidebarCollapsed"`
-	SidebarWidth     int     `json:"sidebarWidth"`   // SidebarWidthMin..SidebarWidthMax
-	InspectorWidth   int     `json:"inspectorWidth"` // InspectorWidthMin..InspectorWidthMax
+	Viewer           *ViewerPreferences `json:"viewer,omitempty"`
+	Theme            Theme              `json:"theme"`
+	Accent           Accent             `json:"accent"`
+	Density          Density            `json:"density"`
+	TextScale        int                `json:"textScale"` // TextScaleMin..TextScaleMax, percent
+	TileSize         int                `json:"tileSize"`  // TileSizeMin..TileSizeMax
+	SidebarCollapsed bool               `json:"sidebarCollapsed"`
+	SidebarWidth     int                `json:"sidebarWidth"`   // SidebarWidthMin..SidebarWidthMax
+	InspectorWidth   int                `json:"inspectorWidth"` // InspectorWidthMin..InspectorWidthMax
 }
 
 // DefaultPreferences is what a library starts with.
 func DefaultPreferences() Preferences {
+	v := DefaultViewerPreferences()
 	return Preferences{
+		Viewer:         &v,
 		Theme:          ThemeSystem,
 		Accent:         AccentBlue,
 		Density:        DensityComfortable,
@@ -116,6 +120,12 @@ func ValidDensity(d Density) bool { return d == DensityComfortable || d == Densi
 // interface.
 func (p Preferences) Normalised() Preferences {
 	def := DefaultPreferences()
+	if p.Viewer == nil {
+		p.Viewer = def.Viewer
+	} else {
+		v := p.Viewer.Normalised()
+		p.Viewer = &v
+	}
 	if !ValidTheme(p.Theme) {
 		p.Theme = def.Theme
 	}
@@ -152,9 +162,9 @@ type MediaCaps struct {
 	// Original: the WebView shows the original photo as it is, through the
 	// original endpoint. A native decoder for the format is not enough.
 	Original bool `json:"original"`
-	// Render: a developed, full-resolution rendered copy can be made within
-	// the render budget. No such path exists before Phase 8, so it is always
-	// false; a larger preview or a RAW file's embedded JPEG never counts.
+	// Render: the runtime can prepare a bounded upright sRGB copy. The service
+	// supplies this capability from its renderer and known source dimensions;
+	// RenderInfo reports whether the available pixels were reduced.
 	Render bool `json:"render"`
 	// DirectPlay: the WebView may play the video file itself.
 	DirectPlay bool `json:"directPlay"`

@@ -44,6 +44,13 @@ beforeEach(() => {
 })
 afterEach(() => notified.stop())
 
+it('reports a failed initial viewing preference read without an unhandled rejection', async () => {
+  vi.mocked(engine.migratePreferences).mockRejectedValueOnce(new Error('Library unavailable'))
+  await expect(usePreferences().setViewer({ resume: true })).resolves.toBeUndefined()
+  expect(engine.setPreferences).not.toHaveBeenCalled()
+  expect(notified.find(ERROR_NOTIFICATION)?.title).toContain('Library unavailable')
+})
+
 const root = () => document.documentElement
 
 it('paints the defaults first, then what the library holds', async () => {

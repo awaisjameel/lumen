@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"lumen/internal/core"
 	"lumen/internal/fileops"
 	"lumen/internal/index"
+	"lumen/internal/media"
 	"lumen/internal/search"
 	"lumen/internal/store"
 )
@@ -43,6 +45,8 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 	for name, want := range map[string]float64{
 		"THUMB_SMALL":               core.ThumbSmall,
 		"THUMB_LARGE":               core.ThumbLarge,
+		"RENDER_SIDE":               media.RenderSide,
+		"RENDER_SIDE_MIN":           media.RenderSideMin,
 		"SPRITE_COLS":               core.SpriteCols,
 		"SPRITE_ROWS":               core.SpriteRows,
 		"TAG_CONFIDENCE_DEFAULT":    core.TagConfidenceDefault,
@@ -72,6 +76,12 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"INSPECTOR_WIDTH_MIN":       core.InspectorWidthMin,
 		"INSPECTOR_WIDTH_MAX":       core.InspectorWidthMax,
 		"INSPECTOR_WIDTH_DEFAULT":   core.InspectorWidthDefault,
+		"SLIDESHOW_SECONDS_MIN":     core.SlideshowSecondsMin,
+		"SLIDESHOW_SECONDS_MAX":     core.SlideshowSecondsMax,
+		"SKIP_SECONDS_MIN":          core.SkipSecondsMin,
+		"SKIP_SECONDS_MAX":          core.SkipSecondsMax,
+		"PLAYBACK_SPEED_MIN":        core.PlaybackSpeedMin,
+		"PLAYBACK_SPEED_MAX":        core.PlaybackSpeedMax,
 	} {
 		if got := constant(name); got != want {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)
@@ -125,7 +135,8 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 	}
 	reasons := quoted(`(?s)export const OrganiseReason = \{(.*?)\} as const`)
 	wantReasons := []string{fileops.ReasonMissing, fileops.ReasonNotVisible, fileops.ReasonBlockedFolder, fileops.ReasonChanged,
-		fileops.ReasonTaken, fileops.ReasonTooLong, fileops.ReasonNotAFolder, fileops.ReasonSidecarTaken}
+		fileops.ReasonTaken, fileops.ReasonTooLong, fileops.ReasonNotAFolder, fileops.ReasonSidecarTaken,
+		fileops.ReasonUnsupported, fileops.ReasonInterrupted}
 	if !slices.Equal(reasons, wantReasons) {
 		t.Errorf("bridge OrganiseReason = %v, engine has %v", reasons, wantReasons)
 	}
@@ -134,6 +145,26 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		if !regexp.MustCompile(`'` + regexp.QuoteMeta(event) + `' satisfies keyof Events.CustomEvents`).MatchString(bridge) {
 			t.Errorf("the bridge does not listen for %q", event)
 		}
+	}
+}
+
+func TestViewingFallbackMatchesTheEngineDefaults(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "frontend", "src", "shared", "viewing.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := regexp.MustCompile(`(?s)return (\{.*?\})`).FindSubmatch(data)
+	if len(block) != 2 {
+		t.Fatal("missing viewing fallback")
+	}
+	jsonData := regexp.MustCompile(`(\w+):`).ReplaceAll(block[1], []byte(`"$1":`))
+	jsonData = regexp.MustCompile(`,\s*\}`).ReplaceAll(jsonData, []byte("}"))
+	var got core.ViewerPreferences
+	if err := json.Unmarshal(jsonData, &got); err != nil {
+		t.Fatal(err)
+	}
+	if want := core.DefaultViewerPreferences(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("viewing fallback = %+v, engine = %+v", got, want)
 	}
 }
 

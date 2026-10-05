@@ -10,6 +10,7 @@ import type { BlockRequest } from './block'
 import { errorText, reportError } from './errors'
 import { t } from './i18n'
 import PinFields from './PinFields.vue'
+import { notify } from './notify'
 
 const ready = ref(false)
 let opener: HTMLElement | null = null
@@ -20,6 +21,8 @@ const pin = ref('')
 const confirmPIN = ref('')
 const error = ref('')
 const busy = ref(false)
+const batchCancelled = ref(false)
+const isBatchCancelled = () => batchCancelled.value
 
 watch(blockRequest, async (request, previous) => {
   ready.value = false
@@ -78,7 +81,8 @@ function close(request: BlockRequest, saved: boolean) {
 }
 
 function cancel() {
-  if (!busy.value && blockRequest.value) close(blockRequest.value, false)
+  if (busy.value && blockRequest.value?.ids) batchCancelled.value = true
+  else if (!busy.value && blockRequest.value) close(blockRequest.value, false)
 }
 
 async function save() {
@@ -90,6 +94,7 @@ async function save() {
     return
   }
   busy.value = true
+  batchCancelled.value = false
   const requestedMode = mode.value
   const requestedLookalikes = lookalikes.value
   try {
@@ -97,6 +102,29 @@ async function save() {
       await engine.createBlockPIN(pin.value)
       if (blockRequest.value !== request) return
       configured.value = true
+    }
+    if (request.ids) {
+      let saved = 0
+      for (const id of request.ids) {
+        if (blockRequest.value !== request || isBatchCancelled() || request.stopped?.()) break
+        try {
+          await engine.setBlock(BlockKind.BlockAsset, id, '', BlockMode.BlockPhotos)
+          saved++
+          request.outcome?.(id, '')
+        } catch (e) {
+          request.outcome?.(id, errorText(e))
+        }
+      }
+      if (saved)
+        notify({
+          id: 'block.batch',
+          kind: 'success',
+          title: t('files.blockedCount', { n: saved }),
+          duration: 8000,
+        })
+      close(request, saved > 0)
+      void showBlocksChanged().catch(reportError)
+      return
     }
     const change =
       request.kind === BlockKind.BlockFace
@@ -107,6 +135,7 @@ async function save() {
     void showBlocksChanged().catch(reportError)
   } catch (e) {
     if (blockRequest.value === request) error.value = errorText(e)
+    if (request.ids) void showBlocksChanged().catch(reportError)
   } finally {
     busy.value = false
   }
@@ -152,7 +181,7 @@ async function save() {
             autofocus
             color="neutral"
             variant="outline"
-            :disabled="busy"
+            :disabled="busy && !blockRequest.ids"
             @click="cancel"
             >{{ t('common.cancel') }}</UButton
           >

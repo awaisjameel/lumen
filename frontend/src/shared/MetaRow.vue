@@ -2,15 +2,36 @@
 // One fact about a photo, a run or the app: an icon, what it is, and its
 // value, which can be selected and copied. A missing value is said, never
 // left blank or invented.
+import IconButton from './IconButton.vue'
 import type { IconName } from '../design/icons'
 import Icon from './Icon.vue'
+import { ref, watch } from 'vue'
+import { icons } from '../design/icons'
+import { t } from './i18n'
+import { reportError } from './errors'
 
-defineProps<{
+const props = defineProps<{
   label: string
   icon?: IconName
   /** The value; the default slot replaces it for anything richer. */
   value?: string
+  copyable?: boolean
 }>()
+const copied = ref(false)
+watch([() => props.value, () => props.label], () => {
+  copied.value = false
+})
+async function copy() {
+  if (!props.value) return
+  const value = props.value,
+    label = props.label
+  try {
+    await navigator.clipboard.writeText(value)
+    if (props.value === value && props.label === label) copied.value = true
+  } catch (e) {
+    reportError(e)
+  }
+}
 </script>
 
 <template>
@@ -25,6 +46,14 @@ defineProps<{
     <div v-if="$slots.action" class="action">
       <slot name="action" />
     </div>
+    <IconButton
+      v-if="copyable && value"
+      :icon="icons.copy"
+      :label="t(copied ? 'files.copied' : 'files.copyField', { name: label })"
+      variant="ghost"
+      size="xs"
+      @click="copy"
+    />
   </div>
 </template>
 

@@ -1,8 +1,9 @@
 # Lumen: frontend and media development plan
 
 Date: 4 October 2026. Status: Phase 7 is implemented (see
-[the Phase 7 record](phase7-design-2026-10-04.md)); Phases 8–12 are planned
-and not started.
+[the Phase 7 record](phase7-design-2026-10-04.md)) and so is Phase 8 (see
+[the Phase 8 record](phase8-implementation-2026-10-05.md)); Phases 9–12 are
+planned and not started.
 
 This plan covers the product owner's four requests: rebuild the complete
 frontend with the latest stable Nuxt UI, expand viewing and file tools,
@@ -168,6 +169,8 @@ migrated, unused CSS/icons/components removed and one notification and
 overlay system. Later phases add features to this new interface.
 
 ## 3. Phase 8 — Viewing, playback, details and file tools
+
+Implemented locally on 5 October 2026. See the [implementation and verification record](phase8-implementation-2026-10-05.md) for delivered behavior, measured native evidence and remaining acceptance boundaries. The scope below remains the design reference.
 
 ### 8A. Image viewer
 

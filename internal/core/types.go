@@ -165,9 +165,21 @@ type OrganiseMove struct {
 	From    string            `json:"from"`
 	To      string            `json:"to"`
 	State   OrganiseMoveState `json:"state"`
-	Renamed bool              `json:"renamed"`         // its name took a " (2)" because another file had it
-	Error   string            `json:"error,omitempty"` // why it was skipped or failed
+	Renamed bool              `json:"renamed"`           // its name took a " (2)" because another file had it
+	Error   string            `json:"error,omitempty"`   // why it was skipped or failed
+	Sidecar SidecarState      `json:"sidecar,omitempty"` // what became of its XMP sidecar; "" is none
 }
+
+// SidecarState is what a move does, or did, with the photo's XMP sidecar.
+type SidecarState string
+
+// The states of a move's sidecar.
+const (
+	SidecarPlanned SidecarState = "planned" // one to move with the photo
+	SidecarMoved   SidecarState = "moved"
+	SidecarKept    SidecarState = "kept"   // left where it was; the move's error says why
+	SidecarUndone  SidecarState = "undone" // put back with the photo
+)
 
 // OrganisePlan is a dry run: the moves a template would make, saved as a
 // planned run so that starting it moves exactly what was previewed.
@@ -570,22 +582,23 @@ type DayItems struct {
 
 // AssetDetail is everything the details panel shows.
 type AssetDetail struct {
-	ID        int64      `json:"id"`
-	Kind      Kind       `json:"kind"`
-	TakenAt   int64      `json:"takenAt"` // wall-clock seconds, see WallClock
-	DateFrom  DateSource `json:"dateFrom"`
-	Width     int        `json:"width"`
-	Height    int        `json:"height"`
-	Camera    string     `json:"camera"`
-	Lat       *float64   `json:"lat"`
-	Lon       *float64   `json:"lon"`
-	PlaceID   int64      `json:"placeId"` // resolved nearby city; 0 if unknown
-	Favourite bool       `json:"favourite"`
-	Paths     []string   `json:"paths"`
-	Size      int64      `json:"size"`
-	Ext       string     `json:"ext"`
-	Caps      MediaCaps  `json:"caps"`  // what can be done with it (see CapsOf)
-	Video     *Video     `json:"video"` // nil for photos
+	Adjustment *DisplayAdjustment `json:"adjustment,omitempty"`
+	ID         int64              `json:"id"`
+	Kind       Kind               `json:"kind"`
+	TakenAt    int64              `json:"takenAt"` // wall-clock seconds, see WallClock
+	DateFrom   DateSource         `json:"dateFrom"`
+	Width      int                `json:"width"`
+	Height     int                `json:"height"`
+	Camera     string             `json:"camera"`
+	Lat        *float64           `json:"lat"`
+	Lon        *float64           `json:"lon"`
+	PlaceID    int64              `json:"placeId"` // resolved nearby city; 0 if unknown
+	Favourite  bool               `json:"favourite"`
+	Paths      []string           `json:"paths"`
+	Size       int64              `json:"size"`
+	Ext        string             `json:"ext"`
+	Caps       MediaCaps          `json:"caps"`  // what can be done with it (see CapsOf)
+	Video      *Video             `json:"video"` // nil for photos
 }
 
 // Video is what the details panel and the player need to know about a video.

@@ -6,6 +6,7 @@ import (
 
 	"lumen/internal/fileops"
 	"lumen/internal/index"
+	"lumen/internal/media"
 	"lumen/internal/search"
 	"lumen/internal/signin"
 	"lumen/internal/store"
@@ -48,9 +49,20 @@ const (
 	CodeTrashChanged    ErrorCode = "trash_changed"    // the Trash changed after Delete from disk was confirmed
 	CodeXMPOff          ErrorCode = "xmp_off"          // XMP sidecars were asked for while the setting is off
 
-	CodeInvalidTemplate ErrorCode = "invalid_template" // the folder scheme to organise by cannot be used
-	CodeOrganiseBusy    ErrorCode = "organise_busy"    // files are already being moved
-	CodeOrganiseState   ErrorCode = "organise_state"   // that run cannot be started or undone now
+	CodeInvalidTemplate  ErrorCode = "invalid_template"  // the folder scheme to organise by cannot be used
+	CodeOrganiseBusy     ErrorCode = "organise_busy"     // files are already being moved
+	CodeOrganiseState    ErrorCode = "organise_state"    // that run cannot be started or undone now
+	CodeSelectionChanged ErrorCode = "selection_changed" // select-all or range membership changed
+	CodeStopping         ErrorCode = "stopping"          // Lumen is closing
+
+	CodeInvalidFileName     ErrorCode = "invalid_file_name"    // Windows cannot give a file that name
+	CodeDestinationOutside  ErrorCode = "destination_outside"  // a move leaves its source folder, or changes the format
+	CodeDestinationFolder   ErrorCode = "destination_folder"   // a link or a file is where a folder must be
+	CodeDestinationExcluded ErrorCode = "destination_excluded" // the folder is one Lumen does not index
+	CodeDestinationBlocked  ErrorCode = "destination_blocked"  // the folder is blocked
+	CodeDestinationTaken    ErrorCode = "destination_taken"    // something else has that name
+	CodeSourceChanged       ErrorCode = "source_changed"       // the file changed after the preview
+	CodeUnsupported         ErrorCode = "unsupported"          // nothing here can read or write that format
 
 	CodeSigninFailed ErrorCode = "signin_failed"      // the Windows sign-in was cancelled, or wrong
 	CodeNoSignin     ErrorCode = "signin_unavailable" // this PC has no way to check a Windows sign-in
@@ -100,6 +112,16 @@ var errorCodes = []struct {
 	{fileops.ErrInvalidTemplate, CodeInvalidTemplate},
 	{ErrOrganiseBusy, CodeOrganiseBusy},
 	{ErrOrganiseState, CodeOrganiseState},
+	{store.ErrSelectionChanged, CodeSelectionChanged},
+	{ErrOrganiseStopping, CodeStopping},
+	{fileops.ErrInvalidFileName, CodeInvalidFileName},
+	{fileops.ErrDestinationOutside, CodeDestinationOutside},
+	{fileops.ErrDestinationFolder, CodeDestinationFolder},
+	{fileops.ErrDestinationExcluded, CodeDestinationExcluded},
+	{fileops.ErrDestinationBlocked, CodeDestinationBlocked},
+	{fileops.ErrExists, CodeDestinationTaken},
+	{fileops.ErrSourceChanged, CodeSourceChanged},
+	{media.ErrUnsupported, CodeUnsupported},
 	{signin.ErrNotVerified, CodeSigninFailed},
 	{signin.ErrUnavailable, CodeNoSignin},
 }
@@ -113,13 +135,23 @@ type Failure struct {
 // MarshalError is the application's error marshaller: failures with a code
 // reach the UI as {"code": ...}; for others Wails sends only the message.
 func MarshalError(err error) []byte {
+	code := errorCodeOf(err)
+	if code == "" {
+		return nil
+	}
+	b, jerr := json.Marshal(Failure{Code: code})
+	if jerr != nil {
+		return nil
+	}
+	return b
+}
+
+// errorCodeOf is the code of a failure, "" for one the UI has no words for.
+func errorCodeOf(err error) ErrorCode {
 	for _, c := range errorCodes {
 		if errors.Is(err, c.err) {
-			b, jerr := json.Marshal(Failure{Code: c.code})
-			if jerr == nil {
-				return b
-			}
+			return c.code
 		}
 	}
-	return nil
+	return ""
 }

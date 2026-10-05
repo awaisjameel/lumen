@@ -27,9 +27,13 @@ var ErrOrganiseState = errors.New("that run cannot be started or undone now")
 // ErrOrganiseStopping means Lumen is closing, and no new run is taken.
 var ErrOrganiseStopping = errors.New("the app is closing")
 
-// recovering is the place a startup recovery takes in organiser.active: no
-// run has this id.
-const recovering = -1
+// The places that work other than a run takes in organiser.active: no run
+// has these ids.
+const (
+	recovering = -1 // a startup recovery
+	exporting  = -2 // an export, which moves no library file but must not overlap one that does
+	planning   = -3 // a preview that must not replace journal rows in use by a run
+)
 
 // organiser is the organise runs' bookkeeping: the one run at a time, and the
 // goroutine that makes it. LibraryService's zero value for it works.
@@ -83,6 +87,27 @@ func (o *organiser) track() (done func(), ok bool) {
 	}
 	o.wg.Add(1)
 	return o.wg.Done, true
+}
+
+// hold admits synchronous file work and ties it to shutdown. Planning shares
+// this place with execution: replacing a preview must never prune a live run.
+func (o *organiser) hold(ctx context.Context, id int64) (context.Context, func(), error) {
+	if err := o.claim(id, ""); err != nil {
+		return ctx, nil, err
+	}
+	done, ok := o.track()
+	if !ok {
+		o.release(nil)
+		return ctx, nil, ErrOrganiseStopping
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(o.lifetime(), cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+		o.release(nil)
+		done()
+	}, nil
 }
 
 // release makes the next action available. A completion event is sent under
@@ -140,7 +165,11 @@ func (s *LibraryService) ServiceShutdown() error {
 // file between its old place and its new one.
 func (s *LibraryService) recoverOrganise(ctx context.Context) error {
 	open, err := s.store.InterruptedOrganiseRuns(ctx)
-	if err != nil || len(open) == 0 {
+	if err != nil {
+		return err
+	}
+	exports, err := s.store.HasInterruptedExports(ctx)
+	if err != nil || (len(open) == 0 && !exports) {
 		return err
 	}
 	if s.organise.claim(recovering, "") != nil {
@@ -152,6 +181,9 @@ func (s *LibraryService) recoverOrganise(ctx context.Context) error {
 		return err
 	}
 	defer unhold()
+	if err := s.exportRunner().Recover(ctx); err != nil {
+		return err
+	}
 	return s.runner().RecoverAll(ctx)
 }
 
@@ -184,6 +216,11 @@ func (s *LibraryService) sendOrganiseProgress(p core.OrganiseProgress) {
 // Only visible photos are planned, and only visible names reach folder names.
 // A scheme that cannot be used fails with fileops.ErrInvalidTemplate.
 func (s *LibraryService) PlanOrganise(ctx context.Context, template string, sourceID int64) (core.OrganisePlan, error) {
+	ctx, finish, err := s.organise.hold(ctx, planning)
+	if err != nil {
+		return core.OrganisePlan{}, err
+	}
+	defer finish()
 	if sourceID != 0 {
 		sources, err := s.store.ListSources(ctx)
 		if err != nil {
@@ -231,7 +268,7 @@ func hasEnabledSource(sources []core.Source, id int64) bool {
 }
 
 func organiseMoveOf(m store.OrganiseMove) core.OrganiseMove {
-	return core.OrganiseMove{Seq: m.Seq, AssetID: m.AssetID, From: m.From, To: m.To, State: m.State, Renamed: m.Renamed, Error: m.Error}
+	return core.OrganiseMove{Seq: m.Seq, AssetID: m.AssetID, From: m.From, To: m.To, State: m.State, Renamed: m.Renamed, Error: m.Error, Sidecar: core.SidecarState(m.Sidecar)}
 }
 
 // The states a run can be started or undone from. A run still marked running

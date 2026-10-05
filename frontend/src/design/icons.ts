@@ -42,6 +42,8 @@ export const icons = {
   refresh: 'i-lucide-refresh-cw',
   undo: 'i-lucide-undo-2',
   reset: 'i-lucide-rotate-ccw',
+  rotate: 'i-lucide-rotate-cw',
+  flip: 'i-lucide-flip-horizontal-2',
   restore: 'i-lucide-archive-restore',
   recycle: 'i-lucide-recycle',
   save: 'i-lucide-save',

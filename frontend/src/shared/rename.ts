@@ -4,6 +4,18 @@ import { whenPortalsClosed } from './overlay'
 
 type ElementRef = Element | ComponentPublicInstance | null
 
+interface Focusable {
+  focus: () => void
+}
+
+/** What a :ref gave, as something to focus: an element, a component that exposes its focus, or one drawn as a single element. */
+function focusable(el: unknown): Focusable | null {
+  if (el instanceof HTMLElement) return el
+  if (!el || typeof el !== 'object') return null
+  if ('focus' in el && typeof el.focus === 'function') return el as Focusable
+  return '$el' in el && el.$el instanceof HTMLElement ? el.$el : null
+}
+
 /**
  * Keyboard behaviour shared by the inline name editors (an event's, a
  * person's): opening one focuses its field with the name selected, and
@@ -17,7 +29,7 @@ export function useRename<K>() {
   const editing = shallowRef<K | null>(null)
   const draft = ref('')
   let field: HTMLInputElement | null = null
-  const triggers = new Map<K, HTMLElement>()
+  const triggers = new Map<K, Focusable>()
 
   /** A :ref for the name field. */
   function fieldRef(el: ElementRef) {
@@ -26,8 +38,9 @@ export function useRename<K>() {
 
   /** A :ref for the control that opens key's editor. */
   function triggerRef(key: K) {
-    return (el: ElementRef) => {
-      if (el instanceof HTMLElement) triggers.set(key, el)
+    return (el: unknown) => {
+      const trigger = focusable(el)
+      if (trigger) triggers.set(key, trigger)
       else triggers.delete(key)
     }
   }

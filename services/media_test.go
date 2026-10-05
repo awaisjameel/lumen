@@ -1,8 +1,11 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -283,6 +286,51 @@ func (l *shownLibrary) get(t *testing.T, url string) *httptest.ResponseRecorder 
 	return rec
 }
 
+func TestATurnedThumbnailIsMadeOnceForAWebViewThatKeepsIt(t *testing.T) {
+	l := newShownLibrary(t, 1)
+	var stored bytes.Buffer
+	check(t, jpeg.Encode(&stored, image.NewNRGBA(image.Rect(0, 0, 4, 2)), nil))
+	check(t, l.cache.Write(1, media.Thumbs{Small: stored.Bytes(), Large: stored.Bytes()}))
+	size := func(rec *httptest.ResponseRecorder) image.Point {
+		t.Helper()
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		cfg, err := jpeg.DecodeConfig(rec.Body)
+		check(t, err)
+		return image.Pt(cfg.Width, cfg.Height)
+	}
+	if got := size(l.get(t, "/thumb/1/1024?v=1")); got != image.Pt(4, 2) {
+		t.Fatalf("as stored: %v", got)
+	}
+	_, err := l.st.SetAdjustment(t.Context(), 1, 1, false)
+	check(t, err)
+	first := l.get(t, "/thumb/1/1024?v=2")
+	tag := first.Header().Get("Etag")
+	if got := size(first); got != image.Pt(2, 4) || tag == "" || first.Header().Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("turned: %v, tag %q, cache %q", got, tag, first.Header().Get("Cache-Control"))
+	}
+	// A face's box is drawn on the stored pixels, whatever the turn.
+	if got := size(l.get(t, "/thumb/1/1024?v=2&canonical=1")); got != image.Pt(4, 2) {
+		t.Fatalf("canonical: %v", got)
+	}
+	again := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/thumb/1/1024?v=2", http.NoBody)
+	again.Header.Set("If-None-Match", tag)
+	rec := httptest.NewRecorder()
+	l.m.ServeHTTP(rec, again)
+	if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 {
+		t.Fatalf("asked again with its tag: status %d, %d bytes", rec.Code, rec.Body.Len())
+	}
+	// Another turn is another picture: the old tag no longer answers for it.
+	_, err = l.st.SetAdjustment(t.Context(), 1, 2, false)
+	check(t, err)
+	rec = httptest.NewRecorder()
+	l.m.ServeHTTP(rec, again)
+	if got := size(rec); got != image.Pt(4, 2) || rec.Header().Get("Etag") == tag {
+		t.Fatalf("turned again: %v, tag %q (was %q)", got, rec.Header().Get("Etag"), tag)
+	}
+}
+
 func TestEvictedThumbnailIsRebuiltOnItsNextRequest(t *testing.T) {
 	l := newShownLibrary(t, 1)
 	if rec := l.get(t, "/thumb/1/1024?v=1"); rec.Code != http.StatusOK || rec.Body.String() != "large thumbnail" {
@@ -383,7 +431,7 @@ func TestThumbCacheCapSettingIsStoredClampedAndReachesTheCache(t *testing.T) {
 	ctx := t.Context()
 	l := newShownLibrary(t, 1)
 	ix := index.New(l.st, core.PathsIn(t.TempDir()), l.cache, index.Models{}, quietEvents{})
-	s := NewLibraryService(l.st, ix, nil)
+	s := NewLibraryService(l.st, ix, nil, nil)
 	if got, err := s.Settings(ctx); err != nil || got.ThumbCacheMB != 2048 {
 		t.Fatalf("default cap = %d MB (%v), want 2048", got.ThumbCacheMB, err)
 	}
@@ -398,14 +446,14 @@ func TestThumbCacheCapSettingIsStoredClampedAndReachesTheCache(t *testing.T) {
 		}
 	}
 	// Without an indexer (as in these tests) the setting is still stored.
-	check(t, NewLibraryService(l.st, nil, nil).SetThumbCacheMB(ctx, 512))
+	check(t, NewLibraryService(l.st, nil, nil, nil).SetThumbCacheMB(ctx, 512))
 }
 
 func TestCPUThreadsSettingShowsTheMachineAndIsStoredClamped(t *testing.T) {
 	ctx := t.Context()
 	l := newShownLibrary(t, 1)
 	ix := index.New(l.st, core.PathsIn(t.TempDir()), l.cache, index.Models{}, quietEvents{})
-	s := NewLibraryService(l.st, ix, nil)
+	s := NewLibraryService(l.st, ix, nil, nil)
 	got, err := s.Settings(ctx)
 	if err != nil || got.CPUThreads != core.DefaultCPUThreads() || got.DefaultCPUThreads != core.DefaultCPUThreads() ||
 		got.MaxCPUThreads != core.MaxCPUThreads() {
@@ -418,11 +466,11 @@ func TestCPUThreadsSettingShowsTheMachineAndIsStoredClamped(t *testing.T) {
 		}
 	}
 	// Without an indexer (as in these tests) the setting is still stored.
-	check(t, NewLibraryService(l.st, nil, nil).SetCPUThreads(ctx, 2))
+	check(t, NewLibraryService(l.st, nil, nil, nil).SetCPUThreads(ctx, 2))
 }
 
 func TestOnboardingUsesTheLibrarysFolderKeys(t *testing.T) {
-	s := NewLibraryService(nil, nil, nil)
+	s := NewLibraryService(nil, nil, nil, nil)
 	if s.SourcePathKey(`D:\Photos\ÉTÉ\..\Été`) != s.SourcePathKey(`d:\photos\été`) {
 		t.Fatal("folder keys did not clean the path and fold its case")
 	}
@@ -435,7 +483,7 @@ func TestIndexingGivesWayByDefaultAndTheSettingsApplyAtOnce(t *testing.T) {
 	ctx := t.Context()
 	l := newShownLibrary(t, 1)
 	ix := index.New(l.st, core.PathsIn(t.TempDir()), l.cache, index.Models{}, quietEvents{})
-	s := NewLibraryService(l.st, ix, nil)
+	s := NewLibraryService(l.st, ix, nil, nil)
 	got, err := s.Settings(ctx)
 	if err != nil || !got.PauseFullScreen || !got.PauseBusy || got.IdleOnly {
 		t.Fatalf("settings = %+v (%v), want full screen and busy on, idle-only off", got, err)
@@ -457,7 +505,7 @@ func TestIndexingGivesWayByDefaultAndTheSettingsApplyAtOnce(t *testing.T) {
 		t.Fatalf("settings after turning them off = %+v (%v)", got, err)
 	}
 	// Without an indexer (as in other tests) the settings are still stored.
-	check(t, NewLibraryService(l.st, nil, nil).SetPauseBusy(ctx, true))
+	check(t, NewLibraryService(l.st, nil, nil, nil).SetPauseBusy(ctx, true))
 }
 
 func TestThumbCacheBytesIsTheCachesRunningTotal(t *testing.T) {
@@ -515,7 +563,7 @@ type coveredMedia struct {
 // fixedConversion is a converter whose output is a few bytes.
 type fixedConversion struct{}
 
-func (fixedConversion) ConvertMP4(context.Context, string, int64) (func(io.Writer) error, error) {
+func (fixedConversion) ConvertMP4(context.Context, string, int64, int) (func(io.Writer) error, error) {
 	return func(w io.Writer) error { _, err := w.Write([]byte("converted")); return err }, nil
 }
 
@@ -740,7 +788,7 @@ type longConversion struct {
 	cancelled atomic.Bool
 }
 
-func (c *longConversion) ConvertMP4(ctx context.Context, _ string, _ int64) (func(io.Writer) error, error) {
+func (c *longConversion) ConvertMP4(ctx context.Context, _ string, _ int64, _ int) (func(io.Writer) error, error) {
 	return func(w io.Writer) error {
 		chunk := make([]byte, 64<<10)
 		for range 100 {
@@ -830,7 +878,7 @@ type stalledConversion struct {
 	ended   chan error
 }
 
-func (c stalledConversion) ConvertMP4(ctx context.Context, _ string, _ int64) (func(io.Writer) error, error) {
+func (c stalledConversion) ConvertMP4(ctx context.Context, _ string, _ int64, _ int) (func(io.Writer) error, error) {
 	return func(io.Writer) error {
 		close(c.started)
 		select {

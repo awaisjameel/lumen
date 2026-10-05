@@ -21,6 +21,7 @@ import (
 
 	"lumen/internal/core"
 	"lumen/internal/index"
+	"lumen/internal/media"
 	"lumen/internal/store"
 )
 
@@ -57,10 +58,12 @@ func (e *Emitter) LibraryChanged(c core.Changes) {
 
 // LibraryService is everything about browsing and managing the library.
 type LibraryService struct {
+	media   *media.Cache
 	store   *store.Store
 	ix      *index.Indexer
 	now     func() time.Time // the clock: time.Now, or a test's
 	recycle recycler         // moves files to the Recycle Bin; nil means fileops.Recycle (a test's fake otherwise)
+	open    opener           // hands a file to the shell; nil means fileops.Open (a test's fake otherwise)
 	gate    *BlockGate       // whether the Blocked screen is unlocked, shared with media serving
 	// recycling serialises every move of files to the Recycle Bin, from its
 	// validation to the removal of the rows: two requests must not each see
@@ -78,15 +81,21 @@ type LibraryService struct {
 	verify func(ctx context.Context, owner uintptr, reason string) error
 
 	organise organiser // the organise-on-disk run in progress (organise.go); the zero value works
+	exports  struct {
+		sync.Mutex
+		batch  int64
+		cancel context.CancelFunc
+	}
 }
 
 // NewLibraryService returns the library service. gate is the Blocked
 // screen's lock it shares with media serving; nil gives it one of its own.
-func NewLibraryService(st *store.Store, ix *index.Indexer, gate *BlockGate) *LibraryService {
+// cache renders what is exported; nil leaves rendered exports unsupported.
+func NewLibraryService(st *store.Store, ix *index.Indexer, gate *BlockGate, cache *media.Cache) *LibraryService {
 	if gate == nil {
 		gate = &BlockGate{}
 	}
-	s := &LibraryService{store: st, ix: ix, now: time.Now, gate: gate}
+	s := &LibraryService{store: st, ix: ix, now: time.Now, gate: gate, media: cache}
 	if ix != nil {
 		// Files an interrupted organise run left half-moved are settled
 		// before the first scan could find them so.
@@ -229,8 +238,9 @@ func (s *LibraryService) Asset(ctx context.Context, id int64) (core.AssetDetail,
 	if errors.Is(err, store.ErrNotFound) && s.unlockedNow() {
 		// Only a photo the open Blocked screen shows is asked of the gate, so
 		// looking at ordinary photos is no use of it.
-		return s.store.AssetDetail(ctx, id, true)
+		d, err = s.store.AssetDetail(ctx, id, true)
 	}
+	d.Caps.Render = err == nil && d.Kind == core.KindPhoto && s.media != nil && s.media.Renderer != nil && media.CanRender(d.Width, d.Height)
 	return d, err
 }
 
