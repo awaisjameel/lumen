@@ -151,3 +151,87 @@ it('paints a later confirmation above a feature dialog even when its portal come
   expect(confirmation.style.zIndex).toBe('')
   expect(feature.style.zIndex).toBe('')
 })
+
+it('keeps a dropdown above its dialog when positioning updates replace the wrapper style', async () => {
+  const dialog = document.createElement('div')
+  dialog.setAttribute('role', 'dialog')
+  dialog.dataset.state = 'open'
+  document.body.append(dialog)
+  const stop = startPortalLayers()
+  try {
+    const wrapper = document.createElement('div')
+    wrapper.setAttribute('data-reka-popper-content-wrapper', '')
+    wrapper.style.zIndex = 'auto'
+    const list = document.createElement('div')
+    list.setAttribute('role', 'listbox')
+    list.dataset.state = 'open'
+    wrapper.append(list)
+    document.body.append(wrapper)
+    await Promise.resolve()
+    expect(Number(wrapper.style.zIndex)).toBeGreaterThan(Number(dialog.style.zIndex))
+
+    // Reka's positioner copies the initial computed z-index into the wrapper
+    // after mounting and can write it again when its placement changes.
+    for (const transform of ['translate(10px, 20px)', 'translate(30px, 40px)']) {
+      wrapper.style.cssText = `position: fixed; z-index: auto; transform: ${transform};`
+      await Promise.resolve()
+      expect(wrapper.style.zIndex).toBe(list.style.zIndex)
+      expect(Number(wrapper.style.zIndex)).toBeGreaterThan(Number(dialog.style.zIndex))
+      expect(wrapper.style.transform).toBe(transform)
+    }
+    await Promise.resolve()
+    const query = vi.spyOn(document, 'querySelectorAll')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(query).not.toHaveBeenCalled()
+    query.mockRestore()
+    stop()
+    expect(wrapper.style.zIndex).toBe('auto')
+    expect(list.style.zIndex).toBe('')
+  } finally {
+    stop()
+  }
+})
+
+it('orders dropdowns inside fullscreen without observing ordinary page mutations after exit', async () => {
+  const page = document.createElement('div')
+  page.setAttribute('data-v-app', '')
+  const viewer = document.createElement('div')
+  page.append(viewer)
+  document.body.append(page)
+  let current: Element | null = viewer
+  const property = Object.getOwnPropertyDescriptor(document, 'fullscreenElement')
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => current })
+  const stop = startPortalLayers()
+  try {
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    dialog.dataset.state = 'open'
+    viewer.append(dialog)
+    await Promise.resolve()
+    const wrapper = document.createElement('div')
+    wrapper.setAttribute('data-reka-popper-content-wrapper', '')
+    const list = document.createElement('div')
+    list.setAttribute('role', 'listbox')
+    list.dataset.state = 'open'
+    wrapper.append(list)
+    viewer.append(wrapper)
+    await Promise.resolve()
+    expect(Number(wrapper.style.zIndex)).toBeGreaterThan(Number(dialog.style.zIndex))
+    wrapper.style.zIndex = 'auto'
+    await Promise.resolve()
+    expect(wrapper.style.zIndex).toBe(list.style.zIndex)
+
+    current = null
+    document.dispatchEvent(new Event('fullscreenchange'))
+    const query = vi.spyOn(document, 'querySelectorAll')
+    viewer.append(document.createElement('div'))
+    await Promise.resolve()
+    expect(query).not.toHaveBeenCalled()
+    query.mockRestore()
+  } finally {
+    stop()
+    if (property) Object.defineProperty(document, 'fullscreenElement', property)
+    else Reflect.deleteProperty(document, 'fullscreenElement')
+  }
+})

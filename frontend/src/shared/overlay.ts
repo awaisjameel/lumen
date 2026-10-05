@@ -46,12 +46,28 @@ export function portalOpen(): boolean {
  */
 export function startPortalLayers(): () => void {
   const active = new Map<HTMLElement, number>()
-  const previous = new Map<HTMLElement, string>()
+  const previous = new Map<HTMLElement, { original: string; assigned: string }>()
   const configured = Number.parseInt(getComputedStyle(document.documentElement).getPropertyValue('--lumen-z-portal'))
   let next = Number.isFinite(configured) ? configured : 40
+  // Reka's positioners can rewrite a wrapper's inline z-index after it has
+  // opened. Watch only the elements we paint, and make writes idempotent so
+  // observing our own changes settles without a mutation loop.
+  const styles = new MutationObserver((records) => {
+    for (const { target } of records) {
+      if (!(target instanceof HTMLElement) || !target.isConnected) continue
+      const value = previous.get(target)?.assigned
+      if (value !== undefined && target.style.zIndex !== value) target.style.zIndex = value
+    }
+  })
   function paint(element: HTMLElement, z: number) {
-    if (!previous.has(element)) previous.set(element, element.style.zIndex)
-    element.style.zIndex = String(z)
+    const value = String(z)
+    const saved = previous.get(element)
+    if (saved) saved.assigned = value
+    else {
+      previous.set(element, { original: element.style.zIndex, assigned: value })
+      styles.observe(element, { attributes: true, attributeFilter: ['style'] })
+    }
+    if (element.style.zIndex !== value) element.style.zIndex = value
   }
   function refresh() {
     const current = [...document.querySelectorAll(PORTALLED)].filter(
@@ -60,7 +76,7 @@ export function startPortalLayers(): () => void {
     for (const element of active.keys()) if (!current.includes(element)) active.delete(element)
     for (const [element, value] of previous) {
       if (!element.isConnected) {
-        element.style.zIndex = value
+        element.style.zIndex = value.original
         previous.delete(element)
       }
     }
@@ -100,10 +116,30 @@ export function startPortalLayers(): () => void {
   }
   observer.observe(document.body, { childList: true })
   Array.from(document.body.children).forEach(watch)
-  refresh()
+  // Fullscreen portals live inside the viewer, below the application root
+  // that ordinary portal observation deliberately excludes.
+  const fullscreen = new MutationObserver(refresh)
+  function watchFullscreen() {
+    fullscreen.disconnect()
+    const target = document.fullscreenElement
+    if (target) {
+      fullscreen.observe(target, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-state', 'role', 'open'],
+      })
+    }
+    refresh()
+  }
+  document.addEventListener('fullscreenchange', watchFullscreen)
+  watchFullscreen()
   return () => {
+    document.removeEventListener('fullscreenchange', watchFullscreen)
+    fullscreen.disconnect()
     observer.disconnect()
-    for (const [element, value] of previous) element.style.zIndex = value
+    styles.disconnect()
+    for (const [element, value] of previous) element.style.zIndex = value.original
   }
 }
 

@@ -9,6 +9,7 @@ import FileTools from './FileTools.vue'
 import { confirm } from '../shared/confirm'
 import type { ExportJob } from '../bridge'
 import { t } from '../shared/i18n'
+import { startPortalLayers } from '../shared/overlay'
 
 vi.mock('../bridge', async (original) => ({
   ...(await original<typeof Bridge>()),
@@ -57,11 +58,47 @@ async function action(label: string) {
   await button.trigger('click')
 }
 
-async function mountFiles(props: { open: boolean; ids: number[]; frame: number }) {
+async function mountFiles(props: { open: boolean; ids: number[]; frame?: number }) {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: FileTools }] })
   await router.push('/')
   return mountInApp(FileTools, { props, plugins: [router] })
 }
+
+it('opens selectable file operations above the dialog and updates the fields for the chosen operation', async () => {
+  const wrapper = await mountFiles({ open: true, ids: [1] })
+  const stop = startPortalLayers()
+  try {
+    await flushPromises()
+    const body = new DOMWrapper(document.body)
+    const trigger = body.get('[aria-label="File operation"]')
+    await trigger.trigger('keydown', { key: 'ArrowDown' })
+    await flushPromises()
+    const list = body.get('[role="listbox"][data-state="open"]')
+    expect(list.findAll('[role="option"]').map((option) => option.text())).toEqual([
+      t('files.original'),
+      t('files.jpeg'),
+      t('files.png'),
+      t('files.move'),
+      t('files.rename'),
+    ])
+    const positioner = list.element.closest('[data-reka-popper-content-wrapper]')
+    const dialog = body.get('[role="dialog"][data-state="open"]').element
+    expect(positioner).toBeInstanceOf(HTMLElement)
+    if (!(positioner instanceof HTMLElement) || !(dialog instanceof HTMLElement))
+      throw new Error('Missing overlay layers')
+    expect(Number(positioner.style.zIndex)).toBeGreaterThan(Number(dialog.style.zIndex))
+    const rename = list.findAll('[role="option"]').find((option) => option.text() === t('files.rename'))
+    if (!rename) throw new Error('Missing rename option')
+    await rename.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(trigger.text()).toContain(t('files.rename'))
+    expect(body.find('input[aria-label="Destination folder"]').exists()).toBe(false)
+    expect(body.find(`input[aria-label="${t('files.name')}"]`).exists()).toBe(true)
+  } finally {
+    wrapper.unmount()
+    stop()
+  }
+})
 
 it('discards a preview when its source selection changes while planning', async () => {
   const pending = deferred<ExportJob[]>()
