@@ -1,9 +1,9 @@
 <script setup lang="ts">
+import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UPopover from '@nuxt/ui/components/Popover.vue'
 import USlider from '@nuxt/ui/components/Slider.vue'
-import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
@@ -569,13 +569,12 @@ const searchNotes = computed(() => {
           <!-- Wide windows keep the size slider in the toolbar; narrower ones
                fold it into a button so the search box keeps its room. -->
           <label v-if="mode === 'wide'" class="zoom" :title="t('library.zoom')">
-            <UButton
+            <IconButton
               :icon="icons['zoom-out']"
-              :aria-label="t('library.zoomOut')"
+              :label="t('library.zoomOut')"
               color="neutral"
               variant="ghost"
               size="xs"
-              square
               :disabled="prefs.prefs.tileSize <= TILE_SIZE_MIN"
               @click="setTileSize(prefs.prefs.tileSize - ZOOM_STEP * 3)"
             />
@@ -589,21 +588,18 @@ const searchNotes = computed(() => {
               :aria-label="t('library.zoom')"
               @update:model-value="onZoom"
             />
-            <UButton
+            <IconButton
               :icon="icons['zoom-in']"
-              :aria-label="t('library.zoomIn')"
+              :label="t('library.zoomIn')"
               color="neutral"
               variant="ghost"
               size="xs"
-              square
               :disabled="prefs.prefs.tileSize >= TILE_SIZE_MAX"
               @click="setTileSize(prefs.prefs.tileSize + ZOOM_STEP * 3)"
             />
           </label>
           <UPopover v-else>
-            <UTooltip :text="t('library.zoom')">
-              <UButton :icon="icons.grid" :aria-label="t('library.zoom')" color="neutral" variant="ghost" square />
-            </UTooltip>
+            <IconButton :icon="icons.grid" :label="t('library.zoom')" color="neutral" variant="ghost" />
             <template #content>
               <div class="zoom-pop">
                 <span>{{ t('library.zoom') }}</span>
@@ -618,17 +614,16 @@ const searchNotes = computed(() => {
               </div>
             </template>
           </UPopover>
-          <UTooltip :text="t('library.info')" :kbds="['I']">
-            <UButton
-              :icon="icons.inspector"
-              :aria-label="t('library.info')"
-              :aria-pressed="lib.showDetails"
-              color="neutral"
-              :variant="lib.showDetails ? 'soft' : 'ghost'"
-              square
-              @click="lib.showDetails = !lib.showDetails"
-            />
-          </UTooltip>
+          <IconButton
+            :kbds="['I']"
+            :icon="icons.inspector"
+            :label="t('library.info')"
+            :tip="t(lib.showDetails ? 'library.hideInfo' : 'library.showInfo')"
+            :aria-pressed="lib.showDetails"
+            color="neutral"
+            :variant="lib.showDetails ? 'soft' : 'ghost'"
+            @click="lib.showDetails = !lib.showDetails"
+          />
         </PageHeader>
       </template>
 

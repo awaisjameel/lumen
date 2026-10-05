@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import USlider from '@nuxt/ui/components/Slider.vue'
@@ -451,45 +452,37 @@ onBeforeUnmount(() => {
         <span class="time">{{ duration(total) }}</span>
       </div>
       <div class="control-row">
-        <UButton
+        <IconButton
           class="play-control"
           :icon="icons[playing ? 'pause' : ended ? 'reset' : 'play']"
-          :aria-label="t(playing ? 'viewer.pause' : ended ? 'viewer.replay' : 'viewer.play')"
-          :title="t(playing ? 'viewer.pause' : ended ? 'viewer.replay' : 'viewer.play')"
+          :label="t(playing ? 'viewer.pause' : ended ? 'viewer.replay' : 'viewer.play')"
           :disabled="failed"
           variant="soft"
-          square
           @click="togglePlayback"
         />
-        <UButton
+        <IconButton
           class="player-control skip-control"
           :icon="icons['rewind']"
-          :aria-label="t('viewer.skipBack', { n: viewing.skipSeconds })"
-          :title="t('viewer.skipBack', { n: viewing.skipSeconds })"
+          :label="t('viewer.skipBack', { n: viewing.skipSeconds })"
           :disabled="!ready || failed || !total"
           variant="ghost"
-          square
           @click="seekVideo(position - viewing.skipSeconds * 1000)"
         />
-        <UButton
+        <IconButton
           class="player-control skip-control"
           :icon="icons['fast-forward']"
-          :aria-label="t('viewer.skipForward', { n: viewing.skipSeconds })"
-          :title="t('viewer.skipForward', { n: viewing.skipSeconds })"
+          :label="t('viewer.skipForward', { n: viewing.skipSeconds })"
           :disabled="!ready || failed || !total"
           variant="ghost"
-          square
           @click="seekVideo(position + viewing.skipSeconds * 1000)"
         />
         <div class="volume-controls">
-          <UButton
+          <IconButton
             class="player-control"
             :icon="icons[silent ? 'volume-off' : 'volume']"
-            :aria-label="t(silent ? 'viewer.unmute' : 'viewer.mute')"
-            :title="t(silent ? 'viewer.unmute' : 'viewer.mute')"
+            :label="t(silent ? 'viewer.unmute' : 'viewer.mute')"
             :aria-pressed="silent"
             variant="ghost"
-            square
             @click="toggleMute"
           />
           <USlider
@@ -503,15 +496,13 @@ onBeforeUnmount(() => {
         </div>
         <span v-if="buffering && !failed" class="buffering" role="status">{{ t('viewer.buffering') }}</span>
         <div class="spacer" />
-        <UButton
+        <IconButton
           v-if="!props.private"
           class="player-control"
           :icon="icons.image"
-          :aria-label="t('viewer.saveFrame')"
-          :title="t('viewer.saveFrame')"
+          :label="t('viewer.saveFrame')"
           :disabled="!ready || failed"
           variant="ghost"
-          square
           @click="saveFrame"
         />
         <UButton :aria-label="t('viewer.loop')" :aria-pressed="looping" variant="ghost" @click="looping = !looping">{{
@@ -552,27 +543,23 @@ onBeforeUnmount(() => {
         >
           <option v-for="speed in rates" :key="speed" :value="speed">{{ speed }}×</option>
         </select>
-        <UButton
+        <IconButton
           v-if="canPip"
           class="player-control"
           :icon="icons.pip"
-          :aria-label="t(pip ? 'viewer.exitPip' : 'viewer.pip')"
-          :title="t(pip ? 'viewer.exitPip' : 'viewer.pip')"
+          :label="t(pip ? 'viewer.exitPip' : 'viewer.pip')"
           :aria-pressed="pip"
           :disabled="!ready || failed"
           variant="ghost"
-          square
           @click="togglePip"
         />
-        <UButton
+        <IconButton
           v-if="canFullscreen"
           class="player-control"
           :icon="icons[fullscreen ? 'minimize' : 'maximize']"
-          :aria-label="t(fullscreen ? 'viewer.exitFullscreen' : 'viewer.fullscreen')"
-          :title="t(fullscreen ? 'viewer.exitFullscreen' : 'viewer.fullscreen')"
+          :label="t(fullscreen ? 'viewer.exitFullscreen' : 'viewer.fullscreen')"
           :aria-pressed="fullscreen"
           variant="ghost"
-          square
           @click="toggleFullscreen"
         />
       </div>

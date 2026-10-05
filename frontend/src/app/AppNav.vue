@@ -2,10 +2,9 @@
 // The app's navigation, as the sidebar and the narrow window's drawer both
 // show it: the brand, where you can go, what indexing is doing, Settings.
 // Collapsed, it is a rail of icons whose names appear as tooltips.
-import UButton from '@nuxt/ui/components/Button.vue'
+import IconButton from '../shared/IconButton.vue'
 import UNavigationMenu from '@nuxt/ui/components/NavigationMenu.vue'
 import type { NavigationMenuItem } from '@nuxt/ui/components/NavigationMenu.vue'
-import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { icons } from '../design/icons'
@@ -51,18 +50,16 @@ const toggleLabel = computed(() => t(props.collapsed ? 'shell.expandSidebar' : '
     <div class="brand">
       <BrandMark :decorative="!collapsed" />
       <span v-if="!collapsed" class="name">{{ t('app.name') }}</span>
-      <UTooltip v-if="collapsible && !collapsed" :text="toggleLabel">
-        <UButton
-          class="toggle"
-          :icon="icons['sidebar-collapse']"
-          :aria-label="toggleLabel"
-          color="neutral"
-          variant="ghost"
-          size="sm"
-          square
-          @click="emit('toggle')"
-        />
-      </UTooltip>
+      <IconButton
+        v-if="collapsible && !collapsed"
+        class="toggle"
+        :icon="icons['sidebar-collapse']"
+        :label="toggleLabel"
+        color="neutral"
+        variant="ghost"
+        size="sm"
+        @click="emit('toggle')"
+      />
     </div>
     <!-- Only the destinations scroll: the status card's list opens outside
          the sidebar, which a scrolling ancestor would cut off. -->
@@ -71,17 +68,16 @@ const toggleLabel = computed(() => t(props.collapsed ? 'shell.expandSidebar' : '
     </div>
     <IndexStatus :compact="collapsed" />
     <UNavigationMenu :items="app" orientation="vertical" :collapsed="collapsed" color="primary" tooltip />
-    <UTooltip v-if="collapsible && collapsed" :text="toggleLabel" :content="{ side: 'right' }">
-      <UButton
-        class="expand"
-        :icon="icons['sidebar-expand']"
-        :aria-label="toggleLabel"
-        color="neutral"
-        variant="ghost"
-        square
-        @click="emit('toggle')"
-      />
-    </UTooltip>
+    <IconButton
+      v-if="collapsible && collapsed"
+      side="right"
+      class="expand"
+      :icon="icons['sidebar-expand']"
+      :label="toggleLabel"
+      color="neutral"
+      variant="ghost"
+      @click="emit('toggle')"
+    />
   </nav>
 </template>
 

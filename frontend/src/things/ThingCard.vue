@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // Card actions share their definitions with the command palette.
+import IconButton from '../shared/IconButton.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
@@ -91,7 +92,7 @@ function fieldRef(el: unknown) {
   )
 }
 function triggerRef(el: unknown, key: number) {
-  editor.triggerRef(key)(el && typeof el === 'object' && '$el' in el && el.$el instanceof HTMLElement ? el.$el : null)
+  editor.triggerRef(key)(el)
 }
 </script>
 
@@ -141,11 +142,10 @@ function triggerRef(el: unknown, key: number) {
       </form>
     </template>
     <UDropdownMenu :items="items" :content="{ onCloseAutoFocus: keepEditorFocus }">
-      <UButton
+      <IconButton
         :ref="(el) => triggerRef(el, tag.id)"
         :icon="icons.more"
-        :aria-label="t('things.actions', { name: tag.name })"
-        square
+        :label="t('things.actions', { name: tag.name })"
       />
     </UDropdownMenu>
   </CollectionCard>

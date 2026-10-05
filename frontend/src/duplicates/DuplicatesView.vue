@@ -4,8 +4,8 @@
 // pick); its Review button lists what would happen and does nothing until the
 // user confirms. Similar photos go to Lumen's Trash, and the extra files of
 // exact copies to the Recycle Bin.
+import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
@@ -218,13 +218,12 @@ useCommands([
     <template #header>
       <PageHeader :title="t('nav.duplicates')">
         <SearchBox />
-        <UButton
+        <IconButton
           :icon="icons.refresh"
-          :aria-label="t('duplicates.refresh')"
+          :label="t('duplicates.refresh')"
           :loading="busy"
           color="neutral"
           variant="ghost"
-          square
           @click="runCommand('duplicates.refresh')"
         />
       </PageHeader>
@@ -285,12 +284,11 @@ useCommands([
       :ui="{ content: 'max-w-5xl' }"
     >
       <template #close>
-        <UButton
+        <IconButton
           :icon="icons.close"
-          :aria-label="t('common.close')"
+          :label="t('common.close')"
           color="neutral"
           variant="ghost"
-          square
           @click="preview = null"
         />
       </template>

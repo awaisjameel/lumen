@@ -5,7 +5,7 @@
 // files that couldn't be read failed. In the collapsed sidebar it is a
 // single button (pause or resume, or a tick when there is nothing to do),
 // with the same list beside it.
-import UButton from '@nuxt/ui/components/Button.vue'
+import IconButton from '../shared/IconButton.vue'
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { engine, FailReason, WaitReason } from '../bridge'
 import type { FailureGroup } from '../bridge'
@@ -132,16 +132,14 @@ function open() {
   <div v-if="p" ref="card" class="status" :class="{ compact }" @mouseenter="open" @focusin="open">
     <div class="line">
       <span class="label" role="status">{{ label }}</span>
-      <UButton
+      <IconButton
         v-if="list.length || p.paused"
         :icon="p.paused ? icons.play : icons.pause"
-        :title="p.paused ? t('status.resume') : t('status.pause')"
-        :aria-label="p.paused ? t('status.resume') : t('status.pause')"
+        :label="p.paused ? t('status.resume') : t('status.pause')"
         :aria-describedby="hasList ? id : undefined"
         color="neutral"
         variant="ghost"
         size="xs"
-        square
         @click="togglePause"
       />
       <span v-else-if="compact" class="idle" :title="label">

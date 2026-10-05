@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
@@ -270,10 +271,9 @@ useCommands([
           >
         </template>
         <UDropdownMenu :items="albumItems(album.id)" :content="{ onCloseAutoFocus: keepEditorFocus }">
-          <UButton
+          <IconButton
             :icon="icons.more"
-            :aria-label="t('albums.actions', { name: album.name })"
-            square
+            :label="t('albums.actions', { name: album.name })"
             @pointerdown="rememberTrigger"
             @keydown="rememberTrigger"
           />
@@ -345,12 +345,7 @@ useCommands([
           v-if="editedAlbum"
           :items="albumItems(editedAlbum.id).filter((item) => item.icon !== icons.pencil)"
         >
-          <UButton
-            :icon="icons.more"
-            :aria-label="t('albums.actions', { name: editedAlbum.name })"
-            :disabled="busy"
-            square
-          />
+          <IconButton :icon="icons.more" :label="t('albums.actions', { name: editedAlbum.name })" :disabled="busy" />
         </UDropdownMenu>
         <div class="flex-1" />
         <UButton data-action="cancel-album" :disabled="busy" variant="ghost" @click="cancelEditor">{{

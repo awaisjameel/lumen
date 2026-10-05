@@ -3,9 +3,9 @@
 // original when the WebView can display it (JPEG, PNG, WebP, AVIF). Its
 // photos, the one beside each and what may be done with it come from a
 // source: the library grid unless one is given (the Blocked screen's browser).
+import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
-import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { engine, isCancelled, videosAvailable } from '../bridge'
 import type { AssetDetail, GridItem } from '../bridge'
@@ -496,22 +496,21 @@ onBeforeUnmount(() => {
     >
       <div class="stage">
         <header class="bar">
-          <UTooltip :text="t('common.withKey', { label: t('common.close'), key: 'Esc' })">
-            <UButton
-              class="viewer-control"
-              :icon="icons.close"
-              :aria-label="t('common.close')"
-              variant="ghost"
-              square
-              @click="runCommand('viewer.close')"
-            />
-          </UTooltip>
+          <IconButton
+            :kbds="['Esc']"
+            class="viewer-control"
+            :icon="icons.close"
+            :label="t('common.close')"
+            variant="ghost"
+            @click="runCommand('viewer.close')"
+          />
           <span class="date">{{ detail ? dateTime(detail.takenAt) : '' }}</span>
           <span v-if="loading" class="date" role="status">{{ t('details.loading') }}</span>
-          <UButton
+          <IconButton
             v-if="sliding && !image"
             :icon="icons.pause"
-            :aria-label="t('viewer.slideshow')"
+            :label="t('viewer.slideshow')"
+            :tip="t('viewer.stopSlideshow')"
             :aria-pressed="sliding"
             variant="ghost"
             @click="runCommand('viewer.slideshow')"
@@ -537,42 +536,36 @@ onBeforeUnmount(() => {
           >
             {{ t('trash.deleteFromDisk') }}
           </UButton>
-          <UTooltip
+          <IconButton
             v-if="actions.favourite"
-            :text="t('common.withKey', { label: t(item?.f ? 'details.unfavourite' : 'details.favourite'), key: 'F' })"
+            class="viewer-control"
+            :label="t(item?.f ? 'details.unfavourite' : 'details.favourite')"
+            :kbds="['F']"
+            :aria-pressed="!!item?.f"
+            variant="ghost"
+            @click="runCommand('viewer.favourite')"
           >
-            <UButton
-              class="viewer-control"
-              :aria-pressed="!!item?.f"
-              :aria-label="t(item?.f ? 'details.unfavourite' : 'details.favourite')"
-              variant="ghost"
-              square
-              @click="runCommand('viewer.favourite')"
-            >
-              <Icon name="heart" :filled="!!item?.f" />
-            </UButton>
-          </UTooltip>
-          <UTooltip v-if="actions.moveToTrash" :text="t('trash.move')">
-            <UButton
-              class="viewer-control"
-              :icon="icons.trash"
-              :aria-label="t('trash.move')"
-              variant="ghost"
-              square
-              @click="runCommand('viewer.trash')"
-            />
-          </UTooltip>
-          <UTooltip v-if="actions.details" :text="t('common.withKey', { label: t('library.info'), key: 'I' })">
-            <UButton
-              class="viewer-control"
-              :icon="icons.info"
-              :aria-pressed="lib.showDetails"
-              :aria-label="t('library.info')"
-              variant="ghost"
-              square
-              @click="runCommand('viewer.details')"
-            />
-          </UTooltip>
+            <Icon name="heart" :filled="!!item?.f" />
+          </IconButton>
+          <IconButton
+            v-if="actions.moveToTrash"
+            class="viewer-control"
+            :icon="icons.trash"
+            :label="t('trash.move')"
+            variant="ghost"
+            @click="runCommand('viewer.trash')"
+          />
+          <IconButton
+            v-if="actions.details"
+            class="viewer-control"
+            :icon="icons.info"
+            :label="t('library.info')"
+            :tip="t(lib.showDetails ? 'library.hideInfo' : 'library.showInfo')"
+            :kbds="['I']"
+            :aria-pressed="lib.showDetails"
+            variant="ghost"
+            @click="runCommand('viewer.details')"
+          />
         </header>
 
         <div
@@ -638,52 +631,49 @@ onBeforeUnmount(() => {
           class="image-controls"
           :class="{ raised: viewing.filmstrip && neighbours.length }"
         >
-          <UButton
+          <IconButton
             :icon="icons['zoom-out']"
-            :aria-label="t('viewer.zoomOut')"
-            :title="t('viewer.zoomOut')"
+            :label="t('viewer.zoomOut')"
             variant="ghost"
             @click="runCommand('viewer.zoomOut')"
           />
           <span role="status">{{ image.scale }}%</span>
-          <UButton
+          <IconButton
             :icon="icons['zoom-in']"
-            :aria-label="t('viewer.zoomIn')"
-            :title="t('viewer.zoomIn')"
+            :label="t('viewer.zoomIn')"
             variant="ghost"
             @click="runCommand('viewer.zoomIn')"
           />
           <UButton variant="ghost" @click="runCommand('viewer.fit')">{{ t('viewer.fit') }}</UButton>
           <UButton variant="ghost" @click="runCommand('viewer.actual')">{{ t('viewer.actual') }}</UButton>
-          <UButton
+          <IconButton
             :icon="icons.maximize"
-            :aria-label="t('viewer.fullscreen')"
-            :title="t('viewer.fullscreen')"
+            :label="t('viewer.fullscreen')"
             variant="ghost"
             @click="runCommand('viewer.fullscreen')"
           />
-          <UButton
+          <IconButton
             v-if="src.window"
             :icon="icons.film"
-            :aria-label="t('viewer.filmstrip')"
-            :title="t('viewer.filmstrip')"
+            :label="t('viewer.filmstrip')"
+            :tip="t(viewing.filmstrip ? 'viewer.hideFilmstrip' : 'viewer.showFilmstrip')"
             :aria-pressed="viewing.filmstrip"
             variant="ghost"
             @click="runCommand('viewer.filmstrip')"
           />
-          <UButton
+          <IconButton
             :icon="icons[sliding ? 'pause' : 'play']"
-            :aria-label="t('viewer.slideshow')"
-            :title="t('viewer.slideshow')"
+            :label="t('viewer.slideshow')"
+            :tip="t(sliding ? 'viewer.stopSlideshow' : 'viewer.startSlideshow')"
             :aria-pressed="sliding"
             variant="ghost"
             @click="runCommand('viewer.slideshow')"
           />
-          <UButton
+          <IconButton
             v-if="src.window"
             :icon="icons.layers"
-            :aria-label="t('viewer.compare')"
-            :title="t('viewer.compare')"
+            :label="t('viewer.compare')"
+            :tip="t(comparing ? 'viewer.stopComparing' : 'viewer.compare')"
             :aria-pressed="comparing"
             variant="ghost"
             @click="runCommand('viewer.compare')"
@@ -691,29 +681,26 @@ onBeforeUnmount(() => {
           <UButton v-if="comparing" :aria-pressed="linked" variant="ghost" @click="linked = !linked">{{
             t('viewer.linked')
           }}</UButton>
-          <UButton
+          <IconButton
             v-if="ordinary"
             :icon="icons.rotate"
-            :aria-label="t('viewer.rotate')"
-            :title="t('viewer.rotate')"
+            :label="t('viewer.rotate')"
             :disabled="adjusting"
             variant="ghost"
             @click="runCommand('viewer.rotate')"
           />
-          <UButton
+          <IconButton
             v-if="ordinary"
             :icon="icons.flip"
-            :aria-label="t('viewer.flip')"
-            :title="t('viewer.flip')"
+            :label="t('viewer.flip')"
             :disabled="adjusting"
             variant="ghost"
             @click="runCommand('viewer.flip')"
           />
-          <UButton
+          <IconButton
             v-if="ordinary"
             :icon="icons.undo"
-            :aria-label="t('viewer.resetAdjustment')"
-            :title="t('viewer.resetAdjustment')"
+            :label="t('viewer.resetAdjustment')"
             :disabled="adjusting"
             variant="ghost"
             @click="runCommand('viewer.resetAdjustment')"
@@ -726,26 +713,22 @@ onBeforeUnmount(() => {
           @select="src.jump?.($event)"
         />
 
-        <UTooltip :text="t('viewer.prev')" :content="{ side: 'right' }">
-          <UButton
-            class="viewer-control nav prev"
-            :icon="icons['chevron-left']"
-            :aria-label="t('viewer.prev')"
-            variant="ghost"
-            square
-            @click="runCommand('viewer.previous')"
-          />
-        </UTooltip>
-        <UTooltip :text="t('viewer.next')" :content="{ side: 'left' }">
-          <UButton
-            class="viewer-control nav next"
-            :icon="icons['chevron-right']"
-            :aria-label="t('viewer.next')"
-            variant="ghost"
-            square
-            @click="runCommand('viewer.next')"
-          />
-        </UTooltip>
+        <IconButton
+          side="right"
+          class="viewer-control nav prev"
+          :icon="icons['chevron-left']"
+          :label="t('viewer.prev')"
+          variant="ghost"
+          @click="runCommand('viewer.previous')"
+        />
+        <IconButton
+          side="left"
+          class="viewer-control nav next"
+          :icon="icons['chevron-right']"
+          :label="t('viewer.next')"
+          variant="ghost"
+          @click="runCommand('viewer.next')"
+        />
       </div>
       <DetailsPanel v-if="lib.showDetails && actions.details" :sel="src.sel" />
     </div>

@@ -2,9 +2,9 @@
 // One fact about a photo, a run or the app: an icon, what it is, and its
 // value, which can be selected and copied. A missing value is said, never
 // left blank or invented.
+import IconButton from './IconButton.vue'
 import type { IconName } from '../design/icons'
 import Icon from './Icon.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
 import { ref, watch } from 'vue'
 import { icons } from '../design/icons'
 import { t } from './i18n'
@@ -46,10 +46,10 @@ async function copy() {
     <div v-if="$slots.action" class="action">
       <slot name="action" />
     </div>
-    <UButton
+    <IconButton
       v-if="copyable && value"
       :icon="icons.copy"
-      :aria-label="t(copied ? 'files.copied' : 'files.copyField', { name: label })"
+      :label="t(copied ? 'files.copied' : 'files.copyField', { name: label })"
       variant="ghost"
       size="xs"
       @click="copy"

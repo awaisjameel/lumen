@@ -2,7 +2,7 @@
 // The one search box: type a description and press Enter to search by what's
 // in the photos (names of people narrow it to them), or pick a matching
 // person or Thing. Ctrl+F or / focuses it.
-import UButton from '@nuxt/ui/components/Button.vue'
+import IconButton from '../shared/IconButton.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, ref, useId, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -170,14 +170,12 @@ function heading(o: Option, i: number): string {
       @keydown="onKey"
     >
       <template v-if="text" #trailing>
-        <UButton
+        <IconButton
           :icon="icons.close"
-          :aria-label="t('search.clear')"
-          :title="t('search.clear')"
+          :label="t('search.clear')"
           color="neutral"
           variant="ghost"
           size="xs"
-          square
           @mousedown.prevent
           @click="clear"
         />

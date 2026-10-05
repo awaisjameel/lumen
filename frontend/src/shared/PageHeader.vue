@@ -2,8 +2,7 @@
 // Every page's header: where you are (an optional way back, the title, a
 // count), then the page's own tools. The title never pushes the tools out:
 // it shortens first, and on narrow windows the tools wrap below it.
-import UButton from '@nuxt/ui/components/Button.vue'
-import UTooltip from '@nuxt/ui/components/Tooltip.vue'
+import IconButton from './IconButton.vue'
 import type { RouteLocationRaw } from 'vue-router'
 import { icons } from '../design/icons'
 
@@ -18,16 +17,14 @@ defineProps<{
 
 <template>
   <header class="page-header">
-    <UTooltip v-if="back" :text="back.label">
-      <UButton
-        :to="back.to"
-        :icon="icons['arrow-left']"
-        :aria-label="back.label"
-        color="neutral"
-        variant="ghost"
-        square
-      />
-    </UTooltip>
+    <IconButton
+      v-if="back"
+      :to="back.to"
+      :icon="icons['arrow-left']"
+      :label="back.label"
+      color="neutral"
+      variant="ghost"
+    />
     <slot name="lead" />
     <div class="heading">
       <slot name="title">

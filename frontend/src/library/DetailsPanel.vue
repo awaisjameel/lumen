@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import USlideover from '@nuxt/ui/components/Slideover.vue'
-import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { createReusableTemplate } from '@vueuse/core'
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import {
@@ -641,26 +641,20 @@ useCommands([
                 :ui="{ label: 'truncate' }"
                 >{{ f.name || t('person.unnamed') }}
               </UButton>
-              <UTooltip :text="t('details.notThisPerson', { name: f.name || t('person.unnamed') })">
-                <UButton
-                  :icon="icons.close"
-                  :aria-label="t('details.notThisPerson', { name: f.name || t('person.unnamed') })"
-                  variant="ghost"
-                  size="xs"
-                  square
-                  @click="notThem(f)"
-                />
-              </UTooltip>
-              <UTooltip :text="t('blocked.confirmTitle', { name: f.name || t('person.unnamed') })">
-                <UButton
-                  :icon="icons['eye-off']"
-                  :aria-label="t('blocked.confirmTitle', { name: f.name || t('person.unnamed') })"
-                  variant="ghost"
-                  size="xs"
-                  square
-                  @click="blockPerson(f)"
-                />
-              </UTooltip>
+              <IconButton
+                :icon="icons.close"
+                :label="t('details.notThisPerson', { name: f.name || t('person.unnamed') })"
+                variant="ghost"
+                size="xs"
+                @click="notThem(f)"
+              />
+              <IconButton
+                :icon="icons['eye-off']"
+                :label="t('blocked.blockNamed', { name: f.name || t('person.unnamed') })"
+                variant="ghost"
+                size="xs"
+                @click="blockPerson(f)"
+              />
             </template>
             <PersonPicker v-else class="who" :placeholder="t('details.whoIsThis')" @pick="(n) => nameFace(f, n)" />
             <UButton class="block-face" :icon="icons['eye-off']" variant="ghost" size="sm" @click="blockFace(f)">{{
@@ -684,26 +678,20 @@ useCommands([
               :ui="{ label: 'truncate' }"
               >{{ tag.name }}</UButton
             >
-            <UTooltip :text="t('details.removeTag', { name: tag.name })">
-              <UButton
-                :icon="icons.close"
-                :aria-label="t('details.removeTag', { name: tag.name })"
-                variant="ghost"
-                size="xs"
-                square
-                @click="removeTag(tag)"
-              />
-            </UTooltip>
-            <UTooltip :text="t('blocked.confirmTitle', { name: tag.name })">
-              <UButton
-                :icon="icons['eye-off']"
-                :aria-label="t('blocked.confirmTitle', { name: tag.name })"
-                variant="ghost"
-                size="xs"
-                square
-                @click="blockThing(tag)"
-              />
-            </UTooltip>
+            <IconButton
+              :icon="icons.close"
+              :label="t('details.removeTag', { name: tag.name })"
+              variant="ghost"
+              size="xs"
+              @click="removeTag(tag)"
+            />
+            <IconButton
+              :icon="icons['eye-off']"
+              :label="t('blocked.blockNamed', { name: tag.name })"
+              variant="ghost"
+              size="xs"
+              @click="blockThing(tag)"
+            />
             <UBadge color="neutral" variant="subtle" size="sm">{{
               t(tag.source === TagSource.TagByAI ? 'details.byAI' : 'details.byYou')
             }}</UBadge>
@@ -749,16 +737,13 @@ useCommands([
             :aria-label="t('albums.createForItem')"
             :aria-invalid="nameTooLong(newAlbum) || undefined"
           />
-          <UTooltip :text="t('albums.createForItem')">
-            <UButton
-              type="submit"
-              :icon="icons.plus"
-              :aria-label="t('albums.createForItem')"
-              :loading="creatingAlbum"
-              :disabled="creatingAlbum || !trimName(newAlbum) || nameTooLong(newAlbum)"
-              square
-            />
-          </UTooltip>
+          <IconButton
+            type="submit"
+            :icon="icons.plus"
+            :label="t('albums.createForItem')"
+            :loading="creatingAlbum"
+            :disabled="creatingAlbum || !trimName(newAlbum) || nameTooLong(newAlbum)"
+          />
         </form>
         <UAlert
           v-if="nameTooLong(newAlbum)"
@@ -785,57 +770,45 @@ useCommands([
         >
           <template #action>
             <div class="flex flex-col items-end gap-1">
-              <UTooltip v-if="!lib.inTrash" :text="t('files.open')">
-                <UButton
-                  :icon="icons.external"
-                  :aria-label="t('files.open')"
-                  variant="ghost"
-                  size="sm"
-                  square
-                  @click="openCopy(detail.id, p, false)"
-                />
-              </UTooltip>
-              <UTooltip v-if="!lib.inTrash" :text="t('files.openWith')">
-                <UButton
-                  :icon="icons.more"
-                  :aria-label="t('files.openWith')"
-                  variant="ghost"
-                  size="sm"
-                  square
-                  @click="openCopy(detail.id, p, true)"
-                />
-              </UTooltip>
-              <UTooltip :text="t('files.copyName')">
-                <UButton
-                  :icon="icons.copy"
-                  :aria-label="t('files.copyName')"
-                  variant="ghost"
-                  size="sm"
-                  square
-                  @click="copyName(p)"
-                />
-              </UTooltip>
-              <UTooltip :text="t('common.showInFolder')">
-                <UButton
-                  :icon="icons.folder"
-                  :aria-label="t('common.showInFolder')"
-                  variant="ghost"
-                  size="sm"
-                  square
-                  @click="showInFolder(detail.id, p)"
-                />
-              </UTooltip>
-              <UTooltip v-if="!lib.inTrash" :text="t('blocked.blockFolder', { path: p })">
-                <UButton
-                  data-block-folder
-                  :icon="icons['eye-off']"
-                  :aria-label="t('blocked.blockFolder', { path: p })"
-                  variant="ghost"
-                  size="sm"
-                  square
-                  @click="blockFolder(p)"
-                />
-              </UTooltip>
+              <IconButton
+                v-if="!lib.inTrash"
+                :icon="icons.external"
+                :label="t('files.open')"
+                variant="ghost"
+                size="sm"
+                @click="openCopy(detail.id, p, false)"
+              />
+              <IconButton
+                v-if="!lib.inTrash"
+                :icon="icons.more"
+                :label="t('files.openWith')"
+                variant="ghost"
+                size="sm"
+                @click="openCopy(detail.id, p, true)"
+              />
+              <IconButton
+                :icon="icons.copy"
+                :label="t('files.copyName')"
+                variant="ghost"
+                size="sm"
+                @click="copyName(p)"
+              />
+              <IconButton
+                :icon="icons.folder"
+                :label="t('common.showInFolder')"
+                variant="ghost"
+                size="sm"
+                @click="showInFolder(detail.id, p)"
+              />
+              <IconButton
+                v-if="!lib.inTrash"
+                data-block-folder
+                :icon="icons['eye-off']"
+                :label="t('blocked.blockFolder', { path: p })"
+                variant="ghost"
+                size="sm"
+                @click="blockFolder(p)"
+              />
             </div>
           </template>
         </MetaRow>
@@ -888,15 +861,7 @@ useCommands([
     />
     <header class="inspector-header">
       <h2>{{ t('details.title') }}</h2>
-      <UTooltip :text="t('common.close')">
-        <UButton
-          :icon="icons.close"
-          :aria-label="t('common.close')"
-          variant="ghost"
-          square
-          @click="lib.showDetails = false"
-        />
-      </UTooltip>
+      <IconButton :icon="icons.close" :label="t('common.close')" variant="ghost" @click="lib.showDetails = false" />
     </header>
     <div class="inspector-scroll">
       <ReuseInspectorContent />
@@ -917,7 +882,7 @@ useCommands([
     "
   >
     <template #close>
-      <UButton :icon="icons.close" :aria-label="t('common.close')" variant="ghost" square />
+      <IconButton :icon="icons.close" :label="t('common.close')" variant="ghost" />
     </template>
     <template #body>
       <ReuseInspectorContent />

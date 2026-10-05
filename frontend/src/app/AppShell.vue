@@ -2,7 +2,7 @@
 // The frame around every page. Wide windows: a sidebar the user can resize
 // or collapse. Medium: the sidebar is a rail of icons. Narrow: the page
 // takes the whole window and navigation opens as a drawer.
-import UButton from '@nuxt/ui/components/Button.vue'
+import IconButton from '../shared/IconButton.vue'
 import USlideover from '@nuxt/ui/components/Slideover.vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -66,13 +66,12 @@ useCommands([
 
     <div class="main">
       <header v-if="mode === 'narrow'" class="narrow-bar">
-        <UButton
+        <IconButton
           :icon="icons.menu"
-          :aria-label="t('shell.openNavigation')"
+          :label="t('shell.openNavigation')"
           :aria-expanded="drawer"
           color="neutral"
           variant="ghost"
-          square
           @click="drawer = true"
         />
         <BrandMark class="narrow-mark" />
