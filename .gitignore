@@ -7,6 +7,8 @@ build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 # Mobile generated (per-machine; overlays hold absolute paths)
 build/ios/xcode/overlay.json
 build/ios/xcode/gen/
+# Icon Composer compiles this on macOS; never ship the template's Wails icon.
+build/darwin/Assets.car
 build/android/overlay.json
 build/android/gen/
 # Phase 0 spikes: downloaded runtimes, models and outputs

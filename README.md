@@ -1,6 +1,10 @@
 # Lumen
 
+<img src="frontend/public/lumen.png" width="64" height="64" alt="Lumen aperture logo" />
+
 A Windows-first desktop photo gallery that organises large libraries with on-device AI. Fully local: no accounts, no uploads, no telemetry. See [the plan](Local%20AI%20Photo%20Gallery%20—%20End-to-End%20Plan.md) for the full vision and roadmap.
+
+Brand assets and their regeneration workflow are documented in [the branding guide](docs/branding.md).
 
 ## Status
 

@@ -278,12 +278,18 @@ tasks:
     sources:
       - build/config.yml
       - build/appicon.png
+      - scripts/branding/main.go
     generates:
       - build/ios/xcode/main/main.m
       - build/ios/xcode/main/Assets.xcassets/**/*
       - build/ios/xcode/project.pbxproj
     cmds:
       - wails3 ios xcode:gen -outdir build/ios/xcode -config build/config.yml
+      - go run ./scripts/branding -ios-assets build/ios/xcode/main/Assets.xcassets/AppIcon.appiconset
+    env:
+      GOOS: '{{OS}}'
+      GOARCH: '{{ARCH}}'
+      CGO_ENABLED: '0'
 
   run:
     summary: Run the application in iOS Simulator

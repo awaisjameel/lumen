@@ -13,6 +13,7 @@ import { icons } from '../design/icons'
 import { useCommands, runCommand } from '../shared/commands'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
+import BrandMark from '../shared/BrandMark.vue'
 
 const lib = useLibrary()
 const folders = ref<{ path: string; key: string; on: boolean }[]>([])
@@ -88,7 +89,7 @@ useCommands([
 <template>
   <main class="welcome">
     <div class="welcome-content">
-      <img src="/lumen.png" alt="" class="logo" />
+      <BrandMark class="logo" />
       <h1>{{ t('welcome.title') }}</h1>
       <p class="question">{{ t('welcome.question') }}</p>
       <FeatureState v-if="!loaded" kind="loading" :title="t('welcome.loading')" />

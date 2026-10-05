@@ -40,6 +40,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed frontend/public/lumen.png
+var appIcon []byte
+
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--render-worker" {
 		if err := media.RenderWorker(context.Background(), os.Stdin, os.Stdout); err != nil {
@@ -77,6 +80,7 @@ func run() error {
 	app := application.New(application.Options{
 		Name:         "Lumen",
 		Description:  "Local, private AI photo gallery",
+		Icon:         appIcon,
 		MarshalError: services.MarshalError, // for errors outside bound methods; see service
 		PanicHandler: recordPanics(reports),
 		Assets: application.AssetOptions{

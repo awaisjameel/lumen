@@ -13,6 +13,7 @@ import { t } from '../shared/i18n'
 import { useLayoutMode } from '../shared/layout'
 import { usePreferences } from '../shared/preferences'
 import ResizeHandle from '../shared/ResizeHandle.vue'
+import BrandMark from '../shared/BrandMark.vue'
 import AppNav from './AppNav.vue'
 
 const mode = useLayoutMode()
@@ -74,7 +75,7 @@ useCommands([
           square
           @click="drawer = true"
         />
-        <img src="/lumen.png" alt="" />
+        <BrandMark class="narrow-mark" />
         <span>{{ t('app.name') }}</span>
       </header>
       <main class="content">
@@ -135,7 +136,7 @@ useCommands([
   font: 600 0.9375rem var(--font-display);
 }
 
-.narrow-bar img {
+.narrow-mark {
   width: 1.25rem;
   height: 1.25rem;
 }

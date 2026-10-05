@@ -12,7 +12,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit
 T=deps/tools
-GO=(. ./internal/... ./services/...) # not ./...: build/ holds other platforms' templates
+GO=(. ./internal/... ./services/... ./scripts/branding) # not ./...: build/ holds other platforms' templates
 
 for tool in golangci-lint deadcode govulncheck ruff shellcheck; do
   [ -x "$T/$tool.exe" ] || { echo "missing $T/$tool.exe: run scripts/deps.sh" >&2; exit 2; }

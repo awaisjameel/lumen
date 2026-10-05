@@ -12,6 +12,7 @@ import { icons } from '../design/icons'
 import IndexStatus from '../library/IndexStatus.vue'
 import { useLibrary } from '../library/store'
 import { t } from '../shared/i18n'
+import BrandMark from '../shared/BrandMark.vue'
 import { isActive, navEntries } from './nav'
 import type { NavEntry } from './nav'
 
@@ -48,7 +49,7 @@ const toggleLabel = computed(() => t(props.collapsed ? 'shell.expandSidebar' : '
 <template>
   <nav class="app-nav" :class="{ collapsed }" :aria-label="t('shell.navigation')">
     <div class="brand">
-      <img src="/lumen.png" alt="" />
+      <BrandMark :decorative="!collapsed" />
       <span v-if="!collapsed" class="name">{{ t('app.name') }}</span>
       <UTooltip v-if="collapsible && !collapsed" :text="toggleLabel">
         <UButton
@@ -112,10 +113,6 @@ const toggleLabel = computed(() => t(props.collapsed ? 'shell.expandSidebar' : '
 }
 .collapsed .brand {
   padding: 0;
-}
-.brand img {
-  width: 1.5rem;
-  height: 1.5rem;
 }
 .brand .name {
   flex: 1;
