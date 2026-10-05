@@ -140,7 +140,11 @@ func (s *LibraryService) ServiceShutdown() error {
 // file between its old place and its new one.
 func (s *LibraryService) recoverOrganise(ctx context.Context) error {
 	open, err := s.store.InterruptedOrganiseRuns(ctx)
-	if err != nil || len(open) == 0 {
+	if err != nil {
+		return err
+	}
+	exports, err := s.store.HasInterruptedExports(ctx)
+	if err != nil || (len(open) == 0 && !exports) {
 		return err
 	}
 	if s.organise.claim(recovering, "") != nil {
@@ -152,6 +156,9 @@ func (s *LibraryService) recoverOrganise(ctx context.Context) error {
 		return err
 	}
 	defer unhold()
+	if err := s.exportRunner().Recover(ctx); err != nil {
+		return err
+	}
 	return s.runner().RecoverAll(ctx)
 }
 
@@ -231,7 +238,7 @@ func hasEnabledSource(sources []core.Source, id int64) bool {
 }
 
 func organiseMoveOf(m store.OrganiseMove) core.OrganiseMove {
-	return core.OrganiseMove{Seq: m.Seq, AssetID: m.AssetID, From: m.From, To: m.To, State: m.State, Renamed: m.Renamed, Error: m.Error}
+	return core.OrganiseMove{Seq: m.Seq, AssetID: m.AssetID, From: m.From, To: m.To, State: m.State, Renamed: m.Renamed, Error: m.Error, Sidecar: m.Sidecar}
 }
 
 // The states a run can be started or undone from. A run still marked running

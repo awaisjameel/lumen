@@ -17,10 +17,13 @@ import { applyAppearance, cachedAppearance } from '../design/appearance'
 import { reportError } from './errors'
 import { latestSave } from './latestSave'
 import type { LatestSave } from './latestSave'
+import { viewerDefaults } from './viewing'
+import type { ViewerPreferences } from '../bridge'
 
 /** What a library starts with (core.DefaultPreferences). */
 function defaults(): Preferences {
   return {
+    viewer: viewerDefaults(),
     theme: Theme.ThemeSystem,
     accent: Accent.AccentBlue,
     density: Density.DensityComfortable,
@@ -133,5 +136,10 @@ export const usePreferences = defineStore('preferences', () => {
     }
   }
 
-  return { prefs, loaded, saving, load, set }
+  async function setViewer(patch: Partial<ViewerPreferences>): Promise<void> {
+    if (!loaded.value) await load()
+    await set({ viewer: { ...viewerDefaults(), ...prefs.value.viewer, ...patch } })
+  }
+
+  return { prefs, loaded, saving, load, set, setViewer }
 })

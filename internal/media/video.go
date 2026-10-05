@@ -40,6 +40,8 @@ type videoInfo struct {
 // ffprobeOutput is the part of ffprobe's JSON Lumen reads.
 type ffprobeOutput struct {
 	Streams []struct {
+		Index       int               `json:"index"`
+		FrameRate   string            `json:"r_frame_rate"`
 		CodecType   string            `json:"codec_type"`
 		CodecName   string            `json:"codec_name"`
 		Width       int               `json:"width"`

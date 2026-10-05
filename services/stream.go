@@ -50,6 +50,10 @@ type videoConverter interface {
 	ConvertMP4(context.Context, string, int64) (func(io.Writer) error, error)
 }
 
+type trackConverter interface {
+	ConvertMP4Track(context.Context, string, int64, int) (func(io.Writer) error, error)
+}
+
 // NewStreamer starts listening on a free loopback port. Serve it with Run.
 func NewStreamer(st *store.Store, d media.Decoders, gate *BlockGate) (*Streamer, error) {
 	if gate == nil {
@@ -190,7 +194,18 @@ func (s *Streamer) servePlay(w http.ResponseWriter, r *http.Request, id int64) {
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	convert, err := s.decoder.ConvertMP4(ctx, path, at)
+	var convert func(io.Writer) error
+	if r.URL.Query().Has("audio") {
+		audio, parseErr := strconv.Atoi(r.URL.Query().Get("audio"))
+		d, supported := s.decoder.(trackConverter)
+		if parseErr != nil || audio < 0 || !supported {
+			http.Error(w, "invalid audio track", http.StatusBadRequest)
+			return
+		}
+		convert, err = d.ConvertMP4Track(ctx, path, at, audio)
+	} else {
+		convert, err = s.decoder.ConvertMP4(ctx, path, at)
+	}
 	if !served(w, err, id) { // a damaged file fails here, before any header is sent
 		return
 	}

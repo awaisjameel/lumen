@@ -114,6 +114,7 @@ export interface AlbumRule {
  * AssetDetail is everything the details panel shows.
  */
 export interface AssetDetail {
+    "adjustment"?: DisplayAdjustment | null;
     "id": number;
     "kind": Kind;
 
@@ -386,6 +387,22 @@ export interface DiskDeletion {
 }
 
 /**
+ * DisplayAdjustment changes presentation only, never source or AI pixels.
+ */
+export interface DisplayAdjustment {
+    /**
+     * clockwise quarter turns
+     */
+    "rotation": number;
+
+    /**
+     * horizontal flip after rotation
+     */
+    "flip": boolean;
+    "version": number;
+}
+
+/**
  * DuplicateGroup holds exact file copies or photos that look similar.
  * Similarity is a suggestion for review, never a deletion decision.
  */
@@ -491,6 +508,44 @@ export interface Event {
      * the user pinned it: it sorts first
      */
     "pinned": boolean;
+}
+
+/**
+ * ExportJob is a durable per-file outcome; completed exports have no Undo.
+ */
+export interface ExportJob {
+    "id": number;
+    "batch": number;
+    "assetId": number;
+    "from": string;
+    "to": string;
+    "size": number;
+    "mtime": number;
+    "state": string;
+    "error": string;
+    "temp": string;
+    "digest": string;
+    "options": ExportOptions;
+}
+
+/**
+ * ExportOptions describes exactly what the new file includes. Originals
+ * retain their metadata; rendered JPEG/PNG copies contain upright sRGB
+ * pixels without source metadata and never replace an existing file.
+ */
+export interface ExportOptions {
+    /**
+     * original, jpeg or png
+     */
+    "format": string;
+    "side": number;
+    "quality": number;
+    "adjust": boolean;
+
+    /**
+     * -1 for originals/photos; source time for a video frame
+     */
+    "frame": number;
 }
 
 /**
@@ -732,6 +787,33 @@ export interface MediaCaps {
 }
 
 /**
+ * MediaInspection is read from the available file rather than inferred.
+ */
+export interface MediaInspection {
+    "orientation": number;
+    "profile": string;
+    "lens": string;
+    "exposure": string;
+    "aperture": string;
+    "iso": string;
+    "frameRate": string;
+    "pages": number;
+    "tracks": MediaTrack[] | null;
+}
+
+/**
+ * MediaTrack describes an actual audio or subtitle stream and its support.
+ */
+export interface MediaTrack {
+    "index": number;
+    "kind": string;
+    "codec": string;
+    "language": string;
+    "title": string;
+    "supported": boolean;
+}
+
+/**
  * OrganiseMove is one file's move, planned or made.
  */
 export interface OrganiseMove {
@@ -750,6 +832,11 @@ export interface OrganiseMove {
      * why it was skipped or failed
      */
     "error"?: string;
+
+    /**
+     * journaled XMP disposition
+     */
+    "sidecar"?: string;
 }
 
 /**
@@ -935,6 +1022,7 @@ export enum Playback {
  * painting its first frame.
  */
 export interface Preferences {
+    "viewer"?: ViewerPreferences | null;
     "theme": Theme;
     "accent": Accent;
     "density": Density;
@@ -1034,6 +1122,20 @@ export interface Progress {
 }
 
 /**
+ * RenderInfo describes the pixels actually available to a viewer. A bounded
+ * render must not claim to contain every source pixel when it was reduced.
+ */
+export interface RenderInfo {
+    "width": number;
+    "height": number;
+    "sourceWidth": number;
+    "sourceHeight": number;
+    "limited": boolean;
+    "revision": string;
+    "provenance": string;
+}
+
+/**
  * SearchResult is the answer to a natural-language search, best match first.
  */
 export interface SearchResult {
@@ -1063,6 +1165,15 @@ export interface SearchResult {
      * a blocked named entity occurred in the query
      */
     "blocked": boolean;
+}
+
+/**
+ * Selection is an explicit snapshot of resolved ids. Batch actions check its
+ * library revision before using it, then revalidate each asset at execution.
+ */
+export interface Selection {
+    "ids": number[] | null;
+    "revision": number;
 }
 
 /**
@@ -1282,6 +1393,22 @@ export interface View {
      * 0 = any event
      */
     "event"?: number;
+}
+
+/**
+ * ViewerPreferences are saved with the library's interface preferences.
+ */
+export interface ViewerPreferences {
+    "filmstrip": boolean;
+    "autoHide": boolean;
+    "slideshowSeconds": number;
+    "loop": boolean;
+    "autoplay": boolean;
+    "volume": number;
+    "muted": boolean;
+    "speed": number;
+    "skipSeconds": number;
+    "resume": boolean;
 }
 
 /**

@@ -47,6 +47,7 @@ const codeText: Record<ErrorCode, MessageKey> = {
   [ErrorCode.InvalidTemplate]: 'error.invalidTemplate',
   [ErrorCode.OrganiseBusy]: 'error.organiseBusy',
   [ErrorCode.OrganiseState]: 'error.organiseState',
+  [ErrorCode.SelectionChanged]: 'error.selectionChanged',
   [ErrorCode.SigninFailed]: 'error.signinFailed',
   [ErrorCode.SigninUnavailable]: 'error.signinUnavailable',
 }

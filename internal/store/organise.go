@@ -270,6 +270,13 @@ func scanOrganiseMove(r *sql.Rows) (m OrganiseMove, err error) {
 	return m, err
 }
 
+// VisibleOrganiseMoves is the public file-operation outcome list.
+func (s *Store) VisibleOrganiseMoves(ctx context.Context, runID int64) ([]OrganiseMove, error) {
+	return queryAll(ctx, s.r, scanOrganiseMove, `SELECT seq, COALESCE(file_id, 0), asset_id, root, from_path, to_path, size, mtime,
+		renamed, sidecar, state, COALESCE(error, '') FROM organise_moves WHERE run_id = ?
+		AND asset_id IN (SELECT id FROM assets WHERE `+visible+`) ORDER BY seq`, runID)
+}
+
 // SetOrganiseRunState records where a run stands.
 func (s *Store) SetOrganiseRunState(ctx context.Context, runID int64, state core.OrganiseRunState) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {

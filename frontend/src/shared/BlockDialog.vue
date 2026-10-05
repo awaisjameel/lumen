@@ -10,6 +10,7 @@ import type { BlockRequest } from './block'
 import { errorText, reportError } from './errors'
 import { t } from './i18n'
 import PinFields from './PinFields.vue'
+import { notify } from './notify'
 
 const ready = ref(false)
 let opener: HTMLElement | null = null
@@ -98,6 +99,28 @@ async function save() {
       if (blockRequest.value !== request) return
       configured.value = true
     }
+    if (request.ids) {
+      let saved = 0
+      for (const id of request.ids) {
+        try {
+          await engine.setBlock(BlockKind.BlockAsset, id, '', BlockMode.BlockPhotos)
+          saved++
+          request.outcome?.(id, '')
+        } catch (e) {
+          request.outcome?.(id, errorText(e))
+        }
+      }
+      if (saved)
+        notify({
+          id: 'block.batch',
+          kind: 'success',
+          title: t('files.blockedCount', { n: saved }),
+          duration: 8000,
+        })
+      close(request, saved > 0)
+      void showBlocksChanged().catch(reportError)
+      return
+    }
     const change =
       request.kind === BlockKind.BlockFace
         ? await engine.blockFace(request.targetID, requestedMode, requestedLookalikes)
@@ -107,6 +130,7 @@ async function save() {
     void showBlocksChanged().catch(reportError)
   } catch (e) {
     if (blockRequest.value === request) error.value = errorText(e)
+    if (request.ids) void showBlocksChanged().catch(reportError)
   } finally {
     busy.value = false
   }

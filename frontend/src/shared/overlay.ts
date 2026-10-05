@@ -26,6 +26,64 @@ export function portalOpen(): boolean {
 }
 
 /**
+ * Give portalled overlays their opening order, independently of where Vue
+ * placed their persistent portal containers. A global confirmation can be
+ * earlier in the DOM than the feature dialog it must cover. Reka still owns
+ * dismissal and focus; this owner only supplies the matching paint order.
+ */
+export function startPortalLayers(): () => void {
+  const active = new Map<HTMLElement, number>()
+  const previous = new Map<HTMLElement, string>()
+  const configured = Number.parseInt(getComputedStyle(document.documentElement).getPropertyValue('--lumen-z-portal'))
+  let next = Number.isFinite(configured) ? configured : 40
+  function paint(element: HTMLElement, z: number) {
+    if (!previous.has(element)) previous.set(element, element.style.zIndex)
+    element.style.zIndex = String(z)
+  }
+  function refresh() {
+    const current = [...document.querySelectorAll(PORTALLED)].filter(
+      (element): element is HTMLElement => element instanceof HTMLElement,
+    )
+    for (const element of active.keys()) if (!current.includes(element)) active.delete(element)
+    for (const [element, value] of previous) {
+      if (!element.isConnected) {
+        element.style.zIndex = value
+        previous.delete(element)
+      }
+    }
+    for (const element of current) {
+      let z = active.get(element)
+      if (z === undefined) {
+        z = next
+        next += 2
+        active.set(element, z)
+      }
+      paint(element, z)
+      const popper = element.closest('[data-reka-popper-content-wrapper]')
+      if (popper instanceof HTMLElement) paint(popper, z)
+      const overlay = element.closest('[data-slot="overlay"]') ?? element.previousElementSibling
+      if (overlay instanceof HTMLElement && overlay.dataset.slot === 'overlay') paint(overlay, z)
+    }
+    for (const tooltip of document.querySelectorAll('[role="tooltip"]')) {
+      const popper = tooltip.closest('[data-reka-popper-content-wrapper]')
+      if (popper instanceof HTMLElement) paint(popper, next)
+    }
+  }
+  const observer = new MutationObserver(refresh)
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-state', 'role', 'open'],
+  })
+  refresh()
+  return () => {
+    observer.disconnect()
+    for (const [element, value] of previous) element.style.zIndex = value
+  }
+}
+
+/**
  * Resolves once no portalled overlay is open: at once if none is, else when
  * the open one has gone (a menu closing after its item was chosen), or after
  * wait ms at the latest. An open overlay traps the focus, so anything that

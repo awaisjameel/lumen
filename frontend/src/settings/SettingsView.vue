@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
 import AboutSection from '../about/AboutSection.vue'
 import OcrSetting from './OcrSetting.vue'
 import XmpSetting from './XmpSetting.vue'
+import ViewingSettings from './ViewingSettings.vue'
 import {
   Accent,
   Density,
@@ -200,6 +201,7 @@ function clearSearch() {
   category.value = ''
 }
 const categories = [
+  { id: 'viewing', label: 'viewer.settings' },
   { id: 'appearance', label: 'settings.appearance' },
   { id: 'library', label: 'settings.category.library' },
   { id: 'indexing', label: 'settings.category.indexing' },
@@ -275,6 +277,20 @@ function onConfidence(value: number | number[] | undefined) {
 onBeforeUnmount(saveConfidence)
 // Filtering keeps long-running child operations mounted so their busy state and results survive.
 const categoryKeys: Record<string, MessageKey[]> = {
+  viewing: [
+    'viewer.settings',
+    'viewer.filmstrip',
+    'viewer.autoHide',
+    'viewer.interval',
+    'viewer.loop',
+    'viewer.autoplay',
+    'viewer.volume',
+    'viewer.skipInterval',
+    'viewer.speed',
+    'viewer.resume',
+    'viewer.resumeHint',
+    'viewer.clearHistory',
+  ],
   appearance: [
     'settings.theme',
     'settings.themeHint',
@@ -799,6 +815,14 @@ const shownCategories = computed(() =>
         >
           <h2>{{ t('about.title') }}</h2>
           <AboutSection :query="query" />
+        </section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'viewing')"
+          :aria-label="t('viewer.settings')"
+          data-category="viewing"
+        >
+          <h2>{{ t('viewer.settings') }}</h2>
+          <ViewingSettings />
         </section>
       </div>
     </div>

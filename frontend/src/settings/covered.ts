@@ -149,6 +149,16 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
 
   /** The Viewer's source: the browser's photos, in the order listed. */
   const source: ViewerSource = {
+    first() {
+      const first = items.value[0]
+      if (first) view(first.id)
+      return Promise.resolve()
+    },
+    window() {
+      const at = viewing.value === null ? undefined : position.value.get(viewing.value)
+      return Promise.resolve(at === undefined ? [] : items.value.slice(Math.max(0, at - 12), at + 13))
+    },
+    jump: view,
     get id() {
       return viewing.value
     },

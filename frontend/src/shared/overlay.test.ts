@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref } from 'vue'
-import { layerOpen, portalOpen, shortcutsSuspended, useLayer } from './overlay'
+import { layerOpen, portalOpen, shortcutsSuspended, startPortalLayers, useLayer } from './overlay'
 
 afterEach(() => {
   document.body.innerHTML = ''
@@ -83,4 +83,37 @@ it('recognises the portalled overlays of Nuxt UI, which take the keyboard from a
   expect(portalOpen()).toBe(false)
   expect(viewer.owns()).toBe(true)
   viewer.wrapper.unmount()
+})
+
+it('paints a later confirmation above a feature dialog even when its portal comes first in the DOM', async () => {
+  const confirmation = document.createElement('div')
+  confirmation.setAttribute('role', 'dialog')
+  confirmation.dataset.state = 'closed'
+  const backdrop = document.createElement('div')
+  backdrop.dataset.slot = 'overlay'
+  const feature = document.createElement('div')
+  feature.setAttribute('role', 'dialog')
+  feature.dataset.state = 'open'
+  document.body.append(backdrop, confirmation, feature)
+  const stop = startPortalLayers()
+  try {
+    confirmation.dataset.state = 'open'
+    await Promise.resolve()
+    expect(Number(confirmation.style.zIndex)).toBeGreaterThan(Number(feature.style.zIndex))
+    expect(backdrop.style.zIndex).toBe(confirmation.style.zIndex)
+    const wrapper = document.createElement('div')
+    wrapper.setAttribute('data-reka-popper-content-wrapper', '')
+    const menu = document.createElement('div')
+    menu.setAttribute('role', 'menu')
+    menu.dataset.state = 'open'
+    wrapper.append(menu)
+    document.body.append(wrapper)
+    await Promise.resolve()
+    expect(Number(wrapper.style.zIndex)).toBeGreaterThan(Number(confirmation.style.zIndex))
+    expect(shortcutsSuspended()).toBe(true)
+  } finally {
+    stop()
+  }
+  expect(confirmation.style.zIndex).toBe('')
+  expect(feature.style.zIndex).toBe('')
 })

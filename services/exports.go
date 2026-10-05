@@ -1,0 +1,190 @@
+package services
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"image/jpeg"
+	"image/png"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"lumen/internal/core"
+	"lumen/internal/fileops"
+	"lumen/internal/media"
+	"lumen/internal/store"
+)
+
+// PlanExport previews collision-free original copies or rendered exports.
+func (s *LibraryService) PlanExport(ctx context.Context, ids []int64, directory string, options core.ExportOptions) ([]core.ExportJob, error) {
+	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
+	if len(ids) == 0 || !filepath.IsAbs(directory) {
+		return nil, store.ErrNotFound
+	}
+	if options.Format != "original" && options.Format != "jpeg" && options.Format != "png" {
+		return nil, media.ErrUnsupported
+	}
+	options.Side = min(max(256, options.Side), media.RenderSide)
+	options.Quality = min(max(1, options.Quality), 100)
+	jobs := []core.ExportJob{}
+	destinations := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		f, err := s.store.AssetFile(ctx, id, false)
+		if err != nil {
+			return nil, err
+		}
+		path, ok := readablePath(f)
+		if !ok {
+			return nil, store.ErrNotFound
+		}
+		if options.Format != "original" && f.Kind == core.KindVideo && options.Frame < 0 {
+			return nil, media.ErrUnsupported
+		}
+		fi, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		name := filepath.Base(path)
+		if options.Format != "original" {
+			name = strings.TrimSuffix(name, filepath.Ext(name)) + "." + options.Format
+			if options.Format == "jpeg" {
+				name = strings.TrimSuffix(name, ".jpeg") + ".jpg"
+			}
+			if f.Kind == core.KindVideo {
+				name = strings.TrimSuffix(name, filepath.Ext(name)) + "-frame" + filepath.Ext(name)
+			}
+		}
+		to := filepath.Join(directory, name)
+		if err := s.store.ExportAllowed(ctx, id, to); err != nil {
+			return nil, err
+		}
+		if options.Format != "original" && f.Kind == core.KindVideo {
+			detail, err := s.store.AssetDetail(ctx, id, false)
+			if err != nil {
+				return nil, err
+			}
+			if detail.Video == nil || options.Frame < 0 || options.Frame >= detail.Video.Duration {
+				return nil, media.ErrUnsupported
+			}
+		}
+		if _, err := os.Lstat(to); !errors.Is(err, os.ErrNotExist) {
+			return nil, fileops.ErrExists
+		}
+		if destinations[core.Fold(to)] {
+			return nil, fileops.ErrExists
+		}
+		destinations[core.Fold(to)] = true
+		jobs = append(jobs, core.ExportJob{AssetID: id, From: path, To: to, Size: fi.Size(), MTime: fi.ModTime().UnixNano(), Options: options})
+	}
+	batch, err := s.store.SaveExportPlan(ctx, jobs)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.VisibleExportJobs(ctx, batch)
+}
+
+// ExportJobs exposes visible per-file outcomes and bounded recent history.
+func (s *LibraryService) ExportJobs(ctx context.Context, batch int64) ([]core.ExportJob, error) {
+	return s.store.VisibleExportJobs(ctx, batch)
+}
+
+// RunExport uses the file-operation lifetime and admission owner, so exports
+// cannot overlap moves or outlive shutdown. An interrupted batch can retry.
+func (s *LibraryService) RunExport(ctx context.Context, batch int64) ([]core.ExportJob, error) {
+	if batch < 1 {
+		return nil, store.ErrNotFound
+	}
+	if err := s.organise.claim(-batch, core.OrganiseRunning); err != nil {
+		return nil, err
+	}
+	defer s.organise.release(nil)
+	done, ok := s.organise.track()
+	if !ok {
+		return nil, ErrOrganiseStopping
+	}
+	defer done()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.exports.Lock()
+	s.exports.batch, s.exports.cancel = batch, cancel
+	s.exports.Unlock()
+	defer func() { s.exports.Lock(); s.exports.batch, s.exports.cancel = 0, nil; s.exports.Unlock() }()
+	stop := context.AfterFunc(s.organise.lifetime(), cancel)
+	defer stop()
+	unhold, err := s.holdScans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unhold()
+	runner := s.exportRunner()
+	if err := runner.Run(ctx, batch); err != nil {
+		return nil, err
+	}
+	return s.store.VisibleExportJobs(context.WithoutCancel(ctx), batch)
+}
+
+func (s *LibraryService) exportRunner() *fileops.ExportRunner {
+	return &fileops.ExportRunner{Store: s.store, Render: s.exportPixels}
+}
+
+// CancelExport stops the admitted batch without cancelling other operations.
+func (s *LibraryService) CancelExport(batch int64) {
+	s.exports.Lock()
+	defer s.exports.Unlock()
+	if s.exports.batch == batch && s.exports.cancel != nil {
+		s.exports.cancel()
+	}
+}
+
+func (s *LibraryService) exportPixels(ctx context.Context, job core.ExportJob) ([]byte, error) {
+	if s.media == nil {
+		return nil, media.ErrUnsupported
+	}
+	f, err := s.store.AssetFile(ctx, job.AssetID, false)
+	if err != nil {
+		return nil, err
+	}
+	var data []byte
+	a, err := s.store.Adjustment(ctx, job.AssetID, false)
+	if err != nil {
+		return nil, err
+	}
+	if f.Kind == core.KindVideo {
+		im, err := s.media.Decoder.FrameAt(ctx, job.From, job.Options.Frame, job.Options.Side)
+		if err != nil {
+			return nil, err
+		}
+		data, err = media.EncodeImage(im, job.Options.Quality)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		path, _, err := s.media.RenderFile(ctx, job.AssetID, job.From, f.Orientation, job.Options.Side, a.Version)
+		if err != nil {
+			return nil, err
+		}
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if job.Options.Adjust {
+		data, err = media.AdjustJPEG(data, a)
+		if err != nil {
+			return nil, err
+		}
+	}
+	im, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	if job.Options.Format == "png" {
+		err = png.Encode(&out, im)
+	} else {
+		err = jpeg.Encode(&out, im, &jpeg.Options{Quality: job.Options.Quality})
+	}
+	return out.Bytes(), err
+}

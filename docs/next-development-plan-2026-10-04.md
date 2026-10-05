@@ -169,6 +169,8 @@ overlay system. Later phases add features to this new interface.
 
 ## 3. Phase 8 — Viewing, playback, details and file tools
 
+Implemented locally on 5 October 2026. See the [implementation and verification record](phase8-implementation-2026-10-05.md) for delivered behavior, measured native evidence and remaining acceptance boundaries. The scope below remains the design reference.
+
 ### 8A. Image viewer
 
 Provide fit-to-window, actual-size, pointer-centred zoom, wheel/pinch zoom,

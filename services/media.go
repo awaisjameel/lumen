@@ -27,12 +27,13 @@ import (
 // Videos stream from the Streamer instead: the app's origin hands the
 // WebView a response only once it is complete.
 type MediaService struct {
-	store  *store.Store
-	cache  *media.Cache
-	stream *Streamer
-	gate   *BlockGate                          // the Blocked screen's lock: covered photos are served only while it is open
-	views  viewFlusher                         // saves which thumbnails were shown, for the cache's size cap
-	open   func(path string) (*os.File, error) // opens a cached picture; tests make it fail
+	store   *store.Store
+	cache   *media.Cache
+	stream  *Streamer
+	gate    *BlockGate                          // the Blocked screen's lock: covered photos are served only while it is open
+	views   viewFlusher                         // saves which thumbnails were shown, for the cache's size cap
+	open    func(path string) (*os.File, error) // opens a cached picture; tests make it fail
+	renders renderLifetime
 }
 
 // NewMediaService returns the media service. stream may be nil (no videos);
@@ -41,8 +42,10 @@ func NewMediaService(st *store.Store, cache *media.Cache, stream *Streamer, gate
 	if gate == nil {
 		gate = &BlockGate{}
 	}
-	return &MediaService{store: st, cache: cache, stream: stream, gate: gate,
+	m := &MediaService{store: st, cache: cache, stream: stream, gate: gate,
 		views: viewFlusher{cache: cache, sink: st, every: viewFlushEvery}, open: core.OpenShared}
+	m.renders.start(context.Background())
+	return m
 }
 
 // ServiceStartup starts saving thumbnail views (Wails calls it once the app runs).
@@ -54,6 +57,7 @@ func (m *MediaService) ServiceStartup(ctx context.Context, _ application.Service
 // ServiceShutdown saves the views still in memory. Wails stops services in
 // reverse order, so this runs before the database closes.
 func (m *MediaService) ServiceShutdown() error {
+	m.renders.stop()
 	m.views.stop()
 	return nil
 }
@@ -91,6 +95,15 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer adm.release()
 	r, w = adm.r, adm.w
 	switch {
+	case parts[0] == "subtitle" && len(parts) == 2:
+		m.serveSubtitles(w, r, id, adm.unlocked)
+	case parts[0] == "render" && len(parts) == 3:
+		side, ok := renderSide(parts[2])
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		m.serveRender(w, r, id, side, adm.unlocked)
 	case parts[0] == "thumb" && len(parts) == 3:
 		size, err := strconv.Atoi(parts[2])
 		if err != nil || (size != core.ThumbSmall && size != core.ThumbLarge) {
@@ -115,6 +128,33 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int64, size int, unlocked bool) {
+	if r.URL.Query().Get("canonical") != "1" {
+		a, err := m.store.Adjustment(r.Context(), id, unlocked)
+		if !served(w, err, id) {
+			return
+		}
+		if a.Rotation != 0 || a.Flip {
+			f, path, ok := assetFile(r.Context(), m.store, id, unlocked, w)
+			if !ok {
+				return
+			}
+			if !served(w, m.cache.Ensure(r.Context(), id, size, media.Original{Path: path, Kind: f.Kind, Orientation: f.Orientation}), id) {
+				return
+			}
+			data, err := os.ReadFile(m.cache.Path(id, size))
+			if !served(w, err, id) {
+				return
+			}
+			data, err = media.AdjustJPEG(data, a)
+			if !served(w, err, id) {
+				return
+			}
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write(data) // The request owns cancellation and the gate writer.
+			return
+		}
+	}
 	m.serveCachedPicture(w, r, id, m.cache.Path(id, size), func() bool {
 		// Missing from the cache (the folder was cleared, or the size cap evicted it): rebuild it now if the asset had one.
 		f, path, ok := assetFile(r.Context(), m.store, id, unlocked, w)

@@ -17,7 +17,12 @@ import Viewer from './Viewer.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
-  engine: { asset: vi.fn(), albums: vi.fn().mockResolvedValue([]) },
+  engine: {
+    asset: vi.fn(),
+    albums: vi.fn().mockResolvedValue([]),
+    inspect: vi.fn().mockResolvedValue({ tracks: [] }),
+    render: vi.fn().mockRejectedValue(new Error('Not available')),
+  },
   videosAvailable: vi.fn(() => true),
 }))
 
@@ -54,6 +59,8 @@ function mountViewer(source?: ViewerSource) {
 }
 
 beforeEach(() => {
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+  vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined)
   // Reka UI measures the slider thumb with an observer, which jsdom does not provide.
   vi.stubGlobal(
     'ResizeObserver',

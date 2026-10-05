@@ -20,7 +20,8 @@ import {
   MAX_NAME_LEN,
   TagSource,
 } from '../bridge'
-import type { AssetDetail, AssetTag, Face } from '../bridge'
+import type { AssetDetail, AssetTag, Face, MediaInspection } from '../bridge'
+import FileTools from '../media/FileTools.vue'
 import { errorText, logError, orFallback } from '../shared/errors'
 import { block } from '../shared/block'
 import { bytes, dateTime, duration, megapixels } from '../shared/format'
@@ -51,6 +52,8 @@ const trigger = document.activeElement
 const loading = ref(false)
 const albums = useAlbums()
 const detail = ref<AssetDetail | null>(null)
+const inspection = ref<MediaInspection | null>(null)
+const filesOpen = ref(false)
 const placeName = ref('') // the city near the photo, once known
 const tags = ref<AssetTag[]>([])
 const faces = ref<Face[]>([])
@@ -84,6 +87,7 @@ watch(
   [() => props.sel?.id, () => lib.itemAt(props.sel)?.f],
   ([id], old) => {
     if (id !== old[0]) {
+      inspection.value = null
       error.value = ''
       detail.value = null
       placeName.value = ''
@@ -102,6 +106,14 @@ async function loadDetails(id: number | undefined) {
     const d = await engine.asset(id)
     if (request !== detailRequest) return
     detail.value = d
+    if (!lib.inTrash) {
+      void engine
+        .inspect(id)
+        .then((value) => {
+          if (request === detailRequest) inspection.value = value
+        })
+        .catch(logError)
+    }
     const place = d.placeId ? await orFallback(engine.place(d.placeId), null) : null
     if (request === detailRequest) placeName.value = place?.name ?? ''
   } catch (e) {
@@ -368,6 +380,20 @@ function showInFolder(id: number, path = '') {
     if (props.sel?.id === id) error.value = errorText(e)
   })
 }
+async function openCopy(id: number, path: string, choose: boolean) {
+  try {
+    await engine.openMedia(id, path, choose)
+  } catch (e) {
+    if (props.sel?.id === id) error.value = errorText(e)
+  }
+}
+async function copyName(path: string) {
+  try {
+    await navigator.clipboard.writeText(path.split(/[\\/]/).at(-1) ?? path)
+  } catch (e) {
+    error.value = errorText(e)
+  }
+}
 
 function returnFocus(e: Event) {
   if (trigger instanceof HTMLElement && trigger.isConnected) {
@@ -379,6 +405,26 @@ function returnFocus(e: Event) {
 const hasDetail = () => detail.value !== null
 const editable = () => hasDetail() && !lib.inTrash
 useCommands([
+  {
+    id: 'inspector.files',
+    group: 'media',
+    title: () => t('files.title'),
+    icon: 'files',
+    available: editable,
+    run: () => {
+      filesOpen.value = true
+    },
+  },
+  {
+    id: 'inspector.open',
+    group: 'media',
+    title: () => t('files.open'),
+    icon: 'external',
+    available: editable,
+    run: async () => {
+      if (detail.value) await engine.openMedia(detail.value.id)
+    },
+  },
   {
     id: 'inspector.close',
     group: 'view',
@@ -504,10 +550,40 @@ useCommands([
         >
       </section>
 
-      <section :aria-label="t('details.camera')">
-        <h3>{{ t('details.camera') }}</h3>
-        <MetaRow :label="t('details.camera')" :value="detail.camera || t('details.missing')" />
+      <section :aria-label="t('details.metadata')">
+        <h3>{{ t('details.metadata') }}</h3>
+        <MetaRow copyable :label="t('details.camera')" :value="detail.camera || t('details.missing')" />
+        <MetaRow copyable :label="t('details.lens')" :value="inspection?.lens || t('details.missing')" />
+        <MetaRow copyable :label="t('details.exposure')" :value="inspection?.exposure || t('details.missing')" />
+        <MetaRow copyable :label="t('details.aperture')" :value="inspection?.aperture || t('details.missing')" />
+        <MetaRow copyable :label="t('details.iso')" :value="inspection?.iso || t('details.missing')" />
+        <MetaRow copyable :label="t('details.profile')" :value="inspection?.profile || t('details.missing')" />
+        <MetaRow
+          copyable
+          :label="t('details.orientation')"
+          :value="inspection?.orientation ? String(inspection.orientation) : t('details.missing')"
+        />
+        <MetaRow
+          copyable
+          :label="t('details.pages')"
+          :value="inspection?.pages ? String(inspection.pages) : t('details.missing')"
+        />
+        <MetaRow
+          v-if="detail.video"
+          copyable
+          :label="t('details.frameRate')"
+          :value="inspection?.frameRate || t('details.missing')"
+        />
+        <MetaRow
+          v-for="track in inspection?.tracks"
+          :key="track.index"
+          copyable
+          :label="t(track.kind === 'audio' ? 'viewer.audioTrack' : 'viewer.subtitleTrack')"
+          :value="`${track.index}: ${track.codec} ${track.language} ${track.title}`"
+        />
       </section>
+
+      <h3 v-if="!lib.inTrash">{{ t('details.organisation') }}</h3>
 
       <section :aria-label="t('details.location')">
         <h3>{{ t('details.location') }}</h3>
@@ -678,9 +754,43 @@ useCommands([
         <p v-if="detail.paths.length > 1" class="text-sm text-muted">
           {{ t('details.copies', { n: detail.paths.length }) }}
         </p>
-        <MetaRow v-for="p in detail.paths" :key="p" :label="t('details.path')" icon="files" class="path" :value="p">
+        <MetaRow
+          v-for="p in detail.paths"
+          :key="p"
+          copyable
+          :label="t('details.path')"
+          icon="files"
+          class="path"
+          :value="p"
+        >
           <template #action>
             <div class="flex flex-col items-end gap-1">
+              <UButton
+                v-if="!lib.inTrash"
+                :icon="icons.external"
+                :aria-label="t('files.open')"
+                variant="ghost"
+                size="sm"
+                square
+                @click="openCopy(detail.id, p, false)"
+              />
+              <UButton
+                v-if="!lib.inTrash"
+                :icon="icons.more"
+                :aria-label="t('files.openWith')"
+                variant="ghost"
+                size="sm"
+                square
+                @click="openCopy(detail.id, p, true)"
+              />
+              <UButton
+                :icon="icons.copy"
+                :aria-label="t('files.copyName')"
+                variant="ghost"
+                size="sm"
+                square
+                @click="copyName(p)"
+              />
               <UTooltip :text="t('common.showInFolder')">
                 <UButton
                   :icon="icons.folder"
@@ -718,6 +828,8 @@ useCommands([
           }}</UButton>
         </template>
         <template v-else>
+          <UButton :icon="icons.files" @click="runCommand('inspector.files')">{{ t('files.title') }}</UButton>
+          <UButton :icon="icons.external" @click="runCommand('inspector.open')">{{ t('files.open') }}</UButton>
           <UButton :icon="icons['eye-off']" @click="runCommand('inspector.block')">{{ t('blocked.block') }}</UButton>
           <UButton
             :icon="icons.heart"
@@ -734,6 +846,7 @@ useCommands([
       <UAlert v-if="shownError" role="alert" color="error" variant="subtle" :title="shownError" />
     </div>
   </InspectorContent>
+  <FileTools v-model:open="filesOpen" :ids="detail ? [detail.id] : []" @changed="loadDetails(props.sel?.id)" />
 
   <aside
     v-if="mode !== 'narrow'"

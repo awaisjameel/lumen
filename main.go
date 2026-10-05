@@ -41,6 +41,12 @@ import (
 var assets embed.FS
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--render-worker" {
+		if err := media.RenderWorker(context.Background(), os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("lumen stopped", "err", err)
 		fatalDialog("Lumen could not start:\n\n" + err.Error()) // there is no window to say it in
@@ -112,6 +118,11 @@ func run() error {
 
 	decoders := media.Decoders{FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe()}
 	cache := media.NewCache(paths.ThumbDir, decoders)
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cache.Renderer = media.ProcessRenderer{Executable: executable, FFmpeg: paths.FFmpeg()}
 	// The Blocked screen's lock, shared so that covered photos and videos are
 	// served only while it is open.
 	gate := &services.BlockGate{}
@@ -123,7 +134,7 @@ func run() error {
 	events := &services.Emitter{App: app}
 	ix := index.New(st, paths, cache, models, events)
 
-	lib := services.NewLibraryService(st, ix, gate)
+	lib := services.NewLibraryService(st, ix, gate, cache)
 	for _, svc := range []application.Service{
 		service(&background{ix: ix, search: models.Search, cache: cache, stream: stream}, application.ServiceOptions{}),
 		service(lib, application.ServiceOptions{}),

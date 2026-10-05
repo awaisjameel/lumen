@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
+
+	"lumen/internal/core"
 )
 
 // ConvertMP4 prepares converting a video to fragmented H.264/AAC MP4 while
@@ -12,6 +15,13 @@ import (
 // Running it never writes to the user's file or keeps a second copy on disk;
 // cancelling ctx stops ffmpeg.
 func (d Decoders) ConvertMP4(ctx context.Context, path string, at int64) (run func(out io.Writer) error, err error) {
+	return d.ConvertMP4Track(ctx, path, at, -1)
+}
+
+func strconvInt(index int) string { return strconv.Itoa(index) }
+
+// ConvertMP4Track prepares playback with an explicitly chosen audio stream.
+func (d Decoders) ConvertMP4Track(ctx context.Context, path string, at int64, audio int) (run func(out io.Writer) error, err error) {
 	if d.FFmpeg == "" || d.FFprobe == "" {
 		return nil, ErrUnsupported
 	}
@@ -19,12 +29,29 @@ func (d Decoders) ConvertMP4(ctx context.Context, path string, at int64) (run fu
 	if err != nil {
 		return nil, err
 	}
+	audioMap := "0:a:0?"
+	if audio >= 0 {
+		tracks, err := d.Inspect(ctx, path, core.KindVideo)
+		if err != nil {
+			return nil, err
+		}
+		found := false
+		for _, track := range tracks.Tracks {
+			if track.Index == audio && track.Kind == "audio" {
+				found = true
+			}
+		}
+		if !found {
+			return nil, ErrUnsupported
+		}
+		audioMap = "0:" + strconvInt(audio)
+	}
 	at = max(0, at)
 	if v.Duration > 0 && at >= v.Duration {
 		at = max(0, v.Duration-1000)
 	}
 	args := ffmpegArgs("-ss", ssTime(at), "-i", path,
-		"-map", "0:V:0", "-map", "0:a:0?", "-sn", "-dn",
+		"-map", "0:V:0", "-map", audioMap, "-sn", "-dn",
 		"-vf", fitFilter(v, 1920, true),
 		"-c:v", "libopenh264", "-b:v", "4M", "-pix_fmt", "yuv420p",
 		"-c:a", "aac", "-b:a", "160k",

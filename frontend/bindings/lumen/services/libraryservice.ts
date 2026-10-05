@@ -25,6 +25,13 @@ export function AddSources(paths: string[] | null): $CancellablePromise<core$0.S
 }
 
 /**
+ * Adjustment reads presentation metadata under the current privacy gate.
+ */
+export function Adjustment(id: number): $CancellablePromise<core$0.DisplayAdjustment> {
+    return $Call.ByID(3683905206, id);
+}
+
+/**
  * Albums lists saved collections with their current counts and covers.
  */
 export function Albums(): $CancellablePromise<core$0.Album[] | null> {
@@ -80,6 +87,20 @@ export function BlockedItems(blockID: number): $CancellablePromise<core$0.Covere
  */
 export function Blocks(): $CancellablePromise<core$0.Block[] | null> {
     return $Call.ByID(2232310235);
+}
+
+/**
+ * CancelExport stops the admitted batch without cancelling other operations.
+ */
+export function CancelExport(batch: number): $CancellablePromise<void> {
+    return $Call.ByID(2825944857, batch);
+}
+
+/**
+ * ClearPlaybackHistory forgets all recorded viewing positions.
+ */
+export function ClearPlaybackHistory(): $CancellablePromise<void> {
+    return $Call.ByID(1674600833);
 }
 
 /**
@@ -163,6 +184,13 @@ export function Events(): $CancellablePromise<core$0.Event[] | null> {
 }
 
 /**
+ * ExportJobs exposes visible per-file outcomes and bounded recent history.
+ */
+export function ExportJobs(batch: number): $CancellablePromise<core$0.ExportJob[] | null> {
+    return $Call.ByID(1389158771, batch);
+}
+
+/**
  * ExportXMPNow writes every photo's sidecar that is out of date now.
  * Phase 5 unit U11.
  */
@@ -175,6 +203,13 @@ export function ExportXMPNow(): $CancellablePromise<core$0.XMPExport> {
  */
 export function Failures(): $CancellablePromise<core$0.FailureGroup[] | null> {
     return $Call.ByID(129227502);
+}
+
+/**
+ * FileMoveOutcomes returns current journal rows without disclosing covered paths.
+ */
+export function FileMoveOutcomes(runID: number): $CancellablePromise<core$0.OrganiseMove[] | null> {
+    return $Call.ByID(2312951439, runID);
 }
 
 /**
@@ -198,6 +233,13 @@ export function LockBlocks(): $CancellablePromise<void> {
  */
 export function MigratePreferences(legacy: core$0.LegacyPreferences): $CancellablePromise<core$0.Preferences> {
     return $Call.ByID(681252860, legacy);
+}
+
+/**
+ * OpenMedia hands one validated visible file copy to the Windows shell.
+ */
+export function OpenMedia(id: number, path: string, choose: boolean): $CancellablePromise<void> {
+    return $Call.ByID(18952735, id, path, choose);
 }
 
 /**
@@ -229,6 +271,21 @@ export function Places(): $CancellablePromise<core$0.Place[] | null> {
 }
 
 /**
+ * PlanExport previews collision-free original copies or rendered exports.
+ */
+export function PlanExport(ids: number[] | null, directory: string, options: core$0.ExportOptions): $CancellablePromise<core$0.ExportJob[] | null> {
+    return $Call.ByID(1912549816, ids, directory, options);
+}
+
+/**
+ * PlanFileMoves previews one selected copy per asset. Explicit moves share
+ * organise's journal, scan hold, recovery, progress and Undo.
+ */
+export function PlanFileMoves(ids: number[] | null, directory: string, name: string): $CancellablePromise<core$0.OrganisePlan> {
+    return $Call.ByID(267317838, ids, directory, name);
+}
+
+/**
  * PlanOrganise previews where template would move the files of the source
  * sourceID (0: every source), and saves the preview as a planned run.
  * Only visible photos are planned, and only visible names reach folder names.
@@ -236,6 +293,13 @@ export function Places(): $CancellablePromise<core$0.Place[] | null> {
  */
 export function PlanOrganise(template: string, sourceID: number): $CancellablePromise<core$0.OrganisePlan> {
     return $Call.ByID(2885257754, template, sourceID);
+}
+
+/**
+ * PlaybackPosition reads resume history for an ordinary visible video.
+ */
+export function PlaybackPosition(id: number): $CancellablePromise<number> {
+    return $Call.ByID(2394817495, id);
 }
 
 /**
@@ -303,11 +367,33 @@ export function RestoreAssets(ids: number[] | null): $CancellablePromise<void> {
 }
 
 /**
+ * RunExport uses the file-operation lifetime and admission owner, so exports
+ * cannot overlap moves or outlive shutdown. An interrupted batch can retry.
+ */
+export function RunExport(batch: number): $CancellablePromise<core$0.ExportJob[] | null> {
+    return $Call.ByID(3295920176, batch);
+}
+
+/**
+ * Selection resolves the view or ranked search IDs under current visibility.
+ */
+export function Selection(view: core$0.View, ids: number[] | null, search: boolean): $CancellablePromise<core$0.Selection> {
+    return $Call.ByID(1651945517, view, ids, search);
+}
+
+/**
  * SetAIOnBattery lets the AI keep working on battery power (it waits for
  * mains power by default).
  */
 export function SetAIOnBattery(on: boolean): $CancellablePromise<void> {
     return $Call.ByID(1575093597, on);
+}
+
+/**
+ * SetAdjustment persists a non-destructive change and refreshes its consumers.
+ */
+export function SetAdjustment(id: number, rotation: number, flip: boolean): $CancellablePromise<core$0.DisplayAdjustment> {
+    return $Call.ByID(4035565656, id, rotation, flip);
 }
 
 /**
@@ -408,6 +494,13 @@ export function SetPauseFullScreen(on: boolean): $CancellablePromise<void> {
  */
 export function SetPaused(paused: boolean): $CancellablePromise<void> {
     return $Call.ByID(1388624885, paused);
+}
+
+/**
+ * SetPlaybackPosition records history only when the preference permits it.
+ */
+export function SetPlaybackPosition(id: number, position: number): $CancellablePromise<void> {
+    return $Call.ByID(2446287193, id, position);
 }
 
 /**
@@ -569,4 +662,11 @@ export function UnlockBlocks(pin: string): $CancellablePromise<void> {
  */
 export function UpdateAlbum(id: number, name: string, rule: core$0.AlbumRule): $CancellablePromise<void> {
     return $Call.ByID(2490788795, id, name, rule);
+}
+
+/**
+ * ValidateSelection refuses stale membership before an action is admitted.
+ */
+export function ValidateSelection(sel: core$0.Selection): $CancellablePromise<void> {
+    return $Call.ByID(1725039415, sel);
 }

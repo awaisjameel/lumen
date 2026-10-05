@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,18 @@ import (
 func downgradeToV18(t *testing.T, st *Store) {
 	t.Helper()
 	ctx := context.Background()
+	selectionTriggers, err := queryAll(ctx, st.r, func(r *sql.Rows) (name string, err error) { err = r.Scan(&name); return name, err }, "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'selection_%'")
+	check(t, err)
+	for _, name := range selectionTriggers {
+		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER "+name)))
+	}
+	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE selection_revision")))
+	for _, column := range []string{"display_rotation", "display_flip", "display_version"} {
+		check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE assets DROP COLUMN "+column)))
+	}
+	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE playback_history")))
+	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE export_jobs")))
+	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE export_batches")))
 	// Migration 0023's trigger on blocks reads event_tags, so it goes too: a
 	// version 18 library has no such trigger, and the replay makes it again.
 	for _, trigger := range []string{"block_event_target_removed", "event_tag_added", "event_tag_changed", "event_tag_deleted", "event_member_added",

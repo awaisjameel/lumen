@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"lumen/internal/core"
@@ -13,7 +14,7 @@ func TestPreferencesStartAtTheirDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := core.DefaultPreferences(); got != want {
+	if want := core.DefaultPreferences(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Preferences() = %+v, want the defaults %+v", got, want)
 	}
 }
@@ -33,7 +34,8 @@ func TestSetPreferencesStoresNormalisedValuesThatSurviveReopening(t *testing.T) 
 	}
 	want := core.Preferences{Theme: core.ThemeDark, Accent: core.AccentTeal, Density: core.DensityCompact,
 		TextScale: core.TextScaleMax, TileSize: 200, SidebarCollapsed: true, SidebarWidth: 260, InspectorWidth: 360}
-	if stored != want {
+	want = want.Normalised()
+	if !reflect.DeepEqual(stored, want) {
 		t.Errorf("SetPreferences stored %+v, want %+v", stored, want)
 	}
 	if err := st.Close(); err != nil {
@@ -45,7 +47,7 @@ func TestSetPreferencesStoresNormalisedValuesThatSurviveReopening(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	if got, err := st.Preferences(ctx); err != nil || got != want {
+	if got, err := st.Preferences(ctx); err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("after reopening Preferences() = %+v, %v, want %+v", got, err, want)
 	}
 }
@@ -110,7 +112,7 @@ func TestLegacyPreferencesIgnoreValuesOutOfRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := core.DefaultPreferences(); got != want {
+	if want := core.DefaultPreferences(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Preferences() = %+v, want the defaults %+v", got, want)
 	}
 	// It still counts as the one offer.
@@ -149,6 +151,7 @@ func TestPreferencesNeverCombineDifferentSavedChoices(t *testing.T) {
 	second := core.Preferences{Theme: core.ThemeDark, Accent: core.AccentTeal,
 		Density: core.DensityCompact, TextScale: 120, TileSize: 240, SidebarCollapsed: true,
 		SidebarWidth: 300, InspectorWidth: 400}
+	second = second.Normalised()
 	if _, err := st.SetPreferences(ctx, first); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +173,7 @@ func TestPreferencesNeverCombineDifferentSavedChoices(t *testing.T) {
 			t.Error(err)
 			break
 		}
-		if got != first && got != second {
+		if !reflect.DeepEqual(got, first) && !reflect.DeepEqual(got, second) {
 			t.Errorf("Preferences returned part of each saved choice: %+v", got)
 			break
 		}

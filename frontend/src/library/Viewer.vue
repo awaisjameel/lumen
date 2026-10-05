@@ -6,9 +6,9 @@
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UTooltip from '@nuxt/ui/components/Tooltip.vue'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { engine, isCancelled, originalUrl, THUMB_LARGE, thumbUrl, videosAvailable } from '../bridge'
-import type { AssetDetail } from '../bridge'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { engine, isCancelled, videosAvailable } from '../bridge'
+import type { AssetDetail, GridItem } from '../bridge'
 import { icons } from '../design/icons'
 import { dispatchKey, runCommand, useCommands } from '../shared/commands'
 import { errorText } from '../shared/errors'
@@ -22,14 +22,35 @@ import { libraryViewerSource, useLibrary } from './store'
 import type { ViewerSource } from './store'
 import DetailsPanel from './DetailsPanel.vue'
 import VideoPlayer from './VideoPlayer.vue'
+import ImageSurface from '../media/ImageSurface.vue'
+import type { ImageControls } from '../media/viewport'
+import Filmstrip from '../media/Filmstrip.vue'
+import { usePreferences } from '../shared/preferences'
+import { viewerDefaults } from '../shared/viewing'
+import { reportError } from '../shared/errors'
+import { useLiveReload } from '../shared/liveReload'
 
 const props = defineProps<{ source?: ViewerSource }>()
 const lib = useLibrary()
+const prefs = usePreferences()
+const viewing = computed(() => prefs.prefs.viewer ?? viewerDefaults())
+const neighbours = shallowRef<GridItem[]>([])
+const comparing = ref(false)
+const comparison = ref<AssetDetail | null>(null)
+const comparisonItem = ref<GridItem | null>(null)
+const linked = ref(true)
+const geometry = ref<{ scale: number; x: number; y: number }>()
+const sliding = ref(false)
+const hidden = ref(false)
+let hideTimer: ReturnType<typeof setTimeout> | undefined
+let slideTimer: ReturnType<typeof setTimeout> | undefined
+let neighbourhoodRequest = 0
+let comparisonRequest = 0
 const src = computed(() => props.source ?? libraryViewerSource(lib))
 const item = computed(() => src.value.item)
 const actions = computed(() => src.value.actions)
 const detail = ref<AssetDetail | null>(null)
-const originalReady = ref(false)
+const image = ref<ImageControls | null>(null)
 const root = ref<HTMLElement | null>(null)
 const loading = ref(false)
 const loadError = ref('')
@@ -42,7 +63,6 @@ watch(
   async (id, _old, onCleanup) => {
     const request = ++detailRequest
     onCleanup(() => detailRequest++)
-    originalReady.value = false
     detail.value = null
     loadError.value = ''
     loading.value = !!id
@@ -68,13 +88,120 @@ function close() {
   src.value.close()
 }
 
-function onMediaDoubleClick() {
-  if (!detail.value?.video) close()
+async function fullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen()
+    else await root.value?.requestFullscreen()
+  } catch (e) {
+    reportError(e)
+  }
+}
+
+function activity() {
+  hidden.value = false
+  clearTimeout(hideTimer)
+  if (viewing.value.autoHide)
+    hideTimer = setTimeout(() => {
+      if (layer.owns()) hidden.value = true
+    }, 3000)
+}
+
+watch(
+  [() => src.value.id, () => viewing.value.filmstrip, comparing],
+  async () => {
+    const request = ++neighbourhoodRequest
+    neighbours.value = []
+    if (!viewing.value.filmstrip && !comparing.value) return
+    try {
+      const items = await src.value.window?.()
+      if (request === neighbourhoodRequest) neighbours.value = items ?? []
+    } catch (e) {
+      if (request === neighbourhoodRequest && !isCancelled(e)) reportError(e)
+    }
+  },
+  { immediate: true },
+)
+
+watch(comparing, async (value) => {
+  const request = ++comparisonRequest
+  comparison.value = null
+  comparisonItem.value = null
+  if (!value) return
+  const id = src.value.id
+  try {
+    const items = await src.value.window?.()
+    const other = items?.find((entry) => entry.id !== id && !entry.v)
+    if (!other) {
+      comparing.value = false
+      return
+    }
+    const data = await engine.asset(other.id)
+    if (request === comparisonRequest && comparing.value && src.value.id === id) {
+      comparison.value = data
+      comparisonItem.value = other
+    }
+  } catch (e) {
+    if (request === comparisonRequest) comparing.value = false
+    if (!isCancelled(e)) reportError(e)
+  }
+})
+
+useLiveReload(
+  async () => {
+    const current = comparison.value
+    if (!current) return
+    try {
+      const data = await engine.asset(current.id)
+      if (comparison.value?.id === current.id) comparison.value = data
+    } catch {
+      comparing.value = false
+      comparison.value = null
+      comparisonItem.value = null
+    }
+  },
+  (c) => c.assets,
+  1,
+)
+
+watch([sliding, () => src.value.id, () => viewing.value.slideshowSeconds], () => {
+  clearTimeout(slideTimer)
+  if (!sliding.value) return
+  slideTimer = setTimeout(() => {
+    if (!layer.owns() || document.hidden) {
+      sliding.value = false
+      return
+    }
+    const id = src.value.id
+    void src.value
+      .step(1)
+      .then(async () => {
+        if (src.value.id === id) {
+          if (viewing.value.loop && src.value.first) await src.value.first()
+          else sliding.value = false
+        }
+      })
+      .catch((e: unknown) => {
+        sliding.value = false
+        reportError(e)
+      })
+  }, viewing.value.slideshowSeconds * 1000)
+})
+
+async function adjust(rotation: number, flip: boolean) {
+  const current = detail.value
+  if (!current || !actions.value.favourite) return
+  try {
+    const adjustment = await engine.setAdjustment(current.id, rotation, flip)
+    if (detail.value?.id === current.id) detail.value = { ...detail.value, adjustment }
+  } catch (e) {
+    reportError(e)
+  }
 }
 
 // Listens in the bubble phase, so a control that handles a key itself (a
 // picker closing its menu on Escape) stops it before it reaches the viewer.
 function onKey(e: KeyboardEvent) {
+  activity()
   if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return
   if (!layer.owns()) return
   // Escape belongs to the browser while the player is fullscreen.
@@ -85,6 +212,11 @@ function onKey(e: KeyboardEvent) {
   }
   // Typing in the details panel (adding a tag): only Escape still closes.
   if (isTyping(e) && e.key !== 'Escape') return
+  if (e.key === '+') {
+    e.preventDefault()
+    void runCommand('viewer.zoomIn')
+    return
+  }
   // Playback controls keep their own arrow keys.
   const slider = e.target instanceof Element && e.target.closest('[role="slider"], [role="separator"]')
   if ((ownsArrows(e) || slider) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
@@ -98,6 +230,107 @@ function onKey(e: KeyboardEvent) {
 }
 
 useCommands([
+  {
+    id: 'viewer.fullscreen',
+    group: 'view',
+    title: () => t('viewer.fullscreen'),
+    icon: 'maximize',
+    zone: 'viewer',
+    run: fullscreen,
+  },
+  {
+    id: 'viewer.filmstrip',
+    group: 'view',
+    title: () => t('viewer.filmstrip'),
+    icon: 'film',
+    zone: 'viewer',
+    available: () => !!src.value.window,
+    run: () => prefs.setViewer({ filmstrip: !viewing.value.filmstrip }),
+  },
+  {
+    id: 'viewer.slideshow',
+    group: 'view',
+    title: () => t('viewer.slideshow'),
+    icon: 'play',
+    zone: 'viewer',
+    run: () => (sliding.value = !sliding.value),
+  },
+  {
+    id: 'viewer.compare',
+    group: 'view',
+    title: () => t('viewer.compare'),
+    icon: 'layers',
+    zone: 'viewer',
+    available: () => !!image.value && !!src.value.window,
+    run: () => (comparing.value = !comparing.value),
+  },
+  {
+    id: 'viewer.rotate',
+    group: 'media',
+    title: () => t('viewer.rotate'),
+    icon: 'reset',
+    zone: 'viewer',
+    available: () => !!image.value && !!actions.value.favourite,
+    run: () => adjust((detail.value?.adjustment?.rotation ?? 0) + 1, detail.value?.adjustment?.flip ?? false),
+  },
+  {
+    id: 'viewer.flip',
+    group: 'media',
+    title: () => t('viewer.flip'),
+    icon: 'image',
+    zone: 'viewer',
+    available: () => !!image.value && !!actions.value.favourite,
+    run: () => adjust(detail.value?.adjustment?.rotation ?? 0, !detail.value?.adjustment?.flip),
+  },
+  {
+    id: 'viewer.resetAdjustment',
+    group: 'media',
+    title: () => t('viewer.resetAdjustment'),
+    icon: 'undo',
+    zone: 'viewer',
+    available: () => !!image.value && !!actions.value.favourite,
+    run: () => adjust(0, false),
+  },
+  {
+    id: 'viewer.zoomIn',
+    group: 'view',
+    title: () => t('viewer.zoomIn'),
+    icon: 'zoom-in',
+    keys: '=',
+    zone: 'viewer',
+    available: () => !!image.value,
+    run: () => image.value?.zoom(1.25),
+  },
+  {
+    id: 'viewer.zoomOut',
+    group: 'view',
+    title: () => t('viewer.zoomOut'),
+    icon: 'zoom-out',
+    keys: '-',
+    zone: 'viewer',
+    available: () => !!image.value,
+    run: () => image.value?.zoom(0.8),
+  },
+  {
+    id: 'viewer.fit',
+    group: 'view',
+    title: () => t('viewer.fit'),
+    icon: 'maximize',
+    keys: '0',
+    zone: 'viewer',
+    available: () => !!image.value,
+    run: () => image.value?.fit(),
+  },
+  {
+    id: 'viewer.actual',
+    group: 'view',
+    title: () => t('viewer.actual'),
+    icon: 'image',
+    keys: '1',
+    zone: 'viewer',
+    available: () => !!image.value,
+    run: () => image.value?.actual(),
+  },
   {
     id: 'viewer.close',
     group: 'view',
@@ -203,8 +436,13 @@ onMounted(() => {
   window.addEventListener('keydown', onKey)
   setBehind(true)
   root.value?.focus()
+  activity()
 })
 onBeforeUnmount(() => {
+  comparisonRequest++
+  neighbourhoodRequest++
+  clearTimeout(slideTimer)
+  clearTimeout(hideTimer)
   window.removeEventListener('keydown', onKey)
   setBehind(false)
   if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
@@ -216,11 +454,14 @@ onBeforeUnmount(() => {
     <div
       ref="root"
       class="viewer"
+      :class="{ 'controls-hidden': hidden }"
       role="dialog"
       aria-modal="true"
       :aria-busy="loading"
       :aria-label="detail ? dateTime(detail.takenAt) : t('viewer.title')"
       tabindex="-1"
+      @pointermove="activity"
+      @focusin="activity"
     >
       <div class="stage">
         <header class="bar">
@@ -236,6 +477,14 @@ onBeforeUnmount(() => {
           </UTooltip>
           <span class="date">{{ detail ? dateTime(detail.takenAt) : '' }}</span>
           <span v-if="loading" class="date" role="status">{{ t('details.loading') }}</span>
+          <UButton
+            v-if="sliding && !image"
+            :icon="icons.pause"
+            :aria-label="t('viewer.slideshow')"
+            :aria-pressed="sliding"
+            variant="ghost"
+            @click="runCommand('viewer.slideshow')"
+          />
           <div class="grow" />
           <!-- In the Trash the two actions are spelt out: what each does to
                the file must be read without hovering. -->
@@ -295,7 +544,10 @@ onBeforeUnmount(() => {
           </UTooltip>
         </header>
 
-        <div class="media" @dblclick="onMediaDoubleClick">
+        <div
+          class="media"
+          :class="{ comparing: comparison && comparisonItem, 'with-filmstrip': viewing.filmstrip && neighbours.length }"
+        >
           <FeatureState v-if="loadError" kind="error" :title="loadError" />
           <FeatureState v-else-if="!item && !loading" kind="empty" icon="image-off" :title="t('viewer.notFound')" />
           <template v-else-if="item">
@@ -305,6 +557,7 @@ onBeforeUnmount(() => {
               :detail="detail"
               :at="item.at ?? 0"
               :thumb-version="item.t"
+              :private="!actions.favourite"
               @timeupdate="src.touch?.()"
             />
             <UAlert
@@ -316,24 +569,16 @@ onBeforeUnmount(() => {
               :title="t('viewer.videoUnavailable')"
             />
             <template v-else-if="!detail?.video">
-              <img
-                v-if="item.t"
-                v-show="!originalReady"
-                :key="'p' + item.id"
-                class="preview"
-                :src="thumbUrl(item.id, item.t, THUMB_LARGE)"
-                alt=""
-                draggable="false"
-              />
-              <img
-                v-if="detail?.caps.original && detail.id === item.id"
-                v-show="originalReady"
-                :key="'o' + detail.id"
-                class="original"
-                :src="originalUrl(detail.id)"
-                alt=""
-                draggable="false"
-                @load="originalReady = true"
+              <ImageSurface
+                :id="item.id"
+                ref="image"
+                :key="item.id"
+                :thumb="item.t"
+                :width="item.w"
+                :height="item.h"
+                :detail="detail"
+                :linked="comparing && linked ? geometry : undefined"
+                @change="geometry = $event"
               />
               <FeatureState
                 v-if="!item.t && !detail?.caps.original"
@@ -344,7 +589,99 @@ onBeforeUnmount(() => {
             </template>
           </template>
           <FeatureState v-else kind="loading" :title="t('details.loading')" />
+          <ImageSurface
+            v-if="comparison && comparisonItem"
+            :id="comparisonItem.id"
+            :key="comparisonItem.id"
+            :thumb="comparisonItem.t"
+            :width="comparisonItem.w"
+            :height="comparisonItem.h"
+            :detail="comparison"
+            :linked="linked ? geometry : undefined"
+            @change="geometry = $event"
+          />
         </div>
+
+        <div
+          v-if="image && !detail?.video"
+          class="image-controls"
+          :class="{ raised: viewing.filmstrip && neighbours.length }"
+        >
+          <UButton
+            :icon="icons['zoom-out']"
+            :aria-label="t('viewer.zoomOut')"
+            variant="ghost"
+            @click="runCommand('viewer.zoomOut')"
+          />
+          <span role="status">{{ image.scale }}%</span>
+          <UButton
+            :icon="icons['zoom-in']"
+            :aria-label="t('viewer.zoomIn')"
+            variant="ghost"
+            @click="runCommand('viewer.zoomIn')"
+          />
+          <UButton variant="ghost" @click="runCommand('viewer.fit')">{{ t('viewer.fit') }}</UButton>
+          <UButton variant="ghost" @click="runCommand('viewer.actual')">{{ t('viewer.actual') }}</UButton>
+          <UButton
+            :icon="icons.maximize"
+            :aria-label="t('viewer.fullscreen')"
+            variant="ghost"
+            @click="runCommand('viewer.fullscreen')"
+          />
+          <UButton
+            v-if="src.window"
+            :icon="icons.film"
+            :aria-label="t('viewer.filmstrip')"
+            :aria-pressed="viewing.filmstrip"
+            variant="ghost"
+            @click="runCommand('viewer.filmstrip')"
+          />
+          <UButton
+            :icon="icons[sliding ? 'pause' : 'play']"
+            :aria-label="t('viewer.slideshow')"
+            :aria-pressed="sliding"
+            variant="ghost"
+            @click="runCommand('viewer.slideshow')"
+          />
+          <UButton
+            v-if="src.window"
+            :icon="icons.layers"
+            :aria-label="t('viewer.compare')"
+            :aria-pressed="comparing"
+            variant="ghost"
+            @click="runCommand('viewer.compare')"
+          />
+          <UButton v-if="comparing" :aria-pressed="linked" variant="ghost" @click="linked = !linked">{{
+            t('viewer.linked')
+          }}</UButton>
+          <UButton
+            v-if="actions.favourite"
+            :icon="icons.reset"
+            :aria-label="t('viewer.rotate')"
+            variant="ghost"
+            @click="runCommand('viewer.rotate')"
+          />
+          <UButton
+            v-if="actions.favourite"
+            :icon="icons.image"
+            :aria-label="t('viewer.flip')"
+            variant="ghost"
+            @click="runCommand('viewer.flip')"
+          />
+          <UButton
+            v-if="actions.favourite"
+            :icon="icons.undo"
+            :aria-label="t('viewer.resetAdjustment')"
+            variant="ghost"
+            @click="runCommand('viewer.resetAdjustment')"
+          />
+        </div>
+        <Filmstrip
+          v-if="viewing.filmstrip && neighbours.length && item"
+          :items="neighbours"
+          :selected="item.id"
+          @select="src.jump?.($event)"
+        />
 
         <UTooltip :text="t('viewer.prev')" :content="{ side: 'right' }">
           <UButton
@@ -444,6 +781,43 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   place-items: center;
+}
+
+.image-controls {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.25rem;
+  width: max-content;
+  max-width: calc(100% - 1rem);
+  background: var(--lumen-viewer-bg);
+  border-radius: var(--ui-radius);
+}
+.image-controls.raised {
+  bottom: 90px;
+}
+.media.with-filmstrip {
+  bottom: 84px;
+}
+.media.comparing {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.controls-hidden .bar,
+.controls-hidden .image-controls,
+.controls-hidden .nav {
+  opacity: 0;
+  pointer-events: none;
+}
+.controls-hidden .bar:focus-within,
+.controls-hidden .image-controls:focus-within,
+.controls-hidden .nav:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .media img,

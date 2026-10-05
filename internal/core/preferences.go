@@ -72,19 +72,22 @@ const (
 // settings are their one durable owner: the UI keeps only a copy for
 // painting its first frame.
 type Preferences struct {
-	Theme            Theme   `json:"theme"`
-	Accent           Accent  `json:"accent"`
-	Density          Density `json:"density"`
-	TextScale        int     `json:"textScale"` // TextScaleMin..TextScaleMax, percent
-	TileSize         int     `json:"tileSize"`  // TileSizeMin..TileSizeMax
-	SidebarCollapsed bool    `json:"sidebarCollapsed"`
-	SidebarWidth     int     `json:"sidebarWidth"`   // SidebarWidthMin..SidebarWidthMax
-	InspectorWidth   int     `json:"inspectorWidth"` // InspectorWidthMin..InspectorWidthMax
+	Viewer           *ViewerPreferences `json:"viewer,omitempty"`
+	Theme            Theme              `json:"theme"`
+	Accent           Accent             `json:"accent"`
+	Density          Density            `json:"density"`
+	TextScale        int                `json:"textScale"` // TextScaleMin..TextScaleMax, percent
+	TileSize         int                `json:"tileSize"`  // TileSizeMin..TileSizeMax
+	SidebarCollapsed bool               `json:"sidebarCollapsed"`
+	SidebarWidth     int                `json:"sidebarWidth"`   // SidebarWidthMin..SidebarWidthMax
+	InspectorWidth   int                `json:"inspectorWidth"` // InspectorWidthMin..InspectorWidthMax
 }
 
 // DefaultPreferences is what a library starts with.
 func DefaultPreferences() Preferences {
+	v := DefaultViewerPreferences()
 	return Preferences{
+		Viewer:         &v,
 		Theme:          ThemeSystem,
 		Accent:         AccentBlue,
 		Density:        DensityComfortable,
@@ -116,6 +119,12 @@ func ValidDensity(d Density) bool { return d == DensityComfortable || d == Densi
 // interface.
 func (p Preferences) Normalised() Preferences {
 	def := DefaultPreferences()
+	if p.Viewer == nil {
+		p.Viewer = def.Viewer
+	} else {
+		v := p.Viewer.Normalised()
+		p.Viewer = &v
+	}
 	if !ValidTheme(p.Theme) {
 		p.Theme = def.Theme
 	}

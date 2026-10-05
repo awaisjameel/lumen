@@ -48,9 +48,10 @@ const (
 	CodeTrashChanged    ErrorCode = "trash_changed"    // the Trash changed after Delete from disk was confirmed
 	CodeXMPOff          ErrorCode = "xmp_off"          // XMP sidecars were asked for while the setting is off
 
-	CodeInvalidTemplate ErrorCode = "invalid_template" // the folder scheme to organise by cannot be used
-	CodeOrganiseBusy    ErrorCode = "organise_busy"    // files are already being moved
-	CodeOrganiseState   ErrorCode = "organise_state"   // that run cannot be started or undone now
+	CodeInvalidTemplate  ErrorCode = "invalid_template"  // the folder scheme to organise by cannot be used
+	CodeOrganiseBusy     ErrorCode = "organise_busy"     // files are already being moved
+	CodeOrganiseState    ErrorCode = "organise_state"    // that run cannot be started or undone now
+	CodeSelectionChanged ErrorCode = "selection_changed" // select-all or range membership changed
 
 	CodeSigninFailed ErrorCode = "signin_failed"      // the Windows sign-in was cancelled, or wrong
 	CodeNoSignin     ErrorCode = "signin_unavailable" // this PC has no way to check a Windows sign-in
@@ -100,6 +101,7 @@ var errorCodes = []struct {
 	{fileops.ErrInvalidTemplate, CodeInvalidTemplate},
 	{ErrOrganiseBusy, CodeOrganiseBusy},
 	{ErrOrganiseState, CodeOrganiseState},
+	{store.ErrSelectionChanged, CodeSelectionChanged},
 	{signin.ErrNotVerified, CodeSigninFailed},
 	{signin.ErrUnavailable, CodeNoSignin},
 }

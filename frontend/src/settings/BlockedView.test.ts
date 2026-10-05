@@ -39,6 +39,17 @@ vi.mock('../bridge', async (importOriginal) => ({
     blockedItems: vi.fn(),
     trashCovered: vi.fn(),
     asset: vi.fn(),
+    inspect: vi.fn<typeof Bridge.engine.inspect>().mockResolvedValue({
+      orientation: 1,
+      profile: '',
+      lens: '',
+      exposure: '',
+      aperture: '',
+      iso: '',
+      frameRate: '',
+      pages: 0,
+      tracks: [],
+    }),
   },
   videosAvailable: vi.fn(() => true),
 }))

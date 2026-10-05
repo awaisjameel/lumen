@@ -30,6 +30,17 @@ vi.mock('../bridge', async (importOriginal) => ({
       Promise.resolve({ ...usePreferences().prefs }),
     ),
     asset: vi.fn(),
+    inspect: vi.fn<typeof Bridge.engine.inspect>().mockResolvedValue({
+      orientation: 1,
+      profile: '',
+      lens: '',
+      exposure: '',
+      aperture: '',
+      iso: '',
+      frameRate: '',
+      pages: 0,
+      tracks: [],
+    }),
     assetTags: vi.fn(),
     assetFaces: vi.fn(),
     assetAlbums: vi.fn(),
@@ -393,7 +404,7 @@ it('states missing metadata rather than inventing a date, camera or location', a
   for (const title of ['Overview', 'Camera', 'Location', 'People', 'Tags', 'Albums', 'Files']) {
     expect(wrapper.text()).toContain(title)
   }
-  expect(wrapper.findAll('.meta-row').filter((row) => row.text().includes('Not available'))).toHaveLength(6)
+  expect(wrapper.findAll('.meta-row').filter((row) => row.text().includes('Not available'))).toHaveLength(12)
   expect(wrapper.text()).toContain('Photo')
   expect(wrapper.text()).toContain(t('details.dateFrom.file'))
 })

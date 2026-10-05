@@ -21,6 +21,7 @@ import (
 
 	"lumen/internal/core"
 	"lumen/internal/index"
+	"lumen/internal/media"
 	"lumen/internal/store"
 )
 
@@ -57,6 +58,7 @@ func (e *Emitter) LibraryChanged(c core.Changes) {
 
 // LibraryService is everything about browsing and managing the library.
 type LibraryService struct {
+	media   *media.Cache
 	store   *store.Store
 	ix      *index.Indexer
 	now     func() time.Time // the clock: time.Now, or a test's
@@ -78,15 +80,23 @@ type LibraryService struct {
 	verify func(ctx context.Context, owner uintptr, reason string) error
 
 	organise organiser // the organise-on-disk run in progress (organise.go); the zero value works
+	exports  struct {
+		sync.Mutex
+		batch  int64
+		cancel context.CancelFunc
+	}
 }
 
 // NewLibraryService returns the library service. gate is the Blocked
 // screen's lock it shares with media serving; nil gives it one of its own.
-func NewLibraryService(st *store.Store, ix *index.Indexer, gate *BlockGate) *LibraryService {
+func NewLibraryService(st *store.Store, ix *index.Indexer, gate *BlockGate, caches ...*media.Cache) *LibraryService {
 	if gate == nil {
 		gate = &BlockGate{}
 	}
 	s := &LibraryService{store: st, ix: ix, now: time.Now, gate: gate}
+	if len(caches) > 0 {
+		s.media = caches[0]
+	}
 	if ix != nil {
 		// Files an interrupted organise run left half-moved are settled
 		// before the first scan could find them so.

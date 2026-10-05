@@ -19,6 +19,25 @@
 // @ts-ignore: Unused imports
 import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as core$0 from "../internal/core/models.js";
+
+/**
+ * Inspect reads file metadata while holding its lifetime and privacy access.
+ */
+export function Inspect(id: number): $CancellablePromise<core$0.MediaInspection> {
+    return $Call.ByID(3159035782, id);
+}
+
+/**
+ * Render prepares an upright sRGB viewing copy and describes its true
+ * resolution. The served URL still checks visibility on every request.
+ */
+export function Render(id: number, side: number): $CancellablePromise<core$0.RenderInfo> {
+    return $Call.ByID(69181878, id, side);
+}
+
 /**
  * ThumbCacheBytes is the thumbnail cache's current size on disk.
  */

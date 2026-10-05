@@ -64,6 +64,13 @@ import type {
   Place,
   Preferences,
   Progress,
+  RenderInfo,
+  DisplayAdjustment,
+  ViewerPreferences,
+  MediaInspection,
+  Selection,
+  ExportOptions,
+  ExportJob,
   SearchResult,
   Settings,
   Source,
@@ -116,6 +123,13 @@ export type {
   Place,
   Preferences,
   Progress,
+  RenderInfo,
+  DisplayAdjustment,
+  ViewerPreferences,
+  MediaInspection,
+  Selection,
+  ExportOptions,
+  ExportJob,
   Settings,
   Source,
   Tag,
@@ -246,6 +260,7 @@ export const ErrorCode = {
   InvalidTemplate: 'invalid_template',
   OrganiseBusy: 'organise_busy',
   OrganiseState: 'organise_state',
+  SelectionChanged: 'selection_changed',
   SigninFailed: 'signin_failed',
   SigninUnavailable: 'signin_unavailable',
 } as const
@@ -294,6 +309,34 @@ function queueBlockSession(action: () => Promise<void>): Promise<void> {
 }
 
 export const engine = {
+  selection: async (view: View, ids: number[], search: boolean): Promise<Selection> => {
+    const result = await LibraryService.Selection(view, ids, search)
+    return { ...result, ids: result.ids ?? [] }
+  },
+  validateSelection: (sel: Selection): Promise<void> => LibraryService.ValidateSelection(sel),
+  planFileMoves: async (ids: number[], directory: string, name: string): Promise<OrganisePlan> => {
+    const result = await LibraryService.PlanFileMoves(ids, directory, name)
+    return { ...result, moves: result.moves ?? [] }
+  },
+  openMedia: (id: number, path = '', choose = false): Promise<void> => LibraryService.OpenMedia(id, path, choose),
+  planExport: async (ids: number[], directory: string, options: ExportOptions): Promise<ExportJob[]> =>
+    (await LibraryService.PlanExport(ids, directory, options)) ?? [],
+  runExport: async (batch: number, signal?: AbortSignal): Promise<ExportJob[]> =>
+    (await cancellable(LibraryService.RunExport(batch), signal)) ?? [],
+  exportJobs: async (batch = 0): Promise<ExportJob[]> => (await LibraryService.ExportJobs(batch)) ?? [],
+  cancelExport: (batch: number): Promise<void> => LibraryService.CancelExport(batch),
+  inspect: async (id: number, signal?: AbortSignal): Promise<MediaInspection> => {
+    const r = await cancellable(MediaService.Inspect(id), signal)
+    return { ...r, tracks: r.tracks ?? [] }
+  },
+  adjustment: (id: number): Promise<DisplayAdjustment> => LibraryService.Adjustment(id),
+  setAdjustment: (id: number, rotation: number, flip: boolean): Promise<DisplayAdjustment> =>
+    LibraryService.SetAdjustment(id, rotation, flip),
+  playbackPosition: (id: number): Promise<number> => LibraryService.PlaybackPosition(id),
+  setPlaybackPosition: (id: number, position: number): Promise<void> =>
+    LibraryService.SetPlaybackPosition(id, Math.round(position)),
+  clearPlaybackHistory: (): Promise<void> => LibraryService.ClearPlaybackHistory(),
+  render: (id: number, signal?: AbortSignal): Promise<RenderInfo> => cancellable(MediaService.Render(id, 4096), signal),
   sources: async (): Promise<Source[]> => (await LibraryService.Sources()) ?? [],
   suggestedFolders: async (): Promise<string[]> => (await LibraryService.SuggestedFolders()) ?? [],
   sourcePathKey: (path: string): Promise<string> => LibraryService.SourcePathKey(path),
@@ -379,6 +422,8 @@ export const engine = {
   startOrganise: (runID: number): Promise<void> => LibraryService.StartOrganise(runID),
   undoOrganise: (runID: number): Promise<void> => LibraryService.UndoOrganise(runID),
   organiseRuns: async (): Promise<OrganiseRun[]> => (await LibraryService.OrganiseRuns()) ?? [],
+  fileMoveOutcomes: async (runID: number): Promise<OrganiseMove[]> =>
+    (await LibraryService.FileMoveOutcomes(runID)) ?? [],
 
   trashAssets: (ids: number[]): Promise<void> => LibraryService.TrashAssets(ids),
   restoreAssets: (ids: number[]): Promise<void> => LibraryService.RestoreAssets(ids),
@@ -508,6 +553,10 @@ export function originalUrl(id: number): string {
   return `/media/original/${id}`
 }
 
+export function renderUrl(id: number, revision: string): string {
+  return `/media/render/${id}/4096?v=${encodeURIComponent(revision)}`
+}
+
 export function spriteUrl(id: number, version: number): string {
   return `/media/sprite/${id}?v=${version}`
 }
@@ -536,6 +585,10 @@ export function videoUrl(id: number): string {
 }
 
 /** A video converted to H.264 while it plays, from at ms. */
-export function playUrl(id: number, at = 0): string {
-  return `${videoBase}/play/${id}?at=${Math.max(0, Math.round(at))}`
+export function playUrl(id: number, at = 0, audio = -1): string {
+  return `${videoBase}/play/${id}?at=${Math.max(0, Math.round(at))}${audio >= 0 ? `&audio=${audio}` : ''}`
+}
+
+export function subtitleUrl(id: number, track: number, at: number): string {
+  return `/media/subtitle/${id}?track=${track}&at=${Math.max(0, Math.round(at))}`
 }

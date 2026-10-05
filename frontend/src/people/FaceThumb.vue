@@ -24,7 +24,7 @@ const image = computed(() => {
   const shown = Math.max(w, h) * scale // the whole photo's long edge, as drawn
   const thumb = shown <= THUMB_SMALL * 1.25 ? THUMB_SMALL : THUMB_LARGE
   return {
-    src: f.video ? frameUrl(f.assetId, f.frame) : thumbUrl(f.assetId, f.thumb, thumb),
+    src: f.video ? frameUrl(f.assetId, f.frame) : `${thumbUrl(f.assetId, f.thumb, thumb)}&canonical=1`,
     style: {
       width: `${w * scale}px`,
       height: `${h * scale}px`,
