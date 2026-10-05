@@ -399,7 +399,6 @@ export interface DisplayAdjustment {
      * horizontal flip after rotation
      */
     "flip": boolean;
-    "version": number;
 }
 
 /**
@@ -511,6 +510,25 @@ export interface Event {
 }
 
 /**
+ * ExportFormat is what an export writes.
+ */
+export enum ExportFormat {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The formats an export can write.
+     *
+     * the file's own bytes, metadata included
+     */
+    ExportOriginal = "original",
+    ExportJPEG = "jpeg",
+    ExportPNG = "png",
+};
+
+/**
  * ExportJob is a durable per-file outcome; completed exports have no Undo.
  */
 export interface ExportJob {
@@ -521,7 +539,7 @@ export interface ExportJob {
     "to": string;
     "size": number;
     "mtime": number;
-    "state": string;
+    "state": ExportState;
     "error": string;
     "temp": string;
     "digest": string;
@@ -534,10 +552,7 @@ export interface ExportJob {
  * pixels without source metadata and never replace an existing file.
  */
 export interface ExportOptions {
-    /**
-     * original, jpeg or png
-     */
-    "format": string;
+    "format": ExportFormat;
     "side": number;
     "quality": number;
     "adjust": boolean;
@@ -547,6 +562,34 @@ export interface ExportOptions {
      */
     "frame": number;
 }
+
+/**
+ * ExportState is where one file of an export stands in its journal.
+ */
+export enum ExportState {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The states of one exported file.
+     */
+    ExportPlanned = "planned",
+
+    /**
+     * a temporary file beside the destination is being written
+     */
+    ExportWriting = "writing",
+
+    /**
+     * its digest is journaled; publication is next
+     */
+    ExportReady = "ready",
+    ExportDone = "done",
+    ExportFailed = "failed",
+    ExportCancelled = "cancelled",
+};
 
 /**
  * Face is one face in a photo or video: where it is, and who it is.
@@ -806,7 +849,7 @@ export interface MediaInspection {
  */
 export interface MediaTrack {
     "index": number;
-    "kind": string;
+    "kind": TrackKind;
     "codec": string;
     "language": string;
     "title": string;
@@ -834,9 +877,9 @@ export interface OrganiseMove {
     "error"?: string;
 
     /**
-     * journaled XMP disposition
+     * what became of its XMP sidecar; "" is none
      */
-    "sidecar"?: string;
+    "sidecar"?: SidecarState;
 }
 
 /**
@@ -1128,11 +1171,12 @@ export interface Progress {
 export interface RenderInfo {
     "width": number;
     "height": number;
-    "sourceWidth": number;
-    "sourceHeight": number;
+
+    /**
+     * fewer pixels than the source has
+     */
     "limited": boolean;
     "revision": string;
-    "provenance": string;
 }
 
 /**
@@ -1213,6 +1257,34 @@ export interface Settings {
     "pauseBusy": boolean;
     "idleOnly": boolean;
 }
+
+/**
+ * SidecarState is what a move does, or did, with the photo's XMP sidecar.
+ */
+export enum SidecarState {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The states of a move's sidecar.
+     *
+     * one to move with the photo
+     */
+    SidecarPlanned = "planned",
+    SidecarMoved = "moved",
+
+    /**
+     * left where it was; the move's error says why
+     */
+    SidecarKept = "kept",
+
+    /**
+     * put back with the photo
+     */
+    SidecarUndone = "undone",
+};
 
 /**
  * Source is a folder the user asked Lumen to watch.
@@ -1316,6 +1388,22 @@ export enum Theme {
     ThemeSystem = "system",
     ThemeLight = "light",
     ThemeDark = "dark",
+};
+
+/**
+ * TrackKind is which of a video's selectable streams a track is.
+ */
+export enum TrackKind {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The kinds of track.
+     */
+    TrackAudio = "audio",
+    TrackSubtitle = "subtitle",
 };
 
 /**

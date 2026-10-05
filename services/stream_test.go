@@ -114,7 +114,7 @@ func TestStreamChecksHostSecretAndDirectRangesWithoutModels(t *testing.T) {
 
 type heldConversion struct{ started, cancelled, release chan struct{} }
 
-func (c heldConversion) ConvertMP4(ctx context.Context, _ string, _ int64) (func(io.Writer) error, error) {
+func (c heldConversion) ConvertMP4(ctx context.Context, _ string, _ int64, _ int) (func(io.Writer) error, error) {
 	return func(io.Writer) error {
 		close(c.started)
 		<-ctx.Done()
@@ -174,7 +174,7 @@ func (failedResponse) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
 type failedOutputConversion struct{ cancelled bool }
 
-func (c *failedOutputConversion) ConvertMP4(ctx context.Context, _ string, _ int64) (func(io.Writer) error, error) {
+func (c *failedOutputConversion) ConvertMP4(ctx context.Context, _ string, _ int64, _ int) (func(io.Writer) error, error) {
 	return func(w io.Writer) error {
 		_, err := w.Write([]byte("frame"))
 		c.cancelled = errors.Is(ctx.Err(), context.Canceled)

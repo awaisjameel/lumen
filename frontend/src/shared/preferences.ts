@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import {
   Accent,
   Density,
@@ -136,14 +136,17 @@ export const usePreferences = defineStore('preferences', () => {
     }
   }
 
+  /** The viewing and playback choices; the fallback holds only until the library answers. */
+  const viewer = computed(() => prefs.value.viewer ?? viewerDefaults())
+
   async function setViewer(patch: Partial<ViewerPreferences>): Promise<void> {
     try {
       if (!loaded.value) await load()
-      await set({ viewer: { ...viewerDefaults(), ...prefs.value.viewer, ...patch } })
+      await set({ viewer: { ...viewer.value, ...patch } })
     } catch (e) {
       reportError(e)
     }
   }
 
-  return { prefs, loaded, saving, load, set, setViewer }
+  return { prefs, viewer, loaded, saving, load, set, setViewer }
 })

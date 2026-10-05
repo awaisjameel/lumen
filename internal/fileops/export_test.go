@@ -20,7 +20,7 @@ func exportFixture(t *testing.T) (library, core.ExportJob, *ExportRunner) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	job := core.ExportJob{AssetID: id, From: l.path("a.jpg"), To: filepath.Join(t.TempDir(), "copy.jpg"), Size: info.Size(), MTime: info.ModTime().UnixNano(), Options: core.ExportOptions{Format: "original", Frame: -1}}
+	job := core.ExportJob{AssetID: id, From: l.path("a.jpg"), To: filepath.Join(t.TempDir(), "copy.jpg"), Size: info.Size(), MTime: info.ModTime().UnixNano(), Options: core.ExportOptions{Format: core.ExportOriginal, Frame: -1}}
 	batch, err := l.st.SaveExportPlan(l.ctx, []core.ExportJob{job})
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestExportPreservesOriginalAndRefusesDestinationReplacement(t *testing.T) {
 		}
 	}
 	jobs, err := l.st.ExportJobs(l.ctx, job.Batch)
-	if err != nil || jobs[0].State != "done" {
+	if err != nil || jobs[0].State != core.ExportDone {
 		t.Fatalf("outcome: %+v %v", jobs, err)
 	}
 	l2, second, other := exportFixture(t)
@@ -57,7 +57,7 @@ func TestExportPreservesOriginalAndRefusesDestinationReplacement(t *testing.T) {
 		t.Fatal("destination overwritten")
 	}
 	jobs, err = l2.st.ExportJobs(l2.ctx, second.Batch)
-	if err != nil || jobs[0].State != "failed" {
+	if err != nil || jobs[0].State != core.ExportFailed {
 		t.Fatalf("collision outcome: %+v %v", jobs, err)
 	}
 }
@@ -90,14 +90,14 @@ func TestExportRecoveryVerifiesPublishedBytesAndRemovesOwnTemporaryFile(t *testi
 	tmp := filepath.Join(filepath.Dir(job.To), ".lumen-export-interrupted")
 	l.write(tmp, "partial")
 	digest := sha256.Sum256([]byte("published"))
-	if err := l.st.SetExportJob(l.ctx, job.ID, "ready", "", tmp, hex.EncodeToString(digest[:])); err != nil {
+	if err := l.st.SetExportJob(l.ctx, job.ID, core.ExportReady, "", tmp, hex.EncodeToString(digest[:])); err != nil {
 		t.Fatal(err)
 	}
 	if err := runner.Recover(l.ctx); err != nil {
 		t.Fatal(err)
 	}
 	jobs, err := l.st.ExportJobs(l.ctx, job.Batch)
-	if err != nil || jobs[0].State != "done" {
+	if err != nil || jobs[0].State != core.ExportDone {
 		t.Fatalf("recovery: %+v %v", jobs, err)
 	}
 	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
@@ -112,7 +112,7 @@ func TestExportRevalidatesAfterRenderingAndCleansTemporaryCopies(t *testing.T) {
 	for _, reason := range []string{"cancel", "source", "privacy"} {
 		t.Run(reason, func(t *testing.T) {
 			l, original, runner := exportFixture(t)
-			original.Options.Format = "png"
+			original.Options.Format = core.ExportPNG
 			batch, err := l.st.SaveExportPlan(l.ctx, []core.ExportJob{original})
 			if err != nil {
 				t.Fatal(err)
@@ -143,9 +143,9 @@ func TestExportRevalidatesAfterRenderingAndCleansTemporaryCopies(t *testing.T) {
 				t.Fatalf("temporary copies remain: %v %v", entries, err)
 			}
 			jobs, err := l.st.ExportJobs(l.ctx, batch)
-			want := "failed"
+			want := core.ExportFailed
 			if reason == "cancel" {
-				want = "cancelled"
+				want = core.ExportCancelled
 			}
 			if err != nil || len(jobs) != 1 || jobs[0].State != want {
 				t.Fatalf("outcome: %+v %v", jobs, err)

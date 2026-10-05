@@ -25,13 +25,6 @@ export function AddSources(paths: string[] | null): $CancellablePromise<core$0.S
 }
 
 /**
- * Adjustment reads presentation metadata under the current privacy gate.
- */
-export function Adjustment(id: number): $CancellablePromise<core$0.DisplayAdjustment> {
-    return $Call.ByID(3683905206, id);
-}
-
-/**
  * Albums lists saved collections with their current counts and covers.
  */
 export function Albums(): $CancellablePromise<core$0.Album[] | null> {

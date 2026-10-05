@@ -13,12 +13,16 @@ import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { showTrashUndo } from '../trash/undo'
 import { blockAssets } from '../shared/block'
+import OutcomeList from './OutcomeList.vue'
+
+type Operation =
+  'favourite' | 'unfavourite' | 'tag' | 'album' | 'removeAlbum' | 'trash' | 'block' | 'restore' | 'delete'
 
 const props = defineProps<{ ids: number[]; selection?: Selection | null; trash: boolean }>()
 const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>('open', { default: false })
 const albums = useAlbums()
-const operation = ref('favourite')
+const operation = ref<Operation>('favourite')
 const tag = ref('')
 const album = ref(0)
 const busy = ref(false)
@@ -28,12 +32,12 @@ let disposed = false
 const error = ref('')
 const results = ref<{ id: number; error: string; state: 'done' | 'failed' | 'cancelled' }[]>([])
 const batchTotal = ref(0)
-const page = ref(0)
+const needsAlbum = computed(() => operation.value === 'album' || operation.value === 'removeAlbum')
 onBeforeUnmount(() => {
   disposed = true
   stopped.value = true
 })
-const options = computed(() =>
+const options = computed((): { value: Operation; label: string }[] =>
   props.trash
     ? [
         { value: 'restore', label: t('trash.restore') },
@@ -64,13 +68,7 @@ async function apply() {
   const selectedOperation = operation.value
   const name = tag.value.trim(),
     albumID = album.value
-  if (
-    busy.value ||
-    !ids.length ||
-    (selectedOperation === 'tag' && !name) ||
-    ((selectedOperation.includes('Album') || selectedOperation === 'album') && !albumID)
-  )
-    return
+  if (busy.value || !ids.length || (selectedOperation === 'tag' && !name) || (needsAlbum.value && !albumID)) return
   if (!(await confirm(t('files.batch'), t('files.batchConfirm', { n: ids.length }), t('files.applyBatch')))) return
   if (disposed || ids.join(',') !== props.ids.join(',')) return
   busy.value = true
@@ -78,7 +76,6 @@ async function apply() {
   stopped.value = false
   error.value = ''
   results.value = []
-  page.value = 0
   try {
     if (props.selection) await engine.validateSelection(props.selection)
     if (selectedOperation === 'block') {
@@ -182,13 +179,7 @@ async function apply() {
       <UAlert v-if="error" color="error" :title="error" />
       <USelect v-model="operation" :items="options" :disabled="busy" :aria-label="t('files.operation')" />
       <UInput v-if="operation === 'tag'" v-model="tag" :disabled="busy" :aria-label="t('details.addTag')" />
-      <USelect
-        v-if="operation === 'album' || operation === 'removeAlbum'"
-        v-model="album"
-        :items="albumOptions"
-        :disabled="busy"
-        :aria-label="t('nav.albums')"
-      />
+      <USelect v-if="needsAlbum" v-model="album" :items="albumOptions" :disabled="busy" :aria-label="t('nav.albums')" />
       <p role="status">
         {{
           t('files.batchProgress', {
@@ -198,15 +189,9 @@ async function apply() {
           })
         }}
       </p>
-      <p v-for="result in results.slice(page * 100, (page + 1) * 100)" :key="result.id">
-        {{ result.id }}: {{ t(`files.outcome.${result.state}`) }} {{ result.error }}
-      </p>
-      <div v-if="results.length > 100">
-        <UButton :disabled="page === 0" variant="outline" @click="page--">{{ t('files.previousPage') }}</UButton>
-        <UButton :disabled="(page + 1) * 100 >= results.length" variant="outline" @click="page++">{{
-          t('files.nextPage')
-        }}</UButton>
-      </div>
+      <OutcomeList v-slot="{ item: result }" :items="results">
+        <p :key="result.id">{{ result.id }}: {{ t(`files.outcome.${result.state}`) }} {{ result.error }}</p>
+      </OutcomeList>
     </template>
     <template #footer>
       <UButton :disabled="busy" @click="apply">{{ t('files.applyBatch') }}</UButton>

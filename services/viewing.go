@@ -2,20 +2,9 @@ package services
 
 import (
 	"context"
-	"errors"
 
 	"lumen/internal/core"
-	"lumen/internal/store"
 )
-
-// Adjustment reads presentation metadata under the current privacy gate.
-func (s *LibraryService) Adjustment(ctx context.Context, id int64) (core.DisplayAdjustment, error) {
-	a, err := s.store.Adjustment(ctx, id, false)
-	if errors.Is(err, store.ErrNotFound) && s.gate.Unlocked() {
-		return s.store.Adjustment(ctx, id, true)
-	}
-	return a, err
-}
 
 // SetAdjustment persists a non-destructive change and refreshes its consumers.
 func (s *LibraryService) SetAdjustment(ctx context.Context, id int64, rotation int, flip bool) (core.DisplayAdjustment, error) {

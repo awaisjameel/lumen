@@ -15,6 +15,7 @@ import (
 	"lumen/internal/core"
 	"lumen/internal/fileops"
 	"lumen/internal/index"
+	"lumen/internal/media"
 	"lumen/internal/search"
 	"lumen/internal/store"
 )
@@ -44,6 +45,8 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 	for name, want := range map[string]float64{
 		"THUMB_SMALL":               core.ThumbSmall,
 		"THUMB_LARGE":               core.ThumbLarge,
+		"RENDER_SIDE":               media.RenderSide,
+		"RENDER_SIDE_MIN":           media.RenderSideMin,
 		"SPRITE_COLS":               core.SpriteCols,
 		"SPRITE_ROWS":               core.SpriteRows,
 		"TAG_CONFIDENCE_DEFAULT":    core.TagConfidenceDefault,

@@ -8,7 +8,7 @@ import { mountInApp } from '../shared/testing'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import type { Sel } from './store'
-import { AlbumKind, BlockKind, DateSource, engine, Kind, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
+import { AlbumKind, BlockKind, DateSource, engine, Kind, MAX_NAME_LEN, onLibraryChanged, Playback } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Block from '../shared/block'
 import type { AssetDetail, Changes, Event, Face } from '../bridge'
@@ -470,4 +470,24 @@ it('does not roll back an album checkbox on the next photo when an earlier edit 
   await flushPromises()
   expect(wrapper.get('[role="checkbox"]').attributes('aria-checked')).toBe('false')
   expect(wrapper.text()).not.toContain('old edit failed')
+})
+
+it('lists only what a video records and offers to copy only the values it has', async () => {
+  vi.mocked(engine.asset).mockResolvedValueOnce({
+    ...detail(1, 'Fixture Cam'),
+    kind: Kind.KindVideo,
+    video: { duration: 1000, codec: 'h264', audio: 'aac', play: Playback.PlayDirect },
+  })
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  const section = wrapper.get(`section[aria-label="${t('details.metadata')}"]`)
+  const labels = section.findAll('.meta-row').map((row) => row.text())
+  expect(labels.some((text) => text.includes(t('details.frameRate')))).toBe(true)
+  expect(labels.some((text) => text.includes(t('details.lens')))).toBe(false)
+  expect(section.find(`button[aria-label="${t('files.copyField', { name: t('details.camera') })}"]`).exists()).toBe(
+    true,
+  )
+  expect(section.find(`button[aria-label="${t('files.copyField', { name: t('details.frameRate') })}"]`).exists()).toBe(
+    false,
+  )
 })

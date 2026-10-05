@@ -89,14 +89,12 @@ type LibraryService struct {
 
 // NewLibraryService returns the library service. gate is the Blocked
 // screen's lock it shares with media serving; nil gives it one of its own.
-func NewLibraryService(st *store.Store, ix *index.Indexer, gate *BlockGate, caches ...*media.Cache) *LibraryService {
+// cache renders what is exported; nil leaves rendered exports unsupported.
+func NewLibraryService(st *store.Store, ix *index.Indexer, gate *BlockGate, cache *media.Cache) *LibraryService {
 	if gate == nil {
 		gate = &BlockGate{}
 	}
-	s := &LibraryService{store: st, ix: ix, now: time.Now, gate: gate}
-	if len(caches) > 0 {
-		s.media = caches[0]
-	}
+	s := &LibraryService{store: st, ix: ix, now: time.Now, gate: gate, media: cache}
 	if ix != nil {
 		// Files an interrupted organise run left half-moved are settled
 		// before the first scan could find them so.

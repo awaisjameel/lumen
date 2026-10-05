@@ -47,11 +47,7 @@ type Streamer struct {
 // videoConverter lets stream lifecycle tests hold a conversion until its
 // request is cancelled, without depending on a particular codec or speed.
 type videoConverter interface {
-	ConvertMP4(context.Context, string, int64) (func(io.Writer) error, error)
-}
-
-type trackConverter interface {
-	ConvertMP4Track(context.Context, string, int64, int) (func(io.Writer) error, error)
+	ConvertMP4(ctx context.Context, path string, at int64, audio int) (func(io.Writer) error, error)
 }
 
 // NewStreamer starts listening on a free loopback port. Serve it with Run.
@@ -194,18 +190,14 @@ func (s *Streamer) servePlay(w http.ResponseWriter, r *http.Request, id int64) {
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	var convert func(io.Writer) error
+	audio := -1 // the file's first audio track
 	if r.URL.Query().Has("audio") {
-		audio, parseErr := strconv.Atoi(r.URL.Query().Get("audio"))
-		d, supported := s.decoder.(trackConverter)
-		if parseErr != nil || audio < 0 || !supported {
+		if audio, err = strconv.Atoi(r.URL.Query().Get("audio")); err != nil || audio < 0 {
 			http.Error(w, "invalid audio track", http.StatusBadRequest)
 			return
 		}
-		convert, err = d.ConvertMP4Track(ctx, path, at, audio)
-	} else {
-		convert, err = s.decoder.ConvertMP4(ctx, path, at)
 	}
+	convert, err := s.decoder.ConvertMP4(ctx, path, at, audio)
 	if !served(w, err, id) { // a damaged file fails here, before any header is sent
 		return
 	}

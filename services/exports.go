@@ -24,10 +24,11 @@ func (s *LibraryService) PlanExport(ctx context.Context, ids []int64, directory 
 	if len(ids) == 0 || !filepath.IsAbs(directory) {
 		return nil, store.ErrNotFound
 	}
-	if options.Format != "original" && options.Format != "jpeg" && options.Format != "png" {
+	if !slices.Contains([]core.ExportFormat{core.ExportOriginal, core.ExportJPEG, core.ExportPNG}, options.Format) {
 		return nil, media.ErrUnsupported
 	}
-	options.Side = min(max(256, options.Side), media.RenderSide)
+	rendered := options.Format != core.ExportOriginal
+	options.Side = min(max(media.RenderSideMin, options.Side), media.RenderSide)
 	options.Quality = min(max(1, options.Quality), 100)
 	jobs := []core.ExportJob{}
 	destinations := make(map[string]bool, len(ids))
@@ -40,7 +41,9 @@ func (s *LibraryService) PlanExport(ctx context.Context, ids []int64, directory 
 		if !ok {
 			return nil, store.ErrNotFound
 		}
-		if options.Format != "original" && f.Kind == core.KindVideo && options.Frame < 0 {
+		// A rendered export of a video is one frame, at a time inside it.
+		frame := rendered && f.Kind == core.KindVideo
+		if frame && (options.Frame < 0 || (f.Duration > 0 && options.Frame >= f.Duration)) {
 			return nil, media.ErrUnsupported
 		}
 		fi, err := os.Stat(path)
@@ -48,13 +51,15 @@ func (s *LibraryService) PlanExport(ctx context.Context, ids []int64, directory 
 			return nil, err
 		}
 		name := filepath.Base(path)
-		if options.Format != "original" {
-			name = strings.TrimSuffix(name, filepath.Ext(name)) + "." + options.Format
-			if options.Format == "jpeg" {
-				name = strings.TrimSuffix(name, ".jpeg") + ".jpg"
+		if rendered {
+			name = strings.TrimSuffix(name, filepath.Ext(name))
+			if frame {
+				name += "-frame"
 			}
-			if f.Kind == core.KindVideo {
-				name = strings.TrimSuffix(name, filepath.Ext(name)) + "-frame" + filepath.Ext(name)
+			if options.Format == core.ExportJPEG {
+				name += ".jpg"
+			} else {
+				name += ".png"
 			}
 		}
 		// A name another selected file or the folder already has takes the
@@ -65,15 +70,6 @@ func (s *LibraryService) PlanExport(ctx context.Context, ids []int64, directory 
 		}
 		if err := s.store.ExportAllowed(ctx, id, to); err != nil {
 			return nil, err
-		}
-		if options.Format != "original" && f.Kind == core.KindVideo {
-			detail, err := s.store.AssetDetail(ctx, id, false)
-			if err != nil {
-				return nil, err
-			}
-			if detail.Video == nil || options.Frame < 0 || options.Frame >= detail.Video.Duration {
-				return nil, media.ErrUnsupported
-			}
 		}
 		destinations[core.Fold(to)] = true
 		jobs = append(jobs, core.ExportJob{AssetID: id, From: path, To: to, Size: fi.Size(), MTime: fi.ModTime().UnixNano(), Options: options})
@@ -177,7 +173,7 @@ func (s *LibraryService) exportPixels(ctx context.Context, job core.ExportJob) (
 		im = media.Adjust(im, a)
 	}
 	var out bytes.Buffer
-	if job.Options.Format == "png" {
+	if job.Options.Format == core.ExportPNG {
 		err = png.Encode(&out, im)
 	} else {
 		err = jpeg.Encode(&out, im, &jpeg.Options{Quality: job.Options.Quality})

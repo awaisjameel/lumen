@@ -43,11 +43,8 @@ function detail(id: number): AssetDetail {
 const render: RenderInfo = {
   width: 4096,
   height: 2731,
-  sourceWidth: 6000,
-  sourceHeight: 4000,
   limited: true,
   revision: 'new',
-  provenance: 'source',
 }
 
 it('cancels navigation and refuses a late render from the previous asset', async () => {
@@ -80,7 +77,7 @@ it('keeps an already loaded original visible after presentation metadata refresh
   try {
     await wrapper.get('img.original').trigger('load')
     expect(wrapper.get('img.original').isVisible()).toBe(true)
-    await wrapper.setProps({ thumb: 2, detail: { ...photo, adjustment: { rotation: 1, flip: false, version: 1 } } })
+    await wrapper.setProps({ thumb: 2, detail: { ...photo, adjustment: { rotation: 1, flip: false } } })
     expect(wrapper.get('img.original').isVisible()).toBe(true)
     expect(wrapper.get('img.original').attributes('style')).toContain('rotate(90deg)')
     expect(wrapper.get('img.preview').isVisible()).toBe(false)

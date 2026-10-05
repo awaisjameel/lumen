@@ -26,23 +26,17 @@ func (s *Store) Selection(ctx context.Context, view core.View, ids []int64, sear
 	if err != nil {
 		return core.Selection{}, err
 	}
+	order := "taken_at DESC, id DESC"
 	if search {
 		data, err := json.Marshal(ids)
 		if err != nil {
 			return core.Selection{}, err
 		}
-		where, args = visible+" AND id IN (SELECT value FROM json_each(?))", []any{string(data)}
+		// Ranked results keep the order they were given in.
+		where, args = visible+" AND id IN (SELECT value FROM json_each(?1))", []any{string(data)}
+		order = "(SELECT key FROM json_each(?1) WHERE value = assets.id)"
 	}
 	var sel core.Selection
-	order := "taken_at DESC, id DESC"
-	if search {
-		data, err := json.Marshal(ids)
-		if err != nil {
-			return sel, err
-		}
-		order = "(SELECT key FROM json_each(?) WHERE value = assets.id)"
-		args = append(args, string(data))
-	}
 	err = s.read(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx, selectionRevisionSQL).Scan(&sel.Revision); err != nil {
 			return err

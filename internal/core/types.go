@@ -167,8 +167,19 @@ type OrganiseMove struct {
 	State   OrganiseMoveState `json:"state"`
 	Renamed bool              `json:"renamed"`           // its name took a " (2)" because another file had it
 	Error   string            `json:"error,omitempty"`   // why it was skipped or failed
-	Sidecar string            `json:"sidecar,omitempty"` // journaled XMP disposition
+	Sidecar SidecarState      `json:"sidecar,omitempty"` // what became of its XMP sidecar; "" is none
 }
+
+// SidecarState is what a move does, or did, with the photo's XMP sidecar.
+type SidecarState string
+
+// The states of a move's sidecar.
+const (
+	SidecarPlanned SidecarState = "planned" // one to move with the photo
+	SidecarMoved   SidecarState = "moved"
+	SidecarKept    SidecarState = "kept"   // left where it was; the move's error says why
+	SidecarUndone  SidecarState = "undone" // put back with the photo
+)
 
 // OrganisePlan is a dry run: the moves a template would make, saved as a
 // planned run so that starting it moves exactly what was previewed.

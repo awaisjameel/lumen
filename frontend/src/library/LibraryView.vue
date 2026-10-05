@@ -290,6 +290,12 @@ function select(day: string, item: GridItem | null, event?: MouseEvent) {
   void lib.selectItems({ day, id: item.id }, event ? event.ctrlKey || event.metaKey : false, event?.shiftKey ?? false)
 }
 
+/** In the selection, or the one item focused while nothing is selected. */
+function isSelected(item: GridItem | null): boolean {
+  if (!item) return false
+  return lib.selectedIDs.size ? lib.selectedIDs.has(item.id) : lib.selected?.id === item.id
+}
+
 function selectVisible() {
   lib.selectedIDs = new Set(
     visible.value
@@ -705,16 +711,11 @@ const searchNotes = computed(() => {
                   :id="it ? cellId(it.id) : undefined"
                   :key="it?.id ?? `p${k}`"
                   class="cell"
-                  :class="{
-                    selected:
-                      it && (lib.selectedIDs.has(it.id) || (!lib.selectedIDs.size && lib.selected?.id === it.id)),
-                  }"
+                  :class="{ selected: isSelected(it) }"
                   :style="{ width: layout.cell + 'px', height: layout.cell + 'px' }"
                   :role="it ? 'option' : undefined"
                   :aria-label="it ? cellLabel(v.row.day, it) : undefined"
-                  :aria-selected="
-                    it ? lib.selectedIDs.has(it.id) || (!lib.selectedIDs.size && lib.selected?.id === it.id) : undefined
-                  "
+                  :aria-selected="it ? isSelected(it) : undefined"
                   :aria-hidden="it ? undefined : 'true'"
                   @click="select(v.row.day, it, $event)"
                   @dblclick="open(v.row.day, it)"
@@ -726,9 +727,7 @@ const searchNotes = computed(() => {
                       :video="it?.v"
                       :duration-ms="it?.d"
                       :favourite="it?.f"
-                      :selected="
-                        !!it && (lib.selectedIDs.has(it.id) || (!lib.selectedIDs.size && lib.selected?.id === it.id))
-                      "
+                      :selected="isSelected(it)"
                     >
                       <template v-if="it?.v && it.t" #media>
                         <VideoThumb :key="it.id" :item="it" :cell="layout.cell" />

@@ -89,7 +89,6 @@ func (m *MediaService) prepareRender(ctx context.Context, id int64, side int, un
 	if err != nil {
 		return "", info, err
 	}
-	info.SourceWidth, info.SourceHeight = d.Width, d.Height
 	info.Limited = info.Width < d.Width || info.Height < d.Height
 	return dst, info, nil
 }
@@ -109,5 +108,5 @@ func (m *MediaService) serveRender(w http.ResponseWriter, r *http.Request, id in
 
 func renderSide(value string) (int, bool) {
 	n, err := strconv.Atoi(value)
-	return n, err == nil && n >= 256 && n <= media.RenderSide
+	return n, err == nil && n >= media.RenderSideMin && n <= media.RenderSide
 }

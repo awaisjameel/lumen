@@ -12,7 +12,8 @@ import { viewerDefaults } from '../shared/viewing'
 import PrefRow from '../shared/PrefRow.vue'
 
 const prefs = usePreferences()
-const viewing = computed(() => prefs.prefs.viewer ?? viewerDefaults())
+const viewing = computed(() => prefs.viewer)
+const defaults = viewerDefaults()
 </script>
 <template>
   <div>
@@ -35,7 +36,7 @@ const viewing = computed(() => prefs.prefs.viewer ?? viewerDefaults())
         :max="60"
         :model-value="viewing.slideshowSeconds"
         :aria-label="t('viewer.interval')"
-        @update:model-value="prefs.setViewer({ slideshowSeconds: Number($event) || 5 })"
+        @update:model-value="prefs.setViewer({ slideshowSeconds: Number($event) || defaults.slideshowSeconds })"
     /></PrefRow>
     <PrefRow :label="t('viewer.loop')"
       ><USwitch
@@ -70,7 +71,7 @@ const viewing = computed(() => prefs.prefs.viewer ?? viewerDefaults())
         :max="60"
         :model-value="viewing.skipSeconds"
         :aria-label="t('viewer.skipInterval')"
-        @update:model-value="prefs.setViewer({ skipSeconds: Number($event) || 10 })"
+        @update:model-value="prefs.setViewer({ skipSeconds: Number($event) || defaults.skipSeconds })"
     /></PrefRow>
     <PrefRow :label="t('viewer.speed')"
       ><UInput
@@ -80,7 +81,7 @@ const viewing = computed(() => prefs.prefs.viewer ?? viewerDefaults())
         :step="0.25"
         :model-value="viewing.speed"
         :aria-label="t('viewer.speed')"
-        @update:model-value="prefs.setViewer({ speed: Number($event) || 1 })"
+        @update:model-value="prefs.setViewer({ speed: Number($event) || defaults.speed })"
     /></PrefRow>
     <UButton variant="ghost" @click="engine.clearPlaybackHistory().catch(reportError)">{{
       t('viewer.clearHistory')

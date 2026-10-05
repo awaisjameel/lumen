@@ -12,7 +12,7 @@ import (
 // Adjustment reads presentation metadata under the visibility predicate.
 func (s *Store) Adjustment(ctx context.Context, id int64, unlocked bool) (core.DisplayAdjustment, error) {
 	var a core.DisplayAdjustment
-	err := s.r.QueryRowContext(ctx, "SELECT display_rotation, display_flip, display_version FROM assets WHERE id = ? AND "+servableOf(unlocked), id).Scan(&a.Rotation, &a.Flip, &a.Version)
+	err := s.r.QueryRowContext(ctx, "SELECT display_rotation, display_flip FROM assets WHERE id = ? AND "+servableOf(unlocked), id).Scan(&a.Rotation, &a.Flip)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrNotFound
 	}

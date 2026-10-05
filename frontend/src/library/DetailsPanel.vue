@@ -19,6 +19,7 @@ import {
   Kind,
   MAX_NAME_LEN,
   TagSource,
+  TrackKind,
 } from '../bridge'
 import type { AssetDetail, AssetTag, Face, MediaInspection } from '../bridge'
 import FileTools from '../media/FileTools.vue'
@@ -409,6 +410,40 @@ function returnFocus(e: Event) {
   }
 }
 
+/**
+ * What the file says about itself. A row it has no value for says so; a
+ * video is not asked for what only a photo records.
+ */
+const metadata = computed(() => {
+  const d = detail.value
+  if (!d) return []
+  const i = inspection.value
+  const row = (label: MessageKey, value: string | number | undefined) => ({
+    key: label as string,
+    label: t(label),
+    value: value ? String(value) : '',
+  })
+  const rows = [row('details.camera', d.camera)]
+  if (d.video) rows.push(row('details.frameRate', i?.frameRate))
+  else
+    rows.push(
+      row('details.lens', i?.lens),
+      row('details.exposure', i?.exposure),
+      row('details.aperture', i?.aperture),
+      row('details.iso', i?.iso),
+      row('details.profile', i?.profile),
+      row('details.orientation', i?.orientation),
+      row('details.pages', i?.pages),
+    )
+  for (const track of i?.tracks ?? [])
+    rows.push({
+      key: `track.${track.index}`,
+      label: t(track.kind === TrackKind.TrackAudio ? 'viewer.audioTrack' : 'viewer.subtitleTrack'),
+      value: `${track.index}: ${[track.codec, track.language, track.title].filter(Boolean).join(' · ')}`,
+    })
+  return rows
+})
+
 const hasDetail = () => detail.value !== null
 const editable = () => hasDetail() && !lib.inTrash
 useCommands([
@@ -559,34 +594,12 @@ useCommands([
 
       <section :aria-label="t('details.metadata')">
         <h3>{{ t('details.metadata') }}</h3>
-        <MetaRow copyable :label="t('details.camera')" :value="detail.camera || t('details.missing')" />
-        <MetaRow copyable :label="t('details.lens')" :value="inspection?.lens || t('details.missing')" />
-        <MetaRow copyable :label="t('details.exposure')" :value="inspection?.exposure || t('details.missing')" />
-        <MetaRow copyable :label="t('details.aperture')" :value="inspection?.aperture || t('details.missing')" />
-        <MetaRow copyable :label="t('details.iso')" :value="inspection?.iso || t('details.missing')" />
-        <MetaRow copyable :label="t('details.profile')" :value="inspection?.profile || t('details.missing')" />
         <MetaRow
-          copyable
-          :label="t('details.orientation')"
-          :value="inspection?.orientation ? String(inspection.orientation) : t('details.missing')"
-        />
-        <MetaRow
-          copyable
-          :label="t('details.pages')"
-          :value="inspection?.pages ? String(inspection.pages) : t('details.missing')"
-        />
-        <MetaRow
-          v-if="detail.video"
-          copyable
-          :label="t('details.frameRate')"
-          :value="inspection?.frameRate || t('details.missing')"
-        />
-        <MetaRow
-          v-for="track in inspection?.tracks"
-          :key="track.index"
-          copyable
-          :label="t(track.kind === 'audio' ? 'viewer.audioTrack' : 'viewer.subtitleTrack')"
-          :value="`${track.index}: ${track.codec} ${track.language} ${track.title}`"
+          v-for="row in metadata"
+          :key="row.key"
+          :copyable="!!row.value"
+          :label="row.label"
+          :value="row.value || t('details.missing')"
         />
       </section>
 
@@ -772,32 +785,36 @@ useCommands([
         >
           <template #action>
             <div class="flex flex-col items-end gap-1">
-              <UButton
-                v-if="!lib.inTrash"
-                :icon="icons.external"
-                :aria-label="t('files.open')"
-                variant="ghost"
-                size="sm"
-                square
-                @click="openCopy(detail.id, p, false)"
-              />
-              <UButton
-                v-if="!lib.inTrash"
-                :icon="icons.more"
-                :aria-label="t('files.openWith')"
-                variant="ghost"
-                size="sm"
-                square
-                @click="openCopy(detail.id, p, true)"
-              />
-              <UButton
-                :icon="icons.copy"
-                :aria-label="t('files.copyName')"
-                variant="ghost"
-                size="sm"
-                square
-                @click="copyName(p)"
-              />
+              <UTooltip v-if="!lib.inTrash" :text="t('files.open')">
+                <UButton
+                  :icon="icons.external"
+                  :aria-label="t('files.open')"
+                  variant="ghost"
+                  size="sm"
+                  square
+                  @click="openCopy(detail.id, p, false)"
+                />
+              </UTooltip>
+              <UTooltip v-if="!lib.inTrash" :text="t('files.openWith')">
+                <UButton
+                  :icon="icons.more"
+                  :aria-label="t('files.openWith')"
+                  variant="ghost"
+                  size="sm"
+                  square
+                  @click="openCopy(detail.id, p, true)"
+                />
+              </UTooltip>
+              <UTooltip :text="t('files.copyName')">
+                <UButton
+                  :icon="icons.copy"
+                  :aria-label="t('files.copyName')"
+                  variant="ghost"
+                  size="sm"
+                  square
+                  @click="copyName(p)"
+                />
+              </UTooltip>
               <UTooltip :text="t('common.showInFolder')">
                 <UButton
                   :icon="icons.folder"

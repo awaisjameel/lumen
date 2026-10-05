@@ -8,7 +8,7 @@ import ConfirmDialog from '../shared/ConfirmDialog.vue'
 import { confirm, question } from '../shared/confirm'
 import { mountInApp } from '../shared/testing'
 import { commandById, runCommand } from '../shared/commands'
-import { DateSource, engine, Kind, Playback, videosAvailable } from '../bridge'
+import { DateSource, engine, Kind, Playback, TrackKind, videosAvailable } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { AssetDetail } from '../bridge'
 import { useLibrary } from './store'
@@ -518,7 +518,7 @@ it('removes existing subtitle cues even when the reused text track was disabled'
     iso: '',
     frameRate: '',
     pages: 0,
-    tracks: [{ index: 3, kind: 'subtitle', codec: 'subrip', language: 'eng', title: '', supported: true }],
+    tracks: [{ index: 3, kind: TrackKind.TrackSubtitle, codec: 'subrip', language: 'eng', title: '', supported: true }],
   })
   vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
     Promise.resolve(new Response('WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nOne caption\n', { status: 200 })),

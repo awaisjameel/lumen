@@ -383,7 +383,7 @@ func TestThumbCacheCapSettingIsStoredClampedAndReachesTheCache(t *testing.T) {
 	ctx := t.Context()
 	l := newShownLibrary(t, 1)
 	ix := index.New(l.st, core.PathsIn(t.TempDir()), l.cache, index.Models{}, quietEvents{})
-	s := NewLibraryService(l.st, ix, nil)
+	s := NewLibraryService(l.st, ix, nil, nil)
 	if got, err := s.Settings(ctx); err != nil || got.ThumbCacheMB != 2048 {
 		t.Fatalf("default cap = %d MB (%v), want 2048", got.ThumbCacheMB, err)
 	}
@@ -398,14 +398,14 @@ func TestThumbCacheCapSettingIsStoredClampedAndReachesTheCache(t *testing.T) {
 		}
 	}
 	// Without an indexer (as in these tests) the setting is still stored.
-	check(t, NewLibraryService(l.st, nil, nil).SetThumbCacheMB(ctx, 512))
+	check(t, NewLibraryService(l.st, nil, nil, nil).SetThumbCacheMB(ctx, 512))
 }
 
 func TestCPUThreadsSettingShowsTheMachineAndIsStoredClamped(t *testing.T) {
 	ctx := t.Context()
 	l := newShownLibrary(t, 1)
 	ix := index.New(l.st, core.PathsIn(t.TempDir()), l.cache, index.Models{}, quietEvents{})
-	s := NewLibraryService(l.st, ix, nil)
+	s := NewLibraryService(l.st, ix, nil, nil)
 	got, err := s.Settings(ctx)
 	if err != nil || got.CPUThreads != core.DefaultCPUThreads() || got.DefaultCPUThreads != core.DefaultCPUThreads() ||
 		got.MaxCPUThreads != core.MaxCPUThreads() {
@@ -418,11 +418,11 @@ func TestCPUThreadsSettingShowsTheMachineAndIsStoredClamped(t *testing.T) {
 		}
 	}
 	// Without an indexer (as in these tests) the setting is still stored.
-	check(t, NewLibraryService(l.st, nil, nil).SetCPUThreads(ctx, 2))
+	check(t, NewLibraryService(l.st, nil, nil, nil).SetCPUThreads(ctx, 2))
 }
 
 func TestOnboardingUsesTheLibrarysFolderKeys(t *testing.T) {
-	s := NewLibraryService(nil, nil, nil)
+	s := NewLibraryService(nil, nil, nil, nil)
 	if s.SourcePathKey(`D:\Photos\ÉTÉ\..\Été`) != s.SourcePathKey(`d:\photos\été`) {
 		t.Fatal("folder keys did not clean the path and fold its case")
 	}
@@ -435,7 +435,7 @@ func TestIndexingGivesWayByDefaultAndTheSettingsApplyAtOnce(t *testing.T) {
 	ctx := t.Context()
 	l := newShownLibrary(t, 1)
 	ix := index.New(l.st, core.PathsIn(t.TempDir()), l.cache, index.Models{}, quietEvents{})
-	s := NewLibraryService(l.st, ix, nil)
+	s := NewLibraryService(l.st, ix, nil, nil)
 	got, err := s.Settings(ctx)
 	if err != nil || !got.PauseFullScreen || !got.PauseBusy || got.IdleOnly {
 		t.Fatalf("settings = %+v (%v), want full screen and busy on, idle-only off", got, err)
@@ -457,7 +457,7 @@ func TestIndexingGivesWayByDefaultAndTheSettingsApplyAtOnce(t *testing.T) {
 		t.Fatalf("settings after turning them off = %+v (%v)", got, err)
 	}
 	// Without an indexer (as in other tests) the settings are still stored.
-	check(t, NewLibraryService(l.st, nil, nil).SetPauseBusy(ctx, true))
+	check(t, NewLibraryService(l.st, nil, nil, nil).SetPauseBusy(ctx, true))
 }
 
 func TestThumbCacheBytesIsTheCachesRunningTotal(t *testing.T) {
@@ -515,7 +515,7 @@ type coveredMedia struct {
 // fixedConversion is a converter whose output is a few bytes.
 type fixedConversion struct{}
 
-func (fixedConversion) ConvertMP4(context.Context, string, int64) (func(io.Writer) error, error) {
+func (fixedConversion) ConvertMP4(context.Context, string, int64, int) (func(io.Writer) error, error) {
 	return func(w io.Writer) error { _, err := w.Write([]byte("converted")); return err }, nil
 }
 
@@ -740,7 +740,7 @@ type longConversion struct {
 	cancelled atomic.Bool
 }
 
-func (c *longConversion) ConvertMP4(ctx context.Context, _ string, _ int64) (func(io.Writer) error, error) {
+func (c *longConversion) ConvertMP4(ctx context.Context, _ string, _ int64, _ int) (func(io.Writer) error, error) {
 	return func(w io.Writer) error {
 		chunk := make([]byte, 64<<10)
 		for range 100 {
@@ -830,7 +830,7 @@ type stalledConversion struct {
 	ended   chan error
 }
 
-func (c stalledConversion) ConvertMP4(ctx context.Context, _ string, _ int64) (func(io.Writer) error, error) {
+func (c stalledConversion) ConvertMP4(ctx context.Context, _ string, _ int64, _ int) (func(io.Writer) error, error) {
 	return func(io.Writer) error {
 		close(c.started)
 		select {

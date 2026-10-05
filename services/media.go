@@ -149,6 +149,7 @@ func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int
 			if !served(w, err, id) {
 				return
 			}
+			m.cache.Viewed(id)
 			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("Content-Type", "image/jpeg")
 			_, _ = w.Write(data) // The request owns cancellation and the gate writer.

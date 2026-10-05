@@ -238,7 +238,7 @@ func TestAddSourcesIsAllOrNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil, nil, nil)
 	dir := t.TempDir()
 	if _, err := s.AddSources(ctx, []string{dir, filepath.Join(dir, "missing")}); !errors.Is(err, ErrFolderNotFound) {
 		t.Fatalf("AddSources with a missing folder: %v", err)
@@ -515,7 +515,7 @@ func TestTurningTextReadingOnAndOffThroughTheLibraryService(t *testing.T) {
 	}
 	defer st.Close()
 	ix := index.New(st, paths, nil, index.Models{}, &quietEvents{})
-	s := NewLibraryService(st, ix, nil)
+	s := NewLibraryService(st, ix, nil, nil)
 	if got, err := s.Settings(ctx); err != nil || got.OCR {
 		t.Fatalf("settings of a new library: OCR %v, %v; want it off", got.OCR, err)
 	}
@@ -584,7 +584,7 @@ func TestLoweringTheTagConfidenceQueuesPhotosThatBecomeScreenshots(t *testing.T)
 		t.Fatal(err)
 	}
 	ix := index.New(l.st, core.PathsIn(t.TempDir()), nil, index.Models{}, &quietEvents{})
-	lib := NewLibraryService(l.st, ix, nil)
+	lib := NewLibraryService(l.st, ix, nil, nil)
 	if err := lib.SetTagConfidence(ctx, 0.2); err != nil {
 		t.Fatal(err)
 	}

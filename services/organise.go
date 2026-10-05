@@ -238,7 +238,7 @@ func hasEnabledSource(sources []core.Source, id int64) bool {
 }
 
 func organiseMoveOf(m store.OrganiseMove) core.OrganiseMove {
-	return core.OrganiseMove{Seq: m.Seq, AssetID: m.AssetID, From: m.From, To: m.To, State: m.State, Renamed: m.Renamed, Error: m.Error, Sidecar: m.Sidecar}
+	return core.OrganiseMove{Seq: m.Seq, AssetID: m.AssetID, From: m.From, To: m.To, State: m.State, Renamed: m.Renamed, Error: m.Error, Sidecar: core.SidecarState(m.Sidecar)}
 }
 
 // The states a run can be started or undone from. A run still marked running

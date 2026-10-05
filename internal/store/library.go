@@ -301,10 +301,10 @@ func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.
 	var thumb int64
 	err := q.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
 		CASE WHEN `+placeBlocked("assets.place_id")+` THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
-		duration_ms, video_codec, audio_codec, thumb_version, display_rotation, display_flip, display_version
+		duration_ms, video_codec, audio_codec, thumb_version, display_rotation, display_flip
 		FROM assets WHERE id = ? AND `+servableOf(unlocked), id).
 		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.PlaceID, &d.Favourite,
-			&duration, &videoCodec, &audioCodec, &thumb, &d.Adjustment.Rotation, &d.Adjustment.Flip, &d.Adjustment.Version)
+			&duration, &videoCodec, &audioCodec, &thumb, &d.Adjustment.Rotation, &d.Adjustment.Flip)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}

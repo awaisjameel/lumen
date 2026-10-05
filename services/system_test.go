@@ -27,7 +27,7 @@ func newSystemService(t *testing.T) (*SystemService, core.Paths) {
 	paths := core.PathsIn(t.TempDir())
 	check(t, paths.Ensure())
 	ix := index.New(l.st, paths, l.cache, index.Models{}, quietEvents{})
-	return NewSystemService(NewLibraryService(l.st, ix, nil), diag.New(paths.DataDir, "1.2.3"), paths, "1.2.3"), paths
+	return NewSystemService(NewLibraryService(l.st, ix, nil, nil), diag.New(paths.DataDir, "1.2.3"), paths, "1.2.3"), paths
 }
 
 func TestAboutSaysWhichLumenThisIsAndWhereItKeepsItsData(t *testing.T) {

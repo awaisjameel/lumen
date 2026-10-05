@@ -3,7 +3,7 @@ import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { reactive } from 'vue'
 import { mountInApp } from '../shared/testing'
-import { engine } from '../bridge'
+import { engine, ExportFormat, ExportState } from '../bridge'
 import type * as Bridge from '../bridge'
 import FileTools from './FileTools.vue'
 import { confirm } from '../shared/confirm'
@@ -44,11 +44,11 @@ const job: ExportJob = {
   to: 'D:\\Exports\\a.jpg',
   size: 100,
   mtime: 100,
-  state: 'planned',
+  state: ExportState.ExportPlanned,
   error: '',
   temp: '',
   digest: '',
-  options: { format: 'jpeg', side: 4096, quality: 92, adjust: true, frame: 1500 },
+  options: { format: ExportFormat.ExportJPEG, side: 4096, quality: 92, adjust: true, frame: 1500 },
 }
 
 async function action(label: string) {
@@ -135,7 +135,7 @@ it('opens frame saving as an image export and plans the captured source time', a
 it('ignores an in-flight progress poll after the export has settled', async () => {
   const running = deferred<ExportJob[]>()
   const polling = deferred<ExportJob[]>()
-  const done = { ...job, state: 'done' }
+  const done = { ...job, state: ExportState.ExportDone }
   let reads = 0
   vi.mocked(engine.exportJobs).mockImplementation((batch) => {
     if (!batch) return Promise.resolve([])
@@ -154,10 +154,10 @@ it('ignores an in-flight progress poll after the export has settled', async () =
     await vi.waitFor(() => expect(reads).toBe(1))
     running.resolve([done])
     await flushPromises()
-    polling.resolve([{ ...job, state: 'writing' }])
+    polling.resolve([{ ...job, state: ExportState.ExportWriting }])
     await flushPromises()
-    expect(new DOMWrapper(document.body).get('[role="status"]').text()).toContain('done')
-    expect(new DOMWrapper(document.body).get('[role="status"]').text()).not.toContain('writing')
+    expect(new DOMWrapper(document.body).get('[role="status"]').text()).toContain(t('files.state.done'))
+    expect(new DOMWrapper(document.body).get('[role="status"]').text()).not.toContain(t('files.state.writing'))
     expect(reads).toBe(2)
   } finally {
     wrapper.unmount()

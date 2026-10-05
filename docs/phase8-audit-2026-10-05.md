@@ -129,3 +129,44 @@ or one full-result query per step, unmeasured on a large library; a rotated
 photo's preview is briefly stretched until its details load; the inspector
 shows the engine's untranslated "Embedded ICC"; `NewLibraryService` takes its
 cache as an optional trailing argument; export journal rows are never pruned.
+
+## Second follow-up audit
+
+Reviewed `update/phase-8` at `1f1f5ad` (merge base and main `4fc704a`), which
+commits the follow-up above. These repairs are local and uncommitted.
+
+- **Export journal:** every preview wrote a batch that nothing removed. A new
+  plan now replaces those never run, as an Organise plan does, and keeps the
+  100 most recent settled outcomes that the history shows; interrupted rows
+  stay for recovery.
+- **Typed states:** export formats and states, track kinds and sidecar states
+  were bare strings in Go and TypeScript, and File tools showed the raw
+  English values. They are `core` enums in the generated bindings and File
+  tools words them through `t()`.
+- **Dead contract:** `RenderInfo.provenance`, `sourceWidth` and `sourceHeight`,
+  `DisplayAdjustment.version` and the `Adjustment` endpoint had no reader and
+  are gone. The `display_version` column stays: the grid's thumbnail revision
+  includes it.
+- **One owner each:** `ConvertMP4` takes the audio track, replacing a second
+  method and a type assertion; one `track` check admits audio and subtitle
+  indices; `NewLibraryService` takes its cache as a required argument;
+  `Selection` encodes its ids once; an export plan checks a video frame once,
+  against the duration the file row already has; the render side limits are
+  constants mirrored in the bridge and checked by the contract test.
+- **Interface:** the inspector no longer lists photo-only fields for a video
+  or offers to copy "Not available"; its Open, Open with and Copy name buttons
+  have tooltips like their neighbours. The player's track selectors share the
+  speed selector's styling and Save frame its controls' shape and title. The
+  viewer's image controls have titles, and rotate and flip their own icons.
+  File tools and Selection actions share one paged outcome list.
+- **Frontend owners:** the preferences store exposes the viewer choices once
+  instead of three fallbacks; zoom geometry, the grid's selected test and the
+  filmstrip height each have one definition; a rotated thumbnail counts as a
+  view for cache eviction.
+
+Still recorded, not changed: batch actions and Shift-range selection make one
+call or one full-result query per step, and the overlay layer owner observes
+every DOM change, both unmeasured on a large library; a rotated photo's
+preview is briefly stretched until its details load; a rotated thumbnail is
+re-encoded on each request; the inspector shows the engine's untranslated
+"Embedded ICC"; uncoded file-operation errors reach the UI in English.

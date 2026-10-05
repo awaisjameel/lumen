@@ -128,10 +128,10 @@ func blockedFolders(ctx context.Context, q querier) ([]string, error) {
 
 // The states of a move's XMP sidecar (OrganiseMove.Sidecar); "" is none.
 const (
-	SidecarPlanned = "planned" // one to move with the photo
-	SidecarMoved   = "moved"
-	SidecarKept    = "kept"   // left where it was; the move's error says why
-	SidecarUndone  = "undone" // put back with the photo
+	SidecarPlanned = string(core.SidecarPlanned)
+	SidecarMoved   = string(core.SidecarMoved)
+	SidecarKept    = string(core.SidecarKept)
+	SidecarUndone  = string(core.SidecarUndone)
 )
 
 // OrganiseSidecar is what became of a photo's sidecar in a move, handed to

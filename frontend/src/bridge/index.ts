@@ -20,6 +20,8 @@ import {
   Density,
   Device,
   DuplicateKind,
+  ExportFormat,
+  ExportState,
   FailReason,
   Filter,
   Kind,
@@ -27,9 +29,11 @@ import {
   OrganiseMoveState,
   OrganiseRunState,
   Playback,
+  SidecarState,
   TagKind,
   TagSource,
   Theme,
+  TrackKind,
   WaitReason,
 } from '../../bindings/lumen/internal/core'
 import type {
@@ -67,8 +71,9 @@ import type {
   RenderInfo,
   DisplayAdjustment,
   ViewerPreferences,
-  MediaInspection,
-  Selection,
+  MediaInspection as RawMediaInspection,
+  MediaTrack,
+  Selection as RawSelection,
   ExportOptions,
   ExportJob,
   SearchResult,
@@ -89,6 +94,8 @@ export {
   Density,
   Device,
   DuplicateKind,
+  ExportFormat,
+  ExportState,
   FailReason,
   Filter,
   Kind,
@@ -96,9 +103,11 @@ export {
   OrganiseMoveState,
   OrganiseRunState,
   Playback,
+  SidecarState,
   TagKind,
   TagSource,
   Theme,
+  TrackKind,
   WaitReason,
 }
 export type {
@@ -126,8 +135,7 @@ export type {
   RenderInfo,
   DisplayAdjustment,
   ViewerPreferences,
-  MediaInspection,
-  Selection,
+  MediaTrack,
   ExportOptions,
   ExportJob,
   Settings,
@@ -160,6 +168,10 @@ export type DiskDeletion = NonNullLists<RawDiskDeletion, 'kept'>
 export type TrashSelection = NonNullLists<RawTrashSelection, 'assets'>
 /** A photo a block covers, with the other blocks that also hide it. */
 export type CoveredItem = NonNullLists<RawCoveredItem, 'hiddenBy'>
+/** What a file says about itself, with the audio and subtitle tracks it has. */
+export type MediaInspection = NonNullLists<RawMediaInspection, 'tracks'>
+/** Resolved ids and the library revision they were resolved at. */
+export type Selection = NonNullLists<RawSelection, 'ids'>
 /** An organise preview: the moves a template would make. */
 export type OrganisePlan = NonNullLists<RawOrganisePlan, 'moves'>
 
@@ -170,6 +182,8 @@ export type FailureGroup = NonNullLists<RawFailureGroup, 'files'>
 // services/contract_test.go checks each against its Go original.
 export const THUMB_SMALL = 256 // core.ThumbSmall
 export const THUMB_LARGE = 1024 // core.ThumbLarge
+export const RENDER_SIDE = 4096 // media.RenderSide
+export const RENDER_SIDE_MIN = 256 // media.RenderSideMin
 export const SPRITE_COLS = 4 // core.SpriteCols
 export const SPRITE_ROWS = 4 // core.SpriteRows
 export const TAG_CONFIDENCE_DEFAULT = 0.02 // core.TagConfidenceDefault
@@ -329,14 +343,14 @@ export const engine = {
     const r = await cancellable(MediaService.Inspect(id), signal)
     return { ...r, tracks: r.tracks ?? [] }
   },
-  adjustment: (id: number): Promise<DisplayAdjustment> => LibraryService.Adjustment(id),
   setAdjustment: (id: number, rotation: number, flip: boolean): Promise<DisplayAdjustment> =>
     LibraryService.SetAdjustment(id, rotation, flip),
   playbackPosition: (id: number): Promise<number> => LibraryService.PlaybackPosition(id),
   setPlaybackPosition: (id: number, position: number): Promise<void> =>
     LibraryService.SetPlaybackPosition(id, Math.round(position)),
   clearPlaybackHistory: (): Promise<void> => LibraryService.ClearPlaybackHistory(),
-  render: (id: number, signal?: AbortSignal): Promise<RenderInfo> => cancellable(MediaService.Render(id, 4096), signal),
+  render: (id: number, signal?: AbortSignal): Promise<RenderInfo> =>
+    cancellable(MediaService.Render(id, RENDER_SIDE), signal),
   sources: async (): Promise<Source[]> => (await LibraryService.Sources()) ?? [],
   suggestedFolders: async (): Promise<string[]> => (await LibraryService.SuggestedFolders()) ?? [],
   sourcePathKey: (path: string): Promise<string> => LibraryService.SourcePathKey(path),
@@ -554,7 +568,7 @@ export function originalUrl(id: number): string {
 }
 
 export function renderUrl(id: number, revision: string): string {
-  return `/media/render/${id}/4096?v=${encodeURIComponent(revision)}`
+  return `/media/render/${id}/${RENDER_SIDE}?v=${encodeURIComponent(revision)}`
 }
 
 export function spriteUrl(id: number, version: number): string {

@@ -6,21 +6,32 @@ import UInput from '@nuxt/ui/components/Input.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
-import { engine, OrganiseRunState } from '../bridge'
-import type { ExportJob, OrganisePlan, Selection } from '../bridge'
+import { engine, ExportFormat, OrganiseRunState, RENDER_SIDE, RENDER_SIDE_MIN } from '../bridge'
+import type { ExportJob, ExportState, OrganiseMoveState, OrganisePlan, Selection, SidecarState } from '../bridge'
 import { confirm } from '../shared/confirm'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
+import OutcomeList from './OutcomeList.vue'
 
+type Operation = ExportFormat | 'move' | 'rename'
+interface Choice {
+  value: Operation
+  label: string
+}
 const props = defineProps<{ ids: number[]; selection?: Selection | null; frame?: number }>()
 const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>('open', { default: false })
-const operation = ref(props.frame === undefined ? 'original' : 'jpeg')
+/** A journalled state in words; the bindings' empty zero value is none. */
+const stateText = (state: ExportState | OrganiseMoveState | SidecarState) => (state ? t(`files.state.${state}`) : '')
+// A frame of a video can only be rendered; anything else starts as a plain copy.
+const startOperation = (): Operation =>
+  props.frame === undefined ? ExportFormat.ExportOriginal : ExportFormat.ExportJPEG
+const operation = ref<Operation>(startOperation())
 const directory = ref('')
 const name = ref('')
 const quality = ref('92')
-const side = ref('4096')
+const side = ref(String(RENDER_SIDE))
 const adjust = ref(true)
 const busy = ref(false)
 const error = ref('')
@@ -68,22 +79,21 @@ async function cancelExport() {
     error.value = errorText(e)
   }
 }
-const options = computed(() =>
-  props.frame === undefined
-    ? [
-        { value: 'original', label: t('files.original') },
-        { value: 'jpeg', label: t('files.jpeg') },
-        { value: 'png', label: t('files.png') },
-        { value: 'move', label: t('files.move') },
-        ...(props.ids.length === 1 ? [{ value: 'rename', label: t('files.rename') }] : []),
-      ]
-    : [
-        { value: 'jpeg', label: t('files.jpeg') },
-        { value: 'png', label: t('files.png') },
-      ],
-)
+const options = computed((): Choice[] => {
+  const rendered: Choice[] = [
+    { value: ExportFormat.ExportJPEG, label: t('files.jpeg') },
+    { value: ExportFormat.ExportPNG, label: t('files.png') },
+  ]
+  if (props.frame !== undefined) return rendered
+  return [
+    { value: ExportFormat.ExportOriginal, label: t('files.original') },
+    ...rendered,
+    { value: 'move', label: t('files.move') },
+    ...(props.ids.length === 1 ? [{ value: 'rename' as const, label: t('files.rename') }] : []),
+  ]
+})
+const moving = computed(() => operation.value === 'move' || operation.value === 'rename')
 const completed = ref(false)
-const page = ref(0)
 const preview = computed(() => [
   ...(moves.value?.moves ?? []).map((m) => ({
     id: m.seq,
@@ -93,12 +103,18 @@ const preview = computed(() => [
     error: m.error,
     sidecar: m.sidecar,
   })),
-  ...exports.value.map((j) => ({ id: j.id, from: j.from, to: j.to, state: j.state, error: j.error, sidecar: '' })),
+  ...exports.value.map((j) => ({
+    id: j.id,
+    from: j.from,
+    to: j.to,
+    state: j.state,
+    error: j.error,
+    sidecar: undefined,
+  })),
 ])
 watch(inputKey, () => {
   plannedKey.value = ''
   if (!busy.value) {
-    page.value = 0
     moves.value = null
     exports.value = []
     completed.value = false
@@ -108,7 +124,7 @@ watch(inputKey, () => {
 watch(
   open,
   (value) => {
-    if (value && props.frame !== undefined) operation.value = 'jpeg'
+    if (value && props.frame !== undefined) operation.value = startOperation()
     void loadHistory()
   },
   { immediate: true },
@@ -124,7 +140,7 @@ async function chooseDirectory() {
 }
 async function prepare() {
   if (busy.value) return
-  page.value = 0
+  const chosen = operation.value
   busy.value = true
   completed.value = false
   runID.value = 0
@@ -136,16 +152,16 @@ async function prepare() {
   const ids = [...props.ids]
   try {
     if (props.selection) await engine.validateSelection(props.selection)
-    if (operation.value === 'move' || operation.value === 'rename') {
+    if (chosen === 'move' || chosen === 'rename') {
       const result = await engine.planFileMoves(
         ids,
-        operation.value === 'move' ? directory.value : '',
-        operation.value === 'rename' ? name.value : '',
+        chosen === 'move' ? directory.value : '',
+        chosen === 'rename' ? name.value : '',
       )
       if (mine === generation && key === inputKey.value) moves.value = result
     } else {
       const result = await engine.planExport(ids, directory.value, {
-        format: operation.value,
+        format: chosen,
         side: Number(side.value),
         quality: Number(quality.value),
         adjust: adjust.value,
@@ -298,18 +314,18 @@ function pollExport(batch: number, mine: number) {
             t('files.choose')
           }}</UButton></template
         >
-        <template v-if="operation === 'jpeg' || operation === 'png'">
+        <template v-if="!moving && operation !== ExportFormat.ExportOriginal">
           <label
             >{{ t('files.size')
             }}<UInput
               v-model="side"
               type="number"
-              :min="256"
-              :max="4096"
+              :min="RENDER_SIDE_MIN"
+              :max="RENDER_SIDE"
               :disabled="busy"
               :aria-label="t('files.size')"
           /></label>
-          <label v-if="operation === 'jpeg'"
+          <label v-if="operation === ExportFormat.ExportJPEG"
             >{{ t('files.quality')
             }}<UInput
               v-model="quality"
@@ -322,29 +338,24 @@ function pollExport(batch: number, mine: number) {
           <UCheckbox v-model="adjust" :disabled="busy" :label="t('files.adjust')" />
           <p>{{ t('files.stripped') }}</p>
         </template>
-        <p v-if="operation === 'original'">{{ t('files.metadata') }}</p>
-        <p v-if="operation === 'move' || operation === 'rename'">{{ t('files.moveHint') }}</p>
+        <p v-if="operation === ExportFormat.ExportOriginal">{{ t('files.metadata') }}</p>
+        <p v-if="moving">{{ t('files.moveHint') }}</p>
       </div>
-      <div class="file-preview" role="status">
-        <p v-if="preview.length > 100">
-          {{ t('files.previewCount', { shown: Math.min((page + 1) * 100, preview.length), n: preview.length }) }}
-        </p>
-        <div v-for="row in preview.slice(page * 100, (page + 1) * 100)" :key="row.id">
+      <OutcomeList v-slot="{ item: row }" :items="preview">
+        <div :key="row.id" class="file-outcome">
           <p>{{ row.from }}</p>
           <p>→ {{ row.to }}</p>
-          <p>{{ row.state }}{{ row.error ? `: ${row.error}` : '' }}</p>
-          <p v-if="row.sidecar">{{ t('files.sidecar') }}: {{ row.from }}.xmp → {{ row.to }}.xmp ({{ row.sidecar }})</p>
+          <p>{{ stateText(row.state) }}{{ row.error ? `: ${row.error}` : '' }}</p>
+          <p v-if="row.sidecar">
+            {{ t('files.sidecar') }}: {{ row.from }}.xmp → {{ row.to }}.xmp ({{ stateText(row.sidecar) }})
+          </p>
         </div>
-      </div>
-      <div v-if="preview.length > 100" class="preview-pages">
-        <UButton :disabled="page === 0" variant="outline" @click="page--">{{ t('files.previousPage') }}</UButton>
-        <UButton :disabled="(page + 1) * 100 >= preview.length" variant="outline" @click="page++">{{
-          t('files.nextPage')
-        }}</UButton>
-      </div>
-      <details v-if="history.length">
+      </OutcomeList>
+      <details v-if="history.length" class="file-history">
         <summary>{{ t('files.history') }}</summary>
-        <p v-for="job in history" :key="job.id">{{ job.to }}: {{ job.state }} {{ job.error }}</p>
+        <p v-for="job in history" :key="job.id">
+          {{ job.to }}: {{ stateText(job.state) }}{{ job.error ? `: ${job.error}` : '' }}
+        </p>
       </details>
     </template>
     <template #footer>
@@ -372,15 +383,11 @@ function pollExport(batch: number, mine: number) {
   display: grid;
   gap: 0.75rem;
 }
-.file-preview {
-  max-height: 20rem;
-  overflow-y: auto;
-}
-.file-preview > div {
+.file-outcome {
   padding: 0.5rem 0;
   border-top: 1px solid var(--ui-border);
 }
-.file-preview p {
+.file-history p {
   overflow-wrap: anywhere;
   margin: 0.25rem 0;
   font-size: 0.8125rem;

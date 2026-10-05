@@ -108,7 +108,7 @@ func newTrashFixture(t *testing.T) trashFixture {
 		}
 		f.ids[name] = d
 	}
-	f.svc = NewLibraryService(st, nil, nil)
+	f.svc = NewLibraryService(st, nil, nil, nil)
 	f.svc.recycle = f.rec.recycle
 	return f
 }

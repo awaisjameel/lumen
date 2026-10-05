@@ -69,7 +69,7 @@ func newCopiesFixture(t *testing.T) copiesFixture {
 	if f.otherID, err = assetAt(ctx, st, f.b); err != nil {
 		t.Fatal(err)
 	}
-	f.svc = NewLibraryService(st, nil, nil)
+	f.svc = NewLibraryService(st, nil, nil, nil)
 	f.svc.recycle = f.rec.recycle
 	return f
 }

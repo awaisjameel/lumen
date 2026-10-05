@@ -24,7 +24,8 @@ import (
 // retained disk space. Very large sources keep their indexed preview until
 // a tiled decoder exists; no full-resolution capability is inferred here.
 const (
-	RenderSide       = 4096
+	RenderSide       = 4096 // the longest edge a render may have
+	RenderSideMin    = 256  // and the shortest one worth asking for
 	renderPixels     = 100_000_000
 	renderBytes      = 64 << 20
 	renderCacheBytes = 256 << 20
@@ -181,7 +182,7 @@ func (c *Cache) RenderFile(ctx context.Context, id int64, path string, orientati
 	if c.Renderer == nil {
 		return "", info, ErrUnsupported
 	}
-	side = min(max(side, 256), RenderSide)
+	side = min(max(side, RenderSideMin), RenderSide)
 	select {
 	case c.rendering <- struct{}{}:
 		defer func() { <-c.rendering }()
@@ -199,7 +200,6 @@ func (c *Cache) RenderFile(ctx context.Context, id int64, path string, orientati
 	// they are not part of the key: changing them must not decode again.
 	key := sha256.Sum256(fmt.Appendf(nil, "%s:%d:%d:%d:%d:%s", path, before.Size(), before.ModTime().UnixNano(), orientation, side, renderVersion))
 	info.Revision = hex.EncodeToString(key[:])
-	info.Provenance = "source"
 	dir := filepath.Join(c.Dir, "render")
 	dst := filepath.Join(dir, fmt.Sprintf("%d-%s.jpg", id, info.Revision))
 	jpeg, err := readRender(dst, side)
@@ -235,7 +235,6 @@ func (c *Cache) RenderFile(ctx context.Context, id int64, path string, orientati
 		return "", info, err
 	}
 	info.Width, info.Height = cfg.Width, cfg.Height
-	// Source dimensions come from metadata in the service, outside this cache.
 	return dst, info, nil
 }
 

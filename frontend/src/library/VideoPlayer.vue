@@ -13,14 +13,14 @@ import {
   SPRITE_ROWS,
   THUMB_LARGE,
   thumbUrl,
+  TrackKind,
   videoUrl,
 } from '../bridge'
-import type { AssetDetail, MediaInspection } from '../bridge'
+import type { AssetDetail, MediaInspection, MediaTrack } from '../bridge'
 import { icons } from '../design/icons'
 import { duration } from '../shared/format'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
-import { viewerDefaults } from '../shared/viewing'
 import { logError } from '../shared/errors'
 import { subtitleCues } from '../media/subtitles'
 import FileTools from '../media/FileTools.vue'
@@ -31,8 +31,12 @@ const emit = defineEmits<{ timeupdate: [] }>()
 const player = ref<HTMLElement | null>(null)
 const video = ref<HTMLVideoElement | null>(null)
 const prefs = usePreferences()
-const viewing = computed(() => prefs.prefs.viewer ?? viewerDefaults())
+const viewing = computed(() => prefs.viewer)
 const inspection = ref<MediaInspection | null>(null)
+const tracksOf = (kind: TrackKind) => inspection.value?.tracks.filter((track) => track.kind === kind) ?? []
+const audioTracks = computed(() => tracksOf(TrackKind.TrackAudio))
+const subtitleTracks = computed(() => tracksOf(TrackKind.TrackSubtitle))
+const trackLabel = (track: MediaTrack) => `${track.title || track.language || track.codec} (${track.index})`
 const audio = ref(-1)
 const subtitle = ref(-1)
 const looping = ref(viewing.value.loop)
@@ -492,50 +496,46 @@ onBeforeUnmount(() => {
         <div class="spacer" />
         <UButton
           v-if="!props.private"
-          :disabled="!ready || failed"
-          :aria-label="t('viewer.saveFrame')"
+          class="player-control"
           :icon="icons.image"
+          :aria-label="t('viewer.saveFrame')"
+          :title="t('viewer.saveFrame')"
+          :disabled="!ready || failed"
           variant="ghost"
+          square
           @click="saveFrame"
         />
         <UButton :aria-label="t('viewer.loop')" :aria-pressed="looping" variant="ghost" @click="looping = !looping">{{
           t('viewer.loop')
         }}</UButton>
         <select
-          v-if="inspection?.tracks?.some((track) => track.kind === 'audio')"
+          v-if="audioTracks.length"
+          class="player-select"
           :value="audio"
           :aria-label="t('viewer.audioTrack')"
+          :title="t('viewer.audioTrack')"
           @change="selectAudio"
         >
           <option :value="-1">{{ t('viewer.defaultTrack') }}</option>
-          <option
-            v-for="track in inspection?.tracks?.filter((track) => track.kind === 'audio')"
-            :key="track.index"
-            :value="track.index"
-          >
-            {{ track.title || track.language || track.codec }} ({{ track.index }})
+          <option v-for="track in audioTracks" :key="track.index" :value="track.index">
+            {{ trackLabel(track) }}
           </option>
         </select>
         <select
-          v-if="inspection?.tracks?.some((track) => track.kind === 'subtitle')"
+          v-if="subtitleTracks.length"
+          class="player-select"
           :value="subtitle"
           :aria-label="t('viewer.subtitleTrack')"
+          :title="t('viewer.subtitleTrack')"
           @change="selectSubtitle"
         >
           <option :value="-1">{{ t('viewer.subtitlesOff') }}</option>
-          <option
-            v-for="track in inspection?.tracks?.filter((track) => track.kind === 'subtitle')"
-            :key="track.index"
-            :value="track.index"
-            :disabled="!track.supported"
-          >
-            {{ track.title || track.language || track.codec }} ({{ track.index }}){{
-              track.supported ? '' : t('viewer.bitmapSubtitles')
-            }}
+          <option v-for="track in subtitleTracks" :key="track.index" :value="track.index" :disabled="!track.supported">
+            {{ trackLabel(track) }}{{ track.supported ? '' : t('viewer.bitmapSubtitles') }}
           </option>
         </select>
         <select
-          class="speed-control"
+          class="player-select"
           :value="rate"
           :aria-label="t('viewer.speed')"
           :title="t('viewer.speed')"
@@ -672,7 +672,8 @@ video:focus-visible {
   width: 5rem;
 }
 
-.speed-control {
+.player-select {
+  max-width: 10rem;
   padding: 0.375rem 0.5rem;
   min-height: 2.5rem;
   border: 1px solid var(--lumen-viewer-control);
@@ -683,7 +684,7 @@ video:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.speed-control:focus-visible {
+.player-select:focus-visible {
   outline: 2px solid var(--ui-primary);
 }
 

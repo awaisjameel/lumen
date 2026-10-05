@@ -125,7 +125,7 @@ func TestPinAnEventAndChangeTheEventGapThroughTheService(t *testing.T) {
 		}
 		ids = append(ids, int64(i+1))
 	}
-	s := NewLibraryService(st, nil, nil)
+	s := NewLibraryService(st, nil, nil, nil)
 	if err := s.SetEventName(ctx, ids[0], "Trip"); err != nil {
 		t.Fatal(err)
 	}

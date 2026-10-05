@@ -13,13 +13,9 @@ import (
 // it is read, beginning at ms: it checks the video can be converted (errors
 // come back before anything is written) and returns the conversion to run.
 // Running it never writes to the user's file or keeps a second copy on disk;
-// cancelling ctx stops ffmpeg.
-func (d Decoders) ConvertMP4(ctx context.Context, path string, at int64) (run func(out io.Writer) error, err error) {
-	return d.ConvertMP4Track(ctx, path, at, -1)
-}
-
-// ConvertMP4Track prepares playback with an explicitly chosen audio stream.
-func (d Decoders) ConvertMP4Track(ctx context.Context, path string, at int64, audio int) (run func(out io.Writer) error, err error) {
+// cancelling ctx stops ffmpeg. audio is the stream index of the audio track to
+// play, or negative for the file's first.
+func (d Decoders) ConvertMP4(ctx context.Context, path string, at int64, audio int) (run func(out io.Writer) error, err error) {
 	if d.FFmpeg == "" || d.FFprobe == "" {
 		return nil, ErrUnsupported
 	}
@@ -29,18 +25,8 @@ func (d Decoders) ConvertMP4Track(ctx context.Context, path string, at int64, au
 	}
 	audioMap := "0:a:0?"
 	if audio >= 0 {
-		tracks, err := d.Inspect(ctx, path, core.KindVideo)
-		if err != nil {
+		if _, err := d.track(ctx, path, audio, core.TrackAudio); err != nil {
 			return nil, err
-		}
-		found := false
-		for _, track := range tracks.Tracks {
-			if track.Index == audio && track.Kind == "audio" {
-				found = true
-			}
-		}
-		if !found {
-			return nil, ErrUnsupported
 		}
 		audioMap = "0:" + strconv.Itoa(audio)
 	}

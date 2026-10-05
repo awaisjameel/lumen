@@ -105,7 +105,7 @@ func TestDisplayAdjustmentsLeaveCanonicalMetadataAndInvalidateTileURLs(t *testin
 	check(t, err)
 	a, err := st.SetAdjustment(t.Context(), id, 5, true)
 	check(t, err)
-	if a.Rotation != 1 || !a.Flip || a.Version != 1 {
+	if a.Rotation != 1 || !a.Flip {
 		t.Fatalf("adjustment: %+v", a)
 	}
 	canonical, err := st.AssetDetail(t.Context(), id, false)
@@ -143,5 +143,48 @@ func TestFileMoveOutcomesDoNotDiscloseCoveredPaths(t *testing.T) {
 	check(t, err)
 	if len(moves) != 0 {
 		t.Fatalf("covered paths exposed: %+v", moves)
+	}
+}
+
+func TestANewExportPlanReplacesUnrunOnesAndKeepsOnlyRecentOutcomes(t *testing.T) {
+	st, ids := viewingFixture(t)
+	ctx := t.Context()
+	plan := func(n int) int64 {
+		t.Helper()
+		jobs := make([]core.ExportJob, n)
+		for i := range jobs {
+			jobs[i] = core.ExportJob{AssetID: ids[0], From: `C:\Photos\a.jpg`, To: `D:\Out\a.jpg`, Options: core.ExportOptions{Format: core.ExportOriginal}}
+		}
+		batch, err := st.SaveExportPlan(ctx, jobs)
+		check(t, err)
+		return batch
+	}
+	settled := plan(exportHistory + 5)
+	jobs, err := st.ExportJobs(ctx, settled)
+	check(t, err)
+	for i, j := range jobs {
+		state := core.ExportDone
+		if i == 0 {
+			state = core.ExportReady // still owed to recovery
+		}
+		check(t, st.SetExportJob(ctx, j.ID, state, "", "", ""))
+	}
+	abandoned := plan(3)
+	current := plan(2)
+	if jobs, err = st.ExportJobs(ctx, abandoned); err != nil || len(jobs) != 0 {
+		t.Fatalf("a plan never run was kept: %d jobs, %v", len(jobs), err)
+	}
+	if jobs, err = st.ExportJobs(ctx, current); err != nil || len(jobs) != 2 {
+		t.Fatalf("the current plan: %d jobs, %v", len(jobs), err)
+	}
+	jobs, err = st.ExportJobs(ctx, settled)
+	check(t, err)
+	if len(jobs) != exportHistory+1 || jobs[0].State != core.ExportReady {
+		t.Fatalf("kept %d settled outcomes, first %q; want the interrupted one and the newest %d", len(jobs), jobs[0].State, exportHistory)
+	}
+	var batches int
+	check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM export_batches").Scan(&batches))
+	if batches != 2 {
+		t.Fatalf("%d batches remain, want the settled and the current one", batches)
 	}
 }

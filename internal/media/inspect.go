@@ -27,11 +27,12 @@ func (d Decoders) Inspect(ctx context.Context, path string, kind core.Kind) (cor
 			if s.CodecType == "video" && info.FrameRate == "" {
 				info.FrameRate = s.FrameRate
 			}
-			if s.CodecType != "audio" && s.CodecType != "subtitle" {
+			kind := core.TrackKind(s.CodecType)
+			if kind != core.TrackAudio && kind != core.TrackSubtitle {
 				continue
 			}
-			supported := s.CodecType == "audio" || textSubtitles[s.CodecName]
-			info.Tracks = append(info.Tracks, core.MediaTrack{Index: s.Index, Kind: s.CodecType, Codec: s.CodecName, Language: s.Tags["language"], Title: s.Tags["title"], Supported: supported})
+			supported := kind == core.TrackAudio || textSubtitles[s.CodecName]
+			info.Tracks = append(info.Tracks, core.MediaTrack{Index: s.Index, Kind: kind, Codec: s.CodecName, Language: s.Tags["language"], Title: s.Tags["title"], Supported: supported})
 		}
 		return info, nil
 	}
@@ -79,19 +80,28 @@ func (d Decoders) probeTracks(ctx context.Context, path string) (ffprobeOutput, 
 	return p, err
 }
 
+// track is the stream of that kind at index, as the file itself declares
+// it: a requested index is never passed to ffmpeg unchecked.
+func (d Decoders) track(ctx context.Context, path string, index int, kind core.TrackKind) (core.MediaTrack, error) {
+	info, err := d.Inspect(ctx, path, core.KindVideo)
+	if err != nil {
+		return core.MediaTrack{}, err
+	}
+	for _, t := range info.Tracks {
+		if t.Index == index && t.Kind == kind {
+			return t, nil
+		}
+	}
+	return core.MediaTrack{}, ErrUnsupported
+}
+
 // Subtitles converts an admitted text stream to local WebVTT.
 func (d Decoders) Subtitles(ctx context.Context, path string, index int, at int64, out io.Writer) error {
-	info, err := d.Inspect(ctx, path, core.KindVideo)
+	t, err := d.track(ctx, path, index, core.TrackSubtitle)
 	if err != nil {
 		return err
 	}
-	allowed := false
-	for _, track := range info.Tracks {
-		if track.Index == index && track.Kind == "subtitle" && track.Supported {
-			allowed = true
-		}
-	}
-	if !allowed || d.FFmpeg == "" {
+	if !t.Supported || d.FFmpeg == "" {
 		return ErrUnsupported
 	}
 	return runTool(ctx, d.FFmpeg, out, ffmpegArgs("-ss", ssTime(at), "-i", path, "-map", "0:"+strconv.Itoa(index), "-f", "webvtt", "-")...)

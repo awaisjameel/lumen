@@ -222,7 +222,7 @@ func TestServiceErrorsCarryTheirCodes(t *testing.T) {
 	}
 	defer st.Close()
 	b := application.NewBindings(nil, nil)
-	if err := b.Add(service(services.NewLibraryService(st, nil, nil), application.ServiceOptions{})); err != nil {
+	if err := b.Add(service(services.NewLibraryService(st, nil, nil, nil), application.ServiceOptions{})); err != nil {
 		t.Fatal(err)
 	}
 	m := b.Get(&application.CallOptions{MethodName: "lumen/services.LibraryService.UnlockBlocks"})
@@ -243,7 +243,7 @@ func TestServiceErrorsCarryTheirCodes(t *testing.T) {
 	}
 
 	// The system service is registered the same way.
-	lib := services.NewLibraryService(st, nil, nil)
+	lib := services.NewLibraryService(st, nil, nil, nil)
 	sys := services.NewSystemService(lib, diag.New(t.TempDir(), "test"), core.PathsIn(t.TempDir()), "test")
 	if err := b.Add(service(sys, application.ServiceOptions{})); err != nil {
 		t.Fatal(err)

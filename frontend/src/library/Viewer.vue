@@ -23,22 +23,21 @@ import type { ViewerSource } from './store'
 import DetailsPanel from './DetailsPanel.vue'
 import VideoPlayer from './VideoPlayer.vue'
 import ImageSurface from '../media/ImageSurface.vue'
-import type { ImageControls } from '../media/viewport'
+import type { ImageControls, ViewGeometry } from '../media/viewport'
 import Filmstrip from '../media/Filmstrip.vue'
 import { usePreferences } from '../shared/preferences'
-import { viewerDefaults } from '../shared/viewing'
 import { useLiveReload } from '../shared/liveReload'
 
 const props = defineProps<{ source?: ViewerSource }>()
 const lib = useLibrary()
 const prefs = usePreferences()
-const viewing = computed(() => prefs.prefs.viewer ?? viewerDefaults())
+const viewing = computed(() => prefs.viewer)
 const neighbours = shallowRef<GridItem[]>([])
 const comparing = ref(false)
 const comparison = ref<AssetDetail | null>(null)
 const comparisonItem = ref<GridItem | null>(null)
 const linked = ref(true)
-const geometry = ref<{ scale: number; x: number; y: number }>()
+const geometry = ref<ViewGeometry>()
 const sliding = ref(false)
 const hidden = ref(false)
 let hideTimer: ReturnType<typeof setTimeout> | undefined
@@ -48,6 +47,9 @@ let comparisonRequest = 0
 const src = computed(() => props.source ?? libraryViewerSource(lib))
 const item = computed(() => src.value.item)
 const actions = computed(() => src.value.actions)
+// Only an ordinary library photo can be a favourite; the same ones keep
+// display adjustments and playback history. The Trash and Blocked do not.
+const ordinary = computed(() => !!actions.value.favourite)
 const detail = ref<AssetDetail | null>(null)
 const image = ref<ImageControls | null>(null)
 const root = ref<HTMLElement | null>(null)
@@ -214,7 +216,7 @@ watch([sliding, () => src.value.id, () => viewing.value.slideshowSeconds], () =>
 
 async function adjust(rotation: number, flip: boolean) {
   const current = detail.value
-  if (!current || !actions.value.favourite || adjusting.value) return
+  if (!current || !ordinary.value || adjusting.value) return
   adjusting.value = true
   try {
     const adjustment = await engine.setAdjustment(current.id, rotation, flip)
@@ -296,18 +298,18 @@ useCommands([
     id: 'viewer.rotate',
     group: 'media',
     title: () => t('viewer.rotate'),
-    icon: 'reset',
+    icon: 'rotate',
     zone: 'viewer',
-    available: () => !!image.value && !!actions.value.favourite && !adjusting.value,
+    available: () => !!image.value && ordinary.value && !adjusting.value,
     run: () => adjust((detail.value?.adjustment?.rotation ?? 0) + 1, detail.value?.adjustment?.flip ?? false),
   },
   {
     id: 'viewer.flip',
     group: 'media',
     title: () => t('viewer.flip'),
-    icon: 'image',
+    icon: 'flip',
     zone: 'viewer',
-    available: () => !!image.value && !!actions.value.favourite && !adjusting.value,
+    available: () => !!image.value && ordinary.value && !adjusting.value,
     run: () => adjust(detail.value?.adjustment?.rotation ?? 0, !detail.value?.adjustment?.flip),
   },
   {
@@ -316,7 +318,7 @@ useCommands([
     title: () => t('viewer.resetAdjustment'),
     icon: 'undo',
     zone: 'viewer',
-    available: () => !!image.value && !!actions.value.favourite && !adjusting.value,
+    available: () => !!image.value && ordinary.value && !adjusting.value,
     run: () => adjust(0, false),
   },
   {
@@ -586,7 +588,7 @@ onBeforeUnmount(() => {
               :detail="detail"
               :at="item.at ?? 0"
               :thumb-version="item.t"
-              :private="!actions.favourite"
+              :private="!ordinary"
               @timeupdate="src.touch?.()"
             />
             <UAlert
@@ -639,6 +641,7 @@ onBeforeUnmount(() => {
           <UButton
             :icon="icons['zoom-out']"
             :aria-label="t('viewer.zoomOut')"
+            :title="t('viewer.zoomOut')"
             variant="ghost"
             @click="runCommand('viewer.zoomOut')"
           />
@@ -646,6 +649,7 @@ onBeforeUnmount(() => {
           <UButton
             :icon="icons['zoom-in']"
             :aria-label="t('viewer.zoomIn')"
+            :title="t('viewer.zoomIn')"
             variant="ghost"
             @click="runCommand('viewer.zoomIn')"
           />
@@ -654,6 +658,7 @@ onBeforeUnmount(() => {
           <UButton
             :icon="icons.maximize"
             :aria-label="t('viewer.fullscreen')"
+            :title="t('viewer.fullscreen')"
             variant="ghost"
             @click="runCommand('viewer.fullscreen')"
           />
@@ -661,6 +666,7 @@ onBeforeUnmount(() => {
             v-if="src.window"
             :icon="icons.film"
             :aria-label="t('viewer.filmstrip')"
+            :title="t('viewer.filmstrip')"
             :aria-pressed="viewing.filmstrip"
             variant="ghost"
             @click="runCommand('viewer.filmstrip')"
@@ -668,6 +674,7 @@ onBeforeUnmount(() => {
           <UButton
             :icon="icons[sliding ? 'pause' : 'play']"
             :aria-label="t('viewer.slideshow')"
+            :title="t('viewer.slideshow')"
             :aria-pressed="sliding"
             variant="ghost"
             @click="runCommand('viewer.slideshow')"
@@ -676,6 +683,7 @@ onBeforeUnmount(() => {
             v-if="src.window"
             :icon="icons.layers"
             :aria-label="t('viewer.compare')"
+            :title="t('viewer.compare')"
             :aria-pressed="comparing"
             variant="ghost"
             @click="runCommand('viewer.compare')"
@@ -684,25 +692,28 @@ onBeforeUnmount(() => {
             t('viewer.linked')
           }}</UButton>
           <UButton
-            v-if="actions.favourite"
-            :icon="icons.reset"
+            v-if="ordinary"
+            :icon="icons.rotate"
             :aria-label="t('viewer.rotate')"
+            :title="t('viewer.rotate')"
             :disabled="adjusting"
             variant="ghost"
             @click="runCommand('viewer.rotate')"
           />
           <UButton
-            v-if="actions.favourite"
-            :icon="icons.image"
+            v-if="ordinary"
+            :icon="icons.flip"
             :aria-label="t('viewer.flip')"
+            :title="t('viewer.flip')"
             :disabled="adjusting"
             variant="ghost"
             @click="runCommand('viewer.flip')"
           />
           <UButton
-            v-if="actions.favourite"
+            v-if="ordinary"
             :icon="icons.undo"
             :aria-label="t('viewer.resetAdjustment')"
+            :title="t('viewer.resetAdjustment')"
             :disabled="adjusting"
             variant="ghost"
             @click="runCommand('viewer.resetAdjustment')"
@@ -751,6 +762,7 @@ onBeforeUnmount(() => {
   color: var(--lumen-viewer-text);
   color-scheme: dark;
   outline: none;
+  --lumen-filmstrip-h: 84px;
   /* Shared states and playback alerts keep the viewer's contrast in either theme. */
   --ui-bg: var(--lumen-viewer-bg);
   --ui-bg-muted: var(--lumen-viewer-control);
@@ -831,10 +843,10 @@ onBeforeUnmount(() => {
   border-radius: var(--ui-radius);
 }
 .image-controls.raised {
-  bottom: 90px;
+  bottom: calc(var(--lumen-filmstrip-h) + 0.375rem);
 }
 .media.with-filmstrip {
-  bottom: 84px;
+  bottom: var(--lumen-filmstrip-h);
 }
 .media.comparing {
   grid-template-columns: repeat(2, minmax(0, 1fr));

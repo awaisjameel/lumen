@@ -49,19 +49,19 @@ func (r *ExportRunner) Run(ctx context.Context, batch int64) error {
 		return err
 	}
 	for _, job := range jobs {
-		if job.State != "planned" && job.State != "failed" && job.State != "cancelled" {
+		if job.State != core.ExportPlanned && job.State != core.ExportFailed && job.State != core.ExportCancelled {
 			continue
 		}
-		state := "done"
+		state := core.ExportDone
 		err := r.one(ctx, job)
 		if err != nil {
 			var published *publishedExportError
 			if errors.As(err, &published) {
 				return err
 			}
-			state = "failed"
+			state = core.ExportFailed
 			if ctx.Err() != nil {
-				state = "cancelled"
+				state = core.ExportCancelled
 			}
 		}
 		message := ""
@@ -70,7 +70,7 @@ func (r *ExportRunner) Run(ctx context.Context, batch int64) error {
 		}
 		// one settles published copies itself. An unsuccessful item still
 		// receives an outcome when the batch was cancelled.
-		if state != "done" {
+		if state != core.ExportDone {
 			if err := r.Store.SetExportJob(context.WithoutCancel(ctx), job.ID, state, message, "", ""); err != nil {
 				return err
 			}
@@ -108,12 +108,12 @@ func (r *ExportRunner) one(ctx context.Context, j core.ExportJob) error {
 		return err
 	}
 	defer func() { _ = tmp.Close(); _ = os.Remove(tmp.Name()) }() // The journal can recover any interrupted temporary file.
-	if err := r.Store.SetExportJob(ctx, j.ID, "writing", "", tmp.Name(), ""); err != nil {
+	if err := r.Store.SetExportJob(ctx, j.ID, core.ExportWriting, "", tmp.Name(), ""); err != nil {
 		return err
 	}
 	hash := sha256.New()
 	out := &checkedWriter{ctx: ctx, out: io.MultiWriter(tmp, hash)}
-	if j.Options.Format == "original" {
+	if j.Options.Format == core.ExportOriginal {
 		in, err := core.OpenShared(j.From)
 		if err != nil {
 			return err
@@ -149,7 +149,7 @@ func (r *ExportRunner) one(ctx context.Context, j core.ExportJob) error {
 		return err
 	}
 	digest := hex.EncodeToString(hash.Sum(nil))
-	if err := r.Store.SetExportJob(ctx, j.ID, "ready", "", tmp.Name(), digest); err != nil {
+	if err := r.Store.SetExportJob(ctx, j.ID, core.ExportReady, "", tmp.Name(), digest); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -158,7 +158,7 @@ func (r *ExportRunner) one(ctx context.Context, j core.ExportJob) error {
 	if err := Move(tmp.Name(), j.To); err != nil {
 		return err
 	}
-	if err := r.Store.SetExportJob(context.WithoutCancel(ctx), j.ID, "done", "", "", digest); err != nil {
+	if err := r.Store.SetExportJob(context.WithoutCancel(ctx), j.ID, core.ExportDone, "", "", digest); err != nil {
 		return &publishedExportError{err}
 	}
 	return nil
@@ -205,18 +205,18 @@ func (r *ExportRunner) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, j := range jobs {
-		if j.State != "ready" && j.State != "writing" {
+		if j.State != core.ExportReady && j.State != core.ExportWriting {
 			continue
 		}
-		state, message := "failed", "Interrupted; retry after checking the destination."
-		if j.State == "ready" {
+		state, message := core.ExportFailed, "Interrupted; retry after checking the destination."
+		if j.State == core.ExportReady {
 			f, err := core.OpenShared(j.To)
 			if err == nil {
 				hash := sha256.New()
 				_, err = io.Copy(hash, f)
 				_ = f.Close()
 				if err == nil && hex.EncodeToString(hash.Sum(nil)) == j.Digest {
-					state, message = "done", ""
+					state, message = core.ExportDone, ""
 				}
 			}
 		}

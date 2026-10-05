@@ -9,6 +9,13 @@ export interface Viewport {
   y: number
 }
 
+/** Zoom and pan as two linked surfaces share them: the offset is in image sizes. */
+export interface ViewGeometry {
+  scale: number
+  x: number
+  y: number
+}
+
 export interface ImageControls {
   fit: () => void
   actual: () => void

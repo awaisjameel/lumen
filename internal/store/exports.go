@@ -4,17 +4,31 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strconv"
 
 	"lumen/internal/core"
 )
 
-// SaveExportPlan journals a batch before any file is written.
+// exportHistory is how many settled outcomes the journal keeps and shows.
+const exportHistory = 100
+
+// SaveExportPlan journals a batch before any file is written. Like an
+// organise plan, a new preview replaces those never run; settled outcomes
+// beyond the recent history go with them, so the journal stays bounded.
 func (s *Store) SaveExportPlan(ctx context.Context, jobs []core.ExportJob) (int64, error) {
 	if len(jobs) == 0 {
 		return 0, ErrNotFound
 	}
 	var batch int64
 	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM export_jobs WHERE state = ?1 OR (state IN (?2, ?3, ?4)
+			AND id NOT IN (SELECT id FROM export_jobs WHERE state IN (?2, ?3, ?4) ORDER BY id DESC LIMIT ?5))`,
+			core.ExportPlanned, core.ExportDone, core.ExportFailed, core.ExportCancelled, exportHistory); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM export_batches WHERE id NOT IN (SELECT batch FROM export_jobs)"); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, "INSERT INTO export_batches DEFAULT VALUES")
 		if err != nil {
 			return err
@@ -45,7 +59,7 @@ func (s *Store) SaveExportPlan(ctx context.Context, jobs []core.ExportJob) (int6
 // HasInterruptedExports reports outputs requiring startup recovery.
 func (s *Store) HasInterruptedExports(ctx context.Context) (bool, error) {
 	var exists bool
-	err := s.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM export_jobs WHERE state IN ('writing', 'ready'))").Scan(&exists)
+	err := s.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM export_jobs WHERE state IN (?, ?))", core.ExportWriting, core.ExportReady).Scan(&exists)
 	return exists, err
 }
 
@@ -66,7 +80,7 @@ func (s *Store) exportJobs(ctx context.Context, batch int64, visibleOnly bool) (
 		where = " AND asset_id IN (SELECT id FROM assets WHERE " + visible + ")"
 	}
 	if visibleOnly && batch == 0 {
-		order = " ORDER BY id DESC LIMIT 100"
+		order = " ORDER BY id DESC LIMIT " + strconv.Itoa(exportHistory)
 	}
 	return queryAll(ctx, s.r, func(r *sql.Rows) (j core.ExportJob, err error) {
 		var options string
@@ -102,6 +116,6 @@ func (s *Store) ExportAllowed(ctx context.Context, id int64, destination string)
 }
 
 // SetExportJob records a file operation before or after publication.
-func (s *Store) SetExportJob(ctx context.Context, id int64, state, message, temp, digest string) error {
+func (s *Store) SetExportJob(ctx context.Context, id int64, state core.ExportState, message, temp, digest string) error {
 	return affected(s.w.ExecContext(ctx, "UPDATE export_jobs SET state = ?, error = ?, temp = ?, digest = ? WHERE id = ?", state, message, temp, digest, id))
 }

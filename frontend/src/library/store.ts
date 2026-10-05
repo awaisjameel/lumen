@@ -203,7 +203,7 @@ export const useLibrary = defineStore('library', () => {
       try {
         const result = await resultSelection()
         if (mine !== selectionRequest) return
-        const ids = result.ids ?? []
+        const ids = result.ids
         const from = ids.indexOf(anchor.id),
           to = ids.indexOf(sel.id)
         if (from < 0 || to < 0) return
@@ -232,7 +232,7 @@ export const useLibrary = defineStore('library', () => {
     try {
       const result = await resultSelection()
       if (mine !== selectionRequest) return
-      selectedIDs.value = new Set(result.ids ?? [])
+      selectedIDs.value = new Set(result.ids)
       selectionSnapshot.value = result
     } catch (e) {
       if (mine === selectionRequest) reportError(e)

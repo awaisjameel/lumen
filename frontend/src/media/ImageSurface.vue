@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { engine, isCancelled, originalUrl, renderUrl, THUMB_LARGE, thumbUrl } from '../bridge'
+import { engine, isCancelled, originalUrl, RENDER_SIDE, renderUrl, THUMB_LARGE, thumbUrl } from '../bridge'
 import type { AssetDetail, RenderInfo } from '../bridge'
 import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { observeResize } from '../shared/observeResize'
 import { constrain, fitScale, zoomAt } from './viewport'
-import type { Viewport } from './viewport'
+import type { ViewGeometry, Viewport } from './viewport'
 
 const props = defineProps<{
   id: number
@@ -14,9 +14,9 @@ const props = defineProps<{
   width: number
   height: number
   detail: AssetDetail | null
-  linked?: { scale: number; x: number; y: number }
+  linked?: ViewGeometry
 }>()
-const emit = defineEmits<{ change: [value: { scale: number; x: number; y: number }] }>()
+const emit = defineEmits<{ change: [value: ViewGeometry] }>()
 const surface = ref<HTMLElement | null>(null)
 const viewport = ref<Viewport>({
   width: 1,
@@ -33,8 +33,10 @@ const info = ref<RenderInfo | null>(null)
 const originalFailed = ref(false)
 const failed = ref('')
 const rendered = computed(() => (info.value ? renderUrl(props.id, info.value.revision) : undefined))
+// The WebView decodes an original no larger than a render would be; a
+// bigger one is shown through the bounded render instead.
 const original = computed(() =>
-  !originalFailed.value && props.detail?.caps.original && props.width * props.height <= 16_777_216
+  !originalFailed.value && props.detail?.caps.original && props.width * props.height <= RENDER_SIDE * RENDER_SIDE
     ? originalUrl(props.id)
     : undefined,
 )

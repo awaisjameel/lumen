@@ -57,7 +57,7 @@ watch(
   position: absolute;
   bottom: 0;
   inset-inline: 0;
-  height: 84px;
+  height: var(--lumen-filmstrip-h);
   overflow-x: auto;
   background: var(--lumen-viewer-bg);
 }

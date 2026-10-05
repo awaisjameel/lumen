@@ -10,6 +10,8 @@ export {
     Density,
     Device,
     DuplicateKind,
+    ExportFormat,
+    ExportState,
     FailReason,
     Filter,
     Kind,
@@ -17,9 +19,11 @@ export {
     OrganiseMoveState,
     OrganiseRunState,
     Playback,
+    SidecarState,
     TagKind,
     TagSource,
     Theme,
+    TrackKind,
     WaitReason
 } from "./models.js";
 

@@ -10,7 +10,7 @@ import (
 
 func TestRenderCapabilityMatchesTheRuntimeAndSourceBudget(t *testing.T) {
 	l := newShownLibrary(t, 1)
-	s := NewLibraryService(l.st, nil, nil)
+	s := NewLibraryService(l.st, nil, nil, nil)
 	s.media = l.cache
 	id, ctx := l.ids[0], t.Context()
 	d, err := s.Asset(ctx, id)

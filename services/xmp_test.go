@@ -19,7 +19,7 @@ func TestXMPIsOffByDefaultAndTheSettingsFollowTheToggle(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	svc := NewLibraryService(st, index.New(st, paths, nil, index.Models{}, quietEvents{}), nil)
+	svc := NewLibraryService(st, index.New(st, paths, nil, index.Models{}, quietEvents{}), nil, nil)
 
 	if s, err := svc.Settings(ctx); err != nil || s.XMP {
 		t.Fatalf("settings = %+v, %v; want XMP off by default", s, err)
@@ -84,7 +84,7 @@ func TestExportXMPNowReportsWhatItWroteLeftAndSkipped(t *testing.T) {
 	if err := os.WriteFile(foreign, []byte("theirs"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewLibraryService(st, index.New(st, paths, nil, index.Models{}, quietEvents{}), nil)
+	svc := NewLibraryService(st, index.New(st, paths, nil, index.Models{}, quietEvents{}), nil, nil)
 	if err := svc.SetXMP(ctx, true); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestDeleteXMPTurnsItOffAndRecyclesWhatLumenWrote(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := &fakeRecycler{}
-	svc := NewLibraryService(st, index.New(st, paths, nil, index.Models{}, quietEvents{}), nil)
+	svc := NewLibraryService(st, index.New(st, paths, nil, index.Models{}, quietEvents{}), nil, nil)
 	svc.recycle = rec.recycle
 	if err := svc.SetXMP(ctx, true); err != nil {
 		t.Fatal(err)
