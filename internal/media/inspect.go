@@ -45,7 +45,7 @@ func (d Decoders) Inspect(ctx context.Context, path string, kind core.Kind) (cor
 		info.Pages = pages
 	}
 	if profile, err := vips.Profile(path); err == nil && len(profile) > 0 {
-		info.Profile = "Embedded ICC"
+		info.HasProfile, info.Profile = true, profileName(profile)
 	}
 	f, err := os.Open(path)
 	if err != nil {

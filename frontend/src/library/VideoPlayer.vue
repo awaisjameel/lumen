@@ -7,6 +7,8 @@ import {
   engine,
   isCancelled,
   Playback,
+  PLAYBACK_SPEED_MAX,
+  PLAYBACK_SPEED_MIN,
   playUrl,
   subtitleUrl,
   SPRITE_COLS,
@@ -23,7 +25,7 @@ import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import { logError } from '../shared/errors'
 import { subtitleCues } from '../media/subtitles'
-import FileTools from '../media/FileTools.vue'
+import { FileTools } from '../media/lazy'
 import { videoSpriteStyle } from '../shared/videoSprite'
 
 const props = defineProps<{ detail: AssetDetail; at: number; thumbVersion?: number; private?: boolean }>()
@@ -90,7 +92,14 @@ const canPip = ref(false)
 let seeking = false
 let playRequest = 0
 const silent = computed(() => muted.value || volume.value === 0)
-const rates = computed(() => [...new Set([0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, rate.value])].sort((a, b) => a - b))
+// Every quarter of the allowed range, and the saved speed if it is between two.
+const rates = computed(() => {
+  const steps = Array.from(
+    { length: Math.round(PLAYBACK_SPEED_MAX / PLAYBACK_SPEED_MIN) },
+    (_, i) => (i + 1) * PLAYBACK_SPEED_MIN,
+  )
+  return [...new Set([...steps, rate.value])].sort((a, b) => a - b)
+})
 
 function applyPreferences() {
   if (!video.value) return

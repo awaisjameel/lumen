@@ -32,6 +32,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     asset: vi.fn(),
     inspect: vi.fn<typeof Bridge.engine.inspect>().mockResolvedValue({
       orientation: 1,
+      hasProfile: false,
       profile: '',
       lens: '',
       exposure: '',
@@ -470,6 +471,43 @@ it('does not roll back an album checkbox on the next photo when an earlier edit 
   await flushPromises()
   expect(wrapper.get('[role="checkbox"]').attributes('aria-checked')).toBe('false')
   expect(wrapper.text()).not.toContain('old edit failed')
+})
+
+it('names the colour profile a photo embeds, or says only that it has one', async () => {
+  const inspection = {
+    orientation: 1,
+    hasProfile: true,
+    profile: 'Display P3',
+    lens: '',
+    exposure: '',
+    aperture: '',
+    iso: '',
+    frameRate: '',
+    pages: 1,
+    tracks: [],
+  }
+  const profileRow = () =>
+    wrapper
+      ?.get(`section[aria-label="${t('details.metadata')}"]`)
+      .findAll('.meta-row')
+      .find((row) => row.text().includes(t('details.profile')))
+      ?.text()
+  vi.mocked(engine.inspect).mockResolvedValueOnce(inspection)
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(profileRow()).toContain('Display P3')
+  wrapper.unmount()
+
+  vi.mocked(engine.inspect).mockResolvedValueOnce({ ...inspection, profile: '' })
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(profileRow()).toContain(t('details.profileEmbedded'))
+  wrapper.unmount()
+
+  vi.mocked(engine.inspect).mockResolvedValueOnce({ ...inspection, hasProfile: false, profile: '' })
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(profileRow()).not.toContain(t('details.profileEmbedded'))
 })
 
 it('lists only what a video records and offers to copy only the values it has', async () => {

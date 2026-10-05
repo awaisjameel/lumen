@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { layerOpen, portalOpen, shortcutsSuspended, startPortalLayers, useLayer } from './overlay'
@@ -83,6 +83,40 @@ it('recognises the portalled overlays of Nuxt UI, which take the keyboard from a
   expect(portalOpen()).toBe(false)
   expect(viewer.owns()).toBe(true)
   viewer.wrapper.unmount()
+})
+
+it('orders an overlay opened inside a portal added later, and ignores the page itself', async () => {
+  const page = document.createElement('div')
+  page.setAttribute('data-v-app', '')
+  document.body.append(page)
+  const stop = startPortalLayers()
+  try {
+    const portal = document.createElement('div')
+    document.body.append(portal)
+    await Promise.resolve()
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    dialog.dataset.state = 'closed'
+    portal.append(dialog)
+    await Promise.resolve()
+    expect(dialog.style.zIndex).toBe('')
+    dialog.dataset.state = 'open'
+    await Promise.resolve()
+    expect(dialog.style.zIndex).not.toBe('')
+
+    // The grid's tiles come and go inside the application's root: none of it
+    // is an overlay, and none of it is looked at.
+    const query = vi.spyOn(document, 'querySelectorAll')
+    page.append(document.createElement('div'))
+    page.dataset.state = 'open'
+    await Promise.resolve()
+    expect(query).not.toHaveBeenCalled()
+    query.mockRestore()
+    portal.remove()
+    page.remove()
+  } finally {
+    stop()
+  }
 })
 
 it('paints a later confirmation above a feature dialog even when its portal comes first in the DOM', async () => {

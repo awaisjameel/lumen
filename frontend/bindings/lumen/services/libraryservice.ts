@@ -32,6 +32,15 @@ export function Albums(): $CancellablePromise<core$0.Album[] | null> {
 }
 
 /**
+ * ApplyBatch does one thing to each of ids and says what became of each: an
+ * asset that fails does not stop the others. The UI sends a large selection
+ * a part at a time, so that it can be stopped between them.
+ */
+export function ApplyBatch(ids: number[] | null, action: core$0.BatchAction, albumID: number): $CancellablePromise<core$0.BatchOutcome[] | null> {
+    return $Call.ByID(2658837381, ids, action, albumID);
+}
+
+/**
  * Asset returns the details for one asset.
  */
 export function Asset(id: number): $CancellablePromise<core$0.AssetDetail> {

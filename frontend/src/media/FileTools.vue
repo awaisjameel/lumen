@@ -10,6 +10,7 @@ import { engine, ExportFormat, OrganiseRunState, RENDER_SIDE, RENDER_SIDE_MIN } 
 import type { ExportJob, ExportState, OrganiseMoveState, OrganisePlan, Selection, SidecarState } from '../bridge'
 import { confirm } from '../shared/confirm'
 import { errorText } from '../shared/errors'
+import { reasonText } from '../shared/fileReasons'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
 import OutcomeList from './OutcomeList.vue'
@@ -345,7 +346,7 @@ function pollExport(batch: number, mine: number) {
         <div :key="row.id" class="file-outcome">
           <p>{{ row.from }}</p>
           <p>→ {{ row.to }}</p>
-          <p>{{ stateText(row.state) }}{{ row.error ? `: ${row.error}` : '' }}</p>
+          <p>{{ stateText(row.state) }}{{ row.error ? `: ${reasonText(row.error)}` : '' }}</p>
           <p v-if="row.sidecar">
             {{ t('files.sidecar') }}: {{ row.from }}.xmp → {{ row.to }}.xmp ({{ stateText(row.sidecar) }})
           </p>
@@ -354,7 +355,7 @@ function pollExport(batch: number, mine: number) {
       <details v-if="history.length" class="file-history">
         <summary>{{ t('files.history') }}</summary>
         <p v-for="job in history" :key="job.id">
-          {{ job.to }}: {{ stateText(job.state) }}{{ job.error ? `: ${job.error}` : '' }}
+          {{ job.to }}: {{ stateText(job.state) }}{{ job.error ? `: ${reasonText(job.error)}` : '' }}
         </p>
       </details>
     </template>

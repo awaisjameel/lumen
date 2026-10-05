@@ -63,6 +63,7 @@ type LibraryService struct {
 	ix      *index.Indexer
 	now     func() time.Time // the clock: time.Now, or a test's
 	recycle recycler         // moves files to the Recycle Bin; nil means fileops.Recycle (a test's fake otherwise)
+	open    opener           // hands a file to the shell; nil means fileops.Open (a test's fake otherwise)
 	gate    *BlockGate       // whether the Blocked screen is unlocked, shared with media serving
 	// recycling serialises every move of files to the Recycle Bin, from its
 	// validation to the removal of the rows: two requests must not each see

@@ -22,7 +22,7 @@ import {
   TrackKind,
 } from '../bridge'
 import type { AssetDetail, AssetTag, Face, MediaInspection } from '../bridge'
-import FileTools from '../media/FileTools.vue'
+import { FileTools } from '../media/lazy'
 import { errorText, logError, orFallback } from '../shared/errors'
 import { block } from '../shared/block'
 import { bytes, dateTime, duration, megapixels } from '../shared/format'
@@ -431,7 +431,7 @@ const metadata = computed(() => {
       row('details.exposure', i?.exposure),
       row('details.aperture', i?.aperture),
       row('details.iso', i?.iso),
-      row('details.profile', i?.profile),
+      row('details.profile', i?.hasProfile ? i.profile || t('details.profileEmbedded') : undefined),
       row('details.orientation', i?.orientation),
       row('details.pages', i?.pages),
     )

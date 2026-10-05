@@ -41,6 +41,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     asset: vi.fn(),
     inspect: vi.fn<typeof Bridge.engine.inspect>().mockResolvedValue({
       orientation: 1,
+      hasProfile: false,
       profile: '',
       lens: '',
       exposure: '',

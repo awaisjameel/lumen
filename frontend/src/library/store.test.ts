@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, watch } from 'vue'
-import { Device, engine, Filter, onLibraryChanged, onProgress, startMedia, WaitReason } from '../bridge'
+import { Device, engine, ErrorCode, Filter, onLibraryChanged, onProgress, startMedia, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Errors from '../shared/errors'
 import type { Changes, DayBucket, DayItems, GridItem, Progress, SearchResults } from '../bridge'
@@ -27,6 +27,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     setPaused: vi.fn(),
     trashCount: vi.fn(),
     selection: vi.fn(),
+    validateSelection: vi.fn(),
   },
   onLibraryChanged: vi.fn(),
   onProgress: vi.fn(),
@@ -115,6 +116,37 @@ it('drops stale selected IDs before binding an additive range to a newer snapsho
   await lib.selectItems({ day, id: 4 }, true, true)
   expect([...lib.selectedIDs]).toEqual([2, 3, 4])
   expect(lib.selectionSnapshot).toEqual({ ids: [2, 3, 4], revision: 10 })
+})
+
+it('reads every id of the view once, then asks only whether membership changed', async () => {
+  const lib = useLibrary()
+  vi.mocked(engine.selection)
+    .mockReset()
+    .mockResolvedValue({ ids: [1, 2, 3, 4], revision: 7 })
+  vi.mocked(engine.validateSelection).mockReset().mockResolvedValue(undefined)
+  await lib.selectItems({ day, id: 1 }, false, false)
+  await lib.selectItems({ day, id: 3 }, false, true)
+  await lib.selectItems({ day, id: 4 }, false, true)
+  expect(engine.selection).toHaveBeenCalledTimes(1)
+  expect(engine.validateSelection).toHaveBeenCalledExactlyOnceWith({ ids: [1, 2, 3, 4], revision: 7 })
+  expect([...lib.selectedIDs]).toEqual([1, 2, 3, 4])
+
+  // A photo left the view: the range is taken from what is there now.
+  vi.mocked(engine.validateSelection).mockRejectedValueOnce(
+    new Error('changed', { cause: { code: ErrorCode.SelectionChanged } }),
+  )
+  vi.mocked(engine.selection).mockResolvedValueOnce({ ids: [1, 3, 4], revision: 8 })
+  await lib.selectItems({ day, id: 3 }, false, true)
+  expect(engine.selection).toHaveBeenCalledTimes(2)
+  expect([...lib.selectedIDs]).toEqual([1, 3])
+  expect(lib.selectionSnapshot).toEqual({ ids: [1, 3], revision: 8 })
+
+  // Any other failure of the check is reported, and nothing is selected by guesswork.
+  vi.mocked(engine.validateSelection).mockRejectedValueOnce(new Error('the database could not be read'))
+  await lib.selectItems({ day, id: 4 }, false, true)
+  expect(engine.selection).toHaveBeenCalledTimes(2)
+  expect(reportError).toHaveBeenCalledOnce()
+  expect([...lib.selectedIDs]).toEqual([1, 3])
 })
 
 describe('library lifetime', () => {

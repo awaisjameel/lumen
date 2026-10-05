@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"lumen/internal/core"
-	"lumen/internal/media"
 	"lumen/internal/store"
 )
 
@@ -81,17 +80,12 @@ func (m *MediaService) serveSubtitles(w http.ResponseWriter, r *http.Request, id
 		http.NotFound(w, r)
 		return
 	}
-	d, ok := m.cache.Decoder.(media.Decoders)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	// Conversion completes before headers, so unsupported tracks cannot look
 	// like a valid empty subtitle document. Text output has a strict cap.
 	var out subtitleBuffer
-	if !served(w, d.Subtitles(ctx, path, track, at, &out), id) {
+	if !served(w, m.cache.Subtitles(ctx, path, track, at, &out), id) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")

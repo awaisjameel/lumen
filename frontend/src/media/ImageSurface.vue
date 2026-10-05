@@ -32,21 +32,35 @@ const loadedSource = ref('')
 const info = ref<RenderInfo | null>(null)
 const originalFailed = ref(false)
 const failed = ref('')
+// The details are asked for after the picture is shown, and until they
+// arrive may still be the last picture's.
+const detail = computed(() => (props.detail?.id === props.id ? props.detail : null))
 const rendered = computed(() => (info.value ? renderUrl(props.id, info.value.revision) : undefined))
 // The WebView decodes an original no larger than a render would be; a
 // bigger one is shown through the bounded render instead.
 const original = computed(() =>
-  !originalFailed.value && props.detail?.caps.original && props.width * props.height <= RENDER_SIDE * RENDER_SIDE
+  !originalFailed.value && detail.value?.caps.original && props.width * props.height <= RENDER_SIDE * RENDER_SIDE
     ? originalUrl(props.id)
     : undefined,
 )
 const full = computed(() => rendered.value ?? original.value)
 const ready = computed(() => !!full.value && loadedSource.value === full.value)
 const scale = computed(() => Math.round(viewport.value.scale * 100))
+const placed = computed(
+  () => `translate(-50%, -50%) translate(${viewport.value.x}px, ${viewport.value.y}px) scale(${viewport.value.scale})`,
+)
+// The full picture is the stored pixels, turned here as the user turned it.
 const style = computed(() => ({
-  width: `${props.detail?.width ?? props.width}px`,
-  height: `${props.detail?.height ?? props.height}px`,
-  transform: `translate(-50%, -50%) translate(${viewport.value.x}px, ${viewport.value.y}px) scale(${viewport.value.scale}) scaleX(${props.detail?.adjustment?.flip ? -1 : 1}) rotate(${(props.detail?.adjustment?.rotation ?? 0) * 90}deg)`,
+  width: `${detail.value?.width ?? props.width}px`,
+  height: `${detail.value?.height ?? props.height}px`,
+  transform: `${placed.value} scaleX(${detail.value?.adjustment?.flip ? -1 : 1}) rotate(${(detail.value?.adjustment?.rotation ?? 0) * 90}deg)`,
+}))
+// The preview is the thumbnail the grid shows, which is already turned: it
+// fills the picture's place as it is, with or without the details.
+const previewStyle = computed(() => ({
+  width: `${viewport.value.imageWidth}px`,
+  height: `${viewport.value.imageHeight}px`,
+  transform: placed.value,
 }))
 let stopResize: (() => void) | undefined
 let request = 0
@@ -70,7 +84,7 @@ function actual() {
   set(zoomAt(viewport.value, pixelScale()))
 }
 function pixelScale() {
-  return info.value ? info.value.width / Math.max(1, props.detail?.width ?? props.width) : 1
+  return info.value ? info.value.width / Math.max(1, detail.value?.width ?? props.width) : 1
 }
 async function renderCopy(current: number) {
   try {
@@ -162,13 +176,13 @@ watch(
     info.value = null
     originalFailed.value = false
     failed.value = ''
-    const rotated = (props.detail?.adjustment?.rotation ?? 0) % 2 !== 0
-    const width = props.detail?.width ?? props.width
-    const height = props.detail?.height ?? props.height
+    const rotated = (detail.value?.adjustment?.rotation ?? 0) % 2 !== 0
+    const width = detail.value?.width ?? props.width
+    const height = detail.value?.height ?? props.height
     viewport.value = { ...viewport.value, imageWidth: rotated ? height : width, imageHeight: rotated ? width : height }
     if (fitting.value) fit()
     else set(viewport.value)
-    if (props.detail?.id !== props.id || props.detail.video || original.value) return
+    if (!detail.value || detail.value.video || original.value) return
     await renderCopy(current)
   },
   { immediate: true },
@@ -208,8 +222,8 @@ defineExpose({ fit, actual, zoom, scale })
       v-if="thumb"
       v-show="!ready"
       class="preview"
-      :src="`${thumbUrl(id, thumb, THUMB_LARGE)}&canonical=1`"
-      :style="style"
+      :src="thumbUrl(id, thumb, THUMB_LARGE)"
+      :style="previewStyle"
       alt=""
       draggable="false"
     />
@@ -253,6 +267,10 @@ img {
   object-fit: fill;
   transform-origin: center;
   user-select: none;
+}
+/* A thumbnail made before the last turn keeps its shape until the new one arrives. */
+.preview {
+  object-fit: contain;
 }
 .resolution {
   position: absolute;

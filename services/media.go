@@ -1,13 +1,17 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -82,7 +86,17 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// A thumbnail is shown as the user turned it, unless the caller draws on
+	// the stored pixels (a face's box). Whether it may be served and how it is
+	// turned are one question of the store.
+	turned := parts[0] == "thumb" && r.URL.Query().Get("canonical") != "1"
+	var adjustment core.DisplayAdjustment
 	adm, ok := admit(w, r, m.gate, id, func(ctx context.Context, unlocked bool) error {
+		if turned {
+			var err error
+			adjustment, err = m.store.Adjustment(ctx, id, unlocked)
+			return err
+		}
 		visible, err := m.store.AssetVisible(ctx, id, unlocked)
 		if err == nil && !visible {
 			err = store.ErrNotFound
@@ -110,7 +124,7 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		m.serveThumb(w, r, id, size, adm.unlocked)
+		m.serveThumb(w, r, id, size, adm.unlocked, adjustment)
 	case parts[0] == "sprite" && len(parts) == 2:
 		m.serveSprite(w, r, id, adm.unlocked)
 	case parts[0] == "original" && len(parts) == 2:
@@ -127,36 +141,8 @@ func (m *MediaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int64, size int, unlocked bool) {
-	if r.URL.Query().Get("canonical") != "1" {
-		a, err := m.store.Adjustment(r.Context(), id, unlocked)
-		if !served(w, err, id) {
-			return
-		}
-		if a.Rotation != 0 || a.Flip {
-			f, path, ok := assetFile(r.Context(), m.store, id, unlocked, w)
-			if !ok {
-				return
-			}
-			if !served(w, m.cache.Ensure(r.Context(), id, size, media.Original{Path: path, Kind: f.Kind, Orientation: f.Orientation}), id) {
-				return
-			}
-			data, err := os.ReadFile(m.cache.Path(id, size))
-			if !served(w, err, id) {
-				return
-			}
-			data, err = media.AdjustJPEG(data, a)
-			if !served(w, err, id) {
-				return
-			}
-			m.cache.Viewed(id)
-			w.Header().Set("Cache-Control", "no-store")
-			w.Header().Set("Content-Type", "image/jpeg")
-			_, _ = w.Write(data) // The request owns cancellation and the gate writer.
-			return
-		}
-	}
-	m.serveCachedPicture(w, r, id, m.cache.Path(id, size), func() bool {
+func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int64, size int, unlocked bool, a core.DisplayAdjustment) {
+	file, ok := m.openCached(w, id, m.cache.Path(id, size), func() bool {
 		// Missing from the cache (the folder was cleared, or the size cap evicted it): rebuild it now if the asset had one.
 		f, path, ok := assetFile(r.Context(), m.store, id, unlocked, w)
 		if !ok {
@@ -168,6 +154,39 @@ func (m *MediaService) serveThumb(w http.ResponseWriter, r *http.Request, id int
 		}
 		return served(w, m.cache.Ensure(r.Context(), id, size, media.Original{Path: path, Kind: f.Kind, Orientation: f.Orientation}), id)
 	})
+	if !ok {
+		return
+	}
+	defer file.Close()
+	m.cache.Viewed(id)
+	if a.Rotation == 0 && !a.Flip {
+		serveOpened(w, r, file, "image/jpeg")
+		return
+	}
+	fi, err := file.Stat()
+	if !served(w, err, id) {
+		return
+	}
+	// The turned copy is made for the request, so its tag names what it is
+	// made from: the stored thumbnail and the turn. A WebView that still has
+	// both is told so, before anything is decoded.
+	tag := fmt.Sprintf(`"%x-%d-%t"`, fi.ModTime().UnixNano(), a.Rotation, a.Flip)
+	w.Header().Set("Etag", tag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if r.Header.Get("If-None-Match") == tag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	data, err := io.ReadAll(file)
+	if !served(w, err, id) {
+		return
+	}
+	data, err = media.AdjustJPEG(data, a)
+	if !served(w, err, id) {
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))
 }
 
 func (m *MediaService) serveSprite(w http.ResponseWriter, r *http.Request, id int64, unlocked bool) {
@@ -184,25 +203,35 @@ func (m *MediaService) serveSprite(w http.ResponseWriter, r *http.Request, id in
 	})
 }
 
-// serveCachedPicture serves a cached thumbnail or sprite. If it is not there
-// it calls rebuild (which answers the request itself and returns false when it
-// cannot make it) and opens it again. Opening, not a separate check, decides:
-// the size cap can evict the file between a check and the open, and that must
-// cost one rebuild, not a 404.
+// serveCachedPicture serves a cached thumbnail or sprite, made again by
+// rebuild if it is not there (see openCached).
 func (m *MediaService) serveCachedPicture(w http.ResponseWriter, r *http.Request, id int64, path string, rebuild func() bool) {
-	file, err := m.open(path)
-	if err != nil {
-		if !rebuild() {
-			return
-		}
-		if file, err = m.open(path); err != nil {
-			served(w, err, id)
-			return
-		}
+	file, ok := m.openCached(w, id, path, rebuild)
+	if !ok {
+		return
 	}
 	defer file.Close()
 	m.cache.Viewed(id)
 	serveOpened(w, r, file, "image/jpeg")
+}
+
+// openCached opens a cached picture. If it is not there it calls rebuild
+// (which answers the request itself and returns false when it cannot make it)
+// and opens it again. Opening, not a separate check, decides: the size cap can
+// evict the file between a check and the open, and that must cost one rebuild,
+// not a 404. It answers a request it cannot open a picture for.
+func (m *MediaService) openCached(w http.ResponseWriter, id int64, path string, rebuild func() bool) (*os.File, bool) {
+	file, err := m.open(path)
+	if err != nil {
+		if !rebuild() {
+			return nil, false
+		}
+		if file, err = m.open(path); err != nil {
+			served(w, err, id)
+			return nil, false
+		}
+	}
+	return file, true
 }
 
 func (m *MediaService) serveFrame(w http.ResponseWriter, r *http.Request, id, at int64, unlocked bool) {

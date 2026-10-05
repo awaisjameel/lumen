@@ -227,21 +227,43 @@ func (s *SearchService) AssetTags(ctx context.Context, assetID int64) ([]core.As
 
 // TagAsset puts a tag on a photo by name, creating the tag if it's new.
 func (s *SearchService) TagAsset(ctx context.Context, assetID int64, name string) error {
-	id, _, err := s.store.TagByName(ctx, name)
-	if errors.Is(err, store.ErrNotFound) {
-		id, err = s.store.CreateTag(ctx, name, core.TagManual, nil)
-	}
+	id, err := s.tagNamed(ctx, name)
 	if err != nil {
 		return err
 	}
 	if err := s.store.TagAsset(ctx, assetID, id); err != nil {
 		return err
 	}
-	// A photo the user calls a screenshot is one to read, if that is on.
+	return s.queueOCR(ctx)
+}
+
+// TagAssets is TagAsset for a selection: the tag is found or made once, and
+// each photo has its own outcome (see LibraryService.ApplyBatch).
+func (s *SearchService) TagAssets(ctx context.Context, ids []int64, name string) ([]core.BatchOutcome, error) {
+	id, err := s.tagNamed(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	outcomes := batchOutcomes(ctx, ids, func(assetID int64) error { return s.store.TagAsset(ctx, assetID, id) })
+	return outcomes, s.queueOCR(ctx)
+}
+
+// tagNamed is the tag of that name, made if there is none.
+func (s *SearchService) tagNamed(ctx context.Context, name string) (int64, error) {
+	id, _, err := s.store.TagByName(ctx, name)
+	if errors.Is(err, store.ErrNotFound) {
+		id, err = s.store.CreateTag(ctx, name, core.TagManual, nil)
+	}
+	return id, err
+}
+
+// queueOCR follows a tag put by hand: a photo the user calls a screenshot
+// is one to read, if that is on.
+func (s *SearchService) queueOCR(ctx context.Context) error {
 	if s.ix != nil {
 		return s.ix.QueueOCR(ctx) // and wakes the stage
 	}
-	_, err = s.store.QueueOCR(ctx)
+	_, err := s.store.QueueOCR(ctx)
 	return err
 }
 

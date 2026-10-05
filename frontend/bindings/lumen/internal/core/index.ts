@@ -4,6 +4,7 @@
 export {
     Accent,
     AlbumKind,
+    BatchAction,
     BlockKind,
     BlockMode,
     DateSource,
@@ -34,6 +35,7 @@ export type {
     AlbumRule,
     AssetDetail,
     AssetTag,
+    BatchOutcome,
     Block,
     BlockChange,
     BlockRef,

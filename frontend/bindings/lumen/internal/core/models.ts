@@ -165,6 +165,40 @@ export interface AssetTag {
 }
 
 /**
+ * BatchAction is what a selection action does to each of its assets.
+ */
+export enum BatchAction {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The actions a selection can take in one call.
+     */
+    BatchFavourite = "favourite",
+    BatchUnfavourite = "unfavourite",
+
+    /**
+     * into a manual album
+     */
+    BatchAlbum = "album",
+    BatchRemoveAlbum = "removeAlbum",
+    BatchTrash = "trash",
+    BatchRestore = "restore",
+};
+
+/**
+ * BatchOutcome is what became of one asset of a selection action. Code is
+ * the failure's error code when it has one; Error is "" when it worked.
+ */
+export interface BatchOutcome {
+    "id": number;
+    "code": string;
+    "error": string;
+}
+
+/**
  * Block is a user-created visibility rule. Path is set only for folders.
  */
 export interface Block {
@@ -834,6 +868,15 @@ export interface MediaCaps {
  */
 export interface MediaInspection {
     "orientation": number;
+
+    /**
+     * a colour profile is embedded
+     */
+    "hasProfile": boolean;
+
+    /**
+     * what that profile calls itself; "" when it does not say
+     */
     "profile": string;
     "lens": string;
     "exposure": string;

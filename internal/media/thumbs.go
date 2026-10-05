@@ -92,6 +92,18 @@ type Decoder interface {
 	FrameAt(ctx context.Context, path string, at int64, side int) (Image, error)
 }
 
+// Inspector is a Decoder that can also read what a file holds beyond the
+// indexed metadata: its streams, lens, exposure and colour profile.
+type Inspector interface {
+	Inspect(ctx context.Context, path string, kind core.Kind) (core.MediaInspection, error)
+}
+
+// Subtitler is a Decoder that can also turn a video's text subtitle stream
+// into WebVTT, starting at ms.
+type Subtitler interface {
+	Subtitles(ctx context.Context, path string, index int, at int64, out io.Writer) error
+}
+
 // Decoders is the production Decoder.
 // Everything ends in the same libvips pipeline (rotate, resize, sRGB); only
 // decoding differs by format:

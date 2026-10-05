@@ -4,7 +4,15 @@ import UButton from '@nuxt/ui/components/Button.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import USwitch from '@nuxt/ui/components/Switch.vue'
 import USlider from '@nuxt/ui/components/Slider.vue'
-import { engine } from '../bridge'
+import {
+  engine,
+  PLAYBACK_SPEED_MAX,
+  PLAYBACK_SPEED_MIN,
+  SKIP_SECONDS_MAX,
+  SKIP_SECONDS_MIN,
+  SLIDESHOW_SECONDS_MAX,
+  SLIDESHOW_SECONDS_MIN,
+} from '../bridge'
 import { reportError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
@@ -32,8 +40,8 @@ const defaults = viewerDefaults()
     <PrefRow :label="t('viewer.interval')"
       ><UInput
         type="number"
-        :min="1"
-        :max="60"
+        :min="SLIDESHOW_SECONDS_MIN"
+        :max="SLIDESHOW_SECONDS_MAX"
         :model-value="viewing.slideshowSeconds"
         :aria-label="t('viewer.interval')"
         @update:model-value="prefs.setViewer({ slideshowSeconds: Number($event) || defaults.slideshowSeconds })"
@@ -67,8 +75,8 @@ const defaults = viewerDefaults()
     <PrefRow :label="t('viewer.skipInterval')"
       ><UInput
         type="number"
-        :min="1"
-        :max="60"
+        :min="SKIP_SECONDS_MIN"
+        :max="SKIP_SECONDS_MAX"
         :model-value="viewing.skipSeconds"
         :aria-label="t('viewer.skipInterval')"
         @update:model-value="prefs.setViewer({ skipSeconds: Number($event) || defaults.skipSeconds })"
@@ -76,9 +84,9 @@ const defaults = viewerDefaults()
     <PrefRow :label="t('viewer.speed')"
       ><UInput
         type="number"
-        :min="0.25"
-        :max="2"
-        :step="0.25"
+        :min="PLAYBACK_SPEED_MIN"
+        :max="PLAYBACK_SPEED_MAX"
+        :step="PLAYBACK_SPEED_MIN"
         :model-value="viewing.speed"
         :aria-label="t('viewer.speed')"
         @update:model-value="prefs.setViewer({ speed: Number($event) || defaults.speed })"

@@ -169,10 +169,19 @@ func (c *Cache) Inspect(ctx context.Context, path string, kind core.Kind) (core.
 			return inspector.Inspect(ctx, path)
 		}
 	}
-	if d, ok := c.Decoder.(Decoders); ok {
+	if d, ok := c.Decoder.(Inspector); ok {
 		return d.Inspect(ctx, path, kind)
 	}
 	return core.MediaInspection{}, ErrUnsupported
+}
+
+// Subtitles writes a video's text subtitle stream as WebVTT, from at ms on.
+func (c *Cache) Subtitles(ctx context.Context, path string, index int, at int64, out io.Writer) error {
+	d, ok := c.Decoder.(Subtitler)
+	if !ok {
+		return ErrUnsupported
+	}
+	return d.Subtitles(ctx, path, index, at, out)
 }
 
 // RenderFile caches only the current source revision. It serialises workers

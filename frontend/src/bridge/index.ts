@@ -14,6 +14,7 @@ import {
 import {
   Accent,
   AlbumKind,
+  BatchAction,
   BlockKind,
   BlockMode,
   DateSource,
@@ -39,6 +40,7 @@ import {
 import type {
   About,
   Album,
+  BatchOutcome,
   Block,
   BlockChange,
   CoveredItem as RawCoveredItem,
@@ -88,6 +90,7 @@ import type {
 export {
   Accent,
   AlbumKind,
+  BatchAction,
   BlockKind,
   BlockMode,
   DateSource,
@@ -113,6 +116,7 @@ export {
 export type {
   About,
   Album,
+  BatchOutcome,
   AlbumRule,
   Block,
   BlockChange,
@@ -213,14 +217,20 @@ export const SIDEBAR_WIDTH_DEFAULT = 232 // core.SidebarWidthDefault
 export const INSPECTOR_WIDTH_MIN = 280 // core.InspectorWidthMin
 export const INSPECTOR_WIDTH_MAX = 480 // core.InspectorWidthMax
 export const INSPECTOR_WIDTH_DEFAULT = 320 // core.InspectorWidthDefault
+export const SLIDESHOW_SECONDS_MIN = 1 // core.SlideshowSecondsMin
+export const SLIDESHOW_SECONDS_MAX = 60 // core.SlideshowSecondsMax
+export const SKIP_SECONDS_MIN = 1 // core.SkipSecondsMin
+export const SKIP_SECONDS_MAX = 60 // core.SkipSecondsMax
+export const PLAYBACK_SPEED_MIN = 0.25 // core.PlaybackSpeedMin
+export const PLAYBACK_SPEED_MAX = 2 // core.PlaybackSpeedMax
 export const ORGANISE_DEFAULT_TEMPLATE = '{Year}/{Month}/{Event}/{Name}' // fileops.DefaultTemplate
 /** The tokens an organise scheme may hold, in the order the editor offers them (fileops.Tokens). */
 export const ORGANISE_TOKENS = ['Year', 'Month', 'MonthName', 'Day', 'Event', 'Place', 'Camera', 'Name', 'Ext'] as const
 /** What a token stands for when a photo has no value for it (fileops.FallbackEvent, FallbackPlace, FallbackCamera). */
 export const ORGANISE_FALLBACKS = { Event: 'Unknown event', Place: 'Unknown place', Camera: 'Unknown camera' } as const
 /**
- * Why a file is left out of an organise run (fileops.Reason*): a move's error
- * is one of these, or else a message from Windows.
+ * Why a file is left out of a move, a rename or an export (fileops.Reason*):
+ * the error of its row is one of these, or else a message from Windows.
  */
 export const OrganiseReason = {
   Missing: 'missing',
@@ -231,6 +241,8 @@ export const OrganiseReason = {
   TooLong: 'too_long',
   NotAFolder: 'not_a_folder',
   SidecarTaken: 'sidecar_taken',
+  Unsupported: 'unsupported',
+  Interrupted: 'interrupted',
 } as const
 export type OrganiseReason = (typeof OrganiseReason)[keyof typeof OrganiseReason]
 /** The pattern attribute of a PIN field: PIN_MIN_LEN to PIN_MAX_LEN digits. */
@@ -275,6 +287,15 @@ export const ErrorCode = {
   OrganiseBusy: 'organise_busy',
   OrganiseState: 'organise_state',
   SelectionChanged: 'selection_changed',
+  Stopping: 'stopping',
+  InvalidFileName: 'invalid_file_name',
+  DestinationOutside: 'destination_outside',
+  DestinationFolder: 'destination_folder',
+  DestinationExcluded: 'destination_excluded',
+  DestinationBlocked: 'destination_blocked',
+  DestinationTaken: 'destination_taken',
+  SourceChanged: 'source_changed',
+  Unsupported: 'unsupported',
   SigninFailed: 'signin_failed',
   SigninUnavailable: 'signin_unavailable',
 } as const
@@ -282,7 +303,8 @@ export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 
 const errorCodes: ReadonlySet<unknown> = new Set<ErrorCode>(Object.values(ErrorCode))
 
-function isErrorCode(code: unknown): code is ErrorCode {
+/** Whether a value is one of the engine's error codes. */
+export function isErrorCode(code: unknown): code is ErrorCode {
   return errorCodes.has(code)
 }
 
@@ -328,6 +350,9 @@ export const engine = {
     return { ...result, ids: result.ids ?? [] }
   },
   validateSelection: (sel: Selection): Promise<void> => LibraryService.ValidateSelection(sel),
+  /** Does one thing to each asset; one that fails is in the outcomes, not thrown. albumID is the album actions'. */
+  applyBatch: async (ids: number[], action: BatchAction, albumID = 0): Promise<BatchOutcome[]> =>
+    (await LibraryService.ApplyBatch(ids, action, albumID)) ?? [],
   planFileMoves: async (ids: number[], directory: string, name: string): Promise<OrganisePlan> => {
     const result = await LibraryService.PlanFileMoves(ids, directory, name)
     return { ...result, moves: result.moves ?? [] }
@@ -496,6 +521,9 @@ export const engine = {
   setThingPinned: (id: number, pinned: boolean): Promise<void> => SearchService.SetThingPinned(id, pinned),
   assetTags: async (id: number): Promise<AssetTag[]> => (await SearchService.AssetTags(id)) ?? [],
   tagAsset: (id: number, name: string): Promise<void> => SearchService.TagAsset(id, name),
+  /** tagAsset for many photos, with an outcome for each (see applyBatch). */
+  tagAssets: async (ids: number[], name: string): Promise<BatchOutcome[]> =>
+    (await SearchService.TagAssets(ids, name)) ?? [],
   untagAsset: (id: number, tagID: number): Promise<void> => SearchService.UntagAsset(id, tagID),
 
   people: async (): Promise<Person[]> => (await PeopleService.People()) ?? [],

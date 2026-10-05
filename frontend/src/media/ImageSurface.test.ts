@@ -71,6 +71,37 @@ it('cancels navigation and refuses a late render from the previous asset', async
   expect(signals[1]?.aborted).toBe(true)
 })
 
+it('previews a turned photo with the thumbnail the grid shows, unstretched before its details arrive', async () => {
+  // The grid's size is the picture as shown: a 6000×4000 photo turned a quarter.
+  const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 3, width: 4000, height: 6000, detail: null } })
+  try {
+    const preview = () => wrapper.get<HTMLImageElement>('img.preview')
+    const shape = () => [preview().element.style.width, preview().element.style.height]
+    expect(preview().attributes('src')).not.toContain('canonical')
+    expect(shape()).toEqual(['4000px', '6000px'])
+    expect(preview().attributes('style')).not.toContain('rotate')
+    await wrapper.setProps({ detail: { ...detail(1), adjustment: { rotation: 1, flip: true } } })
+    expect(shape()).toEqual(['4000px', '6000px'])
+    expect(preview().attributes('style')).not.toContain('rotate')
+    expect(preview().attributes('style')).not.toContain('scaleX')
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('does not turn a photo by the details of the one shown before it', async () => {
+  const turned = { ...detail(1), adjustment: { rotation: 1, flip: false }, caps: { ...detail(1).caps, original: true } }
+  const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 1, width: 400, height: 600, detail: turned } })
+  try {
+    await wrapper.setProps({ id: 2, width: 800, height: 500 })
+    expect(wrapper.find('img.original').exists()).toBe(false)
+    const preview = wrapper.get<HTMLImageElement>('img.preview').element
+    expect([preview.style.width, preview.style.height]).toEqual(['800px', '500px'])
+  } finally {
+    wrapper.unmount()
+  }
+})
+
 it('keeps an already loaded original visible after presentation metadata refreshes', async () => {
   const photo = { ...detail(1), width: 600, height: 400, caps: { ...detail(1).caps, original: true } }
   const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 1, width: 600, height: 400, detail: photo } })

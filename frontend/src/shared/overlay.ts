@@ -69,13 +69,24 @@ export function startPortalLayers(): () => void {
       if (popper instanceof HTMLElement) paint(popper, next)
     }
   }
-  const observer = new MutationObserver(refresh)
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['data-state', 'role', 'open'],
+  const observer = new MutationObserver((records) => {
+    for (const record of records) if (record.target === document.body) record.addedNodes.forEach(watch)
+    refresh()
   })
+  // Overlays are teleported to the body, beside the root the application is
+  // mounted in. Only they are watched: the page inside that root changes with
+  // every scroll of the grid, and holds no overlay.
+  function watch(node: Node) {
+    if (!(node instanceof HTMLElement) || node.hasAttribute('data-v-app')) return
+    observer.observe(node, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-state', 'role', 'open'],
+    })
+  }
+  observer.observe(document.body, { childList: true })
+  Array.from(document.body.children).forEach(watch)
   refresh()
   return () => {
     observer.disconnect()

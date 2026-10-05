@@ -27,9 +27,12 @@ var ErrOrganiseState = errors.New("that run cannot be started or undone now")
 // ErrOrganiseStopping means Lumen is closing, and no new run is taken.
 var ErrOrganiseStopping = errors.New("the app is closing")
 
-// recovering is the place a startup recovery takes in organiser.active: no
-// run has this id.
-const recovering = -1
+// The places that work other than a run takes in organiser.active: no run
+// has these ids.
+const (
+	recovering = -1 // a startup recovery
+	exporting  = -2 // an export, which moves no library file but must not overlap one that does
+)
 
 // organiser is the organise runs' bookkeeping: the one run at a time, and the
 // goroutine that makes it. LibraryService's zero value for it works.

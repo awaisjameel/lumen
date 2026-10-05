@@ -5,24 +5,31 @@ import UButton from '@nuxt/ui/components/Button.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
-import { AlbumKind, engine } from '../bridge'
+import { AlbumKind, BatchAction, engine } from '../bridge'
 import type { Selection } from '../bridge'
 import { useAlbums } from '../albums/store'
 import { confirm } from '../shared/confirm'
-import { errorText, logError } from '../shared/errors'
+import { errorText, failureText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { showTrashUndo } from '../trash/undo'
 import { blockAssets } from '../shared/block'
 import OutcomeList from './OutcomeList.vue'
 
-type Operation =
-  'favourite' | 'unfavourite' | 'tag' | 'album' | 'removeAlbum' | 'trash' | 'block' | 'restore' | 'delete'
+type Operation = BatchAction | 'tag' | 'block' | 'delete'
+interface Result {
+  id: number
+  error: string
+  state: 'done' | 'failed' | 'cancelled'
+}
 
 const props = defineProps<{ ids: number[]; selection?: Selection | null; trash: boolean }>()
 const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>('open', { default: false })
+// How many assets one call to the engine takes: few enough that Cancel and the
+// progress line keep up, enough that a whole library is not a call per photo.
+const PART = 200
 const albums = useAlbums()
-const operation = ref<Operation>('favourite')
+const operation = ref<Operation>(BatchAction.BatchFavourite)
 const tag = ref('')
 const album = ref(0)
 const busy = ref(false)
@@ -30,9 +37,11 @@ const stopped = ref(false)
 const isStopped = () => stopped.value
 let disposed = false
 const error = ref('')
-const results = ref<{ id: number; error: string; state: 'done' | 'failed' | 'cancelled' }[]>([])
+const results = ref<Result[]>([])
 const batchTotal = ref(0)
-const needsAlbum = computed(() => operation.value === 'album' || operation.value === 'removeAlbum')
+const needsAlbum = computed(
+  () => operation.value === BatchAction.BatchAlbum || operation.value === BatchAction.BatchRemoveAlbum,
+)
 onBeforeUnmount(() => {
   disposed = true
   stopped.value = true
@@ -40,29 +49,34 @@ onBeforeUnmount(() => {
 const options = computed((): { value: Operation; label: string }[] =>
   props.trash
     ? [
-        { value: 'restore', label: t('trash.restore') },
+        { value: BatchAction.BatchRestore, label: t('trash.restore') },
         { value: 'delete', label: t('trash.deleteFromDisk') },
       ]
     : [
-        { value: 'favourite', label: t('details.favourite') },
-        { value: 'unfavourite', label: t('details.unfavourite') },
+        { value: BatchAction.BatchFavourite, label: t('details.favourite') },
+        { value: BatchAction.BatchUnfavourite, label: t('details.unfavourite') },
         { value: 'tag', label: t('details.addTag') },
-        { value: 'album', label: t('files.addAlbum') },
-        { value: 'removeAlbum', label: t('files.removeAlbum') },
-        { value: 'trash', label: t('trash.move') },
+        { value: BatchAction.BatchAlbum, label: t('files.addAlbum') },
+        { value: BatchAction.BatchRemoveAlbum, label: t('files.removeAlbum') },
+        { value: BatchAction.BatchTrash, label: t('trash.move') },
         { value: 'block', label: t('blocked.block') },
       ],
 )
 const albumOptions = computed(() =>
   albums.list.filter((a) => a.kind === AlbumKind.AlbumManual).map((a) => ({ value: a.id, label: a.name })),
 )
-watch(open, (value) => {
-  if (value) {
-    operation.value = props.trash ? 'restore' : 'favourite'
-    results.value = []
-    void albums.load().catch(logError)
-  }
-})
+watch(
+  open,
+  (value) => {
+    if (value) {
+      operation.value = props.trash ? BatchAction.BatchRestore : BatchAction.BatchFavourite
+      results.value = []
+      void albums.load().catch(logError)
+    }
+  },
+  { immediate: true },
+)
+const cancelled = (ids: number[]): Result[] => ids.map((id) => ({ id, error: '', state: 'cancelled' }))
 async function apply() {
   const ids = [...props.ids]
   const selectedOperation = operation.value
@@ -85,7 +99,7 @@ async function apply() {
         isStopped,
       )
       const processed = new Set(results.value.map((r) => r.id))
-      for (const id of ids) if (!processed.has(id)) results.value.push({ id, error: '', state: 'cancelled' })
+      results.value.push(...cancelled(ids.filter((id) => !processed.has(id))))
       return
     }
     if (selectedOperation === 'delete') {
@@ -100,7 +114,7 @@ async function apply() {
         return
       for (const id of selection.assets) {
         if (isStopped()) {
-          results.value.push({ id, error: '', state: 'cancelled' })
+          results.value.push(...cancelled([id]))
           continue
         }
         try {
@@ -116,41 +130,31 @@ async function apply() {
         }
       }
     } else {
-      for (const id of ids) {
+      for (let from = 0; from < ids.length; from += PART) {
+        const part = ids.slice(from, from + PART)
         if (isStopped()) {
-          results.value.push({ id, error: '', state: 'cancelled' })
+          results.value.push(...cancelled(part))
           continue
         }
         try {
-          switch (selectedOperation) {
-            case 'favourite':
-              await engine.setFavourite(id, true)
-              break
-            case 'unfavourite':
-              await engine.setFavourite(id, false)
-              break
-            case 'tag':
-              await engine.tagAsset(id, name)
-              break
-            case 'album':
-              await engine.setAlbumItem(id, albumID, true)
-              break
-            case 'removeAlbum':
-              await engine.setAlbumItem(id, albumID, false)
-              break
-            case 'trash':
-              await engine.trashAssets([id])
-              break
-            case 'restore':
-              await engine.restoreAssets([id])
-              break
-          }
-          results.value.push({ id, error: '', state: 'done' })
+          const outcomes =
+            selectedOperation === 'tag'
+              ? await engine.tagAssets(part, name)
+              : await engine.applyBatch(part, selectedOperation, albumID)
+          results.value.push(
+            ...outcomes.map((o): Result => ({
+              id: o.id,
+              error: o.error ? failureText(o.code, o.error) : '',
+              state: o.error ? 'failed' : 'done',
+            })),
+          )
         } catch (e) {
-          results.value.push({ id, error: errorText(e), state: 'failed' })
+          // The call itself failed (the tag's name, say): none of its assets changed.
+          const error = errorText(e)
+          results.value.push(...part.map((id): Result => ({ id, error, state: 'failed' })))
         }
       }
-      if (selectedOperation === 'trash') {
+      if (selectedOperation === BatchAction.BatchTrash) {
         const done = results.value.filter((r) => r.state === 'done').map((r) => r.id)
         if (done.length)
           showTrashUndo(done, async (ids) => {

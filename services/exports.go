@@ -92,7 +92,7 @@ func (s *LibraryService) RunExport(ctx context.Context, batch int64) ([]core.Exp
 	if batch < 1 {
 		return nil, store.ErrNotFound
 	}
-	if err := s.organise.claim(-batch, core.OrganiseRunning); err != nil {
+	if err := s.organise.claim(exporting, ""); err != nil {
 		return nil, err
 	}
 	defer s.organise.release(nil)

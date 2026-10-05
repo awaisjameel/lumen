@@ -1,8 +1,11 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -281,6 +284,51 @@ func (l *shownLibrary) get(t *testing.T, url string) *httptest.ResponseRecorder 
 	rec := httptest.NewRecorder()
 	l.m.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody))
 	return rec
+}
+
+func TestATurnedThumbnailIsMadeOnceForAWebViewThatKeepsIt(t *testing.T) {
+	l := newShownLibrary(t, 1)
+	var stored bytes.Buffer
+	check(t, jpeg.Encode(&stored, image.NewNRGBA(image.Rect(0, 0, 4, 2)), nil))
+	check(t, l.cache.Write(1, media.Thumbs{Small: stored.Bytes(), Large: stored.Bytes()}))
+	size := func(rec *httptest.ResponseRecorder) image.Point {
+		t.Helper()
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		cfg, err := jpeg.DecodeConfig(rec.Body)
+		check(t, err)
+		return image.Pt(cfg.Width, cfg.Height)
+	}
+	if got := size(l.get(t, "/thumb/1/1024?v=1")); got != image.Pt(4, 2) {
+		t.Fatalf("as stored: %v", got)
+	}
+	_, err := l.st.SetAdjustment(t.Context(), 1, 1, false)
+	check(t, err)
+	first := l.get(t, "/thumb/1/1024?v=2")
+	tag := first.Header().Get("Etag")
+	if got := size(first); got != image.Pt(2, 4) || tag == "" || first.Header().Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("turned: %v, tag %q, cache %q", got, tag, first.Header().Get("Cache-Control"))
+	}
+	// A face's box is drawn on the stored pixels, whatever the turn.
+	if got := size(l.get(t, "/thumb/1/1024?v=2&canonical=1")); got != image.Pt(4, 2) {
+		t.Fatalf("canonical: %v", got)
+	}
+	again := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/thumb/1/1024?v=2", http.NoBody)
+	again.Header.Set("If-None-Match", tag)
+	rec := httptest.NewRecorder()
+	l.m.ServeHTTP(rec, again)
+	if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 {
+		t.Fatalf("asked again with its tag: status %d, %d bytes", rec.Code, rec.Body.Len())
+	}
+	// Another turn is another picture: the old tag no longer answers for it.
+	_, err = l.st.SetAdjustment(t.Context(), 1, 2, false)
+	check(t, err)
+	rec = httptest.NewRecorder()
+	l.m.ServeHTTP(rec, again)
+	if got := size(rec); got != image.Pt(4, 2) || rec.Header().Get("Etag") == tag {
+		t.Fatalf("turned again: %v, tag %q (was %q)", got, rec.Header().Get("Etag"), tag)
+	}
 }
 
 func TestEvictedThumbnailIsRebuiltOnItsNextRequest(t *testing.T) {

@@ -3,7 +3,7 @@ import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { reactive } from 'vue'
 import { mountInApp } from '../shared/testing'
-import { engine, ExportFormat, ExportState } from '../bridge'
+import { engine, ExportFormat, ExportState, OrganiseReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import FileTools from './FileTools.vue'
 import { confirm } from '../shared/confirm'
@@ -80,6 +80,23 @@ it('discards a preview when its source selection changes while planning', async 
     expect(new DOMWrapper(document.body).findAll('button').some((button) => button.text() === t('files.apply'))).toBe(
       false,
     )
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('says in words why a past export failed', async () => {
+  vi.mocked(engine.exportJobs).mockResolvedValue([
+    { ...job, id: 1, state: ExportState.ExportFailed, error: OrganiseReason.Taken },
+    { ...job, id: 2, state: ExportState.ExportFailed, error: 'Access is denied.' },
+  ])
+  const wrapper = await mountFiles({ open: true, ids: [1], frame: 1500 })
+  try {
+    await flushPromises()
+    const history = new DOMWrapper(document.body).get('.file-history').text()
+    expect(history).toContain(`${t('files.state.failed')}: ${t('organise.reason.taken')}`)
+    expect(history).toContain(`${t('files.state.failed')}: Access is denied.`)
+    expect(history).not.toContain(OrganiseReason.Taken)
   } finally {
     wrapper.unmount()
   }

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"lumen/internal/core"
+	"lumen/internal/media"
 	"lumen/internal/store"
 )
 
@@ -65,8 +66,8 @@ func (r *ExportRunner) Run(ctx context.Context, batch int64) error {
 			}
 		}
 		message := ""
-		if err != nil {
-			message = reasonOf(err)
+		if state == core.ExportFailed {
+			message = exportReason(err)
 		}
 		// one settles published copies itself. An unsuccessful item still
 		// receives an outcome when the batch was cancelled.
@@ -98,7 +99,7 @@ func (r *ExportRunner) one(ctx context.Context, j core.ExportJob) error {
 		return err
 	}
 	if !info.Mode().IsRegular() || info.Size() != j.Size || info.ModTime().UnixNano() != j.MTime {
-		return errors.New("source changed; preview again")
+		return ErrSourceChanged
 	}
 	if err := exportFolder(filepath.Dir(j.To)); err != nil {
 		return err
@@ -143,7 +144,7 @@ func (r *ExportRunner) one(ctx context.Context, j core.ExportJob) error {
 		return err
 	}
 	if after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) {
-		return errors.New("source changed during export")
+		return ErrSourceChanged
 	}
 	if err := r.Store.ExportAllowed(ctx, j.AssetID, j.To); err != nil {
 		return err
@@ -162,6 +163,26 @@ func (r *ExportRunner) one(ctx context.Context, j core.ExportJob) error {
 		return &publishedExportError{err}
 	}
 	return nil
+}
+
+// exportReason is why a copy was not made, as its row says it: one of the
+// reasons the UI words itself, else the operating system's own message.
+func exportReason(err error) string {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return ReasonNotVisible
+	case errors.Is(err, os.ErrNotExist):
+		return ReasonMissing
+	case errors.Is(err, ErrSourceChanged):
+		return ReasonChanged
+	case errors.Is(err, ErrDestinationFolder):
+		return ReasonNotAFolder
+	case errors.Is(err, ErrExists):
+		return ReasonTaken
+	case errors.Is(err, media.ErrUnsupported):
+		return ReasonUnsupported
+	}
+	return reasonOf(err)
 }
 
 // Preserve the ready journal when publication succeeded but settlement did
@@ -189,7 +210,7 @@ func exportFolder(dir string) error {
 			return err
 		}
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("the destination contains a link or is not a folder")
+			return ErrDestinationFolder
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
@@ -208,7 +229,7 @@ func (r *ExportRunner) Recover(ctx context.Context) error {
 		if j.State != core.ExportReady && j.State != core.ExportWriting {
 			continue
 		}
-		state, message := core.ExportFailed, "Interrupted; retry after checking the destination."
+		state, message := core.ExportFailed, ReasonInterrupted
 		if j.State == core.ExportReady {
 			f, err := core.OpenShared(j.To)
 			if err == nil {

@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"lumen/internal/core"
+	"lumen/internal/media"
+	"lumen/internal/store"
 )
 
 func exportFixture(t *testing.T) (library, core.ExportJob, *ExportRunner) {
@@ -57,8 +60,28 @@ func TestExportPreservesOriginalAndRefusesDestinationReplacement(t *testing.T) {
 		t.Fatal("destination overwritten")
 	}
 	jobs, err = l2.st.ExportJobs(l2.ctx, second.Batch)
-	if err != nil || jobs[0].State != core.ExportFailed {
+	if err != nil || jobs[0].State != core.ExportFailed || jobs[0].Error != ReasonTaken {
 		t.Fatalf("collision outcome: %+v %v", jobs, err)
+	}
+}
+
+func TestAnExportsFailureIsAReasonTheUIWordsOrTheSystemsOwnMessage(t *testing.T) {
+	denied := &os.PathError{Op: "open", Path: `C:\private\a.jpg`, Err: os.ErrPermission}
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{store.ErrNotFound, ReasonNotVisible},
+		{fmt.Errorf("stat: %w", os.ErrNotExist), ReasonMissing},
+		{ErrSourceChanged, ReasonChanged},
+		{ErrDestinationFolder, ReasonNotAFolder},
+		{fmt.Errorf("%w: copy.jpg", ErrExists), ReasonTaken},
+		{fmt.Errorf("render: %w", media.ErrUnsupported), ReasonUnsupported},
+		{denied, os.ErrPermission.Error()}, // without the path: the row names the file
+	} {
+		if got := exportReason(c.err); got != c.want {
+			t.Errorf("reason of %v = %q, want %q", c.err, got, c.want)
+		}
 	}
 }
 

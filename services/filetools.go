@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +12,10 @@ import (
 	"lumen/internal/store"
 )
 
+// chosenFiles is the scheme of a run that moves or renames files the user
+// chose: none. The UI names such a run in its own words.
+const chosenFiles = ""
+
 // PlanFileMoves previews one selected copy per asset. Explicit moves share
 // organise's journal, scan hold, recovery, progress and Undo.
 func (s *LibraryService) PlanFileMoves(ctx context.Context, ids []int64, directory, name string) (core.OrganisePlan, error) {
@@ -21,7 +24,7 @@ func (s *LibraryService) PlanFileMoves(ctx context.Context, ids []int64, directo
 		return core.OrganisePlan{}, store.ErrNotFound
 	}
 	if name != "" && (filepath.Base(name) != name || strings.ContainsAny(name, `<>:"/\|?*`) || name == "." || name == "..") {
-		return core.OrganisePlan{}, errors.New("choose a valid file name")
+		return core.OrganisePlan{}, fileops.ErrInvalidFileName
 	}
 	snap, err := s.store.SelectedFiles(ctx, ids)
 	if err != nil {
@@ -58,7 +61,7 @@ func (s *LibraryService) PlanFileMoves(ctx context.Context, ids []int64, directo
 	if err != nil {
 		return core.OrganisePlan{}, err
 	}
-	run, err := s.store.SaveOrganisePlan(ctx, "Selected files", p.Moves)
+	run, err := s.store.SaveOrganisePlan(ctx, chosenFiles, p.Moves)
 	if err != nil {
 		return core.OrganisePlan{}, err
 	}
@@ -66,7 +69,7 @@ func (s *LibraryService) PlanFileMoves(ctx context.Context, ids []int64, directo
 	for i, m := range p.Moves {
 		moves[i] = organiseMoveOf(m)
 	}
-	return core.OrganisePlan{RunID: run, Template: "Selected files", Moves: moves, InPlace: p.InPlace, Sidecars: p.Sidecars}, nil
+	return core.OrganisePlan{RunID: run, Template: chosenFiles, Moves: moves, InPlace: p.InPlace, Sidecars: p.Sidecars}, nil
 }
 
 // FileMoveOutcomes returns current journal rows without disclosing covered paths.
@@ -81,6 +84,10 @@ func (s *LibraryService) FileMoveOutcomes(ctx context.Context, runID int64) ([]c
 	}
 	return out, nil
 }
+
+// opener hands a file to the shell: opened by its usual application, or by
+// one the user picks (choose).
+type opener func(path string, choose bool) error
 
 // OpenMedia hands one validated visible file copy to the Windows shell.
 func (s *LibraryService) OpenMedia(ctx context.Context, id int64, path string, choose bool) error {
@@ -105,5 +112,9 @@ func (s *LibraryService) OpenMedia(ctx context.Context, id int64, path string, c
 	if !info.Mode().IsRegular() {
 		return store.ErrNotFound
 	}
-	return fileops.Open(path, choose)
+	open := s.open
+	if open == nil {
+		open = fileops.Open
+	}
+	return open(path, choose)
 }

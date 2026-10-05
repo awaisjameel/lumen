@@ -511,6 +511,7 @@ it('scrubs with the indexed sprite instead of generating arbitrary cached frames
 it('removes existing subtitle cues even when the reused text track was disabled', async () => {
   vi.mocked(engine.inspect).mockResolvedValueOnce({
     orientation: 1,
+    hasProfile: false,
     profile: '',
     lens: '',
     exposure: '',

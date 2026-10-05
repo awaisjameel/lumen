@@ -5,7 +5,7 @@ import UPopover from '@nuxt/ui/components/Popover.vue'
 import USlider from '@nuxt/ui/components/Slider.vue'
 import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { AlbumKind, engine, Filter, TILE_SIZE_MAX, TILE_SIZE_MIN } from '../bridge'
@@ -39,15 +39,15 @@ import { RESULTS, scopeKey, useLibrary } from './store'
 import type { Scope, Sel } from './store'
 import TimelineScrubber from './TimelineScrubber.vue'
 import DetailsPanel from './DetailsPanel.vue'
-import Viewer from './Viewer.vue'
 import VideoThumb from './VideoThumb.vue'
 import SelectionBar from '../shared/SelectionBar.vue'
-import FileTools from '../media/FileTools.vue'
-import BatchTools from '../media/BatchTools.vue'
+import { BatchTools, FileTools } from '../media/lazy'
 
 const PAD = 20 // horizontal padding of the grid
 
 const lib = useLibrary()
+// The viewer is as large as the grid itself, and a session may never open it.
+const Viewer = defineAsyncComponent(() => import('./Viewer.vue'))
 const filesOpen = ref(false)
 const batchOpen = ref(false)
 const fileIDs = computed(() => (lib.selectedIDs.size ? [...lib.selectedIDs] : lib.selected ? [lib.selected.id] : []))

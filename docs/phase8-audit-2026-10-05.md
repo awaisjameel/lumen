@@ -170,3 +170,38 @@ every DOM change, both unmeasured on a large library; a rotated photo's
 preview is briefly stretched until its details load; a rotated thumbnail is
 re-encoded on each request; the inspector shows the engine's untranslated
 "Embedded ICC"; uncoded file-operation errors reach the UI in English.
+
+## Third follow-up: the recorded items
+
+The items the second follow-up left recorded were then repaired, on top of
+`ac2206f`.
+
+- **Selection actions:** favourite, album, tag, trash and restore go to the
+  engine 200 assets a call (`ApplyBatch`, `TagAssets`) and come back with one
+  outcome per asset, instead of one call per asset. Cancel acts between calls.
+  Block and Delete from disk still take one asset at a time: each has its own
+  dialog or Recycle Bin step.
+- **Shift ranges:** the ids of a timeline view are read once per scope; each
+  further step asks only whether membership changed (`ValidateSelection`).
+- **Overlay order:** the layer owner watches the portals beside the
+  application's root, not the page inside it, so scrolling the grid no longer
+  runs it.
+- **Turned photos:** the viewer's preview is the thumbnail the grid shows, in
+  the shape the grid gives it, so it is not stretched before the details
+  arrive. A turned thumbnail carries an entity tag naming the stored thumbnail
+  and the turn; the WebView revalidates it without a decode, and visibility
+  and the turn are one query.
+- **Words:** the inspector names the embedded colour profile from its own
+  description ("Display P3"), or says "Embedded profile". Refused moves,
+  renames and exports have error codes; an export's row carries a reason code
+  as a move's does, and both dialogs word them through one `reasonText`. A
+  run of chosen files has no scheme and is named by the UI.
+- **Boundaries:** `Cache` asks its decoder for `Inspector` and `Subtitler` by
+  interface; an export takes the file-operation place under its own id; the
+  viewer preference ranges are `core` constants mirrored in the bridge.
+- **Tests:** `PlanFileMoves` (with `PlanPaths` behind it), `OpenMedia`,
+  `ApplyBatch`, `TagAssets`, the turned thumbnail, profile names and export
+  reasons are covered in Go; the batch dialog, range selection, reasons,
+  preview and overlay watching in the frontend.
+- **Start-up script:** the viewer and the two file dialogs load beside the
+  main script, which is under Vite's 500 kB advisory again.

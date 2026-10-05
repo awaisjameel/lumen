@@ -22,6 +22,17 @@ import (
 // alone: moves never replace.
 var ErrExists = errors.New("something is already at the destination")
 
+// What a chosen move, rename or export is refused for before any file is
+// touched. services gives each a code, so the UI explains it in its own words.
+var (
+	ErrInvalidFileName     = errors.New("the file name cannot be used")
+	ErrDestinationOutside  = errors.New("the destination must keep the format and stay inside its source folder")
+	ErrDestinationFolder   = errors.New("the destination crosses a link or is not a folder")
+	ErrDestinationExcluded = errors.New("the destination is excluded from indexing")
+	ErrDestinationBlocked  = errors.New("the destination is blocked")
+	ErrSourceChanged       = errors.New("the source changed; preview again")
+)
+
 // Why a file is left out of a plan (as a skipped move) or skipped when a run
 // reaches it. They are the Error of the move, and frontend/src/bridge
 // mirrors them so that the UI can explain each in its own words; anything
@@ -37,6 +48,9 @@ const (
 	// ReasonSidecarTaken is on a move whose photo moved but whose sidecar
 	// stayed, because something is at the sidecar's new name.
 	ReasonSidecarTaken = "sidecar_taken"
+	// The last two are an export's alone.
+	ReasonUnsupported = "unsupported" // nothing here can render that format
+	ReasonInterrupted = "interrupted" // Lumen stopped while the copy was being written
 )
 
 // SidecarExt follows a photo's whole file name to name its XMP sidecar

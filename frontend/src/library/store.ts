@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import {
   engine,
+  ErrorCode,
+  errorCode,
   EVENT_GAP_DEFAULT,
   THUMB_CACHE_DEFAULT_MB,
   Filter,
@@ -185,14 +187,29 @@ export const useLibrary = defineStore('library', () => {
   let selectionRequest = 0
   let selectionAnchor: Sel | null = null
 
+  // Every id of the timeline scope, as last read. A Shift range needs them all
+  // to know what lies between two photos; the next step asks the engine only
+  // whether membership has changed since, not for a whole library again.
+  let timelineIDs: { scope: Scope; result: Selection } | null = null
+
   async function resultSelection() {
     const current = scope.value
-    const ids = current.kind === 'search' ? (days.value.get(RESULTS) ?? []).map((item) => item.id) : []
-    return engine.selection(
-      current.kind === 'timeline' ? current.view : { filter: Filter.FilterAll },
-      ids,
-      current.kind === 'search',
-    )
+    if (current.kind === 'search') {
+      const ids = (days.value.get(RESULTS) ?? []).map((item) => item.id)
+      return engine.selection({ filter: Filter.FilterAll }, ids, true)
+    }
+    const kept = timelineIDs?.scope === current ? timelineIDs.result : null
+    if (kept) {
+      try {
+        await engine.validateSelection(kept)
+        return kept
+      } catch (e) {
+        if (errorCode(e) !== ErrorCode.SelectionChanged) throw e
+      }
+    }
+    const result = await engine.selection(current.view, [], false)
+    timelineIDs = { scope: current, result }
+    return result
   }
 
   async function selectItems(sel: Sel, control: boolean, shift: boolean) {

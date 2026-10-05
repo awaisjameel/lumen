@@ -25,6 +25,17 @@ type ViewerPreferences struct {
 	Resume           bool    `json:"resume"`
 }
 
+// The ranges of the viewer preferences that are numbers.
+// frontend/src/bridge mirrors them; services/contract_test.go checks.
+const (
+	SlideshowSecondsMin = 1
+	SlideshowSecondsMax = 60
+	SkipSecondsMin      = 1
+	SkipSecondsMax      = 60
+	PlaybackSpeedMin    = 0.25
+	PlaybackSpeedMax    = 2
+)
+
 // DefaultViewerPreferences supplies the initial viewing and playback choices.
 func DefaultViewerPreferences() ViewerPreferences {
 	return ViewerPreferences{SlideshowSeconds: 5, Autoplay: true, Volume: 1, Speed: 1, SkipSeconds: 10}
@@ -38,10 +49,10 @@ func (v ViewerPreferences) Normalised() ViewerPreferences {
 	if math.IsNaN(v.Speed) || math.IsInf(v.Speed, 0) {
 		v.Speed = 1
 	}
-	v.SlideshowSeconds = min(max(1, v.SlideshowSeconds), 60)
+	v.SlideshowSeconds = min(max(SlideshowSecondsMin, v.SlideshowSeconds), SlideshowSecondsMax)
 	v.Volume = min(max(0, v.Volume), 1)
-	v.Speed = min(max(0.25, v.Speed), 2)
-	v.SkipSeconds = min(max(1, v.SkipSeconds), 60)
+	v.Speed = min(max(PlaybackSpeedMin, v.Speed), PlaybackSpeedMax)
+	v.SkipSeconds = min(max(SkipSecondsMin, v.SkipSeconds), SkipSecondsMax)
 	return v
 }
 
@@ -54,7 +65,8 @@ type DisplayAdjustment struct {
 // MediaInspection is read from the available file rather than inferred.
 type MediaInspection struct {
 	Orientation int          `json:"orientation"`
-	Profile     string       `json:"profile"`
+	HasProfile  bool         `json:"hasProfile"` // a colour profile is embedded
+	Profile     string       `json:"profile"`    // what that profile calls itself; "" when it does not say
 	Lens        string       `json:"lens"`
 	Exposure    string       `json:"exposure"`
 	Aperture    string       `json:"aperture"`

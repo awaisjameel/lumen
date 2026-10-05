@@ -51,6 +51,7 @@ const en = {
   'details.aperture': 'Aperture',
   'details.iso': 'ISO',
   'details.profile': 'Colour profile',
+  'details.profileEmbedded': 'Embedded profile',
   'details.orientation': 'Source orientation',
   'details.pages': 'Pages or animation frames',
   'details.frameRate': 'Frame rate (frames per second)',
@@ -819,6 +820,8 @@ const en = {
   'organise.reason.not_a_folder': 'A file, link or hidden folder is where the folder would go.',
   'organise.reason.sidecar_taken':
     'The photo moves, but its .xmp sidecar stays because something is already at its new name.',
+  'organise.reason.unsupported': 'This format can’t be exported that way.',
+  'organise.reason.interrupted': 'Lumen closed before the copy was finished. Check the folder, then try again.',
   'organise.sidecars': {
     one: '1 sidecar file (.xmp) will move with its photo.',
     other: '{n} sidecar files (.xmp) will move with their photos.',
@@ -855,10 +858,17 @@ const en = {
   'organise.undoText':
     'Lumen moves each file of this run back to where it was. It never replaces a file that has appeared there since, and removes only the folders it made, if they are empty.',
   'organise.undoOk': 'Put files back',
+  'organise.chosenFiles': 'Files moved or renamed from a selection',
   'error.invalidTemplate':
     'That folder scheme can’t be used. Use the tokens above, and leave out “..”, a leading slash and characters Windows doesn’t allow in names.',
   'error.organiseBusy': 'Lumen is already moving files. Wait for it to finish.',
   'error.organiseState': 'That run can’t be started or undone from where it is now.',
+  'error.stopping': 'Lumen is closing. Try again once it is open.',
+  'error.invalidFileName':
+    'That file name can’t be used. Leave out \\ / : * ? " < > | and a dot or space at the end, and avoid names Windows keeps for itself.',
+  'error.destinationOutside': 'A file can only move within the library folder it is in, and it keeps its format.',
+  'error.destinationExcluded': 'Lumen does not index that folder, so the file would leave the library.',
+  'error.unsupported': 'Lumen can’t do that with this format.',
 
   // XMP sidecars.
   'error.xmpOff': 'XMP sidecar files are turned off. Turn them on in Settings first.',

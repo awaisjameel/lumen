@@ -76,6 +76,12 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"INSPECTOR_WIDTH_MIN":       core.InspectorWidthMin,
 		"INSPECTOR_WIDTH_MAX":       core.InspectorWidthMax,
 		"INSPECTOR_WIDTH_DEFAULT":   core.InspectorWidthDefault,
+		"SLIDESHOW_SECONDS_MIN":     core.SlideshowSecondsMin,
+		"SLIDESHOW_SECONDS_MAX":     core.SlideshowSecondsMax,
+		"SKIP_SECONDS_MIN":          core.SkipSecondsMin,
+		"SKIP_SECONDS_MAX":          core.SkipSecondsMax,
+		"PLAYBACK_SPEED_MIN":        core.PlaybackSpeedMin,
+		"PLAYBACK_SPEED_MAX":        core.PlaybackSpeedMax,
 	} {
 		if got := constant(name); got != want {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)
@@ -129,7 +135,8 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 	}
 	reasons := quoted(`(?s)export const OrganiseReason = \{(.*?)\} as const`)
 	wantReasons := []string{fileops.ReasonMissing, fileops.ReasonNotVisible, fileops.ReasonBlockedFolder, fileops.ReasonChanged,
-		fileops.ReasonTaken, fileops.ReasonTooLong, fileops.ReasonNotAFolder, fileops.ReasonSidecarTaken}
+		fileops.ReasonTaken, fileops.ReasonTooLong, fileops.ReasonNotAFolder, fileops.ReasonSidecarTaken,
+		fileops.ReasonUnsupported, fileops.ReasonInterrupted}
 	if !slices.Equal(reasons, wantReasons) {
 		t.Errorf("bridge OrganiseReason = %v, engine has %v", reasons, wantReasons)
 	}

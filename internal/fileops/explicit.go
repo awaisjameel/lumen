@@ -2,7 +2,6 @@ package fileops
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,24 +28,24 @@ func PlanPaths(ctx context.Context, snap store.OrganiseSnapshot, paths map[int64
 		to = filepath.Clean(to)
 		base := filepath.Base(to)
 		if isReserved(base) || strings.HasSuffix(base, ".") || strings.HasSuffix(base, " ") || strings.ContainsFunc(base, forbiddenRune) || len(utf16.Encode([]rune(to+SidecarExt))) > maxPathLen {
-			return result, ErrInvalidTemplate
+			return result, ErrInvalidFileName
 		}
 		if !filepath.IsAbs(to) || !core.IsWithin(to, f.Root) || !strings.EqualFold(filepath.Ext(to), filepath.Ext(f.Path)) {
-			return result, errors.New("the destination must keep the format and stay inside its source folder")
+			return result, ErrDestinationOutside
 		}
 		if core.Fold(to) == core.Fold(f.Path) {
 			result.InPlace++
 			continue
 		}
 		if !p.folderUsable(f.Root, filepath.Dir(to)) {
-			return result, errors.New("the destination crosses a link or is not a folder")
+			return result, ErrDestinationFolder
 		}
 		if _, _, excluded := scanner.Exclusion(f.Root, to, nil); excluded {
-			return result, errors.New("the destination is excluded from indexing")
+			return result, ErrDestinationExcluded
 		}
 		for _, blocked := range snap.BlockedDirs {
 			if core.IsWithin(to, blocked) {
-				return result, errors.New("the destination is blocked")
+				return result, ErrDestinationBlocked
 			}
 		}
 		if p.taken(core.Fold(to), to) || p.taken(core.Fold(sidecarOf(to)), sidecarOf(to)) {
@@ -57,7 +56,7 @@ func PlanPaths(ctx context.Context, snap store.OrganiseSnapshot, paths map[int64
 			return result, err
 		}
 		if !fi.Mode().IsRegular() || fi.Size() != f.Size || fi.ModTime().UnixNano() != f.MTime {
-			return result, errors.New("the source changed; preview again")
+			return result, ErrSourceChanged
 		}
 		m := store.OrganiseMove{FileID: f.FileID, AssetID: f.AssetID, Root: f.Root, From: f.Path, To: to, Size: f.Size, MTime: f.MTime, State: core.MovePlanned}
 		if present, _ := exists(sidecarOf(f.Path)); present {
