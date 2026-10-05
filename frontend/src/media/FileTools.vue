@@ -125,22 +125,24 @@ watch(inputKey, () => {
 watch(
   open,
   (value) => {
+    if (!value) invalidate()
     if (value && props.frame !== undefined) operation.value = startOperation()
     void loadHistory()
   },
-  { immediate: true },
+  { immediate: true, flush: 'sync' },
 )
 
 async function chooseDirectory() {
+  const mine = generation
   try {
     const path = await engine.pickFolder()
-    if (path) directory.value = path
+    if (path && mine === generation && open.value && !busy.value) directory.value = path
   } catch (e) {
-    error.value = errorText(e)
+    if (mine === generation) error.value = errorText(e)
   }
 }
 async function prepare() {
-  if (busy.value) return
+  if (busy.value || !open.value) return
   const chosen = operation.value
   busy.value = true
   completed.value = false
@@ -153,6 +155,7 @@ async function prepare() {
   const ids = [...props.ids]
   try {
     if (props.selection) await engine.validateSelection(props.selection)
+    if (mine !== generation || key !== inputKey.value) return
     if (chosen === 'move' || chosen === 'rename') {
       const result = await engine.planFileMoves(
         ids,
@@ -207,7 +210,8 @@ async function updateRun(id: number, mine = generation) {
 }
 async function commit() {
   const key = plannedKey.value
-  if (busy.value || !key || key !== inputKey.value || props.ids.join(',') !== planIDs.value.join(',')) return
+  if (busy.value || !open.value || !key || key !== inputKey.value || props.ids.join(',') !== planIDs.value.join(','))
+    return
   busy.value = true
   error.value = ''
   const mine = ++generation
@@ -229,13 +233,16 @@ async function commit() {
         try {
           await engine.runExport(batch, exportAbort.signal)
         } finally {
-          clearTimeout(poll)
-          exportAbort = undefined
-          activeBatch.value = 0
-          const jobs = await engine.exportJobs(batch)
-          if (mine === generation) exports.value = jobs
+          if (mine === generation) {
+            clearTimeout(poll)
+            exportAbort = undefined
+            activeBatch.value = 0
+            const jobs = await engine.exportJobs(batch)
+            if (mine === generation) exports.value = jobs
+          }
         }
       }
+      if (mine !== generation) return
       busy.value = false
       completed.value = true
       emit('changed')
@@ -267,12 +274,21 @@ async function undo() {
     error.value = errorText(e)
   }
 }
-onBeforeUnmount(() => {
+function invalidate() {
   generation++
   historyRequest++
   exportAbort?.abort()
+  exportAbort = undefined
   clearTimeout(poll)
-})
+  activeBatch.value = 0
+  busy.value = false
+  plannedKey.value = ''
+  runID.value = 0
+  moves.value = null
+  exports.value = []
+  completed.value = false
+}
+onBeforeUnmount(invalidate)
 
 function pollExport(batch: number, mine: number) {
   poll = setTimeout(() => {

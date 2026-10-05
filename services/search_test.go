@@ -577,6 +577,29 @@ func TestTaggingAPhotoAScreenshotQueuesItsTextWhileOCRIsOn(t *testing.T) {
 	}
 }
 
+func TestBatchTaggingKeepsCommittedOutcomesWhenOCRQueueingFails(t *testing.T) {
+	l, _ := screenshotLibrary(t)
+	ctx := t.Context()
+	check(t, l.st.SetOCR(ctx, true))
+	w, err := sql.Open("sqlite3", l.db)
+	check(t, err)
+	defer w.Close()
+	// Fail only the background queue write, after the tag edit has committed.
+	_, err = w.ExecContext(ctx, `CREATE TRIGGER refuse_ocr_queue BEFORE INSERT ON asset_jobs
+		WHEN NEW.stage = 'ocr' BEGIN SELECT RAISE(ABORT, 'queue unavailable'); END`)
+	check(t, err)
+	results, err := l.svc.TagAssets(ctx, []int64{l.a}, "Screenshots")
+	check(t, err)
+	if len(results) != 1 || results[0].Error != "" {
+		t.Fatalf("committed tag reported as failed: %+v", results)
+	}
+	tags, err := l.st.AssetTags(ctx, l.a, core.TagConfidenceDefault)
+	check(t, err)
+	if len(tags) != 1 || tags[0].Name != "Screenshots" {
+		t.Fatalf("tag was not committed: %+v", tags)
+	}
+}
+
 func TestLoweringTheTagConfidenceQueuesPhotosThatBecomeScreenshots(t *testing.T) {
 	l, shots := screenshotLibrary(t)
 	ctx := t.Context()

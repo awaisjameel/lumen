@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -183,11 +184,55 @@ func TestFreeNameSkipsNamesOnDiskAndNamesAlreadyPlanned(t *testing.T) {
 		t.Fatal(err)
 	}
 	reserved := map[string]bool{core.Fold(filepath.Join(dir, "A (2).JPG")): true}
-	got, err := FreeName(dir, "a.jpg", reserved)
+	got, err := FreeName(t.Context(), dir, "a.jpg", reserved)
 	if err != nil || got != filepath.Join(dir, "a (3).jpg") {
 		t.Fatalf("FreeName = %q, %v", got, err)
 	}
-	if got, err := FreeName(dir, "b.jpg", reserved); err != nil || got != filepath.Join(dir, "b.jpg") {
+	if got, err := FreeName(t.Context(), dir, "b.jpg", reserved); err != nil || got != filepath.Join(dir, "b.jpg") {
 		t.Fatalf("a free name was changed: %q, %v", got, err)
+	}
+}
+
+func TestAnExportPreviewRefusesMissingFoldersFilesAndLinks(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, []byte("kept"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FreeName(t.Context(), filepath.Join(dir, "missing"), "copy.jpg", nil); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("missing destination: %v", err)
+	}
+	if _, err := FreeName(t.Context(), file, "copy.jpg", nil); !errors.Is(err, ErrDestinationFolder) {
+		t.Errorf("file destination: %v", err)
+	}
+	t.Run("links", func(t *testing.T) {
+		link := filepath.Join(dir, "link")
+		if err := os.Symlink(t.TempDir(), link); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		if _, err := FreeName(t.Context(), link, "copy.jpg", nil); !errors.Is(err, ErrDestinationFolder) {
+			t.Errorf("linked destination: %v", err)
+		}
+	})
+}
+
+func TestRunningAnExportWhosePreviewWasReplacedReportsNotFound(t *testing.T) {
+	l, job, runner := exportFixture(t)
+	if _, err := l.st.SaveExportPlan(l.ctx, []core.ExportJob{job}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(l.ctx, job.Batch); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("obsolete preview succeeded: %v", err)
+	}
+	if _, err := os.Stat(job.To); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("obsolete preview published an output")
+	}
+}
+
+func TestExportNamePlanningHonoursCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := FreeName(ctx, t.TempDir(), "copy.jpg", nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled preview: %v", err)
 	}
 }

@@ -205,6 +205,14 @@ function playbackState(event: Event) {
   if (playing.value) ended.value = false
 }
 
+function bufferingState(event: Event) {
+  if (event.target === video.value) buffering.value = event.type === 'waiting'
+}
+
+function pictureState(event: Event) {
+  if (event.target === video.value) pip.value = event.type === 'enterpictureinpicture'
+}
+
 function videoEnded(event: Event) {
   if (event.target !== video.value) return
   playing.value = false
@@ -410,14 +418,14 @@ onBeforeUnmount(() => {
         @timeupdate="videoTime"
         @play="playbackState"
         @pause="playbackState"
-        @playing="buffering = false"
-        @canplay="buffering = false"
-        @waiting="buffering = true"
+        @playing="bufferingState"
+        @canplay="bufferingState"
+        @waiting="bufferingState"
         @ended="videoEnded"
         @error="videoError"
         @volumechange="volumeChanged"
-        @enterpictureinpicture="pip = true"
-        @leavepictureinpicture="pip = false"
+        @enterpictureinpicture="pictureState"
+        @leavepictureinpicture="pictureState"
         @click="togglePlayback"
         @dblclick.stop="canFullscreen && toggleFullscreen()"
       />

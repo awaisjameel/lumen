@@ -180,3 +180,51 @@ it('ignores an in-flight progress poll after the export has settled', async () =
     wrapper.unmount()
   }
 })
+
+it('discards a preview after closing and reopening the same dialog', async () => {
+  const pending = deferred<ExportJob[]>()
+  vi.mocked(engine.planExport).mockReturnValueOnce(pending.promise)
+  const props = reactive({ open: true, ids: [1], frame: 1500 })
+  const wrapper = await mountFiles(props)
+  try {
+    await flushPromises()
+    await new DOMWrapper(document.body).get('input[aria-label="Destination folder"]').setValue('D:\\Exports')
+    await action(t('files.preview'))
+    props.open = false
+    await flushPromises()
+    props.open = true
+    await flushPromises()
+    pending.resolve([job])
+    await flushPromises()
+    expect(new DOMWrapper(document.body).text()).not.toContain(job.to)
+    expect(new DOMWrapper(document.body).findAll('button').some((button) => button.text() === t('files.apply'))).toBe(
+      false,
+    )
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('does not execute a confirmed export after its dialog closes and reopens', async () => {
+  const answer = deferred<boolean>()
+  vi.mocked(confirm).mockReturnValueOnce(answer.promise)
+  vi.mocked(engine.planExport).mockResolvedValueOnce([job])
+  const props = reactive({ open: true, ids: [1], frame: 1500 })
+  const wrapper = await mountFiles(props)
+  try {
+    await flushPromises()
+    await new DOMWrapper(document.body).get('input[aria-label="Destination folder"]').setValue('D:\\Exports')
+    await action(t('files.preview'))
+    await flushPromises()
+    await action(t('files.apply'))
+    props.open = false
+    await flushPromises()
+    props.open = true
+    await flushPromises()
+    answer.resolve(true)
+    await flushPromises()
+    expect(engine.runExport).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})

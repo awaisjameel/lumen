@@ -297,7 +297,7 @@ function isSelected(item: GridItem | null): boolean {
 }
 
 function selectVisible() {
-  lib.selectedIDs = new Set(
+  lib.selectVisible(
     visible.value
       .filter(
         (v) =>
@@ -305,7 +305,6 @@ function selectVisible() {
       )
       .flatMap((row) => row.items.flatMap((item) => (item ? [item.id] : []))),
   )
-  lib.selectionSnapshot = null
 }
 function contextSelect(day: string, item: GridItem | null) {
   if (item && !lib.selectedIDs.has(item.id)) select(day, item)

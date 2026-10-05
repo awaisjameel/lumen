@@ -1,9 +1,10 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { reactive } from 'vue'
 import { BatchAction, engine, ErrorCode } from '../bridge'
 import type * as Bridge from '../bridge'
-import type { BatchOutcome } from '../bridge'
+import type { BatchOutcome, Selection } from '../bridge'
 import { confirm } from '../shared/confirm'
 import { t } from '../shared/i18n'
 import { mountInApp } from '../shared/testing'
@@ -47,10 +48,14 @@ async function apply() {
   await flushPromises()
 }
 
-function mountBatch(ids: number[], trash = false) {
+function mountBatch(
+  ids: number[],
+  trash = false,
+  props?: { open: boolean; ids: number[]; trash: boolean; selection?: Selection },
+) {
   const pinia = createPinia()
   setActivePinia(pinia)
-  return mountInApp(BatchTools, { props: { open: true, ids, trash }, plugins: [pinia] })
+  return mountInApp(BatchTools, { props: props ?? { open: true, ids, trash }, plugins: [pinia] })
 }
 
 it('sends a large selection to the engine a part at a time, not a call per photo', async () => {
@@ -150,6 +155,57 @@ it('does not start a confirmed batch after its owning dialog unmounts', async ()
     await apply()
     wrapper.unmount()
     answer(true)
+    await flushPromises()
+    expect(engine.applyBatch).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('invalidates a confirmation when the dialog closes and reopens', async () => {
+  let answer: (value: boolean) => void = () => undefined
+  vi.mocked(confirm).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        answer = resolve
+      }),
+  )
+  const props = reactive({ open: true, ids: [1, 2], trash: false })
+  const wrapper = mountBatch(props.ids, false, props)
+  try {
+    await flushPromises()
+    await apply()
+    props.open = false
+    await flushPromises()
+    props.open = true
+    await flushPromises()
+    answer(true)
+    await flushPromises()
+    expect(engine.applyBatch).not.toHaveBeenCalled()
+    await apply()
+    expect(engine.applyBatch).toHaveBeenCalledExactlyOnceWith([1, 2], BatchAction.BatchFavourite, 0)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('does not mutate assets after its owner closes while selection validation is pending', async () => {
+  let validated: () => void = () => undefined
+  vi.mocked(engine.validateSelection).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        validated = resolve
+      }),
+  )
+  const props = reactive({ open: true, ids: [1, 2], trash: false, selection: { ids: [1, 2], revision: 1 } })
+  const wrapper = mountBatch(props.ids, false, props)
+  try {
+    await flushPromises()
+    await apply()
+    expect(engine.validateSelection).toHaveBeenCalledOnce()
+    props.open = false
+    await flushPromises()
+    validated()
     await flushPromises()
     expect(engine.applyBatch).not.toHaveBeenCalled()
   } finally {

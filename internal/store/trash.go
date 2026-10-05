@@ -32,6 +32,10 @@ func (s *Store) RestoreAssets(ctx context.Context, ids []int64) error {
 }
 
 func (s *Store) setTrashed(ctx context.Context, ids []int64, trash bool) error {
+	return s.tx(ctx, func(tx *sql.Tx) error { return setTrashed(ctx, tx, ids, trash) })
+}
+
+func setTrashed(ctx context.Context, tx *sql.Tx, ids []int64, trash bool) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -48,13 +52,11 @@ func (s *Store) setTrashed(ctx context.Context, ids []int64, trash bool) error {
 		update = "UPDATE assets SET trashed_at = ? WHERE id IN (SELECT value FROM json_each(?)) AND trashed_at IS NULL AND " + present
 		args = []any{time.Now().Unix(), string(list)}
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
-		if err := requireAll(ctx, tx, exists, string(list)); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, update, args...)
+	if err := requireAll(ctx, tx, exists, string(list)); err != nil {
 		return err
-	})
+	}
+	_, err = tx.ExecContext(ctx, update, args...)
+	return err
 }
 
 // requireAll fails with ErrNotFound unless every id of the JSON list names an

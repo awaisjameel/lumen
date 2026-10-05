@@ -19,6 +19,11 @@ const chosenFiles = ""
 // PlanFileMoves previews one selected copy per asset. Explicit moves share
 // organise's journal, scan hold, recovery, progress and Undo.
 func (s *LibraryService) PlanFileMoves(ctx context.Context, ids []int64, directory, name string) (core.OrganisePlan, error) {
+	ctx, finish, err := s.organise.hold(ctx, planning)
+	if err != nil {
+		return core.OrganisePlan{}, err
+	}
+	defer finish()
 	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
 	if len(ids) == 0 || (name != "" && len(ids) != 1) {
 		return core.OrganisePlan{}, store.ErrNotFound

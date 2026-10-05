@@ -20,16 +20,24 @@ import (
 // FreeName is name, or name with the organise planner's " (2)", " (3)"…
 // before its extension: the first that nothing in dir has on disk and that
 // reserved (folded paths already planned) does not hold.
-func FreeName(dir, name string, reserved map[string]bool) (string, error) {
+func FreeName(ctx context.Context, dir, name string, reserved map[string]bool) (string, error) {
+	if err := exportFolder(ctx, dir); err != nil {
+		return "", err
+	}
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
 	for n := 1; n <= maxCollisions; n++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		candidate := filepath.Join(dir, stem+collisionSuffix(n)+ext)
 		if reserved[core.Fold(candidate)] {
 			continue
 		}
 		if _, err := os.Lstat(candidate); errors.Is(err, os.ErrNotExist) {
 			return candidate, nil
+		} else if err != nil {
+			return "", err
 		}
 	}
 	return "", ErrExists
@@ -49,6 +57,9 @@ func (r *ExportRunner) Run(ctx context.Context, batch int64) error {
 	if err != nil {
 		return err
 	}
+	if len(jobs) == 0 {
+		return store.ErrNotFound
+	}
 	for _, job := range jobs {
 		if job.State != core.ExportPlanned && job.State != core.ExportFailed && job.State != core.ExportCancelled {
 			continue
@@ -56,8 +67,8 @@ func (r *ExportRunner) Run(ctx context.Context, batch int64) error {
 		state := core.ExportDone
 		err := r.one(ctx, job)
 		if err != nil {
-			var published *publishedExportError
-			if errors.As(err, &published) {
+			var pending *pendingExportError
+			if errors.As(err, &pending) {
 				return err
 			}
 			state = core.ExportFailed
@@ -80,7 +91,7 @@ func (r *ExportRunner) Run(ctx context.Context, batch int64) error {
 	return nil
 }
 
-func (r *ExportRunner) one(ctx context.Context, j core.ExportJob) error {
+func (r *ExportRunner) one(ctx context.Context, j core.ExportJob) (result error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -101,14 +112,21 @@ func (r *ExportRunner) one(ctx context.Context, j core.ExportJob) error {
 	if !info.Mode().IsRegular() || info.Size() != j.Size || info.ModTime().UnixNano() != j.MTime {
 		return ErrSourceChanged
 	}
-	if err := exportFolder(filepath.Dir(j.To)); err != nil {
+	if err := exportFolder(ctx, filepath.Dir(j.To)); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(j.To), ".lumen-export-*")
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tmp.Close(); _ = os.Remove(tmp.Name()) }() // The journal can recover any interrupted temporary file.
+	defer func() {
+		_ = tmp.Close() // Already closed before publication; close on failure too.
+		if err := os.Remove(tmp.Name()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			// Keep the writing/ready row and its owned path for recovery instead
+			// of settling a failure that forgets an undeleted temporary copy.
+			result = &pendingExportError{errors.Join(result, fmt.Errorf("remove export temporary copy: %w", err))}
+		}
+	}()
 	if err := r.Store.SetExportJob(ctx, j.ID, core.ExportWriting, "", tmp.Name(), ""); err != nil {
 		return err
 	}
@@ -160,7 +178,7 @@ func (r *ExportRunner) one(ctx context.Context, j core.ExportJob) error {
 		return err
 	}
 	if err := r.Store.SetExportJob(context.WithoutCancel(ctx), j.ID, core.ExportDone, "", "", digest); err != nil {
-		return &publishedExportError{err}
+		return &pendingExportError{err}
 	}
 	return nil
 }
@@ -185,9 +203,9 @@ func exportReason(err error) string {
 	return reasonOf(err)
 }
 
-// Preserve the ready journal when publication succeeded but settlement did
-// not. Recovery verifies the digest before reporting this output as complete.
-type publishedExportError struct{ error }
+// Preserve the journal when settlement or temporary-file cleanup failed.
+// Recovery checks committed bytes and removes only the recorded owned copy.
+type pendingExportError struct{ error }
 
 type checkedWriter struct {
 	ctx context.Context
@@ -203,8 +221,11 @@ func (w *checkedWriter) Write(p []byte) (int, error) {
 
 // Every existing parent must be a real directory; an export never follows
 // a junction or symbolic link into a different destination.
-func exportFolder(dir string) error {
+func exportFolder(ctx context.Context, dir string) error {
 	for current := dir; ; current = filepath.Dir(current) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		info, err := os.Lstat(current)
 		if err != nil {
 			return err
@@ -234,7 +255,7 @@ func (r *ExportRunner) Recover(ctx context.Context) error {
 			f, err := core.OpenShared(j.To)
 			if err == nil {
 				hash := sha256.New()
-				_, err = io.Copy(hash, f)
+				_, err = io.Copy(&checkedWriter{ctx: ctx, out: hash}, f)
 				_ = f.Close()
 				if err == nil && hex.EncodeToString(hash.Sum(nil)) == j.Digest {
 					state, message = core.ExportDone, ""

@@ -34,8 +34,17 @@ const tag = ref('')
 const album = ref(0)
 const busy = ref(false)
 const stopped = ref(false)
-const isStopped = () => stopped.value
-let disposed = false
+let generation = 0
+const inputKey = computed(() =>
+  JSON.stringify({
+    ids: props.ids,
+    selection: props.selection,
+    trash: props.trash,
+    operation: operation.value,
+    tag: tag.value,
+    album: album.value,
+  }),
+)
 const error = ref('')
 const results = ref<Result[]>([])
 const batchTotal = ref(0)
@@ -43,7 +52,7 @@ const needsAlbum = computed(
   () => operation.value === BatchAction.BatchAlbum || operation.value === BatchAction.BatchRemoveAlbum,
 )
 onBeforeUnmount(() => {
-  disposed = true
+  generation++
   stopped.value = true
 })
 const options = computed((): { value: Operation; label: string }[] =>
@@ -68,13 +77,17 @@ const albumOptions = computed(() =>
 watch(
   open,
   (value) => {
+    if (!value) {
+      generation++
+      stopped.value = true
+    }
     if (value) {
       operation.value = props.trash ? BatchAction.BatchRestore : BatchAction.BatchFavourite
       results.value = []
       void albums.load().catch(logError)
     }
   },
-  { immediate: true },
+  { immediate: true, flush: 'sync' },
 )
 const cancelled = (ids: number[]): Result[] => ids.map((id) => ({ id, error: '', state: 'cancelled' }))
 async function apply() {
@@ -82,28 +95,44 @@ async function apply() {
   const selectedOperation = operation.value
   const name = tag.value.trim(),
     albumID = album.value
-  if (busy.value || !ids.length || (selectedOperation === 'tag' && !name) || (needsAlbum.value && !albumID)) return
-  if (!(await confirm(t('files.batch'), t('files.batchConfirm', { n: ids.length }), t('files.applyBatch')))) return
-  if (disposed || ids.join(',') !== props.ids.join(',')) return
+  if (
+    busy.value ||
+    !open.value ||
+    !ids.length ||
+    (selectedOperation === 'tag' && !name) ||
+    (needsAlbum.value && !albumID)
+  )
+    return
+  const mine = ++generation
+  const isStopped = () => stopped.value || mine !== generation
+  const key = inputKey.value
+  const selection = props.selection
   busy.value = true
   batchTotal.value = ids.length
   stopped.value = false
   error.value = ''
   results.value = []
   try {
-    if (props.selection) await engine.validateSelection(props.selection)
+    if (!(await confirm(t('files.batch'), t('files.batchConfirm', { n: ids.length }), t('files.applyBatch')))) return
+    if (mine !== generation || key !== inputKey.value) return
+    if (selection) await engine.validateSelection(selection)
+    if (mine !== generation || key !== inputKey.value || isStopped()) return
     if (selectedOperation === 'block') {
       await blockAssets(
         ids,
-        (id, error) => results.value.push({ id, error, state: error ? 'failed' : 'done' }),
+        (id, error) => {
+          if (mine === generation) results.value.push({ id, error, state: error ? 'failed' : 'done' })
+        },
         isStopped,
       )
+      if (mine !== generation) return
       const processed = new Set(results.value.map((r) => r.id))
       results.value.push(...cancelled(ids.filter((id) => !processed.has(id))))
       return
     }
     if (selectedOperation === 'delete') {
       const selection = await engine.trashSelection(ids)
+      if (mine !== generation || isStopped()) return
       if (
         !(await confirm(
           t('trash.deleteFromDisk'),
@@ -112,6 +141,7 @@ async function apply() {
         ))
       )
         return
+      if (mine !== generation || isStopped()) return
       for (const id of selection.assets) {
         if (isStopped()) {
           results.value.push(...cancelled([id]))
@@ -119,13 +149,19 @@ async function apply() {
         }
         try {
           const item = await engine.trashSelection([id])
+          if (mine !== generation || isStopped()) {
+            if (mine === generation) results.value.push(...cancelled([id]))
+            continue
+          }
           const outcome = await engine.deleteFromDisk(item)
+          if (mine !== generation) return
           results.value.push({
             id,
             error: outcome.kept.length ? t('files.kept', { n: outcome.kept.length }) : '',
             state: outcome.kept.length ? 'failed' : 'done',
           })
         } catch (e) {
+          if (mine !== generation) return
           results.value.push({ id, error: errorText(e), state: 'failed' })
         }
       }
@@ -141,6 +177,7 @@ async function apply() {
             selectedOperation === 'tag'
               ? await engine.tagAssets(part, name)
               : await engine.applyBatch(part, selectedOperation, albumID)
+          if (mine !== generation) return
           results.value.push(
             ...outcomes.map((o): Result => ({
               id: o.id,
@@ -149,6 +186,7 @@ async function apply() {
             })),
           )
         } catch (e) {
+          if (mine !== generation) return
           // The call itself failed (the tag's name, say): none of its assets changed.
           const error = errorText(e)
           results.value.push(...part.map((id): Result => ({ id, error, state: 'failed' })))
@@ -164,10 +202,10 @@ async function apply() {
       }
     }
   } catch (e) {
-    error.value = errorText(e)
+    if (mine === generation) error.value = errorText(e)
   } finally {
     busy.value = false
-    emit('changed')
+    if (mine === generation) emit('changed')
   }
 }
 </script>

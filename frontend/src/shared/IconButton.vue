@@ -23,7 +23,10 @@ defineOptions({ inheritAttrs: false })
 const button = useTemplateRef<ComponentPublicInstance>('button')
 defineExpose({
   /** Focuses the button: a parent's ref to this component is not the element. */
-  focus: () => (button.value?.$el as HTMLElement | null | undefined)?.focus(),
+  focus: () => {
+    const element: unknown = button.value?.$el
+    if (element instanceof HTMLElement) element.focus()
+  },
 })
 </script>
 

@@ -20,6 +20,11 @@ import (
 // PlanExport previews original copies or rendered exports at names nothing
 // else has.
 func (s *LibraryService) PlanExport(ctx context.Context, ids []int64, directory string, options core.ExportOptions) ([]core.ExportJob, error) {
+	ctx, finish, err := s.organise.hold(ctx, planning)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
 	if len(ids) == 0 || !filepath.IsAbs(directory) {
 		return nil, store.ErrNotFound
@@ -64,7 +69,7 @@ func (s *LibraryService) PlanExport(ctx context.Context, ids []int64, directory 
 		}
 		// A name another selected file or the folder already has takes the
 		// planner's " (2)", so one shared name never refuses the whole batch.
-		to, err := fileops.FreeName(directory, name, destinations)
+		to, err := fileops.FreeName(ctx, directory, name, destinations)
 		if err != nil {
 			return nil, err
 		}
@@ -92,29 +97,26 @@ func (s *LibraryService) RunExport(ctx context.Context, batch int64) ([]core.Exp
 	if batch < 1 {
 		return nil, store.ErrNotFound
 	}
-	if err := s.organise.claim(exporting, ""); err != nil {
+	ctx, finish, err := s.organise.hold(ctx, exporting)
+	if err != nil {
 		return nil, err
 	}
-	defer s.organise.release(nil)
-	done, ok := s.organise.track()
-	if !ok {
-		return nil, ErrOrganiseStopping
-	}
-	defer done()
-	ctx, cancel := context.WithCancel(ctx)
+	defer finish()
+	ctx, cancel := context.WithCancel(ctx) // CancelExport only cancels this batch.
 	defer cancel()
 	s.exports.Lock()
 	s.exports.batch, s.exports.cancel = batch, cancel
 	s.exports.Unlock()
 	defer func() { s.exports.Lock(); s.exports.batch, s.exports.cancel = 0, nil; s.exports.Unlock() }()
-	stop := context.AfterFunc(s.organise.lifetime(), cancel)
-	defer stop()
 	unhold, err := s.holdScans(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer unhold()
 	runner := s.exportRunner()
+	if err := runner.Recover(ctx); err != nil {
+		return nil, err
+	}
 	if err := runner.Run(ctx, batch); err != nil {
 		return nil, err
 	}

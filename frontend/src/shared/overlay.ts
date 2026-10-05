@@ -4,10 +4,23 @@
 // popovers, selects, the command palette) are recognised in the document,
 // where Reka UI marks each open one. Focus trapping and restoration are
 // Reka UI's for its overlays and the layer's own for Lumen's.
-import { onBeforeUnmount, shallowRef, toValue, watch } from 'vue'
+import { computed, onBeforeUnmount, shallowRef, toValue, watch } from 'vue'
 import type { MaybeRefOrGetter } from 'vue'
 
 const layers = shallowRef<readonly symbol[]>([])
+
+/** Keep every Nuxt UI portal inside the browser's visible fullscreen tree. */
+export function useFullscreenPortal() {
+  const target = shallowRef<HTMLElement | 'body'>('body')
+  const update = () => {
+    const element = document.fullscreenElement
+    target.value = element instanceof HTMLElement ? element : 'body'
+  }
+  update()
+  document.addEventListener('fullscreenchange', update)
+  onBeforeUnmount(() => document.removeEventListener('fullscreenchange', update))
+  return computed(() => target.value)
+}
 
 // What Reka UI renders while one of its overlays that takes the keyboard is
 // open (a dialog, sheet or popover; a menu; a select's list), plus native

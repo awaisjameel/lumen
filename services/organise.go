@@ -32,6 +32,7 @@ var ErrOrganiseStopping = errors.New("the app is closing")
 const (
 	recovering = -1 // a startup recovery
 	exporting  = -2 // an export, which moves no library file but must not overlap one that does
+	planning   = -3 // a preview that must not replace journal rows in use by a run
 )
 
 // organiser is the organise runs' bookkeeping: the one run at a time, and the
@@ -86,6 +87,27 @@ func (o *organiser) track() (done func(), ok bool) {
 	}
 	o.wg.Add(1)
 	return o.wg.Done, true
+}
+
+// hold admits synchronous file work and ties it to shutdown. Planning shares
+// this place with execution: replacing a preview must never prune a live run.
+func (o *organiser) hold(ctx context.Context, id int64) (context.Context, func(), error) {
+	if err := o.claim(id, ""); err != nil {
+		return ctx, nil, err
+	}
+	done, ok := o.track()
+	if !ok {
+		o.release(nil)
+		return ctx, nil, ErrOrganiseStopping
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(o.lifetime(), cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+		o.release(nil)
+		done()
+	}, nil
 }
 
 // release makes the next action available. A completion event is sent under
@@ -194,6 +216,11 @@ func (s *LibraryService) sendOrganiseProgress(p core.OrganiseProgress) {
 // Only visible photos are planned, and only visible names reach folder names.
 // A scheme that cannot be used fails with fileops.ErrInvalidTemplate.
 func (s *LibraryService) PlanOrganise(ctx context.Context, template string, sourceID int64) (core.OrganisePlan, error) {
+	ctx, finish, err := s.organise.hold(ctx, planning)
+	if err != nil {
+		return core.OrganisePlan{}, err
+	}
+	defer finish()
 	if sourceID != 0 {
 		sources, err := s.store.ListSources(ctx)
 		if err != nil {

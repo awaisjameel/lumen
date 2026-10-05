@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -12,6 +13,80 @@ import (
 
 	"lumen/internal/core"
 )
+
+type cancelledRenderer struct{ started chan struct{} }
+
+func (r cancelledRenderer) Render(ctx context.Context, _ string, _, _ int) ([]byte, error) {
+	close(r.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestFilePreviewsCannotReplaceJournalRowsWhileAnExportRuns(t *testing.T) {
+	l := newShownLibrary(t, 2)
+	s := NewLibraryService(l.st, nil, nil, l.cache)
+	t.Cleanup(func() { check(t, s.ServiceShutdown()) })
+	started := make(chan struct{})
+	l.cache.Renderer = cancelledRenderer{started}
+	dir := t.TempDir()
+	options := core.ExportOptions{Format: core.ExportPNG, Frame: -1}
+	jobs, err := s.PlanExport(t.Context(), l.ids, dir, options)
+	check(t, err)
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.RunExport(t.Context(), jobs[0].Batch)
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-t.Context().Done():
+		t.Fatal("export did not start")
+	}
+	if _, err := s.PlanExport(t.Context(), l.ids, dir, options); !errors.Is(err, ErrOrganiseBusy) {
+		t.Errorf("export preview during execution: %v", err)
+	}
+	if _, err := s.PlanFileMoves(t.Context(), l.ids, dir, ""); !errors.Is(err, ErrOrganiseBusy) {
+		t.Errorf("move preview during execution: %v", err)
+	}
+	if _, err := s.PlanOrganise(t.Context(), "{year}/{name}", 0); !errors.Is(err, ErrOrganiseBusy) {
+		t.Errorf("organise preview during execution: %v", err)
+	}
+	current, err := s.ExportJobs(t.Context(), jobs[0].Batch)
+	check(t, err)
+	if len(current) != 2 || current[1].State != core.ExportPlanned {
+		t.Fatalf("active journal was pruned: %+v", current)
+	}
+	s.CancelExport(jobs[0].Batch)
+	check(t, <-done)
+	current, err = s.ExportJobs(t.Context(), jobs[0].Batch)
+	check(t, err)
+	for _, job := range current {
+		if job.State != core.ExportCancelled {
+			t.Errorf("cancelled outcome: %+v", job)
+		}
+	}
+	_, err = s.PlanExport(t.Context(), l.ids, dir, options)
+	check(t, err)
+}
+
+func TestFilePlanningIsCancelledAndAwaitedByShutdown(t *testing.T) {
+	s := &LibraryService{}
+	ctx, finish, err := s.organise.hold(t.Context(), planning)
+	check(t, err)
+	done := make(chan error, 1)
+	go func() { done <- s.ServiceShutdown() }()
+	<-ctx.Done()
+	select {
+	case <-done:
+		t.Error("shutdown did not wait for planning")
+	default:
+	}
+	finish()
+	check(t, <-done)
+	if _, _, err := s.organise.hold(t.Context(), planning); !errors.Is(err, ErrOrganiseStopping) {
+		t.Errorf("planning after shutdown: %v", err)
+	}
+}
 
 func TestPlanExportGivesATakenNameASuffixInsteadOfRefusingTheBatch(t *testing.T) {
 	l := newShownLibrary(t, 2)

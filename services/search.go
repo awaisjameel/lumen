@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"maps"
 	"slices"
 
@@ -244,8 +245,16 @@ func (s *SearchService) TagAssets(ctx context.Context, ids []int64, name string)
 	if err != nil {
 		return nil, err
 	}
-	outcomes := batchOutcomes(ctx, ids, func(assetID int64) error { return s.store.TagAsset(ctx, assetID, id) })
-	return outcomes, s.queueOCR(ctx)
+	results, err := s.store.TagAssets(ctx, ids, id)
+	if err != nil {
+		return nil, err
+	}
+	// Tagging has committed. A background queue failure must not discard its
+	// per-photo outcomes or tell the UI that those edits failed.
+	if err := s.queueOCR(ctx); err != nil && ctx.Err() == nil {
+		slog.Error("queue ocr after batch tagging", "err", err)
+	}
+	return batchOutcomes(results), nil
 }
 
 // tagNamed is the tag of that name, made if there is none.

@@ -8,6 +8,7 @@ import ConfirmDialog from '../shared/ConfirmDialog.vue'
 import { confirm, question } from '../shared/confirm'
 import { mountInApp } from '../shared/testing'
 import { commandById, runCommand } from '../shared/commands'
+import { t } from '../shared/i18n'
 import { DateSource, engine, Kind, Playback, TrackKind, videosAvailable } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { AssetDetail } from '../bridge'
@@ -495,6 +496,31 @@ it('preserves playing intent when a discarded converted stream emits pause or er
   expect(view().get<HTMLVideoElement>('video').element).not.toBe(old.element)
   expect(view().get<HTMLVideoElement>('video').element.autoplay).toBe(true)
   expect(view().find('[role="alert"]').exists()).toBe(false)
+})
+
+it('ignores buffering and picture-in-picture events from a discarded converted stream', async () => {
+  displayProperty(document, 'pictureInPictureEnabled', true)
+  displayProperty(HTMLVideoElement.prototype, 'requestPictureInPicture', vi.fn())
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
+  wrapper = mountViewer()
+  await flushPromises()
+  const old = view().get<HTMLVideoElement>('video')
+  await old.trigger('loadedmetadata')
+  const slider = wrapper.findComponent(USlider)
+  slider.vm.$emit('update:modelValue', 25000)
+  slider.vm.$emit('change', new Event('change'))
+  await flushPromises()
+  old.element.dispatchEvent(new Event('canplay'))
+  await flushPromises()
+  expect(view().text()).toContain(t('viewer.buffering'))
+  const current = view().get<HTMLVideoElement>('video')
+  await current.trigger('canplay')
+  old.element.dispatchEvent(new Event('waiting'))
+  old.element.dispatchEvent(new Event('enterpictureinpicture'))
+  await flushPromises()
+  expect(view().text()).not.toContain(t('viewer.buffering'))
+  expect(view().find('button[aria-label="Exit picture in picture"]').exists()).toBe(false)
+  expect(view().get('button[aria-label="Picture in picture"]').attributes('aria-pressed')).toBe('false')
 })
 
 it('scrubs with the indexed sprite instead of generating arbitrary cached frames', async () => {

@@ -378,7 +378,11 @@ func (s *Store) AssetFile(ctx context.Context, id int64, unlocked bool) (MediaFi
 
 // SetFavourite marks or unmarks an asset as a favourite.
 func (s *Store) SetFavourite(ctx context.Context, id int64, fav bool) error {
-	return affected(s.w.ExecContext(ctx, "UPDATE assets SET favourite = ? WHERE id = ? AND "+present, fav, id))
+	return s.tx(ctx, func(tx *sql.Tx) error { return setFavourite(ctx, tx, id, fav) })
+}
+
+func setFavourite(ctx context.Context, tx *sql.Tx, id int64, fav bool) error {
+	return affected(tx.ExecContext(ctx, "UPDATE assets SET favourite = ? WHERE id = ? AND "+present, fav, id))
 }
 
 // CountVisible returns how many assets the grid shows.

@@ -4,7 +4,7 @@ import { nextTick, watch } from 'vue'
 import { Device, engine, ErrorCode, Filter, onLibraryChanged, onProgress, startMedia, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Errors from '../shared/errors'
-import type { Changes, DayBucket, DayItems, GridItem, Progress, SearchResults } from '../bridge'
+import type { Changes, DayBucket, DayItems, GridItem, Progress, SearchResults, Selection } from '../bridge'
 import { affects, scopeKey, useLibrary } from './store'
 import { reportError } from '../shared/errors'
 
@@ -147,6 +147,30 @@ it('reads every id of the view once, then asks only whether membership changed',
   expect(engine.selection).toHaveBeenCalledTimes(2)
   expect(reportError).toHaveBeenCalledOnce()
   expect([...lib.selectedIDs]).toEqual([1, 3])
+})
+
+it('keeps the visible selection when an older select-all request finishes', async () => {
+  const lib = useLibrary()
+  const pending = deferred<Selection>()
+  vi.mocked(engine.selection).mockReturnValueOnce(pending.promise)
+  const selecting = lib.selectAllResults()
+  lib.selectVisible([2])
+  pending.resolve({ ids: [1, 2, 3], revision: 7 })
+  await selecting
+  expect([...lib.selectedIDs]).toEqual([2])
+  expect(lib.selectionSnapshot).toBeNull()
+})
+
+it('does not publish a selection after the library store is disposed', async () => {
+  const lib = useLibrary()
+  const pending = deferred<Selection>()
+  vi.mocked(engine.selection).mockReturnValueOnce(pending.promise)
+  const selecting = lib.selectAllResults()
+  lib.$dispose()
+  pending.resolve({ ids: [1, 2, 3], revision: 7 })
+  await selecting
+  expect([...lib.selectedIDs]).toEqual([])
+  expect(lib.selectionSnapshot).toBeNull()
 })
 
 describe('library lifetime', () => {

@@ -262,6 +262,11 @@ export const useLibrary = defineStore('library', () => {
     selectedIDs.value = new Set()
     selectionSnapshot.value = null
   }
+
+  function selectVisible(ids: number[]) {
+    clearSelection()
+    selectedIDs.value = new Set(ids)
+  }
   const viewer = ref<Sel | null>(null)
   const showDetails = ref(false)
 
@@ -329,6 +334,8 @@ export const useLibrary = defineStore('library', () => {
   onScopeDispose(() => {
     stopBlocks()
     disposed = true
+    clearSelection()
+    timelineIDs = null
     stopProgress?.()
     stopChanges?.()
     generation++
@@ -778,6 +785,7 @@ export const useLibrary = defineStore('library', () => {
     selected,
     selectedIDs,
     selectionSnapshot,
+    selectVisible,
     selectItems,
     selectAllResults,
     clearSelection,
