@@ -239,8 +239,9 @@ func (s *LibraryService) Asset(ctx context.Context, id int64) (core.AssetDetail,
 	if errors.Is(err, store.ErrNotFound) && s.unlockedNow() {
 		// Only a photo the open Blocked screen shows is asked of the gate, so
 		// looking at ordinary photos is no use of it.
-		return s.store.AssetDetail(ctx, id, true)
+		d, err = s.store.AssetDetail(ctx, id, true)
 	}
+	d.Caps.Render = err == nil && d.Kind == core.KindPhoto && s.media != nil && s.media.Renderer != nil && media.CanRender(d.Width, d.Height)
 	return d, err
 }
 

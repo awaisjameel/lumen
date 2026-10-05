@@ -24,11 +24,13 @@ const album = ref(0)
 const busy = ref(false)
 const stopped = ref(false)
 const isStopped = () => stopped.value
+let disposed = false
 const error = ref('')
 const results = ref<{ id: number; error: string; state: 'done' | 'failed' | 'cancelled' }[]>([])
 const batchTotal = ref(0)
 const page = ref(0)
 onBeforeUnmount(() => {
+  disposed = true
   stopped.value = true
 })
 const options = computed(() =>
@@ -70,7 +72,7 @@ async function apply() {
   )
     return
   if (!(await confirm(t('files.batch'), t('files.batchConfirm', { n: ids.length }), t('files.applyBatch')))) return
-  if (ids.join(',') !== props.ids.join(',')) return
+  if (disposed || ids.join(',') !== props.ids.join(',')) return
   busy.value = true
   batchTotal.value = ids.length
   stopped.value = false
@@ -80,9 +82,13 @@ async function apply() {
   try {
     if (props.selection) await engine.validateSelection(props.selection)
     if (selectedOperation === 'block') {
-      await blockAssets(ids, (id, error) => results.value.push({ id, error, state: error ? 'failed' : 'done' }))
-      for (const id of ids)
-        if (!results.value.some((r) => r.id === id)) results.value.push({ id, error: '', state: 'cancelled' })
+      await blockAssets(
+        ids,
+        (id, error) => results.value.push({ id, error, state: error ? 'failed' : 'done' }),
+        isStopped,
+      )
+      const processed = new Set(results.value.map((r) => r.id))
+      for (const id of ids) if (!processed.has(id)) results.value.push({ id, error: '', state: 'cancelled' })
       return
     }
     if (selectedOperation === 'delete') {

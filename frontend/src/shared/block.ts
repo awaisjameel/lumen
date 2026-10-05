@@ -12,6 +12,7 @@ export interface BlockRequest {
   targetID: number
   ids?: number[]
   outcome?: (id: number, error: string) => void
+  stopped?: () => boolean
   path: string
   name: string
   labelOnly: boolean
@@ -22,7 +23,11 @@ export interface BlockRequest {
 export const blockRequest = shallowRef<BlockRequest | null>(null)
 
 /** Uses the same PIN and privacy dialog for an explicit group of assets. */
-export function blockAssets(ids: number[], outcome?: (id: number, error: string) => void): Promise<boolean> {
+export function blockAssets(
+  ids: number[],
+  outcome?: (id: number, error: string) => void,
+  stopped?: () => boolean,
+): Promise<boolean> {
   blockRequest.value?.answer(false)
   return new Promise((resolve) => {
     blockRequest.value = {
@@ -30,6 +35,7 @@ export function blockAssets(ids: number[], outcome?: (id: number, error: string)
       targetID: ids[0] ?? 0,
       ids: [...ids],
       outcome,
+      stopped,
       path: '',
       name: t('selection.count', { n: ids.length }),
       labelOnly: false,

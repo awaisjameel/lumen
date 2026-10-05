@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -134,6 +135,26 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		if !regexp.MustCompile(`'` + regexp.QuoteMeta(event) + `' satisfies keyof Events.CustomEvents`).MatchString(bridge) {
 			t.Errorf("the bridge does not listen for %q", event)
 		}
+	}
+}
+
+func TestViewingFallbackMatchesTheEngineDefaults(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "frontend", "src", "shared", "viewing.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := regexp.MustCompile(`(?s)return (\{.*?\})`).FindSubmatch(data)
+	if len(block) != 2 {
+		t.Fatal("missing viewing fallback")
+	}
+	jsonData := regexp.MustCompile(`(\w+):`).ReplaceAll(block[1], []byte(`"$1":`))
+	jsonData = regexp.MustCompile(`,\s*\}`).ReplaceAll(jsonData, []byte("}"))
+	var got core.ViewerPreferences
+	if err := json.Unmarshal(jsonData, &got); err != nil {
+		t.Fatal(err)
+	}
+	if want := core.DefaultViewerPreferences(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("viewing fallback = %+v, engine = %+v", got, want)
 	}
 }
 

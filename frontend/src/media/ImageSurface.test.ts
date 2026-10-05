@@ -73,3 +73,18 @@ it('cancels navigation and refuses a late render from the previous asset', async
   }
   expect(signals[1]?.aborted).toBe(true)
 })
+
+it('keeps an already loaded original visible after presentation metadata refreshes', async () => {
+  const photo = { ...detail(1), width: 600, height: 400, caps: { ...detail(1).caps, original: true } }
+  const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 1, width: 600, height: 400, detail: photo } })
+  try {
+    await wrapper.get('img.original').trigger('load')
+    expect(wrapper.get('img.original').isVisible()).toBe(true)
+    await wrapper.setProps({ thumb: 2, detail: { ...photo, adjustment: { rotation: 1, flip: false, version: 1 } } })
+    expect(wrapper.get('img.original').isVisible()).toBe(true)
+    expect(wrapper.get('img.original').attributes('style')).toContain('rotate(90deg)')
+    expect(wrapper.get('img.preview').isVisible()).toBe(false)
+  } finally {
+    wrapper.unmount()
+  }
+})

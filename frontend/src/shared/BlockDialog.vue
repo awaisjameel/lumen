@@ -21,6 +21,8 @@ const pin = ref('')
 const confirmPIN = ref('')
 const error = ref('')
 const busy = ref(false)
+const batchCancelled = ref(false)
+const isBatchCancelled = () => batchCancelled.value
 
 watch(blockRequest, async (request, previous) => {
   ready.value = false
@@ -79,7 +81,8 @@ function close(request: BlockRequest, saved: boolean) {
 }
 
 function cancel() {
-  if (!busy.value && blockRequest.value) close(blockRequest.value, false)
+  if (busy.value && blockRequest.value?.ids) batchCancelled.value = true
+  else if (!busy.value && blockRequest.value) close(blockRequest.value, false)
 }
 
 async function save() {
@@ -91,6 +94,7 @@ async function save() {
     return
   }
   busy.value = true
+  batchCancelled.value = false
   const requestedMode = mode.value
   const requestedLookalikes = lookalikes.value
   try {
@@ -102,6 +106,7 @@ async function save() {
     if (request.ids) {
       let saved = 0
       for (const id of request.ids) {
+        if (blockRequest.value !== request || isBatchCancelled() || request.stopped?.()) break
         try {
           await engine.setBlock(BlockKind.BlockAsset, id, '', BlockMode.BlockPhotos)
           saved++
@@ -176,7 +181,7 @@ async function save() {
             autofocus
             color="neutral"
             variant="outline"
-            :disabled="busy"
+            :disabled="busy && !blockRequest.ids"
             @click="cancel"
             >{{ t('common.cancel') }}</UButton
           >

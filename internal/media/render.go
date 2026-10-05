@@ -31,6 +31,11 @@ const (
 	renderVersion    = "srgb-upright-v1"
 )
 
+// CanRender reports whether known source dimensions fit the worker's budget.
+func CanRender(width, height int) bool {
+	return width > 0 && height > 0 && int64(width) <= renderPixels/int64(height)
+}
+
 // Renderer supplies a cancellable decode. Production runs it outside the
 // engine so a native decoder cannot keep the UI or shutdown waiting.
 type Renderer interface {
@@ -128,7 +133,7 @@ func RenderWorker(ctx context.Context, input io.Reader, output io.Writer) error 
 	if err != nil {
 		return err
 	}
-	if m.Width <= 0 || m.Height <= 0 || int64(m.Width) > renderPixels/int64(m.Height) {
+	if !CanRender(m.Width, m.Height) {
 		return ErrUnsupported
 	}
 	d := Decoders{FFmpeg: in.FFmpeg}
@@ -142,6 +147,31 @@ func RenderWorker(ctx context.Context, input io.Reader, output io.Writer) error 
 	}
 	_, err = output.Write(jpeg)
 	return err
+}
+
+// Inspect uses the same admission slot as image rendering. Metadata requests
+// must not multiply the native worker's memory budget while a render runs.
+func (c *Cache) Inspect(ctx context.Context, path string, kind core.Kind) (core.MediaInspection, error) {
+	if kind == core.KindPhoto {
+		if inspector, ok := c.Renderer.(interface {
+			Inspect(context.Context, string) (core.MediaInspection, error)
+		}); ok {
+			select {
+			case c.rendering <- struct{}{}:
+				defer func() { <-c.rendering }()
+			case <-ctx.Done():
+				return core.MediaInspection{}, ctx.Err()
+			}
+			if err := ctx.Err(); err != nil {
+				return core.MediaInspection{}, err
+			}
+			return inspector.Inspect(ctx, path)
+		}
+	}
+	if d, ok := c.Decoder.(Decoders); ok {
+		return d.Inspect(ctx, path, kind)
+	}
+	return core.MediaInspection{}, ErrUnsupported
 }
 
 // RenderFile caches only the current source revision. It serialises workers

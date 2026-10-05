@@ -137,8 +137,12 @@ export const usePreferences = defineStore('preferences', () => {
   }
 
   async function setViewer(patch: Partial<ViewerPreferences>): Promise<void> {
-    if (!loaded.value) await load()
-    await set({ viewer: { ...viewerDefaults(), ...prefs.value.viewer, ...patch } })
+    try {
+      if (!loaded.value) await load()
+      await set({ viewer: { ...viewerDefaults(), ...prefs.value.viewer, ...patch } })
+    } catch (e) {
+      reportError(e)
+    }
   }
 
   return { prefs, loaded, saving, load, set, setViewer }

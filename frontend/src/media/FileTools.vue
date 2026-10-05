@@ -27,6 +27,20 @@ const error = ref('')
 const moves = ref<OrganisePlan | null>(null)
 const exports = ref<ExportJob[]>([])
 const planIDs = ref<number[]>([])
+const plannedKey = ref('')
+const inputKey = computed(() =>
+  JSON.stringify({
+    operation: operation.value,
+    directory: directory.value,
+    name: name.value,
+    quality: quality.value,
+    side: side.value,
+    adjust: adjust.value,
+    frame: props.frame,
+    ids: props.ids,
+    selection: props.selection,
+  }),
+)
 const runID = ref(0)
 const moveState = ref<OrganiseRunState>(OrganiseRunState.OrganisePlanned)
 let poll: ReturnType<typeof setTimeout> | undefined
@@ -81,7 +95,8 @@ const preview = computed(() => [
   })),
   ...exports.value.map((j) => ({ id: j.id, from: j.from, to: j.to, state: j.state, error: j.error, sidecar: '' })),
 ])
-watch([operation, directory, name, quality, side, adjust, () => props.frame, () => props.ids.join(',')], () => {
+watch(inputKey, () => {
+  plannedKey.value = ''
   if (!busy.value) {
     page.value = 0
     moves.value = null
@@ -108,6 +123,7 @@ async function chooseDirectory() {
   }
 }
 async function prepare() {
+  if (busy.value) return
   page.value = 0
   busy.value = true
   completed.value = false
@@ -116,6 +132,7 @@ async function prepare() {
   moves.value = null
   exports.value = []
   const mine = ++generation
+  const key = inputKey.value
   const ids = [...props.ids]
   try {
     if (props.selection) await engine.validateSelection(props.selection)
@@ -125,7 +142,7 @@ async function prepare() {
         operation.value === 'move' ? directory.value : '',
         operation.value === 'rename' ? name.value : '',
       )
-      if (mine === generation) moves.value = result
+      if (mine === generation && key === inputKey.value) moves.value = result
     } else {
       const result = await engine.planExport(ids, directory.value, {
         format: operation.value,
@@ -134,9 +151,12 @@ async function prepare() {
         adjust: adjust.value,
         frame: props.frame ?? -1,
       })
-      if (mine === generation) exports.value = result
+      if (mine === generation && key === inputKey.value) exports.value = result
     }
-    planIDs.value = ids
+    if (mine === generation && key === inputKey.value) {
+      planIDs.value = ids
+      plannedKey.value = key
+    }
   } catch (e) {
     if (mine === generation) error.value = errorText(e)
   } finally {
@@ -144,18 +164,18 @@ async function prepare() {
   }
 }
 
-async function updateRun(id: number) {
+async function updateRun(id: number, mine = generation) {
   try {
     const run = (await engine.organiseRuns()).find((r) => r.id === id)
     if (!run) return
-    if (runID.value !== id) return
+    if (runID.value !== id || mine !== generation) return
     const outcomes = await engine.fileMoveOutcomes(id)
-    if (runID.value !== id) return
+    if (runID.value !== id || mine !== generation) return
     if (moves.value) moves.value.moves = outcomes
     moveState.value = run.state
     if (run.state === OrganiseRunState.OrganiseRunning || run.state === OrganiseRunState.OrganiseUndoing)
       poll = setTimeout(() => {
-        void updateRun(id)
+        void updateRun(id, mine)
       }, 250)
     else {
       busy.value = false
@@ -163,18 +183,22 @@ async function updateRun(id: number) {
       emit('changed')
     }
   } catch (e) {
+    if (mine !== generation) return
     error.value = errorText(e)
     busy.value = false
   }
 }
 async function commit() {
-  if (busy.value || props.ids.join(',') !== planIDs.value.join(',')) return
-  if (!(await confirm(t('files.title'), t('files.confirm'), t('files.apply')))) return
-  if (props.ids.join(',') !== planIDs.value.join(',')) return
+  const key = plannedKey.value
+  if (busy.value || !key || key !== inputKey.value || props.ids.join(',') !== planIDs.value.join(',')) return
   busy.value = true
   error.value = ''
+  const mine = ++generation
   try {
+    if (!(await confirm(t('files.title'), t('files.confirm'), t('files.apply')))) return
+    if (mine !== generation || key !== inputKey.value) return
     if (props.selection) await engine.validateSelection(props.selection)
+    if (mine !== generation || key !== inputKey.value) return
     if (moves.value) {
       runID.value = moves.value.runId
       await engine.startOrganise(runID.value)
@@ -184,14 +208,15 @@ async function commit() {
       if (batch) {
         exportAbort = new AbortController()
         activeBatch.value = batch
-        pollExport(batch)
+        pollExport(batch, mine)
         try {
-          exports.value = await engine.runExport(batch, exportAbort.signal)
+          await engine.runExport(batch, exportAbort.signal)
         } finally {
           clearTimeout(poll)
           exportAbort = undefined
           activeBatch.value = 0
-          exports.value = await engine.exportJobs(batch)
+          const jobs = await engine.exportJobs(batch)
+          if (mine === generation) exports.value = jobs
         }
       }
       busy.value = false
@@ -199,17 +224,28 @@ async function commit() {
       emit('changed')
     }
   } catch (e) {
+    if (mine !== generation) return
     error.value = errorText(e)
     busy.value = false
+  } finally {
+    if (mine === generation && !runID.value) busy.value = false
   }
 }
 async function undo() {
-  if (!(await confirm(t('files.title'), t('organise.undoText'), t('organise.undo')))) return
+  if (busy.value) return
+  const mine = generation
+  const id = runID.value
+  busy.value = true
   try {
-    busy.value = true
-    await engine.undoOrganise(runID.value)
-    await updateRun(runID.value)
+    if (!(await confirm(t('files.title'), t('organise.undoText'), t('organise.undo')))) {
+      if (mine === generation) busy.value = false
+      return
+    }
+    if (mine !== generation || runID.value !== id) return
+    await engine.undoOrganise(id)
+    await updateRun(id, mine)
   } catch (e) {
+    if (mine !== generation) return
     busy.value = false
     error.value = errorText(e)
   }
@@ -221,17 +257,18 @@ onBeforeUnmount(() => {
   clearTimeout(poll)
 })
 
-function pollExport(batch: number) {
+function pollExport(batch: number, mine: number) {
   poll = setTimeout(() => {
-    if (!busy.value) return
+    if (!busy.value || activeBatch.value !== batch || mine !== generation) return
     void engine
       .exportJobs(batch)
       .then((jobs) => {
+        if (activeBatch.value !== batch || mine !== generation) return
         exports.value = jobs
-        pollExport(batch)
+        pollExport(batch, mine)
       })
       .catch((e: unknown) => {
-        error.value = errorText(e)
+        if (activeBatch.value === batch && mine === generation) error.value = errorText(e)
       })
   }, 250)
 }
@@ -312,9 +349,12 @@ function pollExport(batch: number) {
     </template>
     <template #footer>
       <UButton :disabled="busy" variant="outline" @click="prepare">{{ t('files.preview') }}</UButton>
-      <UButton v-if="preview.length && !runID && !completed" :disabled="busy" @click="commit">{{
-        t('files.apply')
-      }}</UButton>
+      <UButton
+        v-if="preview.length && plannedKey === inputKey && !runID && !completed"
+        :disabled="busy"
+        @click="commit"
+        >{{ t('files.apply') }}</UButton
+      >
       <UButton
         v-if="runID && moveState === OrganiseRunState.OrganiseDone"
         :disabled="busy"

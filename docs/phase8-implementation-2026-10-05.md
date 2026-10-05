@@ -1,6 +1,6 @@
 # Phase 8 implementation and verification
 
-Implemented locally on 5 October 2026 on `update/phase-8`, from merged main `4fc704a`, following Phase 8 of the [development plan](next-development-plan-2026-10-04.md). Changes are uncommitted. This record separates implementation and local verification from release, device and scale acceptance.
+Implemented locally on 5 October 2026 on `update/phase-8`, from merged main `4fc704a`, following Phase 8 of the [development plan](next-development-plan-2026-10-04.md), and committed as `335a2de`. This record describes the initial implementation evidence; subsequent local repairs and verification are recorded in the [branch audit](phase8-audit-2026-10-05.md). Both records separate implementation and local verification from release, device and scale acceptance.
 
 ## Delivered behavior
 

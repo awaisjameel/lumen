@@ -769,9 +769,9 @@ export interface MediaCaps {
     "original": boolean;
 
     /**
-     * Render: a developed, full-resolution rendered copy can be made within
-     * the render budget. No such path exists before Phase 8, so it is always
-     * false; a larger preview or a RAW file's embedded JPEG never counts.
+     * Render: the runtime can prepare a bounded upright sRGB copy. The service
+     * supplies this capability from its renderer and known source dimensions;
+     * RenderInfo reports whether the available pixels were reduced.
      */
     "render": boolean;
 

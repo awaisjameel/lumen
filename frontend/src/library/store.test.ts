@@ -26,6 +26,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     setFavourite: vi.fn(),
     setPaused: vi.fn(),
     trashCount: vi.fn(),
+    selection: vi.fn(),
   },
   onLibraryChanged: vi.fn(),
   onProgress: vi.fn(),
@@ -104,6 +105,16 @@ beforeEach(() => {
   vi.mocked(engine.setPaused).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.trashCount).mockReset().mockResolvedValue(0)
   vi.mocked(reportError).mockClear()
+})
+
+it('drops stale selected IDs before binding an additive range to a newer snapshot', async () => {
+  const lib = useLibrary()
+  await lib.selectItems({ day, id: 1 }, false, false)
+  await lib.selectItems({ day, id: 2 }, true, false)
+  vi.mocked(engine.selection).mockResolvedValueOnce({ ids: [2, 3, 4], revision: 10 })
+  await lib.selectItems({ day, id: 4 }, true, true)
+  expect([...lib.selectedIDs]).toEqual([2, 3, 4])
+  expect(lib.selectionSnapshot).toEqual({ ids: [2, 3, 4], revision: 10 })
 })
 
 describe('library lifetime', () => {

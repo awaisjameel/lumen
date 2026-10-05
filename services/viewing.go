@@ -33,13 +33,6 @@ func (s *LibraryService) PlaybackPosition(ctx context.Context, id int64) (int64,
 
 // SetPlaybackPosition records history only when the preference permits it.
 func (s *LibraryService) SetPlaybackPosition(ctx context.Context, id, position int64) error {
-	p, err := s.store.Preferences(ctx)
-	if err != nil {
-		return err
-	}
-	if p.Viewer == nil || !p.Viewer.Resume {
-		return nil
-	}
 	return s.store.SetPlaybackPosition(ctx, id, position)
 }
 

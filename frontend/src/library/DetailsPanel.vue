@@ -72,7 +72,9 @@ let detailRequest = 0
 let tagsRequest = 0
 let facesRequest = 0
 let albumsRequest = 0
+let inspectionAbort: AbortController | undefined
 onBeforeUnmount(() => {
+  inspectionAbort?.abort()
   selectionRevision++
   detailRequest++
   tagsRequest++
@@ -98,6 +100,9 @@ watch(
 )
 
 async function loadDetails(id: number | undefined) {
+  inspectionAbort?.abort()
+  inspectionAbort = new AbortController()
+  const signal = inspectionAbort.signal
   const request = ++detailRequest
   detailError.value = ''
   loading.value = !!id
@@ -108,11 +113,13 @@ async function loadDetails(id: number | undefined) {
     detail.value = d
     if (!lib.inTrash) {
       void engine
-        .inspect(id)
+        .inspect(id, signal)
         .then((value) => {
           if (request === detailRequest) inspection.value = value
         })
-        .catch(logError)
+        .catch((e: unknown) => {
+          if (!isCancelled(e)) logError(e)
+        })
     }
     const place = d.placeId ? await orFallback(engine.place(d.placeId), null) : null
     if (request === detailRequest) placeName.value = place?.name ?? ''

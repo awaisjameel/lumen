@@ -208,7 +208,10 @@ export const useLibrary = defineStore('library', () => {
           to = ids.indexOf(sel.id)
         if (from < 0 || to < 0) return
         const range = ids.slice(Math.min(from, to), Math.max(from, to) + 1)
-        selectedIDs.value = new Set(control ? [...selectedIDs.value, ...range] : range)
+        const present = new Set(ids)
+        selectedIDs.value = new Set(
+          control ? [...selectedIDs.value].filter((id) => present.has(id)).concat(range) : range,
+        )
         selectionSnapshot.value = { ...result, ids: [...selectedIDs.value] }
       } catch (e) {
         if (mine === selectionRequest) reportError(e)

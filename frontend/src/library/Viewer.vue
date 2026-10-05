@@ -11,7 +11,7 @@ import { engine, isCancelled, videosAvailable } from '../bridge'
 import type { AssetDetail, GridItem } from '../bridge'
 import { icons } from '../design/icons'
 import { dispatchKey, runCommand, useCommands } from '../shared/commands'
-import { errorText } from '../shared/errors'
+import { errorText, reportError } from '../shared/errors'
 import FeatureState from '../shared/FeatureState.vue'
 import { dateTime } from '../shared/format'
 import { t } from '../shared/i18n'
@@ -27,7 +27,6 @@ import type { ImageControls } from '../media/viewport'
 import Filmstrip from '../media/Filmstrip.vue'
 import { usePreferences } from '../shared/preferences'
 import { viewerDefaults } from '../shared/viewing'
-import { reportError } from '../shared/errors'
 import { useLiveReload } from '../shared/liveReload'
 
 const props = defineProps<{ source?: ViewerSource }>()
@@ -54,6 +53,7 @@ const image = ref<ImageControls | null>(null)
 const root = ref<HTMLElement | null>(null)
 const loading = ref(false)
 const loadError = ref('')
+const adjusting = ref(false)
 const layer = useLayer()
 let previousFocus: Element | null = null
 let detailRequest = 0
@@ -61,6 +61,7 @@ let detailRequest = 0
 watch(
   () => src.value.id,
   async (id, _old, onCleanup) => {
+    geometry.value = undefined
     const request = ++detailRequest
     onCleanup(() => detailRequest++)
     detail.value = null
@@ -81,7 +82,7 @@ watch(
 )
 
 function go(dir: 1 | -1) {
-  void src.value.step(dir)
+  void src.value.step(dir).catch(reportError)
 }
 
 function close() {
@@ -106,23 +107,21 @@ function activity() {
     }, 3000)
 }
 
-watch(
-  [() => src.value.id, () => viewing.value.filmstrip, comparing],
-  async () => {
-    const request = ++neighbourhoodRequest
-    neighbours.value = []
-    if (!viewing.value.filmstrip && !comparing.value) return
-    try {
-      const items = await src.value.window?.()
-      if (request === neighbourhoodRequest) neighbours.value = items ?? []
-    } catch (e) {
-      if (request === neighbourhoodRequest && !isCancelled(e)) reportError(e)
-    }
-  },
-  { immediate: true },
-)
+watch([() => src.value.id, () => viewing.value.filmstrip, comparing], loadNeighbours, { immediate: true })
 
-watch(comparing, async (value) => {
+async function loadNeighbours() {
+  const request = ++neighbourhoodRequest
+  neighbours.value = []
+  if (!viewing.value.filmstrip && !comparing.value) return
+  try {
+    const items = await src.value.window?.()
+    if (request === neighbourhoodRequest) neighbours.value = items ?? []
+  } catch (e) {
+    if (request === neighbourhoodRequest && !isCancelled(e)) reportError(e)
+  }
+}
+
+watch([comparing, () => src.value.id], async ([value]) => {
   const request = ++comparisonRequest
   comparison.value = null
   comparisonItem.value = null
@@ -130,6 +129,7 @@ watch(comparing, async (value) => {
   const id = src.value.id
   try {
     const items = await src.value.window?.()
+    if (request !== comparisonRequest) return
     const other = items?.find((entry) => entry.id !== id && !entry.v)
     if (!other) {
       comparing.value = false
@@ -141,27 +141,52 @@ watch(comparing, async (value) => {
       comparisonItem.value = other
     }
   } catch (e) {
-    if (request === comparisonRequest) comparing.value = false
-    if (!isCancelled(e)) reportError(e)
+    if (request === comparisonRequest) {
+      comparing.value = false
+      if (!isCancelled(e)) reportError(e)
+    }
   }
 })
 
 useLiveReload(
   async () => {
+    await loadNeighbours()
+    const currentID = src.value.id
+    const request = ++detailRequest
+    if (currentID) {
+      try {
+        const data = await engine.asset(currentID)
+        if (request === detailRequest && src.value.id === currentID) {
+          detail.value = data
+          loadError.value = ''
+          loading.value = false
+        }
+      } catch (e) {
+        if (request === detailRequest && !isCancelled(e)) {
+          detail.value = null
+          loadError.value = errorText(e)
+          loading.value = false
+        }
+      }
+    }
     const current = comparison.value
     if (!current) return
+    const comparisonRevision = comparisonRequest
     try {
       const data = await engine.asset(current.id)
-      if (comparison.value?.id === current.id) comparison.value = data
-    } catch {
-      comparing.value = false
-      comparison.value = null
-      comparisonItem.value = null
+      if (comparisonRevision === comparisonRequest && comparison.value?.id === current.id) comparison.value = data
+    } catch (e) {
+      if (comparisonRevision === comparisonRequest && !isCancelled(e)) {
+        comparing.value = false
+        comparison.value = null
+        comparisonItem.value = null
+      }
     }
   },
-  (c) => c.assets,
+  (c) => c.assets || c.thumbs,
   1,
 )
+watch(() => viewing.value.autoHide, activity)
 
 watch([sliding, () => src.value.id, () => viewing.value.slideshowSeconds], () => {
   clearTimeout(slideTimer)
@@ -189,12 +214,15 @@ watch([sliding, () => src.value.id, () => viewing.value.slideshowSeconds], () =>
 
 async function adjust(rotation: number, flip: boolean) {
   const current = detail.value
-  if (!current || !actions.value.favourite) return
+  if (!current || !actions.value.favourite || adjusting.value) return
+  adjusting.value = true
   try {
     const adjustment = await engine.setAdjustment(current.id, rotation, flip)
     if (detail.value?.id === current.id) detail.value = { ...detail.value, adjustment }
   } catch (e) {
     reportError(e)
+  } finally {
+    adjusting.value = false
   }
 }
 
@@ -270,7 +298,7 @@ useCommands([
     title: () => t('viewer.rotate'),
     icon: 'reset',
     zone: 'viewer',
-    available: () => !!image.value && !!actions.value.favourite,
+    available: () => !!image.value && !!actions.value.favourite && !adjusting.value,
     run: () => adjust((detail.value?.adjustment?.rotation ?? 0) + 1, detail.value?.adjustment?.flip ?? false),
   },
   {
@@ -279,7 +307,7 @@ useCommands([
     title: () => t('viewer.flip'),
     icon: 'image',
     zone: 'viewer',
-    available: () => !!image.value && !!actions.value.favourite,
+    available: () => !!image.value && !!actions.value.favourite && !adjusting.value,
     run: () => adjust(detail.value?.adjustment?.rotation ?? 0, !detail.value?.adjustment?.flip),
   },
   {
@@ -288,7 +316,7 @@ useCommands([
     title: () => t('viewer.resetAdjustment'),
     icon: 'undo',
     zone: 'viewer',
-    available: () => !!image.value && !!actions.value.favourite,
+    available: () => !!image.value && !!actions.value.favourite && !adjusting.value,
     run: () => adjust(0, false),
   },
   {
@@ -439,6 +467,7 @@ onMounted(() => {
   activity()
 })
 onBeforeUnmount(() => {
+  detailRequest++
   comparisonRequest++
   neighbourhoodRequest++
   clearTimeout(slideTimer)
@@ -658,6 +687,7 @@ onBeforeUnmount(() => {
             v-if="actions.favourite"
             :icon="icons.reset"
             :aria-label="t('viewer.rotate')"
+            :disabled="adjusting"
             variant="ghost"
             @click="runCommand('viewer.rotate')"
           />
@@ -665,6 +695,7 @@ onBeforeUnmount(() => {
             v-if="actions.favourite"
             :icon="icons.image"
             :aria-label="t('viewer.flip')"
+            :disabled="adjusting"
             variant="ghost"
             @click="runCommand('viewer.flip')"
           />
@@ -672,6 +703,7 @@ onBeforeUnmount(() => {
             v-if="actions.favourite"
             :icon="icons.undo"
             :aria-label="t('viewer.resetAdjustment')"
+            :disabled="adjusting"
             variant="ghost"
             @click="runCommand('viewer.resetAdjustment')"
           />

@@ -9,9 +9,55 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"lumen/internal/core"
 )
 
 type renderFunc func(context.Context, string, int, int) ([]byte, error)
+
+type inspectionRenderer struct {
+	renderFunc
+	inspections int
+}
+
+func (r *inspectionRenderer) Inspect(context.Context, string) (core.MediaInspection, error) {
+	r.inspections++
+	return core.MediaInspection{Pages: 1}, nil
+}
+
+func TestImageInspectionWaitsForRenderingAndCancelsBeforeLaunchingAWorker(t *testing.T) {
+	c := NewCache(t.TempDir(), Decoders{})
+	started, release := make(chan struct{}), make(chan struct{})
+	r := &inspectionRenderer{renderFunc: func(context.Context, string, int, int) ([]byte, error) {
+		close(started)
+		<-release
+		return renderJPEG(t, 4, 3), nil
+	}}
+	c.Renderer = r
+	source := filepath.Join(t.TempDir(), "source.tiff")
+	if err := os.WriteFile(source, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := c.RenderFile(t.Context(), 1, source, 1, 1024, 0)
+		done <- err
+	}()
+	<-started
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := c.Inspect(ctx, source, core.KindPhoto)
+	close(release)
+	if !errors.Is(err, context.Canceled) || r.inspections != 0 {
+		t.Fatalf("inspection escaped render admission: %v, %d calls", err, r.inspections)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Inspect(t.Context(), source, core.KindPhoto); err != nil || r.inspections != 1 {
+		t.Fatalf("released admission was not reusable: %v", err)
+	}
+}
 
 func (f renderFunc) Render(ctx context.Context, path string, orientation, side int) ([]byte, error) {
 	return f(ctx, path, orientation, side)

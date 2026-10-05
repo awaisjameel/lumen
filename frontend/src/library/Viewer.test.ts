@@ -478,6 +478,97 @@ it('preserves pause, volume, mute and speed when a converted seek replaces the s
   expect(video.element.volume).toBe(0.35)
 })
 
+it('preserves playing intent when a discarded converted stream emits pause or error', async () => {
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
+  wrapper = mountViewer()
+  await flushPromises()
+  const old = view().get<HTMLVideoElement>('video')
+  simulatePlayback(old.element)
+  await old.trigger('loadedmetadata')
+  await view().get('button[aria-label="Play"]').trigger('click')
+  const slider = wrapper.findComponent(USlider)
+  slider.vm.$emit('update:modelValue', 25000)
+  slider.vm.$emit('change', new Event('change'))
+  await flushPromises()
+  old.element.dispatchEvent(new Event('error'))
+  await flushPromises()
+  expect(view().get<HTMLVideoElement>('video').element).not.toBe(old.element)
+  expect(view().get<HTMLVideoElement>('video').element.autoplay).toBe(true)
+  expect(view().find('[role="alert"]').exists()).toBe(false)
+})
+
+it('scrubs with the indexed sprite instead of generating arbitrary cached frames', async () => {
+  wrapper = mountViewer()
+  await flushPromises()
+  wrapper.findComponent(USlider).vm.$emit('update:modelValue', 25000)
+  await flushPromises()
+  const preview = view().get('.seek-preview')
+  expect(preview.element.tagName).toBe('SPAN')
+  expect(preview.attributes('style')).toContain('/media/sprite/1?v=1')
+  expect(view().find('img[src*="/media/frame/"]').exists()).toBe(false)
+})
+
+it('removes existing subtitle cues even when the reused text track was disabled', async () => {
+  vi.mocked(engine.inspect).mockResolvedValueOnce({
+    orientation: 1,
+    profile: '',
+    lens: '',
+    exposure: '',
+    aperture: '',
+    iso: '',
+    frameRate: '',
+    pages: 0,
+    tracks: [{ index: 3, kind: 'subtitle', codec: 'subrip', language: 'eng', title: '', supported: true }],
+  })
+  vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+    Promise.resolve(new Response('WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nOne caption\n', { status: 200 })),
+  )
+  class Cue {
+    constructor(
+      readonly startTime: number,
+      readonly endTime: number,
+      readonly text: string,
+    ) {}
+  }
+  vi.stubGlobal('VTTCue', Cue)
+  const cues: Cue[] = []
+  const track = {
+    mode: 'disabled',
+    get cues() {
+      return this.mode === 'disabled' ? null : cues
+    },
+    addCue: (cue: Cue) => cues.push(cue),
+    removeCue: (cue: Cue) => cues.splice(cues.indexOf(cue), 1),
+  }
+  wrapper = mountViewer()
+  await flushPromises()
+  const addTrack = vi.fn(() => track)
+  Object.defineProperty(view().get('video').element, 'addTextTrack', { value: addTrack })
+  for (let i = 0; i < 3; i++) {
+    await view().get('select[aria-label="Subtitle track"]').setValue('3')
+    await flushPromises()
+    expect(cues).toHaveLength(1)
+    await view().get('select[aria-label="Subtitle track"]').setValue('-1')
+    await flushPromises()
+    expect(cues).toHaveLength(0)
+  }
+  expect(addTrack).toHaveBeenCalledOnce()
+})
+
+it('loops converted playback through a new source without replaying the discarded offset', async () => {
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
+  wrapper = mountViewer()
+  await flushPromises()
+  const old = view().get<HTMLVideoElement>('video')
+  const playback = simulatePlayback(old.element)
+  await view().get('button[aria-label="Loop"]').trigger('click')
+  await old.trigger('ended')
+  await flushPromises()
+  expect(playback.play).not.toHaveBeenCalled()
+  expect(view().get('video').attributes('src')).toContain('at=0')
+  expect(view().get<HTMLVideoElement>('video').element.autoplay).toBe(true)
+})
+
 it('replays a converted video from the beginning instead of the last stream offset', async () => {
   vi.mocked(engine.asset).mockResolvedValue({ ...detail, caps: { ...detail.caps, directPlay: false } })
   wrapper = mountViewer()

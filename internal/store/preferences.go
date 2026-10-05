@@ -49,7 +49,7 @@ func (s *Store) Preferences(ctx context.Context) (core.Preferences, error) {
 		return core.Preferences{}, err
 	}
 	p.SidebarCollapsed = collapsed
-	viewer, ok, err := s.setting(ctx, "ui_viewer")
+	viewer, ok, err := s.setting(ctx, core.SettingUIViewer)
 	if err != nil {
 		return core.Preferences{}, err
 	}
@@ -71,7 +71,7 @@ func (s *Store) SetPreferences(ctx context.Context, p core.Preferences) (core.Pr
 	}
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
-	return p, s.writeSettings(ctx, append(preferenceSettings(p), setting{"ui_viewer", string(viewer)}))
+	return p, s.writeSettings(ctx, append(preferenceSettings(p), setting{core.SettingUIViewer, string(viewer)}))
 }
 
 // MigrateLegacyPreferences offers this library the choices an older Lumen

@@ -46,18 +46,7 @@ func (m *MediaService) Inspect(ctx context.Context, id int64) (core.MediaInspect
 	if !ok {
 		return core.MediaInspection{}, store.ErrNotFound
 	}
-	d, ok := m.cache.Decoder.(media.Decoders)
-	if !ok {
-		return core.MediaInspection{}, media.ErrUnsupported
-	}
-	var info core.MediaInspection
-	if inspector, ok := m.cache.Renderer.(interface {
-		Inspect(context.Context, string) (core.MediaInspection, error)
-	}); ok && f.Kind == core.KindPhoto {
-		info, err = inspector.Inspect(ctx, path)
-	} else {
-		info, err = d.Inspect(ctx, path, f.Kind)
-	}
+	info, err := m.cache.Inspect(ctx, path, f.Kind)
 	if err != nil {
 		return info, err
 	}

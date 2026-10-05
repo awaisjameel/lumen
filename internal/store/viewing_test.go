@@ -19,6 +19,53 @@ func viewingFixture(t *testing.T) (st *Store, ids []int64) {
 	return st, sel.IDs
 }
 
+func TestPlaybackWritesRequireTheCurrentOptInAndVisibleVideo(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	src, err := st.AddSource(ctx, `C:\Videos`)
+	check(t, err)
+	in := item(src.ID, `C:\Videos\clip.mp4`, "resume-video")
+	in.Kind = core.KindVideo
+	check(t, errOf(st.Ingest(ctx, []IngestItem{in})))
+	selection, err := st.Selection(ctx, core.View{}, nil, false)
+	check(t, err)
+	id := selection.IDs[0]
+	check(t, st.SaveMetadata(ctx, "fixture", []MetadataResult{{AssetID: id, Duration: 12_000}}))
+	check(t, st.SetPlaybackPosition(ctx, id, 5000))
+	position, err := st.PlaybackPosition(ctx, id)
+	check(t, err)
+	if position != 0 {
+		t.Fatal("recorded history before opting in")
+	}
+	p := core.DefaultPreferences()
+	p.Viewer.Resume = true
+	_, err = st.SetPreferences(ctx, p)
+	check(t, err)
+	check(t, st.SetPlaybackPosition(ctx, id, 50_000))
+	position, err = st.PlaybackPosition(ctx, id)
+	check(t, err)
+	if position != 12_000 {
+		t.Fatalf("unbounded playback position: %d", position)
+	}
+	p.Viewer.Resume = false
+	_, err = st.SetPreferences(ctx, p)
+	check(t, err)
+	check(t, st.ClearPlaybackHistory(ctx))
+	check(t, st.SetPlaybackPosition(ctx, id, 8000))
+	position, err = st.PlaybackPosition(ctx, id)
+	check(t, err)
+	if position != 0 {
+		t.Fatal("a late save recreated history after disabling it")
+	}
+	p.Viewer.Resume = true
+	_, err = st.SetPreferences(ctx, p)
+	check(t, err)
+	_, err = st.SetBlock(ctx, core.BlockAsset, id, "", core.BlockPhotos)
+	check(t, err)
+	if !errors.Is(st.SetPlaybackPosition(ctx, id, 1000), ErrNotFound) {
+		t.Fatal("recorded history for a covered video")
+	}
+}
+
 func TestSelectionRetainsSearchOrderAndRefusesMembershipDrift(t *testing.T) {
 	st, ids := viewingFixture(t)
 	ordered := []int64{ids[1], ids[0]}

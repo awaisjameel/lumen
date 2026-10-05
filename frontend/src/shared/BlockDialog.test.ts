@@ -8,7 +8,7 @@ import { t } from './i18n'
 import { BlockKind, BlockMode, engine } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { BlockChange } from '../bridge'
-import { block, blockRequest, BLOCK_UNDO_NOTIFICATION } from './block'
+import { block, blockAssets, blockRequest, BLOCK_UNDO_NOTIFICATION } from './block'
 import BlockDialog from './BlockDialog.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -31,6 +31,24 @@ const body = new DOMWrapper(document.body)
 function mountDialog() {
   return mountInApp(BlockDialog)
 }
+
+it('cancels a batch between items while settling the current item once', async () => {
+  const pending = deferred<BlockChange>()
+  vi.mocked(engine.setBlock).mockReturnValueOnce(pending.promise)
+  const outcome = vi.fn()
+  wrapper = mountDialog()
+  const saved = blockAssets([1, 2, 3], outcome)
+  await flushPromises()
+  await body.get('[data-block-form]').trigger('submit')
+  await body.get('[data-block="cancel"]').trigger('click')
+  expect(blockRequest.value).not.toBeNull()
+  pending.resolve({ id: 10, created: true })
+  await flushPromises()
+  expect(await saved).toBe(true)
+  expect(engine.setBlock).toHaveBeenCalledExactlyOnceWith(BlockKind.BlockAsset, 1, '', BlockMode.BlockPhotos)
+  expect(outcome).toHaveBeenCalledExactlyOnceWith(1, '')
+  expect(blockRequest.value).toBeNull()
+})
 
 async function choose(label: string) {
   const field = body.findAll('label').find((item) => item.text() === label)

@@ -28,7 +28,7 @@ const viewport = ref<Viewport>({
   y: 0,
 })
 const fitting = ref(true)
-const ready = ref(false)
+const loadedSource = ref('')
 const info = ref<RenderInfo | null>(null)
 const originalFailed = ref(false)
 const failed = ref('')
@@ -39,6 +39,7 @@ const original = computed(() =>
     : undefined,
 )
 const full = computed(() => rendered.value ?? original.value)
+const ready = computed(() => !!full.value && loadedSource.value === full.value)
 const scale = computed(() => Math.round(viewport.value.scale * 100))
 const style = computed(() => ({
   width: `${props.detail?.width ?? props.width}px`,
@@ -78,7 +79,7 @@ async function renderCopy(current: number) {
   }
 }
 function loadFailed() {
-  ready.value = false
+  loadedSource.value = ''
   if (original.value) {
     originalFailed.value = true
     void renderCopy(request)
@@ -158,7 +159,6 @@ watch(
     abort = new AbortController()
     info.value = null
     originalFailed.value = false
-    ready.value = false
     failed.value = ''
     const rotated = (props.detail?.adjustment?.rotation ?? 0) % 2 !== 0
     const width = props.detail?.width ?? props.width
@@ -220,7 +220,7 @@ defineExpose({ fit, actual, zoom, scale })
       :style="style"
       alt=""
       draggable="false"
-      @load="ready = true"
+      @load="loadedSource = full ?? ''"
       @error="loadFailed"
     />
     <span v-if="info?.limited" class="resolution" role="status">{{

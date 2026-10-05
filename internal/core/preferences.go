@@ -63,6 +63,7 @@ const (
 	SettingUISidebarCollapsed = "ui_sidebar_collapsed"
 	SettingUISidebarWidth     = "ui_sidebar_width"
 	SettingUIInspectorWidth   = "ui_inspector_width"
+	SettingUIViewer           = "ui_viewer"
 	// SettingUILegacyMigrated marks that what an older Lumen kept in the
 	// WebView's storage was offered to this library once (bool).
 	SettingUILegacyMigrated = "ui_legacy_migrated"
@@ -161,9 +162,9 @@ type MediaCaps struct {
 	// Original: the WebView shows the original photo as it is, through the
 	// original endpoint. A native decoder for the format is not enough.
 	Original bool `json:"original"`
-	// Render: a developed, full-resolution rendered copy can be made within
-	// the render budget. No such path exists before Phase 8, so it is always
-	// false; a larger preview or a RAW file's embedded JPEG never counts.
+	// Render: the runtime can prepare a bounded upright sRGB copy. The service
+	// supplies this capability from its renderer and known source dimensions;
+	// RenderInfo reports whether the available pixels were reduced.
 	Render bool `json:"render"`
 	// DirectPlay: the WebView may play the video file itself.
 	DirectPlay bool `json:"directPlay"`
