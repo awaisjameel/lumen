@@ -67,6 +67,15 @@ type Image struct {
 	W, H int
 }
 
+// RGBA is the picture as Go's image package reads it.
+func (im Image) RGBA() *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, im.W, im.H))
+	for i, j := 0, 0; i+2 < len(im.Pix) && j+3 < len(img.Pix); i, j = i+3, j+4 {
+		img.Pix[j], img.Pix[j+1], img.Pix[j+2], img.Pix[j+3] = im.Pix[i], im.Pix[i+1], im.Pix[i+2], 255
+	}
+	return img
+}
+
 // Decoder reads original files: what they say about themselves, upright
 // thumbnails, and pixels for the models. ctx cancels a slow external decoder.
 type Decoder interface {
@@ -257,11 +266,7 @@ func goDecode(path string) (source, error) {
 
 // perceptualHash is the 64-bit pHash of a hashSide x hashSide RGB square.
 func perceptualHash(rgb []byte) (uint64, error) {
-	img := image.NewRGBA(image.Rect(0, 0, hashSide, hashSide))
-	for i, j := 0, 0; i+2 < len(rgb); i, j = i+3, j+4 {
-		img.Pix[j], img.Pix[j+1], img.Pix[j+2], img.Pix[j+3] = rgb[i], rgb[i+1], rgb[i+2], 255
-	}
-	ph, err := imagehash.NewPHash64(img)
+	ph, err := imagehash.NewPHash64(Image{Pix: rgb, W: hashSide, H: hashSide}.RGBA())
 	if err != nil {
 		return 0, fmt.Errorf("perceptual hash: %w", err)
 	}

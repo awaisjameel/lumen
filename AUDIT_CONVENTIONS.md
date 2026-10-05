@@ -22,7 +22,9 @@ tooling; this file covers how code is written.
   the other.
 - **Scope.** Phase 5 is built as `docs/phase5-design-2026-10-01.md` sets
   out. Phase 7 (the Nuxt UI frontend and design system) is built as
-  `docs/phase7-design-2026-10-04.md` records. Phase 6 (the installer, politeness controls, crash reports and
+  `docs/phase7-design-2026-10-04.md` records. Phase 8 (viewing, playback,
+  details and file tools) is built as
+  `docs/phase8-implementation-2026-10-05.md` records. Phase 6 (the installer, politeness controls, crash reports and
   diagnostics, onboarding and empty states, the performance pass) is built
   as `docs/phase6-design-2026-10-03.md` sets out; its decisions are not
   reopened except by a later explicit product-owner decision. Lumen currently

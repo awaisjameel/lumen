@@ -1,8 +1,10 @@
 package fileops
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -19,10 +21,12 @@ type openAsInfo struct {
 func Open(path string, choose bool) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	if err := windows.CoInitializeEx(0, windows.COINIT_APARTMENTTHREADED); err != nil {
-		return err
+	switch err := windows.CoInitializeEx(0, windows.COINIT_APARTMENTTHREADED); {
+	case err == nil || errors.Is(err, syscall.Errno(sFalse)): // S_FALSE: already initialised here, still counted
+		defer windows.CoUninitialize()
+	default:
+		return fmt.Errorf("start COM: %w", err)
 	}
-	defer windows.CoUninitialize()
 	v, err := windows.UTF16PtrFromString("open")
 	if err != nil {
 		return err

@@ -271,7 +271,8 @@ export function Places(): $CancellablePromise<core$0.Place[] | null> {
 }
 
 /**
- * PlanExport previews collision-free original copies or rendered exports.
+ * PlanExport previews original copies or rendered exports at names nothing
+ * else has.
  */
 export function PlanExport(ids: number[] | null, directory: string, options: core$0.ExportOptions): $CancellablePromise<core$0.ExportJob[] | null> {
     return $Call.ByID(1912549816, ids, directory, options);

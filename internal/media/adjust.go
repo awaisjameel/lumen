@@ -8,15 +8,12 @@ import (
 	"lumen/internal/core"
 )
 
-// AdjustJPEG is only for presentation copies. Model thumbnails and face
-// crops keep their canonical coordinates and never pass through this.
-func AdjustJPEG(data []byte, a core.DisplayAdjustment) ([]byte, error) {
+// Adjust applies a display rotation and flip to presentation pixels only.
+// Model thumbnails and face crops keep their canonical coordinates and never
+// pass through this.
+func Adjust(im image.Image, a core.DisplayAdjustment) image.Image {
 	if a.Rotation == 0 && !a.Flip {
-		return data, nil
-	}
-	im, err := jpeg.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, err
+		return im
 	}
 	w, h := im.Bounds().Dx(), im.Bounds().Dy()
 	ow, oh := w, h
@@ -41,7 +38,19 @@ func AdjustJPEG(data []byte, a core.DisplayAdjustment) ([]byte, error) {
 			out.Set(tx, ty, im.At(x+im.Bounds().Min.X, y+im.Bounds().Min.Y))
 		}
 	}
+	return out
+}
+
+// AdjustJPEG is Adjust for a cached JPEG thumbnail.
+func AdjustJPEG(data []byte, a core.DisplayAdjustment) ([]byte, error) {
+	if a.Rotation == 0 && !a.Flip {
+		return data, nil
+	}
+	im, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
 	var buf bytes.Buffer
-	err = jpeg.Encode(&buf, out, &jpeg.Options{Quality: 92})
+	err = jpeg.Encode(&buf, Adjust(im, a), &jpeg.Options{Quality: 92})
 	return buf.Bytes(), err
 }

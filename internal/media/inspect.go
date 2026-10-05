@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,5 +94,5 @@ func (d Decoders) Subtitles(ctx context.Context, path string, index int, at int6
 	if !allowed || d.FFmpeg == "" {
 		return ErrUnsupported
 	}
-	return runTool(ctx, d.FFmpeg, out, ffmpegArgs("-ss", ssTime(at), "-i", path, "-map", "0:"+strconvInt(index), "-f", "webvtt", "-")...)
+	return runTool(ctx, d.FFmpeg, out, ffmpegArgs("-ss", ssTime(at), "-i", path, "-map", "0:"+strconv.Itoa(index), "-f", "webvtt", "-")...)
 }

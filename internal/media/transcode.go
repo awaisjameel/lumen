@@ -18,8 +18,6 @@ func (d Decoders) ConvertMP4(ctx context.Context, path string, at int64) (run fu
 	return d.ConvertMP4Track(ctx, path, at, -1)
 }
 
-func strconvInt(index int) string { return strconv.Itoa(index) }
-
 // ConvertMP4Track prepares playback with an explicitly chosen audio stream.
 func (d Decoders) ConvertMP4Track(ctx context.Context, path string, at int64, audio int) (run func(out io.Writer) error, err error) {
 	if d.FFmpeg == "" || d.FFprobe == "" {
@@ -44,7 +42,7 @@ func (d Decoders) ConvertMP4Track(ctx context.Context, path string, at int64, au
 		if !found {
 			return nil, ErrUnsupported
 		}
-		audioMap = "0:" + strconvInt(audio)
+		audioMap = "0:" + strconv.Itoa(audio)
 	}
 	at = max(0, at)
 	if v.Duration > 0 && at >= v.Duration {

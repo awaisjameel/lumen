@@ -81,11 +81,7 @@ func (m *MediaService) prepareRender(ctx context.Context, id int64, side int, un
 	if !ok {
 		return "", info, store.ErrNotFound
 	}
-	a, err := m.store.Adjustment(ctx, id, unlocked)
-	if err != nil {
-		return "", info, err
-	}
-	dst, info, err := m.cache.RenderFile(ctx, id, path, f.Orientation, side, a.Version)
+	dst, info, err := m.cache.RenderFile(ctx, id, path, f.Orientation, side)
 	if err != nil {
 		return "", info, err
 	}

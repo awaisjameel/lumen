@@ -16,6 +16,24 @@ import (
 	"lumen/internal/store"
 )
 
+// FreeName is name, or name with the organise planner's " (2)", " (3)"…
+// before its extension: the first that nothing in dir has on disk and that
+// reserved (folded paths already planned) does not hold.
+func FreeName(dir, name string, reserved map[string]bool) (string, error) {
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for n := 1; n <= maxCollisions; n++ {
+		candidate := filepath.Join(dir, stem+collisionSuffix(n)+ext)
+		if reserved[core.Fold(candidate)] {
+			continue
+		}
+		if _, err := os.Lstat(candidate); errors.Is(err, os.ErrNotExist) {
+			return candidate, nil
+		}
+	}
+	return "", ErrExists
+}
+
 // ExportRunner publishes new copies from an adjacent temporary file. The
 // journal records its digest before the no-replace rename, so a restart can
 // distinguish a committed output from an unrelated file at the destination.

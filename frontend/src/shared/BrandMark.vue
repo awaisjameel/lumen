@@ -9,7 +9,9 @@ withDefaults(defineProps<{ decorative?: boolean }>(), { decorative: true })
 </template>
 
 <style scoped>
-.brand-mark {
+/* :where keeps this default below a caller's own size class, whatever order
+   the two stylesheets load in. */
+:where(.brand-mark) {
   display: block;
   flex-shrink: 0;
   width: 1.5rem;

@@ -76,7 +76,7 @@ The repairs add 12 frontend regressions and four Go regressions.
   readiness wait for asynchronous audio-track discovery. Screenshot inspection
   then caught duplicate subtitle cues; the fix and stricter cue-count assertions
   were applied before the final rerun.
-- `git diff --check`: passed. Audit repairs remain local and uncommitted.
+- `git diff --check`: passed. These repairs were committed as `470ccc7`.
 
 ## Acceptance limits
 
@@ -90,3 +90,42 @@ exports retain the documented intermediate rendered-copy limitations. Native
 Open/Open with OS-dialog hand-off, touch hardware, unusual codecs/GPUs, clean
 machine installation, signing and release packaging are separate acceptance
 work. No commit, push, merge, installer release or publication was performed.
+
+## Follow-up audit of the branch head
+
+Reviewed `update/phase-8` at `098f16b` (merge base and main `4fc704a`):
+`335a2de` implementation, `470ccc7` the repairs above, `098f16b` the new logo
+and its derived assets. These repairs are local and uncommitted.
+
+- **Render cache key:** the display-adjustment version was part of the key
+  although rendered pixels do not depend on it, so every rotate, flip or reset
+  of a HEIC/TIFF ran the native worker again and kept another identical copy.
+  The key is now source revision, orientation, size and decoder version.
+- **Export encoding:** a rendered export was JPEG-encoded up to three times
+  (viewing render, baked adjustment, final) and a video frame twice. Pixels are
+  now decoded once, adjusted, and encoded once at the chosen quality.
+- **Export names:** one name already in the folder, or shared by two selected
+  files, refused the whole plan; saving a second frame of a video to the same
+  folder always failed. Such a name now takes the Organise planner's " (2)".
+- **Consistency:** Open/Open with accepts an already-initialised COM thread as
+  recycling does; the `strconvInt` and `EncodeImage` forwarding wrappers are
+  gone; the logo's default size can no longer outrank a caller's size class.
+- **Records:** the plan's status line, the render-key and export statements in
+  the implementation record, and the conventions' scope now match the code.
+
+Verification of the repaired tree: `scripts/lint.sh` passed (507 frontend
+tests across 48 files). The Go race suite passed except
+`TestWatchReportsChangesAndReleasesHandle` in the untouched `internal/scanner`,
+which timed out once under load and passed three consecutive race reruns.
+Bindings regenerated with only the `PlanExport` comment changed. `wails3 build`
+passed (`Lumen.exe` SHA-256
+`5DF4D5FC796F806A03FC6E5C9373CCFAF12A5D051BB653DFD2264F49446F49A4`) and the
+native WebView2 harness passed 56 checks with no uncaught frontend error. Four
+Go regressions were added (adjustment geometry, free export names at both
+layers, baked export rotation).
+
+Recorded, not changed: batch actions and Shift-range selection make one call
+or one full-result query per step, unmeasured on a large library; a rotated
+photo's preview is briefly stretched until its details load; the inspector
+shows the engine's untranslated "Embedded ICC"; `NewLibraryService` takes its
+cache as an optional trailing argument; export journal rows are never pruned.

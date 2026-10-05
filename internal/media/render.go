@@ -176,7 +176,7 @@ func (c *Cache) Inspect(ctx context.Context, path string, kind core.Kind) (core.
 
 // RenderFile caches only the current source revision. It serialises workers
 // and eviction, and rechecks the source before publishing a finished decode.
-func (c *Cache) RenderFile(ctx context.Context, id int64, path string, orientation, side, adjustmentVersion int) (string, core.RenderInfo, error) {
+func (c *Cache) RenderFile(ctx context.Context, id int64, path string, orientation, side int) (string, core.RenderInfo, error) {
 	var info core.RenderInfo
 	if c.Renderer == nil {
 		return "", info, ErrUnsupported
@@ -195,7 +195,9 @@ func (c *Cache) RenderFile(ctx context.Context, id int64, path string, orientati
 	if err != nil {
 		return "", info, err
 	}
-	key := sha256.Sum256(fmt.Appendf(nil, "%s:%d:%d:%d:%d:%d:%s", path, before.Size(), before.ModTime().UnixNano(), orientation, side, adjustmentVersion, renderVersion))
+	// Display rotation and flip are applied by the viewer and by export, so
+	// they are not part of the key: changing them must not decode again.
+	key := sha256.Sum256(fmt.Appendf(nil, "%s:%d:%d:%d:%d:%s", path, before.Size(), before.ModTime().UnixNano(), orientation, side, renderVersion))
 	info.Revision = hex.EncodeToString(key[:])
 	info.Provenance = "source"
 	dir := filepath.Join(c.Dir, "render")

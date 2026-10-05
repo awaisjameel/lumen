@@ -153,3 +153,18 @@ func TestExportRevalidatesAfterRenderingAndCleansTemporaryCopies(t *testing.T) {
 		})
 	}
 }
+
+func TestFreeNameSkipsNamesOnDiskAndNamesAlreadyPlanned(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.jpg"), []byte("kept"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reserved := map[string]bool{core.Fold(filepath.Join(dir, "A (2).JPG")): true}
+	got, err := FreeName(dir, "a.jpg", reserved)
+	if err != nil || got != filepath.Join(dir, "a (3).jpg") {
+		t.Fatalf("FreeName = %q, %v", got, err)
+	}
+	if got, err := FreeName(dir, "b.jpg", reserved); err != nil || got != filepath.Join(dir, "b.jpg") {
+		t.Fatalf("a free name was changed: %q, %v", got, err)
+	}
+}

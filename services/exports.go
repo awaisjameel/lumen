@@ -3,7 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
-	"errors"
+	"image"
 	"image/jpeg"
 	"image/png"
 	"os"
@@ -17,7 +17,8 @@ import (
 	"lumen/internal/store"
 )
 
-// PlanExport previews collision-free original copies or rendered exports.
+// PlanExport previews original copies or rendered exports at names nothing
+// else has.
 func (s *LibraryService) PlanExport(ctx context.Context, ids []int64, directory string, options core.ExportOptions) ([]core.ExportJob, error) {
 	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
 	if len(ids) == 0 || !filepath.IsAbs(directory) {
@@ -56,7 +57,12 @@ func (s *LibraryService) PlanExport(ctx context.Context, ids []int64, directory 
 				name = strings.TrimSuffix(name, filepath.Ext(name)) + "-frame" + filepath.Ext(name)
 			}
 		}
-		to := filepath.Join(directory, name)
+		// A name another selected file or the folder already has takes the
+		// planner's " (2)", so one shared name never refuses the whole batch.
+		to, err := fileops.FreeName(directory, name, destinations)
+		if err != nil {
+			return nil, err
+		}
 		if err := s.store.ExportAllowed(ctx, id, to); err != nil {
 			return nil, err
 		}
@@ -68,12 +74,6 @@ func (s *LibraryService) PlanExport(ctx context.Context, ids []int64, directory 
 			if detail.Video == nil || options.Frame < 0 || options.Frame >= detail.Video.Duration {
 				return nil, media.ErrUnsupported
 			}
-		}
-		if _, err := os.Lstat(to); !errors.Is(err, os.ErrNotExist) {
-			return nil, fileops.ErrExists
-		}
-		if destinations[core.Fold(to)] {
-			return nil, fileops.ErrExists
 		}
 		destinations[core.Fold(to)] = true
 		jobs = append(jobs, core.ExportJob{AssetID: id, From: path, To: to, Size: fi.Size(), MTime: fi.ModTime().UnixNano(), Options: options})
@@ -146,39 +146,35 @@ func (s *LibraryService) exportPixels(ctx context.Context, job core.ExportJob) (
 	if err != nil {
 		return nil, err
 	}
-	var data []byte
-	a, err := s.store.Adjustment(ctx, job.AssetID, false)
-	if err != nil {
-		return nil, err
-	}
+	// The pixels are encoded once, after any adjustment: every further JPEG
+	// generation would lose detail the chosen quality did not ask to lose.
+	var im image.Image
 	if f.Kind == core.KindVideo {
-		im, err := s.media.Decoder.FrameAt(ctx, job.From, job.Options.Frame, job.Options.Side)
+		frame, err := s.media.Decoder.FrameAt(ctx, job.From, job.Options.Frame, job.Options.Side)
 		if err != nil {
 			return nil, err
 		}
-		data, err = media.EncodeImage(im, job.Options.Quality)
-		if err != nil {
-			return nil, err
-		}
+		im = frame.RGBA()
 	} else {
-		path, _, err := s.media.RenderFile(ctx, job.AssetID, job.From, f.Orientation, job.Options.Side, a.Version)
+		path, _, err := s.media.RenderFile(ctx, job.AssetID, job.From, f.Orientation, job.Options.Side)
 		if err != nil {
 			return nil, err
 		}
-		data, err = os.ReadFile(path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		im, err = jpeg.Decode(bytes.NewReader(data))
 		if err != nil {
 			return nil, err
 		}
 	}
 	if job.Options.Adjust {
-		data, err = media.AdjustJPEG(data, a)
+		a, err := s.store.Adjustment(ctx, job.AssetID, false)
 		if err != nil {
 			return nil, err
 		}
-	}
-	im, err := jpeg.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, err
+		im = media.Adjust(im, a)
 	}
 	var out bytes.Buffer
 	if job.Options.Format == "png" {
