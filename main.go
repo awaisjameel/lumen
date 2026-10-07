@@ -120,13 +120,13 @@ func run() error {
 	}
 	defer st.Close()
 
-	decoders := media.Decoders{FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe()}
+	decoders := media.Decoders{FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe(), Raw: paths.Raw()}
 	cache := media.NewCache(paths.ThumbDir, decoders)
 	executable, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	cache.Renderer = media.ProcessRenderer{Executable: executable, FFmpeg: paths.FFmpeg()}
+	cache.Renderer = media.ProcessRenderer{Executable: executable, FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe(), Raw: paths.Raw()}
 	// The Blocked screen's lock, shared so that covered photos and videos are
 	// served only while it is open.
 	gate := &services.BlockGate{}

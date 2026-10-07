@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { engine, isCancelled, originalUrl, RENDER_SIDE, renderUrl, THUMB_LARGE, thumbUrl } from '../bridge'
 import type { AssetDetail, RenderInfo } from '../bridge'
-import { errorText } from '../shared/errors'
+import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { observeResize } from '../shared/observeResize'
 import { constrain, fitScale, zoomAt } from './viewport'
@@ -32,10 +32,14 @@ const loadedSource = ref('')
 const info = ref<RenderInfo | null>(null)
 const originalFailed = ref(false)
 const failed = ref('')
+// A file that holds several pages (a TIFF) is turned through with the
+// viewer's controls; the grid, the details and the models know its first.
+const page = ref(0)
+const pages = ref(1)
 // The details are asked for after the picture is shown, and until they
 // arrive may still be the last picture's.
 const detail = computed(() => (props.detail?.id === props.id ? props.detail : null))
-const rendered = computed(() => (info.value ? renderUrl(props.id, info.value.revision) : undefined))
+const rendered = computed(() => (info.value ? renderUrl(props.id, info.value.revision, info.value.page) : undefined))
 // The WebView decodes an original no larger than a render would be; a
 // bigger one is shown through the bounded render instead.
 const original = computed(() =>
@@ -88,11 +92,29 @@ function pixelScale() {
 }
 async function renderCopy(current: number) {
   try {
-    const result = await engine.render(props.id, abort?.signal)
+    const result = await engine.render(props.id, abort?.signal, page.value)
     if (request === current) info.value = result
   } catch (e) {
     if (request === current && !isCancelled(e)) failed.value = errorText(e)
   }
+}
+async function countPages(current: number) {
+  try {
+    const inspection = await engine.inspect(props.id, abort?.signal)
+    if (request === current) pages.value = Math.max(1, inspection.pages)
+  } catch (e) {
+    if (!isCancelled(e)) logError(e) // the first page is still shown
+  }
+}
+function turnPage(by: number) {
+  const next = Math.min(pages.value - 1, Math.max(0, page.value + by))
+  if (next === page.value) return
+  page.value = next
+  const current = ++request
+  abort?.abort()
+  abort = new AbortController()
+  failed.value = ''
+  void renderCopy(current)
 }
 function loadFailed() {
   loadedSource.value = ''
@@ -176,6 +198,8 @@ watch(
     info.value = null
     originalFailed.value = false
     failed.value = ''
+    page.value = 0
+    pages.value = 1
     const rotated = (detail.value?.adjustment?.rotation ?? 0) % 2 !== 0
     const width = detail.value?.width ?? props.width
     const height = detail.value?.height ?? props.height
@@ -183,6 +207,7 @@ watch(
     if (fitting.value) fit()
     else set(viewport.value)
     if (!detail.value || detail.value.video || original.value) return
+    if (detail.value.caps.paged) void countPages(current)
     await renderCopy(current)
   },
   { immediate: true },
@@ -202,7 +227,7 @@ onBeforeUnmount(() => {
   stopResize?.()
   pointers.clear()
 })
-defineExpose({ fit, actual, zoom, scale })
+defineExpose({ fit, actual, zoom, scale, page, pages, turnPage })
 </script>
 
 <template>
@@ -232,6 +257,7 @@ defineExpose({ fit, actual, zoom, scale })
       v-show="ready"
       :key="full"
       class="original"
+      :class="{ page: page > 0 }"
       :src="full"
       :style="style"
       alt=""
@@ -239,7 +265,10 @@ defineExpose({ fit, actual, zoom, scale })
       @load="loadedSource = full ?? ''"
       @error="loadFailed"
     />
-    <span v-if="info?.limited" class="resolution" role="status">{{
+    <span v-if="info?.preview" class="resolution" role="status">{{
+      t('viewer.embeddedPreview', { w: info.width, h: info.height })
+    }}</span>
+    <span v-else-if="info?.limited" class="resolution" role="status">{{
       t('viewer.resolution', { w: info.width, h: info.height })
     }}</span>
     <span v-if="failed" class="resolution" role="status">{{ failed }}</span>
@@ -270,6 +299,10 @@ img {
 }
 /* A thumbnail made before the last turn keeps its shape until the new one arrives. */
 .preview {
+  object-fit: contain;
+}
+/* A later page may have another shape than the first, whose place it takes. */
+.original.page {
   object-fit: contain;
 }
 .resolution {

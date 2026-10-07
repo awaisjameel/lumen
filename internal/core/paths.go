@@ -93,6 +93,10 @@ func (p Paths) FFmpeg() string { return p.runtimeTool("ffmpeg", "ffmpeg.exe") }
 // FFprobe is the bundled ffprobe.exe, "" if it isn't there (see FFmpeg).
 func (p Paths) FFprobe() string { return p.runtimeTool("ffmpeg", "ffprobe.exe") }
 
+// Raw is the bundled camera RAW worker, lumen-raw.exe, "" if it isn't there
+// (see FFmpeg).
+func (p Paths) Raw() string { return p.runtimeTool("lumen-raw.exe") }
+
 // SigLIP is the folder holding the SigLIP 2 model files ("" if there is no
 // runtime folder).
 func (p Paths) SigLIP() string { return p.runtimeFile("models", "siglip2") }

@@ -39,6 +39,14 @@ export function Render(id: number, side: number): $CancellablePromise<core$0.Ren
 }
 
 /**
+ * RenderPage is Render for one page of a file that holds several (a TIFF),
+ * counted from 0. A page the file does not hold is refused.
+ */
+export function RenderPage(id: number, side: number, page: number): $CancellablePromise<core$0.RenderInfo> {
+    return $Call.ByID(3151875933, id, side, page);
+}
+
+/**
  * ThumbCacheBytes is the thumbnail cache's current size on disk.
  */
 export function ThumbCacheBytes(): $CancellablePromise<number> {

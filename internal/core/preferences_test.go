@@ -41,6 +41,9 @@ func TestCapsOfOffersOnlyWhatIsProven(t *testing.T) {
 	}{
 		{"a JPEG the WebView shows", KindPhoto, ".JPG", true, "", MediaCaps{Preview: true, Original: true}},
 		{"a HEIC it cannot show", KindPhoto, ".heic", true, "", MediaCaps{Preview: true}},
+		{"a camera RAW it cannot show", KindPhoto, ".CR2", true, "", MediaCaps{Preview: true}},
+		{"a TIFF, which may hold pages", KindPhoto, ".tif", true, "", MediaCaps{Preview: true, Paged: true}},
+		{"an animated PNG the WebView plays", KindPhoto, ".apng", true, "", MediaCaps{Preview: true, Original: true}},
 		{"a photo not yet indexed", KindPhoto, ".png", false, "", MediaCaps{Original: true}},
 		{"a video played directly", KindVideo, ".mp4", true, PlayDirect,
 			MediaCaps{Preview: true, DirectPlay: true, ConvertPlay: true}},

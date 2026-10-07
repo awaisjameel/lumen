@@ -374,8 +374,9 @@ export const engine = {
   setPlaybackPosition: (id: number, position: number): Promise<void> =>
     LibraryService.SetPlaybackPosition(id, Math.round(position)),
   clearPlaybackHistory: (): Promise<void> => LibraryService.ClearPlaybackHistory(),
-  render: (id: number, signal?: AbortSignal): Promise<RenderInfo> =>
-    cancellable(MediaService.Render(id, RENDER_SIDE), signal),
+  /** The viewing copy of a photo, or of one page (from 0) of a file that holds several. */
+  render: (id: number, signal?: AbortSignal, page = 0): Promise<RenderInfo> =>
+    cancellable(MediaService.RenderPage(id, RENDER_SIDE, page), signal),
   sources: async (): Promise<Source[]> => (await LibraryService.Sources()) ?? [],
   suggestedFolders: async (): Promise<string[]> => (await LibraryService.SuggestedFolders()) ?? [],
   sourcePathKey: (path: string): Promise<string> => LibraryService.SourcePathKey(path),
@@ -595,8 +596,9 @@ export function originalUrl(id: number): string {
   return `/media/original/${id}`
 }
 
-export function renderUrl(id: number, revision: string): string {
-  return `/media/render/${id}/${RENDER_SIDE}?v=${encodeURIComponent(revision)}`
+export function renderUrl(id: number, revision: string, page = 0): string {
+  const url = `/media/render/${id}/${RENDER_SIDE}?v=${encodeURIComponent(revision)}`
+  return page > 0 ? `${url}&page=${page}` : url
 }
 
 export function spriteUrl(id: number, version: number): string {

@@ -853,6 +853,12 @@ export interface MediaCaps {
     "render": boolean;
 
     /**
+     * Paged: the file's format can hold several pages (TIFF), which the
+     * viewer turns through; how many this file holds is in its inspection.
+     */
+    "paged": boolean;
+
+    /**
      * DirectPlay: the WebView may play the video file itself.
      */
     "directPlay": boolean;
@@ -1219,6 +1225,16 @@ export interface RenderInfo {
      * fewer pixels than the source has
      */
     "limited": boolean;
+
+    /**
+     * a RAW file's embedded preview: its sensor data could not be developed
+     */
+    "preview": boolean;
+
+    /**
+     * which page of the file this is, from 0
+     */
+    "page": number;
     "revision": string;
 }
 

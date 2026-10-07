@@ -36,6 +36,14 @@ func (d Decoders) Inspect(ctx context.Context, path string, kind core.Kind) (cor
 		}
 		return info, nil
 	}
+	switch core.FamilyOf(path) {
+	case core.FamilyRAW:
+		return d.rawInspection(ctx, path)
+	case core.FamilyJXL:
+		info.Orientation = 1 // the decoder turns it; nothing else is read from it
+		return info, nil
+	default: // read below, by the readers of the common formats
+	}
 	m, err := ReadMetadata(path, kind)
 	if err != nil {
 		return info, err

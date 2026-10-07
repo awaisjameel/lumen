@@ -68,6 +68,41 @@ if [ ! -f "$RT/ffmpeg/ffmpeg.exe" ] || [ ! -f "$RT/ffmpeg/ffprobe.exe" ]; then
 fi
 cp -u "$RT/ffmpeg/LICENSE.txt" "$D/licenses/ffmpeg.LICENSE.txt"
 
+# LibRaw 0.22.2, for camera RAW, used under its CDDL-1.0 option. It is built
+# here from its unmodified source with the same llvm-mingw clang cgo uses
+# (LibRaw's own Windows binaries need the Visual C++ runtime), and linked
+# statically into lumen-raw.exe, the worker in native/lumen-raw. No optional
+# library is compiled in, so lossy-JPEG and deflate-compressed DNG are not read.
+get https://www.libraw.org/data/LibRaw-0.22.2.tar.gz \
+  libraw-0.22.2.tar.gz de86b035655accff8d4010f1a221fdf50d353cb7b1422ba26f14a0db92612cfa
+LR=$D/libraw/LibRaw-0.22.2
+if [ ! -f "$LR/libraw/libraw.h" ]; then
+  rm -rf "$D/libraw"
+  mkdir -p "$D/libraw" && tar -xzf "$D/cache/libraw-0.22.2.tar.gz" -C "$D/libraw"
+fi
+cp -u "$LR/LICENSE.CDDL" "$D/licenses/libraw.LICENSE.CDDL.txt"
+cp -u "$LR/COPYRIGHT" "$D/licenses/libraw.COPYRIGHT.txt"
+RAW_FLAGS=(-O2 -I"$LR" -DLIBRAW_NODLL -DLIBRAW_NOTHREADS)
+# libraw_object SOURCE: compile one LibRaw source file unless its object is newer.
+libraw_object() {
+  local obj=$D/libraw/obj/${1//\//_}.o
+  [ "$obj" -nt "$LR/$1" ] || clang++ -c -w "${RAW_FLAGS[@]}" -o "$obj" "$LR/$1"
+}
+if [ ! -f "$RT/lumen-raw.exe" ] || [ "$ROOT/native/lumen-raw/main.cpp" -nt "$RT/lumen-raw.exe" ]; then
+  echo "build lumen-raw.exe"
+  mkdir -p "$D/libraw/obj"
+  # The *_ph.cpp files are placeholders for the parts they stand in for.
+  mapfile -t RAW_SOURCES < <(cd "$LR" && find src -name '*.cpp' ! -name '*_ph.cpp' | sort)
+  for src in "${RAW_SOURCES[@]}"; do
+    libraw_object "$src" &
+    while [ "$(jobs -rp | wc -l)" -ge 8 ]; do wait -n; done
+  done
+  wait
+  [ "$(find "$D/libraw/obj" -name '*.o' | wc -l)" -eq "${#RAW_SOURCES[@]}" ] || { echo "LibRaw did not compile" >&2; exit 1; }
+  clang++ -std=c++17 -municode -static -Wall -Wextra "${RAW_FLAGS[@]}" \
+    -o "$RT/lumen-raw.exe" "$ROOT/native/lumen-raw/main.cpp" "$D"/libraw/obj/*.o -lws2_32
+fi
+
 # SigLIP 2 base (Apache-2.0): fp16 ONNX towers and the Gemma tokenizer.
 HF=https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/ba1f3b0843f24bc5417d38e19c37b287d719b2f4
 get $HF/tokenizer.json siglip2-tokenizer.json cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322

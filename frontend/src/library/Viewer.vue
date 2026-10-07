@@ -631,6 +631,23 @@ onBeforeUnmount(() => {
           class="image-controls"
           :class="{ raised: viewing.filmstrip && neighbours.length }"
         >
+          <template v-if="image.pages > 1">
+            <IconButton
+              :icon="icons['chevron-left']"
+              :label="t('viewer.previousPage')"
+              variant="ghost"
+              :disabled="image.page === 0"
+              @click="image.turnPage(-1)"
+            />
+            <span role="status" data-pages>{{ t('viewer.page', { page: image.page + 1, pages: image.pages }) }}</span>
+            <IconButton
+              :icon="icons['chevron-right']"
+              :label="t('viewer.nextPage')"
+              variant="ghost"
+              :disabled="image.page === image.pages - 1"
+              @click="image.turnPage(1)"
+            />
+          </template>
           <IconButton
             :icon="icons['zoom-out']"
             :label="t('viewer.zoomOut')"

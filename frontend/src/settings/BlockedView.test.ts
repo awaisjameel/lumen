@@ -316,7 +316,7 @@ const photoDetail = (id: number): AssetDetail => ({
   paths: [],
   size: 100,
   ext: '.jpg',
-  caps: { preview: true, original: true, render: false, directPlay: false, convertPlay: false },
+  caps: { preview: true, original: true, render: false, paged: false, directPlay: false, convertPlay: false },
   video: null,
 })
 
@@ -478,7 +478,7 @@ it('plays a covered video in the Viewer', async () => {
     ...photoDetail(7),
     kind: Kind.KindVideo,
     ext: '.mp4',
-    caps: { preview: true, original: false, render: false, directPlay: true, convertPlay: true },
+    caps: { preview: true, original: false, render: false, paged: false, directPlay: true, convertPlay: true },
     video: { duration: 60000, codec: 'h264', audio: 'aac', play: Playback.PlayDirect },
   })
   await browsing([covered(7, { v: true, d: 60000 })])
@@ -681,7 +681,7 @@ it('counts a covered video playing as use of the screen', async () => {
     ...photoDetail(7),
     kind: Kind.KindVideo,
     ext: '.mp4',
-    caps: { preview: true, original: false, render: false, directPlay: true, convertPlay: true },
+    caps: { preview: true, original: false, render: false, paged: false, directPlay: true, convertPlay: true },
     video: { duration: 60000, codec: 'h264', audio: 'aac', play: Playback.PlayDirect },
   })
   await browsing([covered(7, { v: true, d: 60000 })])

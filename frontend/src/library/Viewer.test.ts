@@ -42,7 +42,7 @@ const detail: AssetDetail = {
   paths: [],
   size: 100,
   ext: '.mp4',
-  caps: { preview: true, original: false, render: false, directPlay: true, convertPlay: true },
+  caps: { preview: true, original: false, render: false, paged: false, directPlay: true, convertPlay: true },
   video: { duration: 60000, codec: 'h264', audio: 'aac', play: Playback.PlayDirect },
 }
 let wrapper: VueWrapper | undefined
@@ -158,7 +158,7 @@ it('ignores details from an earlier visit to the same asset', async () => {
   pending.resolve({
     ...detail,
     video: null,
-    caps: { preview: true, original: true, render: false, directPlay: false, convertPlay: false },
+    caps: { preview: true, original: true, render: false, paged: false, directPlay: false, convertPlay: false },
   })
   await flushPromises()
   expect(view().find('video').exists()).toBe(true)
@@ -202,7 +202,7 @@ it('shows the photo of the source it is given, not the library’s', async () =>
     ...detail,
     id: 5,
     video: null,
-    caps: { preview: true, original: true, render: false, directPlay: false, convertPlay: false },
+    caps: { preview: true, original: true, render: false, paged: false, directPlay: false, convertPlay: false },
   })
   wrapper = mountViewer(fakeSource())
   await flushPromises()

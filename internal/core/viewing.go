@@ -8,6 +8,8 @@ type RenderInfo struct {
 	Width    int    `json:"width"`
 	Height   int    `json:"height"`
 	Limited  bool   `json:"limited"` // fewer pixels than the source has
+	Preview  bool   `json:"preview"` // a RAW file's embedded preview: its sensor data could not be developed
+	Page     int    `json:"page"`    // which page of the file this is, from 0
 	Revision string `json:"revision"`
 }
 

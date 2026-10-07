@@ -66,6 +66,22 @@ func HEICSamples(tb testing.TB) []string {
 	return paths
 }
 
+// RawSamples returns the camera RAW files in the folder LUMEN_RAW_SAMPLES
+// names (real camera files are tens of megabytes each, so they are kept out
+// of the repo), skipping the test if it is unset.
+func RawSamples(tb testing.TB) []string {
+	tb.Helper()
+	dir := os.Getenv("LUMEN_RAW_SAMPLES")
+	if dir == "" {
+		tb.Skip("LUMEN_RAW_SAMPLES not set: no camera files to test on")
+	}
+	paths, _ := filepath.Glob(filepath.Join(dir, "*.*"))
+	if len(paths) == 0 {
+		tb.Skipf("no files in %s", dir)
+	}
+	return paths
+}
+
 // FacePhotos returns the photos in the folder LUMEN_FACE_PHOTOS names (real
 // photos of people, kept out of the repo), skipping the test if it is unset.
 func FacePhotos(tb testing.TB, n int) []string {

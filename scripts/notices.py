@@ -120,6 +120,7 @@ def main() -> None:
 
     vips = pinned(r"build-win64-mxe/releases/download/v([0-9.]+)/")
     ffmpeg = pinned(r"ffmpeg-n([0-9.]+)-[^ ]*-lgpl-shared")
+    libraw = pinned(r"libraw\.org/data/LibRaw-([0-9.]+)\.tar\.gz")
     ort = pinned(r"microsoft\.ml\.onnxruntime\.directml/([0-9.]+)/")
     dml = pinned(r"microsoft\.ai\.directml/([0-9.]+)/")
     vips_libs: dict[str, str] = json.loads(licence("libvips.versions.json"))
@@ -146,6 +147,11 @@ def main() -> None:
             f'FFmpeg {ffmpeg} (ffmpeg\\): LGPL-3.0-or-later. The unmodified "lgpl-shared" build from\n'
             "  https://github.com/BtbN/FFmpeg-Builds, which publishes its build scripts; FFmpeg's\n"
             f"  source is at https://ffmpeg.org/ (release {ffmpeg}).\n\n"
+            f"LibRaw {libraw} (inside lumen-raw.exe, which reads camera RAW files): used under the\n"
+            "  Common Development and Distribution License 1.0, one of the two licences it offers.\n"
+            f"  Built from the unmodified source, https://www.libraw.org/data/LibRaw-{libraw}.tar.gz,\n"
+            "  by Lumen's scripts/deps.sh. Its copyright notice, which names the code it includes\n"
+            "  (dcraw, DCB and FBDD, the X3F library, parts of the Adobe DNG SDK), follows below.\n\n"
             f"ONNX Runtime {ort} with DirectML (onnxruntime.dll, onnxruntime_providers_shared.dll): MIT.\n"
             "  https://github.com/microsoft/onnxruntime\n\n"
             f"DirectML {dml} (DirectML.dll): Microsoft Software License Terms, which allow it to be\n"
@@ -193,6 +199,8 @@ def main() -> None:
         "\nLICENCE TEXTS\n",
         section("libvips: GNU Lesser General Public License 2.1", licence("libvips.LICENSE.txt")),
         section("FFmpeg: GNU Lesser General Public License 3", licence("ffmpeg.LICENSE.txt")),
+        section("LibRaw: copyright notice", licence("libraw.COPYRIGHT.txt")),
+        section("LibRaw: Common Development and Distribution License 1.0", licence("libraw.LICENSE.CDDL.txt")),
         section("ONNX Runtime: MIT", licence("onnxruntime.LICENSE.txt")),
         section("ONNX Runtime: third-party notices", licence("onnxruntime.ThirdPartyNotices.txt")),
         section("DirectML: Microsoft Software License Terms", licence("directml.LICENSE.txt")),

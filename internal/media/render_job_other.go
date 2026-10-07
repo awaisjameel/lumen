@@ -4,4 +4,4 @@ package media
 
 import "os/exec"
 
-func containRender(_ *exec.Cmd) (func(), error) { return func() {}, nil }
+func contain(*exec.Cmd, uintptr) (func(), error) { return func() {}, nil }

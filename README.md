@@ -23,7 +23,7 @@ Brand assets and their regeneration workflow are documented in [the branding gui
 
 **Phase 2 (search and Things)** is working:
 
-- Thumbnails through **libvips** (JPEG, PNG, WebP, GIF, TIFF, AVIF, shrink-on-load); **HEIC** through Windows' decoder (WIC), falling back to the bundled FFmpeg; BMP through Go
+- Thumbnails through **libvips** (JPEG, PNG, WebP, GIF, TIFF, AVIF, shrink-on-load); **HEIC** through Windows' decoder (WIC), falling back to the bundled FFmpeg; BMP through Go; camera RAW through LibRaw and JPEG XL through FFmpeg (Phase 9)
 - **SigLIP 2** image embeddings on the GPU through DirectML (CPU fallback), batches of 16, loaded only while there is work
 - **Natural-language search** from the search box (Ctrl+F): results best first, cut relative to the best match so a query matching nothing returns nothing; an in-memory int8 index answers in milliseconds
 - **Things**: about 180 built-in labels, the broad kind of each photo (People, Screenshots, Documents…), labels users add ("Eiffel Tower", found across the library at once), tags users add or remove on any photo (their edits always win), a confidence slider
@@ -88,14 +88,22 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 - A resizable metadata inspector, multi-selection across virtual pages, shared batch actions, validated Windows hand-off, previewed rename/move with journal recovery and Undo, and original/JPEG/PNG export with per-file outcomes.
 - Implementation, verification evidence and limits: [Phase 8 record](docs/phase8-implementation-2026-10-05.md).
 
-**Next development is planned:** RAW/DNG-first format support, expanded customisation, individual/bulk
+**Phase 9 (camera RAW first, then broader formats)** is implemented locally:
+
+- **Camera RAW**: Adobe DNG, Canon (CR2, CR3, CRW), Nikon (NEF, NRW), Sony (ARW, SR2, SRF), Fujifilm (RAF), Olympus and OM System (ORF), Panasonic (RW2) and Pentax (PEF). LibRaw develops the sensor data in a worker process of its own (`lumen-raw.exe`), with a memory budget and a lifetime per file. One neutral development (the camera's white balance and colour matrix, sRGB, upright) feeds thumbnails, the perceptual hash, the AI and the viewer, so it does not have the camera's own JPEG look. A file LibRaw cannot develop shows its embedded camera preview, labelled as one; a file it cannot read at all is skipped with a reason. A RAW and the JPEG beside it stay two photos, and are never offered as similar copies.
+- **One format catalogue** (`internal/core/formats.go`) names every extension, its kind, its family and what the WebView is sent; the scanner, decoders and services read it.
+- **JPEG XL** is decoded by the bundled FFmpeg; **animated PNG** joins the animations the WebView plays from the original; a **multi-page TIFF** is turned through page by page in the viewer.
+- **More video containers**: MPG/MPEG, TS, OGV and ASF, converted as they play. A TypeScript source named `.ts` is told from a transport stream by its first packets.
+- The tested camera matrix, measurements, decisions and limits: [Phase 9 record](docs/phase9-formats-2026-10-07.md).
+
+**Next development is planned:** expanded customisation, individual/bulk
 lossless image compression, and automatic update checking with background
 preparation and a user-approved restart. The updater's limited network exception and
 recovery design are in [the automatic update plan](docs/automatic-updates-plan-2026-10-04.md).
 The phased scope, architecture,
 migration rules and acceptance gates are in
 [the next development plan](docs/next-development-plan-2026-10-04.md).
-Phases 9–12 have not started.
+Phases 10–12 have not started.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
@@ -176,6 +184,7 @@ internal/scanner     folder walk, hashing, Windows folder watcher
 internal/media       EXIF, filename dates, thumbnails and their cache, perceptual hash
 internal/media/vips  the libvips calls (cgo), one C function per job
 internal/media/wic   Windows Imaging Component decoding (HEIC)
+native/lumen-raw     the camera RAW worker (C++, LibRaw linked statically); scripts/deps.sh builds it into deps/runtime
 internal/ai          ONNX Runtime sessions, SigLIP 2 image/text encoders, tokenizer, face detection/alignment/recognition
 internal/search      in-memory int8 vector index, search, Things vocabulary and tagging
 internal/people      face clustering (incremental, constrained by the user's corrections), names in searches
@@ -234,6 +243,7 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **AI models ship beside `Lumen.exe`** (`models\` in the runtime folder), read-only from the installer, rather than in the per-user app-data folder; the database and thumbnail cache are in `%LOCALAPPDATA%\Lumen`.
 - **Text in images is in v1**, not "Later", and only for photos the AI sorts as screenshots or documents. It is searched with SQLite FTS4, which go-sqlite3 includes by default; FTS5 would need a build tag on every build and test.
 - **Removing files goes to the Windows Recycle Bin**, never a permanent delete, and only after the user confirms. Duplicates pre-select the best copy (the plan's "quality/best-shot picking" for copies), but nothing moves until the user confirms.
+- **Camera RAW runs in a worker Lumen builds itself** (decided 7 October 2026): LibRaw's source is pinned and compiled by `deps.sh` with the same llvm-mingw clang cgo uses, into one static `lumen-raw.exe`. LibRaw's own Windows binaries need the Visual C++ runtime, which a clean PC may lack. It is used under its CDDL-1.0 option. No JPEG or zlib library is compiled in, so lossy-JPEG and deflate-compressed DNG are not read.
 - **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). Trimming it needs a from-source LGPL build of FFmpeg, a toolchain of its own; packed in the installer the stock build is 63 MB of its 872 MB. Revisit if the installer's size matters more than that build.
 - **No updates in the app** (decided 3 October 2026): the plan left auto-update open, as opt-in. Lumen makes no network request at all; Settings shows the releases page.
 - **Installed per user** (decided 3 October 2026), not in Program Files: the library is per user already, and installing or updating needs no administrator.

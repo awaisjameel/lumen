@@ -2,7 +2,8 @@
 
 Date: 4 October 2026. Status: Phase 7 is implemented (see
 [the Phase 7 record](phase7-design-2026-10-04.md)) and so is Phase 8 (see
-[the Phase 8 record](phase8-implementation-2026-10-05.md)); Phases 9–12 are
+[the Phase 8 record](phase8-implementation-2026-10-05.md)) and Phase 9 (see
+[the Phase 9 record](phase9-formats-2026-10-07.md)); Phases 10–12 are
 planned and not started.
 
 This plan covers the product owner's four requests: rebuild the complete
@@ -263,6 +264,8 @@ star ratings also need an explicit XMP rule: current favourites export as
 five stars and must not silently acquire conflicting rating semantics.
 
 ## 4. Phase 9 — RAW first, then broader format coverage
+
+Implemented locally on 7 October 2026. See the [implementation and verification record](phase9-formats-2026-10-07.md) for the tested camera matrix, the decoder decision, measurements and the limits that remain. The scope below remains the design reference.
 
 Current recognised image extensions are JPEG/JPE, PNG, GIF, WebP, BMP,
 TIFF, HEIC/HEIF and AVIF. Video extensions are MP4/M4V/MOV, AVI, MKV,

@@ -335,14 +335,14 @@ func walkable(root string, isSource bool) (walk string, ok bool, err error) {
 }
 
 // notTransportStream reports whether a file with a transport stream's name
-// (.mts, .m2ts: AVCHD and Blu-ray video) isn't one: TypeScript gives its
-// modules the same name, and a downloads folder holding a project's
+// (.ts, .mts, .m2ts: broadcast, AVCHD and Blu-ray video) isn't one: TypeScript
+// gives its sources and modules the same names, and a downloads folder holding a project's
 // node_modules offered hundreds of them as videos, each failing in every
 // stage. A stream is packets with a 0x47 sync byte every 188 bytes, or every
 // 192 after a 4-byte time code. Other files, and one that can't be read (its
 // stages say why), are kept.
 func notTransportStream(path string) bool {
-	if ext := strings.ToLower(filepath.Ext(path)); ext != ".mts" && ext != ".m2ts" {
+	if core.FamilyOf(path) != core.FamilyTransport {
 		return false
 	}
 	f, err := core.OpenShared(path)

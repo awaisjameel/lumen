@@ -146,6 +146,9 @@ func TestTypeScriptModulesAreNotVideos(t *testing.T) {
 		"clip.mts":          packets(188, 0), // MPEG-TS
 		"camera.MTS":        packets(192, 4), // AVCHD: a time code before each packet
 		"film.m2ts":         packets(192, 4),
+		"recording.ts":      packets(188, 0), // a broadcast recording
+		"main.ts":           []byte("export const answer: number = 42;\n"),
+		"component.d.ts":    bytes.Repeat([]byte("declare const x: number;\n"), 100),
 		"film.mp4":          []byte("not sniffed"),
 		"index.d.mts":       []byte("export declare function f(): void;\n"),
 		"types.mts":         bytes.Repeat([]byte("export {};\n"), 100),
@@ -168,7 +171,7 @@ func TestTypeScriptModulesAreNotVideos(t *testing.T) {
 	}
 	s := Scanner{Store: st, HashWorkers: 2}
 	res, err := s.Scan(t.Context(), src, "", Options{Videos: true})
-	if err != nil || res.Seen != 4 || res.Removed != 1 {
-		t.Fatalf("scan: %+v, %v; want the 4 videos seen and the module forgotten", res, err)
+	if err != nil || res.Seen != 5 || res.Removed != 1 {
+		t.Fatalf("scan: %+v, %v; want the 5 videos seen and the module forgotten", res, err)
 	}
 }

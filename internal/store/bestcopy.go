@@ -20,8 +20,9 @@ import (
 //  1. resolution (width × height), higher first;
 //  2. format and re-save signals, each deciding only if the ones before it tie:
 //     an original-camera file (EXIF names a camera and gave the date) before
-//     one without; then lossless or camera-native formats (PNG, TIFF, HEIC,
-//     HEIF, AVIF) before JPEG before every other format (WebP, GIF, BMP); then
+//     one without; then a camera's RAW before lossless or camera-native
+//     formats (PNG, TIFF, HEIC, HEIF, AVIF, JPEG XL) before JPEG before every other
+//     format (WebP, GIF, BMP); then
 //     a file with a messenger re-save name (IMG-20240101-WA0001, "photo (1)",
 //     "photo-edited") after one without;
 //  3. file size, larger first;
@@ -36,16 +37,19 @@ import (
 // Exact copies are one photo in several files with identical bytes, so only
 // the path can differ: the oldest file is kept, then the shortest path.
 
-// formatRank orders file formats: lossless and camera-native first, then
-// JPEG, then everything else (WebP, GIF, BMP). ext is lower case with its dot.
+// formatRank orders file formats: a camera's RAW first, then lossless and
+// camera-native formats, then JPEG, then everything else (WebP, GIF, BMP).
 func formatRank(ext string) int {
-	switch strings.ToLower(ext) {
-	case ".png", ".tif", ".tiff", ".heic", ".heif", ".avif":
+	switch core.FamilyOf(ext) {
+	case core.FamilyRAW:
+		return 3
+	case core.FamilyPNG, core.FamilyTIFF, core.FamilyHEIF, core.FamilyAVIF, core.FamilyJXL:
 		return 2
-	case ".jpg", ".jpeg", ".jpe":
+	case core.FamilyJPEG:
 		return 1
+	default:
+		return 0
 	}
-	return 0
 }
 
 // resaveName matches the names messengers and editors give to a copy of a
