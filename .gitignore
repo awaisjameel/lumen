@@ -30,3 +30,9 @@ __pycache__/
 
 # go build . output (the app builds to bin/)
 /lumen.exe
+
+# End-to-end tests: generated fixtures, scratch libraries and results
+# (e2e/.work), downloaded camera samples (e2e/.cache)
+e2e/node_modules
+e2e/.work
+e2e/.cache

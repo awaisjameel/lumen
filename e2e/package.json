@@ -1,0 +1,20 @@
+{
+  "name": "lumen-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "description": "End-to-end suites that drive the built Lumen app in its native WebView2",
+  "type": "module",
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0",
+    "npm": ">=11.19.0"
+  },
+  "scripts": {
+    "test": "node run.mjs",
+    "list": "node run.mjs --list",
+    "clean": "node run.mjs --clean",
+    "perf": "node perf/perf.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "25.12.0"
+  }
+}

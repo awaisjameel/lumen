@@ -39,6 +39,11 @@ tasks:
     cmds:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
 
+  e2e:
+    summary: Runs the end-to-end suites against bin/Lumen.exe (e2e/README.md); SUITES="viewer formats" runs only those
+    cmds:
+      - node e2e/run.mjs {{.SUITES}}
+
   # The template's Docker, server and MSIX tasks are left out: Lumen needs cgo
   # with the Windows libvips (deps/), which neither build can have, and its
   # installer is NSIS (task package), which carries the runtime folder.

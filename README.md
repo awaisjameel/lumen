@@ -152,6 +152,7 @@ go test -race -timeout 900s . ./internal/... ./services/... # wiring, engine and
 scripts/lint.sh               # every formatter, linter and type check (--fix applies fixes first)
 cd frontend && npm run check  # the frontend's alone: vue-tsc, ESLint, Prettier (lint:fix and format fix)
 npm run test                 # Vitest: async store, viewer and settings regressions
+node e2e/run.mjs             # end-to-end suites on bin/Lumen.exe in its WebView2 (after wails3 build)
 ```
 
 Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates, which only build for their own platforms.
@@ -162,8 +163,11 @@ Before moving between implementation phases, also regenerate the bindings with
 `wails3 generate bindings -f '-tags production' -clean=true -ts -i` (as the build does), check `git diff -- frontend/bindings`, and run
 `wails3 build`. The frontend must finish building before Go embeds `frontend/dist`;
 do not run independent frontend and Go production builds concurrently. Browser
-component tests use jsdom; actual codec playback still needs a WebView smoke test
-(the app started with `LUMEN_DEVTOOLS_PORT`, driven over the DevTools protocol).
+component tests use jsdom; actual codec playback, native full screen and files
+moving on disk are checked by the end-to-end suites in [`e2e/`](e2e/README.md),
+which drive the built app over the DevTools protocol on scratch libraries, with
+fixtures they generate themselves (one suite for each use case: onboarding, every
+screen, interface, collections, organise, viewer, file tools, branding, formats).
 See [the latest audit](docs/audit-2026-10-01.md) for findings, verification evidence
 and remaining acceptance limits (earlier audits in `docs/` are historical records).
 
@@ -173,6 +177,7 @@ Handy environment variables:
 - `LUMEN_RUNTIME_DIR`: where the DLLs, `ffmpeg\` and `models\` are (default: beside `Lumen.exe`).
 - `LUMEN_DEVTOOLS_PORT`: expose the WebView's DevTools protocol on `127.0.0.1` so UI tests (e.g. puppeteer-core) can drive the real app. Off by default.
 - `LUMEN_FACE_PHOTOS` (tests only): a folder of real photos of people. The face tests run on it and skip without it; keep such photos out of the repo.
+- `LUMEN_RAW_SAMPLES` (tests only): a folder of real camera RAW files. The RAW tests run on it and skip without it; `e2e/fixtures/fetch_raw.py` downloads a pinned CC0 set into `e2e/.cache/raw`.
 
 ## Layout
 
@@ -196,6 +201,7 @@ internal/signin      Windows sign-in check for a forgotten PIN (Windows Hello, o
 internal/xmp         the XMP sidecar packet (pure Go)
 internal/parallel    the worker pool loops run on
 internal/testenv     finds deps/runtime for tests, skipping cleanly without it
+e2e/                 end-to-end suites on the built app in WebView2, their fixture generators and perf scripts (e2e/README.md)
 services/            Wails services (Library, Search, People, Media, System), the block gate, the loopback video server, error codes
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/design  design tokens (tokens.css), the icon manifest, how the appearance preferences are applied
