@@ -166,6 +166,9 @@ type MediaCaps struct {
 	// supplies this capability from its renderer and known source dimensions;
 	// RenderInfo reports whether the available pixels were reduced.
 	Render bool `json:"render"`
+	// Paged: the file's format can hold several pages (TIFF), which the
+	// viewer turns through; how many this file holds is in its inspection.
+	Paged bool `json:"paged"`
 	// DirectPlay: the WebView may play the video file itself.
 	DirectPlay bool `json:"directPlay"`
 	// ConvertPlay: Lumen can convert the video while it plays.
@@ -180,6 +183,7 @@ func CapsOf(kind Kind, ext string, hasPreview bool, play Playback) MediaCaps {
 	switch kind {
 	case KindPhoto:
 		c.Original = WebNative(ext)
+		c.Paged = FamilyOf(ext) == FamilyTIFF
 	case KindVideo:
 		// PlayHEVC plays directly where the WebView decodes HEVC; that holds
 		// until the player has tried. Any video can be converted as it plays,

@@ -130,3 +130,51 @@ func TestRenderRefusesChangedSourcesAndInvalidOutputs(t *testing.T) {
 		t.Fatal("failed output entered the render cache")
 	}
 }
+
+// pagedRenderer renders each page as a picture as wide as its number says.
+type pagedRenderer struct {
+	t     *testing.T
+	calls []int
+}
+
+func (r *pagedRenderer) Render(ctx context.Context, path string, orientation, side int) ([]byte, error) {
+	return r.RenderPage(ctx, path, orientation, side, 0)
+}
+
+func (r *pagedRenderer) RenderPage(_ context.Context, _ string, _, _, page int) ([]byte, error) {
+	r.calls = append(r.calls, page)
+	return renderJPEG(r.t, 8+page, 8), nil
+}
+
+func TestEachPageOfAFileIsRenderedAndCachedOnItsOwn(t *testing.T) {
+	c := NewCache(t.TempDir(), Decoders{})
+	r := &pagedRenderer{t: t}
+	c.Renderer = r
+	source := filepath.Join(t.TempDir(), "scan.tiff")
+	if err := os.WriteFile(source, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first, a, err := c.RenderPage(t.Context(), 1, source, 1, 1024, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, b, err := c.RenderPage(t.Context(), 1, source, 1, 1024, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == third || a.Revision == b.Revision || a.Width != 8 || b.Width != 10 || a.Page != 0 || b.Page != 2 {
+		t.Fatalf("pages share a render: %+v at %s, %+v at %s", a, first, b, third)
+	}
+	// The first page is the same render RenderFile always made; both are cached.
+	if again, info, err := c.RenderFile(t.Context(), 1, source, 1, 1024); err != nil || again != first || info.Revision != a.Revision {
+		t.Fatalf("the first page moved: %s, %v", again, err)
+	}
+	if _, _, err := c.RenderPage(t.Context(), 1, source, 1, 1024, 2); err != nil || len(r.calls) != 2 {
+		t.Fatalf("renders = %v, %v; want one for each page", r.calls, err)
+	}
+	// A renderer that knows nothing of pages is not asked for one.
+	c.Renderer = renderFunc(func(context.Context, string, int, int) ([]byte, error) { return renderJPEG(t, 8, 8), nil })
+	if _, _, err := c.RenderPage(t.Context(), 1, source, 1, 1024, 1); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("err = %v, want ErrUnsupported", err)
+	}
+}

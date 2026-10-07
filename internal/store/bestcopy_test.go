@@ -78,7 +78,7 @@ func TestBestCopyStepTwoKeepsTheOriginalCameraFile(t *testing.T) {
 }
 
 func TestBestCopyStepTwoRanksFormats(t *testing.T) {
-	ranked := [][]string{{".png", ".tif", ".tiff", ".heic", ".heif", ".avif"}, {".jpg", ".jpeg", ".jpe"}, {".webp", ".gif", ".bmp"}}
+	ranked := [][]string{{".dng", ".cr2", ".nef", ".arw"}, {".png", ".tif", ".tiff", ".heic", ".heif", ".avif"}, {".jpg", ".jpeg", ".jpe"}, {".webp", ".gif", ".bmp"}}
 	for hi := range ranked {
 		for _, better := range ranked[hi] {
 			for _, worse := range slices.Concat(ranked[hi+1:]...) {

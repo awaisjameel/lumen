@@ -24,7 +24,9 @@ tooling; this file covers how code is written.
   out. Phase 7 (the Nuxt UI frontend and design system) is built as
   `docs/phase7-design-2026-10-04.md` records. Phase 8 (viewing, playback,
   details and file tools) is built as
-  `docs/phase8-implementation-2026-10-05.md` records. Phase 6 (the installer, politeness controls, crash reports and
+  `docs/phase8-implementation-2026-10-05.md` records. Phase 9 (camera RAW
+  and broader formats) is built as `docs/phase9-formats-2026-10-07.md`
+  records. Phase 6 (the installer, politeness controls, crash reports and
   diagnostics, onboarding and empty states, the performance pass) is built
   as `docs/phase6-design-2026-10-03.md` sets out; its decisions are not
   reopened except by a later explicit product-owner decision. Lumen currently
@@ -80,6 +82,11 @@ tooling; this file covers how code is written.
   User-triggered ones are returned.
 - **Versions.** A change to what a stage produces bumps that stage's version
   constant, with an upgrade rule if old output can stand.
+- **Formats.** An extension is recognised in one place, the catalogue in
+  `internal/core/formats.go`. Code that treats a format specially asks for
+  its `core.Family`, never compares extensions; which decoder reads a family
+  is `internal/media`'s choice (`Decoders.open`). A format is listed only
+  with fixtures that prove what Lumen does with it.
 - **Tests**
   - Tests are named as a sentence about behaviour
     (`TestTagByNameRefusesABlockedThing`).

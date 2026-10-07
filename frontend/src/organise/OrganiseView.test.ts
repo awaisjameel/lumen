@@ -60,7 +60,7 @@ const asset: AssetDetail = {
   paths: ['D:\\Photos\\IMG_0042.JPG'],
   size: 100,
   ext: '.jpg',
-  caps: { preview: true, original: true, render: false, directPlay: false, convertPlay: false },
+  caps: { preview: true, original: true, render: false, paged: false, directPlay: false, convertPlay: false },
   video: null,
 }
 const beachDay: Event = {

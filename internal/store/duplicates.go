@@ -157,7 +157,10 @@ func groupDuplicates(ctx context.Context, candidates []duplicateCandidate) ([]co
 		hashes[i] = p.hash
 	}
 	if err := linkNear(ctx, hashes, func(a, b int) {
-		if sameShape(photos[a].DuplicateItem, photos[b].DuplicateItem) {
+		// A camera's RAW file and the JPEG it saved beside it are a negative
+		// and its print, not two copies: they are never offered as similar,
+		// which would suggest removing one. RAW files still group together.
+		if sameShape(photos[a].DuplicateItem, photos[b].DuplicateItem) && isRaw(photos[a].Ext) == isRaw(photos[b].Ext) {
 			join(a, b)
 		}
 	}); err != nil {
@@ -188,6 +191,8 @@ func groupDuplicates(ctx context.Context, candidates []duplicateCandidate) ([]co
 	})
 	return groups, nil
 }
+
+func isRaw(ext string) bool { return core.FamilyOf(ext) == core.FamilyRAW }
 
 func newestFirst(a, b core.DuplicateItem) int {
 	return cmp.Or(cmp.Compare(b.TakenAt, a.TakenAt), cmp.Compare(a.ID, b.ID))

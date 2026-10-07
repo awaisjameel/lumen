@@ -65,6 +65,23 @@ func TestDuplicateGroupsReviewOnlyVisibleCopiesAndSimilarPhotos(t *testing.T) {
 	}
 }
 
+func TestARawFileAndItsJPEGAreNotOfferedAsSimilar(t *testing.T) {
+	photo := func(id int64, ext string) duplicateCandidate {
+		return duplicateCandidate{DuplicateItem: core.DuplicateItem{ID: id, Width: 6000, Height: 4000, Ext: ext}, hash: 7, hashed: true}
+	}
+	groups, err := groupDuplicates(context.Background(), []duplicateCandidate{photo(1, ".ARW"), photo(2, ".jpg")})
+	check(t, err)
+	if len(groups) != 0 {
+		t.Fatalf("a RAW and its JPEG were grouped: %+v", groups)
+	}
+	// Two RAW frames of one burst are still two takes of one picture.
+	groups, err = groupDuplicates(context.Background(), []duplicateCandidate{photo(1, ".arw"), photo(2, ".jpg"), photo(3, ".arw")})
+	check(t, err)
+	if len(groups) != 1 || len(groups[0].Items) != 2 || groups[0].Items[0].ID == 2 || groups[0].Items[1].ID == 2 {
+		t.Fatalf("groups = %+v, want the two RAW files", groups)
+	}
+}
+
 // randomPhotos returns n photos with random hashes, plus a near copy (a few
 // bits flipped) of every tenth one, all the same shape.
 func randomPhotos(n int) []duplicateCandidate {

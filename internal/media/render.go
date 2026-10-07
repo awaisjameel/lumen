@@ -30,6 +30,12 @@ const (
 	renderBytes      = 64 << 20
 	renderCacheBytes = 256 << 20
 	renderVersion    = "srgb-upright-v1"
+	// renderMemory is the render worker's job limit. It covers the worker, a
+	// camera RAW it has developed (rawMemory) and the pixels it then holds.
+	renderMemory = 1536 << 20
+	// renderTimeout bounds one render: a RAW developed at full size and then
+	// encoded, on battery.
+	renderTimeout = 45 * time.Second
 )
 
 // CanRender reports whether known source dimensions fit the worker's budget.
@@ -43,23 +49,34 @@ type Renderer interface {
 	Render(ctx context.Context, path string, orientation, side int) ([]byte, error)
 }
 
+// PageRenderer is a Renderer that can also render a page after a file's
+// first (see Decoders.DecodePage).
+type PageRenderer interface {
+	RenderPage(ctx context.Context, path string, orientation, side, page int) ([]byte, error)
+}
+
 // ProcessRenderer launches the installed runtime in its private worker mode.
-type ProcessRenderer struct{ Executable, FFmpeg string }
+type ProcessRenderer struct{ Executable, FFmpeg, FFprobe, Raw string }
 
 type renderInput struct {
-	Path, FFmpeg      string
-	Orientation, Side int
-	Operation         string
+	Path, FFmpeg, FFprobe, Raw string
+	Orientation, Side, Page    int
+	Operation                  string
 }
 
 // Render decodes one image in a cancellable, bounded worker process.
 func (p ProcessRenderer) Render(ctx context.Context, path string, orientation, side int) ([]byte, error) {
-	return p.worker(ctx, renderInput{Path: path, FFmpeg: p.FFmpeg, Orientation: orientation, Side: side})
+	return p.RenderPage(ctx, path, orientation, side, 0)
+}
+
+// RenderPage is Render for one page of a file, counted from 0.
+func (p ProcessRenderer) RenderPage(ctx context.Context, path string, orientation, side, page int) ([]byte, error) {
+	return p.worker(ctx, renderInput{Path: path, FFmpeg: p.FFmpeg, FFprobe: p.FFprobe, Raw: p.Raw, Orientation: orientation, Side: side, Page: page})
 }
 
 // Inspect reads image metadata inside the same bounded native worker.
 func (p ProcessRenderer) Inspect(ctx context.Context, path string) (core.MediaInspection, error) {
-	data, err := p.worker(ctx, renderInput{Path: path, FFmpeg: p.FFmpeg, Operation: "inspect"})
+	data, err := p.worker(ctx, renderInput{Path: path, FFmpeg: p.FFmpeg, FFprobe: p.FFprobe, Raw: p.Raw, Operation: "inspect"})
 	var info core.MediaInspection
 	if err != nil {
 		return info, err
@@ -69,7 +86,7 @@ func (p ProcessRenderer) Inspect(ctx context.Context, path string) (core.MediaIn
 }
 
 func (p ProcessRenderer) worker(ctx context.Context, in renderInput) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, renderTimeout)
 	defer cancel()
 	input, err := json.Marshal(in)
 	if err != nil {
@@ -86,7 +103,7 @@ func (p ProcessRenderer) worker(ctx context.Context, in renderInput) ([]byte, er
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	cleanup, err := containRender(cmd)
+	cleanup, err := contain(cmd, renderMemory)
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -120,8 +137,9 @@ func RenderWorker(ctx context.Context, input io.Reader, output io.Writer) error 
 	if err := json.NewDecoder(io.LimitReader(input, 64<<10)).Decode(&in); err != nil {
 		return err
 	}
+	d := Decoders{FFmpeg: in.FFmpeg, FFprobe: in.FFprobe, Raw: in.Raw, foreground: true}
 	if in.Operation == "inspect" {
-		info, err := (Decoders{FFmpeg: in.FFmpeg}).Inspect(ctx, in.Path, core.KindPhoto)
+		info, err := d.Inspect(ctx, in.Path, core.KindPhoto)
 		if err != nil {
 			return err
 		}
@@ -130,15 +148,14 @@ func RenderWorker(ctx context.Context, input io.Reader, output io.Writer) error 
 	if in.Side < 1 || in.Side > RenderSide {
 		return ErrUnsupported
 	}
-	m, err := ReadMetadata(in.Path, core.KindPhoto)
+	m, err := d.Metadata(ctx, in.Path, core.KindPhoto)
 	if err != nil {
 		return err
 	}
 	if !CanRender(m.Width, m.Height) {
 		return ErrUnsupported
 	}
-	d := Decoders{FFmpeg: in.FFmpeg}
-	im, err := d.Decode(ctx, in.Path, core.KindPhoto, in.Orientation, in.Side)
+	im, err := d.DecodePage(ctx, in.Path, core.KindPhoto, in.Orientation, in.Side, in.Page)
 	if err != nil {
 		return err
 	}
@@ -146,8 +163,35 @@ func RenderWorker(ctx context.Context, input io.Reader, output io.Writer) error 
 	if err != nil {
 		return err
 	}
+	if im.Preview {
+		jpeg = markPreview(jpeg)
+	}
 	_, err = output.Write(jpeg)
 	return err
+}
+
+// previewMark is the JPEG comment a render carries when it shows a RAW
+// file's embedded preview. It travels with the cached file, so a render read
+// back from the cache still says what it is.
+const previewMark = "lumen:embedded-preview"
+
+// markPreview adds previewMark to a JPEG, straight after its first marker.
+func markPreview(jpeg []byte) []byte {
+	if len(jpeg) < 2 {
+		return jpeg
+	}
+	size := len(previewMark) + 2
+	out := append(make([]byte, 0, len(jpeg)+size+2), jpeg[:2]...)
+	out = append(out, 0xff, 0xfe, byte(size>>8), byte(size))
+	out = append(out, previewMark...)
+	return append(out, jpeg[2:]...)
+}
+
+// markedPreview reports whether a render carries previewMark.
+func markedPreview(jpeg []byte) bool {
+	const head = 2 + 4 // the first marker, then the comment's marker and length
+	return len(jpeg) >= head+len(previewMark) && jpeg[2] == 0xff && jpeg[3] == 0xfe &&
+		string(jpeg[head:head+len(previewMark)]) == previewMark
 }
 
 // Inspect uses the same admission slot as image rendering. Metadata requests
@@ -187,9 +231,22 @@ func (c *Cache) Subtitles(ctx context.Context, path string, index int, at int64,
 // RenderFile caches only the current source revision. It serialises workers
 // and eviction, and rechecks the source before publishing a finished decode.
 func (c *Cache) RenderFile(ctx context.Context, id int64, path string, orientation, side int) (string, core.RenderInfo, error) {
-	var info core.RenderInfo
+	return c.RenderPage(ctx, id, path, orientation, side, 0)
+}
+
+// RenderPage is RenderFile for one page of a file, counted from 0.
+func (c *Cache) RenderPage(ctx context.Context, id int64, path string, orientation, side, page int) (string, core.RenderInfo, error) {
+	info := core.RenderInfo{Page: page}
 	if c.Renderer == nil {
 		return "", info, ErrUnsupported
+	}
+	render := func(ctx context.Context) ([]byte, error) { return c.Renderer.Render(ctx, path, orientation, side) }
+	if page != 0 {
+		pages, ok := c.Renderer.(PageRenderer)
+		if !ok || page < 0 {
+			return "", info, ErrUnsupported
+		}
+		render = func(ctx context.Context) ([]byte, error) { return pages.RenderPage(ctx, path, orientation, side, page) }
 	}
 	side = min(max(side, RenderSideMin), RenderSide)
 	select {
@@ -208,12 +265,15 @@ func (c *Cache) RenderFile(ctx context.Context, id int64, path string, orientati
 	// Display rotation and flip are applied by the viewer and by export, so
 	// they are not part of the key: changing them must not decode again.
 	key := sha256.Sum256(fmt.Appendf(nil, "%s:%d:%d:%d:%d:%s", path, before.Size(), before.ModTime().UnixNano(), orientation, side, renderVersion))
+	if page != 0 { // the first page keeps the key it always had
+		key = sha256.Sum256(fmt.Appendf(nil, "%x:page-%d", key, page))
+	}
 	info.Revision = hex.EncodeToString(key[:])
 	dir := filepath.Join(c.Dir, "render")
 	dst := filepath.Join(dir, fmt.Sprintf("%d-%s.jpg", id, info.Revision))
 	jpeg, err := readRender(dst, side)
 	if errors.Is(err, os.ErrNotExist) {
-		jpeg, err = c.Renderer.Render(ctx, path, orientation, side)
+		jpeg, err = render(ctx)
 		if err != nil {
 			return "", info, err
 		}
@@ -244,6 +304,7 @@ func (c *Cache) RenderFile(ctx context.Context, id int64, path string, orientati
 		return "", info, err
 	}
 	info.Width, info.Height = cfg.Width, cfg.Height
+	info.Preview = markedPreview(jpeg)
 	return dst, info, nil
 }
 

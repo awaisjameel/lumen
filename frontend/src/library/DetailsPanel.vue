@@ -433,7 +433,9 @@ const metadata = computed(() => {
       row('details.iso', i?.iso),
       row('details.profile', i?.hasProfile ? i.profile || t('details.profileEmbedded') : undefined),
       row('details.orientation', i?.orientation),
-      row('details.pages', i?.pages),
+      // A TIFF's pages are turned through in the viewer; an animation's
+      // frames play there, and a still picture has neither to count.
+      d.caps.paged ? row('details.pages', i?.pages) : row('details.frames', i && i.pages > 1 ? i.pages : undefined),
     )
   for (const track of i?.tracks ?? [])
     rows.push({

@@ -1,7 +1,6 @@
 package core
 
 import (
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -623,8 +622,8 @@ const (
 // names; audio "" = none) plays: directly when the WebView supports the
 // container and both codecs, else converted.
 func PlaybackOf(ext, video, audio string) Playback {
-	switch strings.ToLower(ext) {
-	case ".mp4", ".m4v", ".mov":
+	switch FamilyOf(ext) {
+	case FamilyMP4:
 		if !mp4Audio[audio] {
 			return PlayConvert
 		}
@@ -634,10 +633,11 @@ func PlaybackOf(ext, video, audio string) Playback {
 		case "hevc":
 			return PlayHEVC
 		}
-	case ".webm":
+	case FamilyWebM:
 		if webmVideo[video] && webmAudio[audio] {
 			return PlayDirect
 		}
+	default: // no other container plays in the WebView
 	}
 	return PlayConvert
 }
@@ -781,58 +781,6 @@ func WallClock(t time.Time) int64 {
 	y, mo, d := t.Date()
 	h, mi, s := t.Clock()
 	return time.Date(y, mo, d, h, mi, s, 0, time.UTC).Unix()
-}
-
-// Media file extensions Lumen recognises (lower case, with the dot).
-var (
-	photoExts = map[string]bool{
-		".jpg": true, ".jpeg": true, ".jpe": true, ".png": true, ".gif": true,
-		".webp": true, ".bmp": true, ".tif": true, ".tiff": true,
-		".heic": true, ".heif": true, ".avif": true,
-	}
-	videoExts = map[string]bool{
-		".mp4": true, ".m4v": true, ".mov": true, ".avi": true, ".mkv": true,
-		".webm": true, ".3gp": true, ".wmv": true, ".mts": true, ".m2ts": true,
-	}
-	// Photo formats WebView2 renders natively, so the viewer can show the
-	// original (videos: see PlaybackOf), with the MIME type they are sent as.
-	webNativeTypes = map[string]string{
-		".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".jpe": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
-		".webp": "image/webp", ".bmp": "image/bmp", ".avif": "image/avif",
-	}
-	// Videos the WebView may play as they are, with their MIME types.
-	videoTypes = map[string]string{
-		".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
-	}
-)
-
-// KindOf returns the media kind for a path, or "" if Lumen ignores it.
-func KindOf(path string) Kind {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch {
-	case photoExts[ext]:
-		return KindPhoto
-	case videoExts[ext]:
-		return KindVideo
-	}
-	return ""
-}
-
-// WebNative reports whether the WebView can display a photo of this extension.
-func WebNative(ext string) bool { _, ok := webNativeTypes[strings.ToLower(ext)]; return ok }
-
-// ContentType is the MIME type to send a file of this extension as, when
-// the WebView is sent it as it is: a photo it displays or a video it plays
-// (from Lumen's own tables: Windows' registry, which Go would ask, varies by PC).
-func ContentType(ext string) string {
-	ext = strings.ToLower(ext)
-	if t, ok := webNativeTypes[ext]; ok {
-		return t
-	}
-	if t, ok := videoTypes[ext]; ok {
-		return t
-	}
-	return "application/octet-stream"
 }
 
 // About is what Settings → About Lumen shows.

@@ -10,8 +10,7 @@ import (
 	"io"
 	"math"
 	"os"
-	"path/filepath"
-	"strings"
+	"strconv"
 
 	"github.com/evanoberholster/imagemeta/imagehash"
 
@@ -65,6 +64,9 @@ type Thumbs struct {
 type Image struct {
 	Pix  []byte // W x H x 3
 	W, H int
+	// Preview: these are a RAW file's embedded preview, as its sensor data
+	// could not be developed.
+	Preview bool
 }
 
 // RGBA is the picture as Go's image package reads it.
@@ -109,6 +111,8 @@ type Subtitler interface {
 // decoding differs by format:
 //
 //   - HEIC/HEIF: Windows' own decoder (WIC), else FFmpeg
+//   - camera RAW: the LibRaw worker (see raw.go)
+//   - JPEG XL: FFmpeg (the libvips build has no JPEG XL loader)
 //   - BMP: Go (the libvips build ships without ImageMagick)
 //   - videos: FFmpeg, which also turns them upright
 //   - everything else (JPEG, PNG, WebP, GIF, TIFF, AVIF): libvips, shrinking on load
@@ -116,15 +120,26 @@ type Subtitler interface {
 // Thumbnails and Decode share that routing, so a face box found in a Decode
 // image lands on the same spot of the thumbnail.
 type Decoders struct {
-	FFmpeg  string // ffmpeg.exe, for videos, and HEIC when WIC can't decode it; "" = none
-	FFprobe string // ffprobe.exe, for videos; "" = none
+	FFmpeg  string // ffmpeg.exe, for videos, JPEG XL, and HEIC when WIC can't decode it; "" = none
+	FFprobe string // ffprobe.exe, for videos and the size of a JPEG XL; "" = none
+	Raw     string // lumen-raw.exe, for camera RAW; "" = none
+
+	// foreground runs the tools at normal priority: a viewer is waiting.
+	foreground bool
 }
 
 // Metadata reads what a file says about itself: EXIF for photos, the
 // container's tags for videos.
 func (d Decoders) Metadata(ctx context.Context, path string, kind core.Kind) (Metadata, error) {
 	if kind != core.KindVideo {
-		return ReadMetadata(path, kind)
+		switch core.FamilyOf(path) {
+		case core.FamilyRAW:
+			return d.rawMetadata(ctx, path)
+		case core.FamilyJXL:
+			return d.jxlMetadata(ctx, path)
+		default:
+			return ReadMetadata(path, kind)
+		}
 	}
 	v, err := d.probe(ctx, path)
 	if err != nil {
@@ -182,9 +197,22 @@ func ThumbsFromImage(im Image) (Thumbs, error) {
 // most side (never enlarged), for the models that need more detail than the
 // thumbnails hold. Videos are read with Frames instead.
 func (d Decoders) Decode(ctx context.Context, path string, kind core.Kind, orientation, side int) (Image, error) {
+	return d.DecodePage(ctx, path, kind, orientation, side, 0)
+}
+
+// DecodePage is Decode for one page of a file, counted from 0. Only a TIFF
+// has pages after its first; the index and the models read the first.
+func (d Decoders) DecodePage(ctx context.Context, path string, kind core.Kind, orientation, side, page int) (Image, error) {
 	src, err := d.open(ctx, path, kind, orientation, side)
 	if err != nil {
 		return Image{}, err
+	}
+	if page != 0 {
+		if page < 0 || src.file == "" || core.FamilyOf(path) != core.FamilyTIFF {
+			return Image{}, ErrUnsupported
+		}
+		// libvips takes a loader's options after the file's name.
+		src.file += "[page=" + strconv.Itoa(page) + "]"
 	}
 	var im vips.RGB
 	if src.file != "" {
@@ -195,15 +223,16 @@ func (d Decoders) Decode(ctx context.Context, path string, kind core.Kind, orien
 	if err != nil {
 		return Image{}, fmt.Errorf("decode %s: %w", path, err)
 	}
-	return Image{Pix: im.Pix, W: im.W, H: im.H}, nil
+	return Image{Pix: im.Pix, W: im.W, H: im.H, Preview: src.preview}, nil
 }
 
 // source is a photo ready for libvips: a file it decodes itself (shrinking
 // on load and applying the EXIF orientation), or pixels decoded elsewhere
 // with the orientation still to apply.
 type source struct {
-	file   string
-	pixels vips.Pixels
+	file    string
+	pixels  vips.Pixels
+	preview bool // a RAW file's embedded preview (see raw.go)
 }
 
 // open picks the decoder for path. Pixels decoded outside libvips are at
@@ -212,13 +241,18 @@ func (d Decoders) open(ctx context.Context, path string, kind core.Kind, orienta
 	if kind != core.KindPhoto {
 		return source{}, ErrUnsupported // videos: see Frames
 	}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".heic", ".heif":
+	switch core.FamilyOf(path) {
+	case core.FamilyHEIF:
 		return d.heif(ctx, path, orientation, maxSide)
-	case ".bmp":
+	case core.FamilyRAW:
+		return d.rawSource(ctx, path, maxSide)
+	case core.FamilyJXL:
+		return d.jxl(ctx, path, maxSide)
+	case core.FamilyBMP:
 		return goDecode(path)
+	default:
+		return source{file: path}, nil
 	}
-	return source{file: path}, nil
 }
 
 // heif decodes HEIC/HEIF. Neither decoder applies the file's rotation, so
@@ -242,6 +276,33 @@ func (d Decoders) heif(ctx context.Context, path string, orientation, maxSide in
 		icc = nil // as sRGB, as before profiles were read
 	}
 	return source{pixels: vips.Pixels{Pix: pix, W: w, H: h, Bands: 3, Orientation: orientation, ICC: icc}}, nil
+}
+
+// jxl decodes JPEG XL with FFmpeg's libjxl, which applies the orientation
+// the file declares. The pixels are taken for sRGB: FFmpeg hands over
+// neither the file's profile nor a conversion from it.
+func (d Decoders) jxl(ctx context.Context, path string, maxSide int) (source, error) {
+	if d.FFmpeg == "" {
+		return source{}, ErrUnsupported
+	}
+	pix, w, h, err := ffmpegDecode(ctx, d.FFmpeg, path, maxSide)
+	if err != nil {
+		return source{}, fmt.Errorf("decode JPEG XL: %w", err)
+	}
+	return source{pixels: vips.RGBPixels(pix, w, h)}, nil
+}
+
+// jxlMetadata is Metadata for a JPEG XL: its size as FFprobe reads it. No
+// reader here finds the EXIF a JPEG XL may carry, so its date comes from the
+// file's name or time like any photo without one.
+func (d Decoders) jxlMetadata(ctx context.Context, path string) (Metadata, error) {
+	m := Metadata{Orientation: 1}
+	v, err := d.probe(ctx, path)
+	if err != nil {
+		return m, err
+	}
+	m.Width, m.Height = v.Width, v.Height
+	return m, nil
 }
 
 // goDecode reads formats libvips lacks with Go's image packages. They carry
@@ -268,12 +329,18 @@ func goDecode(path string) (source, error) {
 	if err != nil {
 		return source{}, fmt.Errorf("decode: %w", err)
 	}
+	return source{pixels: straightPixels(img, 1)}, nil
+}
+
+// straightPixels is a picture Go decoded, for libvips, with the EXIF
+// orientation still to apply.
+func straightPixels(img image.Image, orientation int) vips.Pixels {
 	b := img.Bounds()
 	// Straight (not premultiplied) alpha, as libvips flattens it and WIC
 	// delivers it: premultiplying first would darken see-through pixels twice.
 	rgba := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	draw.Draw(rgba, rgba.Bounds(), img, b.Min, draw.Src)
-	return source{pixels: vips.Pixels{Pix: rgba.Pix, W: b.Dx(), H: b.Dy(), Bands: 4, Orientation: 1}}, nil
+	return vips.Pixels{Pix: rgba.Pix, W: b.Dx(), H: b.Dy(), Bands: 4, Orientation: orientation}
 }
 
 // perceptualHash is the 64-bit pHash of a hashSide x hashSide RGB square.

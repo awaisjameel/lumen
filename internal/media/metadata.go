@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -81,7 +80,7 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 
 	// imagemeta (needed for HEIC) silently returns nothing for some real JPEGs,
 	// e.g. GoPro files. goexif reads those, so it backs it up for JPEG/TIFF.
-	if m.TakenAt.IsZero() && m.Camera == "" && goexifFormats[strings.ToLower(filepath.Ext(path))] {
+	if family := core.FamilyOf(path); m.TakenAt.IsZero() && m.Camera == "" && (family == core.FamilyJPEG || family == core.FamilyTIFF) {
 		if _, err := f.Seek(0, io.SeekStart); err == nil {
 			fillFromGoexif(f, &m)
 		}
@@ -105,8 +104,6 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 	}
 	return m, nil
 }
-
-var goexifFormats = map[string]bool{".jpg": true, ".jpeg": true, ".jpe": true, ".tif": true, ".tiff": true}
 
 // fillFromGoexif fills whatever m is missing from a second EXIF parser.
 func fillFromGoexif(r io.Reader, m *Metadata) {

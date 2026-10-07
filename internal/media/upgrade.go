@@ -2,10 +2,10 @@ package media
 
 import (
 	"encoding/binary"
-	"path/filepath"
 	"strings"
 	"unicode/utf16"
 
+	"lumen/internal/core"
 	"lumen/internal/media/vips"
 )
 
@@ -28,8 +28,8 @@ const EpochDatesMetadataVersion = "imagemeta-1.1+goexif+vips-3"
 // decode the photo again. It reads at most the file's header, and is false
 // when unsure: a version it doesn't know, a header that won't read.
 func DecodesAsAt(path, version string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	heif := ext == ".heic" || ext == ".heif"
+	family := core.FamilyOf(path)
+	heif := family == core.FamilyHEIF
 	switch version {
 	case HEIFProfilesVersion:
 		// Only HEIC changed since, and only in a profile other than sRGB
@@ -46,7 +46,7 @@ func DecodesAsAt(path, version string) bool {
 	// Since then colour profiles are converted to sRGB (by libvips, and by
 	// WIC for HEIC, which iPhones save in Display P3) and pixels Go decodes
 	// keep straight alpha.
-	if heif || ext == ".bmp" {
+	if heif || family == core.FamilyBMP {
 		return false
 	}
 	icc, err := vips.Profile(path)

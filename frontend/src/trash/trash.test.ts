@@ -70,7 +70,7 @@ const detail = (id: number): AssetDetail => ({
   paths: ['C:\\a.jpg'],
   size: 100,
   ext: '.jpg',
-  caps: { preview: true, original: true, render: false, directPlay: false, convertPlay: false },
+  caps: { preview: true, original: true, render: false, paged: false, directPlay: false, convertPlay: false },
   video: null,
 })
 

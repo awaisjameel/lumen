@@ -7,7 +7,7 @@ import ImageSurface from './ImageSurface.vue'
 
 vi.mock('../bridge', async (original) => ({
   ...(await original<typeof Bridge>()),
-  engine: { render: vi.fn() },
+  engine: { render: vi.fn(), inspect: vi.fn() },
 }))
 vi.mock('../shared/observeResize', () => ({ observeResize: () => () => undefined }))
 
@@ -37,15 +37,71 @@ function detail(id: number): AssetDetail {
     size: 1000,
     ext: '.tiff',
     video: null,
-    caps: { preview: true, original: false, render: true, directPlay: false, convertPlay: false },
+    caps: { preview: true, original: false, render: true, paged: false, directPlay: false, convertPlay: false },
   }
 }
 const render: RenderInfo = {
   width: 4096,
   height: 2731,
   limited: true,
+  preview: false,
+  page: 0,
   revision: 'new',
 }
+
+it('turns through the pages of a file that holds several', async () => {
+  const paged = { ...detail(1), caps: { ...detail(1).caps, paged: true } }
+  const inspection = {
+    orientation: 1,
+    hasProfile: false,
+    profile: '',
+    lens: '',
+    exposure: '',
+    aperture: '',
+    iso: '',
+    frameRate: '',
+    pages: 3,
+    tracks: [],
+  }
+  vi.mocked(engine.inspect).mockResolvedValue(inspection)
+  vi.mocked(engine.render).mockImplementation((_id, _signal, page = 0) =>
+    Promise.resolve({ ...render, page, revision: `page-${page}` }),
+  )
+  const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 1, width: 6000, height: 4000, detail: paged } })
+  try {
+    await flushPromises()
+    // The viewer's controls read these and turn the page.
+    expect([wrapper.vm.page, wrapper.vm.pages]).toEqual([0, 3])
+    wrapper.vm.turnPage(-1)
+    expect(wrapper.vm.page).toBe(0)
+    wrapper.vm.turnPage(1)
+    await flushPromises()
+    expect(wrapper.vm.page).toBe(1)
+    expect(wrapper.get('.original').attributes('src')).toContain('/render/1/4096?v=page-1&page=1')
+    wrapper.vm.turnPage(5)
+    await flushPromises()
+    expect(wrapper.vm.page).toBe(2)
+    // Another photo starts at its own first page, with no pages to turn until it says so.
+    vi.mocked(engine.inspect).mockResolvedValue({ ...inspection, pages: 1 })
+    await wrapper.setProps({ id: 2, detail: { ...paged, id: 2 } })
+    await flushPromises()
+    expect([wrapper.vm.page, wrapper.vm.pages]).toEqual([0, 1])
+    expect(wrapper.get('.original').attributes('src')).toContain('/render/2/4096?v=page-0')
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('says when a RAW file shows only its embedded camera preview', async () => {
+  vi.mocked(engine.render).mockResolvedValue({ ...render, width: 1616, height: 1080, preview: true })
+  const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 1, width: 6000, height: 4000, detail: detail(1) } })
+  try {
+    await flushPromises()
+    expect(wrapper.get('[role="status"]').text()).toContain('Camera preview from the RAW file: 1,616 × 1,080')
+  } finally {
+    wrapper.unmount()
+  }
+})
 
 it('cancels navigation and refuses a late render from the previous asset', async () => {
   const first = deferred<RenderInfo>(),
