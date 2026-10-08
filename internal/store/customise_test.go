@@ -118,19 +118,29 @@ func TestExcludedFormatsKeepOnlyWhatCanBeExcluded(t *testing.T) {
 	if got, err := st.ExcludedFormats(ctx); err != nil || got != nil {
 		t.Fatalf("ExcludedFormats() = %v, %v, want none to start with", got, err)
 	}
-	stored, err := st.SetExcludedFormats(ctx, []core.Family{core.FamilyRAW, core.FamilyMP4, "betamax", core.FamilyHEIF})
-	want := []core.Family{core.FamilyHEIF, core.FamilyRAW}
-	if err != nil || !reflect.DeepEqual(stored, want) {
-		t.Fatalf("SetExcludedFormats stored %v, %v, want %v", stored, err, want)
+	// Whatever order they are chosen in, and whatever else is asked for, the
+	// library holds the formats that can be left out, in the order offered.
+	for _, family := range []core.Family{core.FamilyRAW, core.FamilyMP4, "betamax", core.FamilyHEIF} {
+		changed, err := st.SetFormatExcluded(ctx, family, true)
+		if want := family == core.FamilyRAW || family == core.FamilyHEIF; err != nil || changed != want {
+			t.Fatalf("SetFormatExcluded(%q) = %v, %v, want changed %v", family, changed, err, want)
+		}
 	}
+	want := []core.Family{core.FamilyHEIF, core.FamilyRAW}
 	if got, err := st.ExcludedFormats(ctx); err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("ExcludedFormats() = %v, %v, want %v", got, err, want)
 	}
-	if _, err := st.SetExcludedFormats(ctx, nil); err != nil {
-		t.Fatal(err)
+	if changed, err := st.SetFormatExcluded(ctx, core.FamilyRAW, true); err != nil || changed {
+		t.Errorf("excluding RAW again = %v, %v, want no change", changed, err)
+	}
+	if changed, err := st.ClearExcludedFormats(ctx); err != nil || !changed {
+		t.Fatalf("ClearExcludedFormats() = %v, %v, want a change", changed, err)
 	}
 	if got, err := st.ExcludedFormats(ctx); err != nil || got != nil {
 		t.Errorf("after clearing ExcludedFormats() = %v, %v, want none", got, err)
+	}
+	if changed, err := st.ClearExcludedFormats(ctx); err != nil || changed {
+		t.Errorf("clearing none = %v, %v, want no change", changed, err)
 	}
 }
 
@@ -138,7 +148,7 @@ func TestConcurrentFormatChoicesKeepEveryExclusion(t *testing.T) {
 	st, ctx := openTest(t), t.Context()
 	want := core.ExcludableFamilies()
 	for range 10 {
-		if _, err := st.SetExcludedFormats(ctx, nil); err != nil {
+		if _, err := st.ClearExcludedFormats(ctx); err != nil {
 			t.Fatal(err)
 		}
 		var workers sync.WaitGroup

@@ -66,11 +66,6 @@ export function zoneOf(entry: ShortcutEntry): ShortcutZone {
   return entry.zone ?? 'global'
 }
 
-/** The shortcut an entry's command answers to now: the user's, or else its own. */
-export function currentKeys(entry: ShortcutEntry): string | undefined {
-  return keysOf(entry)
-}
-
 /**
  * The command that already answers to keys where entry's would hear them
  * too, if there is one: giving entry the same keys would leave one of the
@@ -79,9 +74,26 @@ export function currentKeys(entry: ShortcutEntry): string | undefined {
 export function shortcutConflict(entry: ShortcutEntry, keys: string): ShortcutEntry | undefined {
   return shortcutCatalogue.find((other) => {
     if (other.id === entry.id || !zonesOverlap(entry.zone, other.zone)) return false
-    const taken = currentKeys(other)
+    const taken = keysOf(other)
     return (taken !== undefined && sameKeys(taken, keys)) || altKeysOf(other).some((alt) => sameKeys(alt, keys))
   })
+}
+
+/**
+ * What stands in the way of entry answering to keys, or to its own again
+ * (undefined), which brings back the other keys that go with them: the first
+ * of those keys another action already hears, and that action.
+ */
+export function assignmentConflict(
+  entry: ShortcutEntry,
+  keys: string | undefined,
+): { keys: string; taken: ShortcutEntry } | undefined {
+  const wanted = keys === undefined ? [entry.keys ?? '', ...(entry.altKeys ?? [])] : [keys]
+  for (const candidate of wanted) {
+    const taken = candidate ? shortcutConflict(entry, candidate) : undefined
+    if (taken) return { keys: candidate, taken }
+  }
+  return undefined
 }
 
 /** Whether another shortcut may still be reassigned (core.MaxShortcuts bounds what is stored). */

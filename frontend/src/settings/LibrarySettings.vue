@@ -7,7 +7,7 @@ import { computed } from 'vue'
 import URadioGroup from '@nuxt/ui/components/RadioGroup.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
 import USwitch from '@nuxt/ui/components/Switch.vue'
-import { START_VIEWS, StartView, ThumbFit } from '../bridge'
+import { START_VIEWS, ThumbFit } from '../bridge'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import PrefRow from '../shared/PrefRow.vue'
@@ -17,17 +17,9 @@ const props = withDefaults(defineProps<{ query?: string }>(), { query: '' })
 const shows = useRowFilter(() => props.query)
 const prefs = usePreferences()
 
-// The generated enum also carries Go's zero value, which is no choice.
-const startViews = Object.values(StartView).filter((v) => v !== StartView.$zero)
-const byName = new Map<string, StartView>(startViews.map((v) => [v, v]))
-const startItems = computed(() =>
-  START_VIEWS.flatMap((name) => {
-    const value = byName.get(name)
-    return value ? [{ value, label: t(`nav.${name}`) }] : []
-  }),
-)
+const startItems = computed(() => START_VIEWS.map((value) => ({ value, label: t(`nav.${value}`) })))
 function setStart(value: unknown) {
-  for (const startView of startViews) if (startView === value) void prefs.set({ startView })
+  for (const startView of START_VIEWS) if (startView === value) void prefs.set({ startView })
 }
 
 const fits = [ThumbFit.ThumbCover, ThumbFit.ThumbContain] as const
@@ -47,7 +39,7 @@ function setFit(value: unknown) {
         <USelect
           data-library="startView"
           class="w-44"
-          :model-value="startViews.find((value) => value === prefs.prefs.startView)"
+          :model-value="START_VIEWS.find((value) => value === prefs.prefs.startView)"
           :items="startItems"
           :aria-labelledby="labelledBy"
           :aria-describedby="describedBy"

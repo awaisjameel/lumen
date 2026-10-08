@@ -23,6 +23,7 @@ import { setShortcutOverrides } from './commands'
 import { reportError } from './errors'
 import { latestSave } from './latestSave'
 import type { LatestSave } from './latestSave'
+import { turns } from './turns'
 import { viewerDefaults } from './viewing'
 import type { ViewerPreferences } from '../bridge'
 
@@ -130,7 +131,9 @@ export const usePreferences = defineStore('preferences', () => {
   let save = saver(prefs.value)
   let pending = 0
   let loading: Promise<void> | null = null
-  let resetting: Promise<void> | null = null
+  // A reset has the preferences to itself: an edit made meanwhile waits and
+  // is applied to what the reset left.
+  const resets = turns()
 
   /** Reads the library's preferences, first offering it an older Lumen's choices. */
   function load(): Promise<void> {
@@ -149,17 +152,19 @@ export const usePreferences = defineStore('preferences', () => {
   /**
    * Changes preferences: shown at once, then saved. Rapid changes (a slider)
    * save one at a time and end with the newest; a failure rolls back to
-   * what the library holds and says why.
+   * what the library holds and says why. The patch is made from the
+   * preferences as they are when it is applied, and it resolves to whether
+   * the library now holds it.
    */
-  async function set(patch: Partial<Preferences>): Promise<boolean> {
+  async function change(patch: (now: Preferences) => Partial<Preferences>): Promise<boolean> {
     pending++
     saving.value = true
     try {
       // A startup edit must preserve the library's other choices rather
       // than saving the first-paint cache as a whole preference set.
       if (!loaded.value) await load()
-      while (resetting) await resetting
-      show({ ...prefs.value, ...patch })
+      while (resets.pending) await resets.pending
+      show({ ...prefs.value, ...patch(prefs.value) })
       await save(prefs.value)
       return !saveFailed
     } catch (e) {
@@ -170,31 +175,23 @@ export const usePreferences = defineStore('preferences', () => {
     }
   }
 
+  function set(patch: Partial<Preferences>): Promise<boolean> {
+    return change(() => patch)
+  }
+
   /** The viewing and playback choices; the fallback holds only until the library answers. */
   const viewer = computed(() => prefs.value.viewer ?? viewerDefaults())
 
   async function setViewer(patch: Partial<ViewerPreferences>): Promise<void> {
-    try {
-      if (!loaded.value) await load()
-      while (resetting) await resetting
-      await set({ viewer: { ...viewer.value, ...patch } })
-    } catch (e) {
-      reportError(e)
-    }
+    await change(() => ({ viewer: { ...viewer.value, ...patch } }))
   }
 
   /** Reassigns a command's shortcut ("" leaves it without one), or gives it back its own (undefined). */
-  async function setShortcut(id: string, keys: string | undefined): Promise<boolean> {
-    try {
-      if (!loaded.value) await load()
-      while (resetting) await resetting
-      const others = Object.entries(prefs.value.shortcuts).filter(([command]) => command !== id)
-      const shortcuts = Object.fromEntries(keys === undefined ? others : [...others, [id, keys]])
-      return await set({ shortcuts })
-    } catch (e) {
-      reportError(e)
-      return false
-    }
+  function setShortcut(id: string, keys: string | undefined): Promise<boolean> {
+    return change((now) => {
+      const others = Object.entries(now.shortcuts).filter(([command]) => command !== id)
+      return { shortcuts: Object.fromEntries(keys === undefined ? others : [...others, [id, keys]]) }
+    })
   }
 
   /** Replaces the saved export presets. */
@@ -208,28 +205,19 @@ export const usePreferences = defineStore('preferences', () => {
    * way are saved first, so the reset is the last word. It throws what the
    * engine refused, for the caller to explain beside its button.
    */
-  function reset(categories: PrefCategory[]): Promise<void> {
-    const previous = resetting
-    const task = (async () => {
-      if (previous) await previous
+  function reset(categories: readonly PrefCategory[]): Promise<void> {
+    return resets.take(async () => {
       if (!loaded.value) await load()
       await save.flush()
       try {
-        await engine.resetPreferences(categories)
+        await engine.resetPreferences([...categories])
       } finally {
+        // Also after a refusal: a reset may have changed part of what it names.
         const p = await engine.preferences()
         save = saver(p)
         show(p)
       }
-    })()
-    // Later edits wait for completion; the caller of reset receives its failure.
-    const current = task
-      .catch(() => undefined)
-      .finally(() => {
-        if (resetting === current) resetting = null
-      })
-    resetting = current
-    return task
+    })
   }
 
   return { prefs, viewer, loaded, saving, load, set, setViewer, setShortcut, setExportPresets, reset }

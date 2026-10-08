@@ -236,39 +236,46 @@ func (s *Store) ExcludedFormats(ctx context.Context) ([]core.Family, error) {
 	return core.NormalisedFamilies(list), nil
 }
 
-// SetExcludedFormats stores the photo formats indexing leaves out, held to
-// those that can be, and returns what was stored.
-func (s *Store) SetExcludedFormats(ctx context.Context, list []core.Family) ([]core.Family, error) {
-	s.settingsMu.Lock()
-	defer s.settingsMu.Unlock()
-	return s.setExcludedFormats(ctx, list)
+// SetFormatExcluded makes indexing leave one format out, or take it in again,
+// and reports whether that changed anything.
+func (s *Store) SetFormatExcluded(ctx context.Context, family core.Family, excluded bool) (bool, error) {
+	return s.changeExcludedFormats(ctx, func(list []core.Family) []core.Family {
+		if excluded {
+			return append(list, family)
+		}
+		return slices.DeleteFunc(list, func(f core.Family) bool { return f == family })
+	})
 }
 
-// SetFormatExcluded changes one format under the settings lock, so concurrent
-// choices of different formats cannot overwrite one another.
-func (s *Store) SetFormatExcluded(ctx context.Context, family core.Family, excluded bool) (bool, error) {
+// ClearExcludedFormats takes every format in again, and reports whether any
+// had been left out.
+func (s *Store) ClearExcludedFormats(ctx context.Context) (bool, error) {
+	return s.changeExcludedFormats(ctx, func([]core.Family) []core.Family { return nil })
+}
+
+// changeExcludedFormats stores what change makes of the excluded formats,
+// held to those that can be, and reports whether they differ. The settings
+// lock covers the read and the write, so concurrent choices of different
+// formats cannot overwrite one another.
+func (s *Store) changeExcludedFormats(ctx context.Context, change func([]core.Family) []core.Family) (bool, error) {
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
-	list, err := s.ExcludedFormats(ctx)
-	if err != nil || slices.Contains(list, family) == excluded {
+	before, err := s.ExcludedFormats(ctx)
+	if err != nil {
 		return false, err
 	}
-	if excluded {
-		list = append(list, family)
-	} else {
-		list = slices.DeleteFunc(list, func(f core.Family) bool { return f == family })
+	after := core.NormalisedFamilies(change(slices.Clone(before)))
+	if slices.Equal(before, after) {
+		return false, nil
 	}
-	_, err = s.setExcludedFormats(ctx, list)
-	return err == nil, err
-}
-
-func (s *Store) setExcludedFormats(ctx context.Context, list []core.Family) ([]core.Family, error) {
-	list = core.NormalisedFamilies(list)
-	names := make([]string, len(list))
-	for i, f := range list {
+	names := make([]string, len(after))
+	for i, f := range after {
 		names[i] = string(f)
 	}
-	return list, s.writeSettings(ctx, []setting{{core.SettingFormatsExcluded, strings.Join(names, ",")}})
+	if err := s.writeSettings(ctx, []setting{{core.SettingFormatsExcluded, strings.Join(names, ",")}}); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // writeSettings stores several settings in one statement, then updates the

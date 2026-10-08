@@ -147,11 +147,6 @@ export function applyPresentation(p: Presentation): void {
   present(presented)
 }
 
-/** Whether the interface is holding still now: the user's choice, or Windows' under "system". */
-export function motionReduced(): boolean {
-  return document.documentElement.dataset.motion === 'reduced'
-}
-
 /** Shows the interface as a says, and remembers it for the next start's first frame. */
 export function applyAppearance(a: Appearance): void {
   applied = { theme: a.theme, accent: a.accent, density: a.density, textScale: a.textScale }

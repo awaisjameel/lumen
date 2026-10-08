@@ -7,17 +7,10 @@
 import UButton from '@nuxt/ui/components/Button.vue'
 import UKbd from '@nuxt/ui/components/Kbd.vue'
 import { computed, ref } from 'vue'
-import { chordOf, keyCaps, sameKeys } from '../shared/commands'
+import { chordOf, keyCaps, keysOf, sameKeys } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
-import {
-  canReassign,
-  currentKeys,
-  shortcutCatalogue,
-  shortcutConflict,
-  shortcutZones,
-  zoneOf,
-} from '../shared/shortcuts'
+import { assignmentConflict, canReassign, shortcutCatalogue, shortcutZones, zoneOf } from '../shared/shortcuts'
 import type { ShortcutEntry } from '../shared/shortcuts'
 
 const prefs = usePreferences()
@@ -29,7 +22,7 @@ const zones = computed(() =>
     entries: shortcutCatalogue
       .filter((entry) => zoneOf(entry) === zone)
       .map((entry) => {
-        const keys = currentKeys(entry)
+        const keys = keysOf(entry)
         return {
           entry,
           title: t(entry.title),
@@ -59,14 +52,13 @@ async function assign(entry: ShortcutEntry, keys: string | undefined) {
   // The action's own keys are no reassignment: it simply has its own again.
   const own = keys !== undefined && entry.keys !== undefined && sameKeys(keys, entry.keys)
   const next = own ? undefined : keys
-  const restored = next ?? entry.keys
-  const taken = restored ? shortcutConflict(entry, restored) : undefined
-  if (taken) {
-    say(entry, t('settings.shortcutTaken', { keys: restored ?? '', action: t(taken.title) }), true)
+  const conflict = assignmentConflict(entry, next)
+  if (conflict) {
+    say(entry, t('settings.shortcutTaken', { keys: conflict.keys, action: t(conflict.taken.title) }), true)
     return
   }
   if (!(await prefs.setShortcut(entry.id, next))) return
-  const now = currentKeys(entry)
+  const now = keysOf(entry)
   say(
     entry,
     now

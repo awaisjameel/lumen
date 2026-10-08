@@ -7,6 +7,7 @@ import type * as Bridge from '../bridge'
 import { useLibrary } from '../library/store'
 import { setShortcutOverrides } from '../shared/commands'
 import { confirm } from '../shared/confirm'
+import { errorText } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { defaultPreferences, usePreferences } from '../shared/preferences'
 import CustomisationSettings from './CustomisationSettings.vue'
@@ -272,7 +273,7 @@ it('keeps the import preview available without reporting success when its save f
   expect(wrapper.text()).toContain(t('settings.presetApplied'))
 })
 
-it('preserves a newer format choice when an older save fails', async () => {
+it('preserves a newer format choice when an older save fails, and says that it failed', async () => {
   const lib = useLibrary()
   lib.settings = { ...settings }
   let fail: ((error: Error) => void) | undefined
@@ -283,7 +284,8 @@ it('preserves a newer format choice when an older save fails', async () => {
   fail?.(new Error('Disk full'))
   await Promise.all([first, second])
   expect(lib.settings.excludedFormats).toEqual([Family.FamilyHEIF])
-  expect(lib.settingErrors.excludedFormats).toBe('')
+  // The formats are separate choices: the one that failed is still explained.
+  expect(lib.settingErrors.excludedFormats).toBe(errorText(new Error('Disk full')))
 })
 
 it('can save a format again when both the previous save and its recovery read fail', async () => {

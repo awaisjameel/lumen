@@ -103,6 +103,13 @@ const (
 // MaxShortcuts is how many shortcuts the user may have reassigned.
 const MaxShortcuts = 64
 
+// maxShortcutCommand bounds a command id ("viewer.resetAdjustment").
+const maxShortcutCommand = 48
+
+// fixedShortcutCommand is the viewer's Close. Escape always leaves the
+// viewer, so its shortcut is never reassigned.
+const fixedShortcutCommand = "viewer.close"
+
 // maxSubtitleLanguage bounds the preferred subtitle language, a tag such as
 // "en" or "pt-BR".
 const maxSubtitleLanguage = 16
@@ -177,7 +184,8 @@ func ValidShortcut(keys string) bool {
 func normalisedShortcuts(in map[string]string) map[string]string {
 	ids := make([]string, 0, len(in))
 	for id, keys := range in {
-		if id != "viewer.close" && len(id) <= 48 && shortcutCommand.MatchString(id) && ValidShortcut(keys) {
+		if id != fixedShortcutCommand && len(id) <= maxShortcutCommand && shortcutCommand.MatchString(id) &&
+			ValidShortcut(keys) {
 			ids = append(ids, id)
 		}
 	}

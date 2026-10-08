@@ -268,10 +268,35 @@ export const EXPORT_QUALITY_MAX = 100 // core.ExportQualityMax
 export const EXPORT_QUALITY_DEFAULT = 92 // core.ExportQualityDefault
 export const MAX_EXPORT_PRESETS = 12 // core.MaxExportPresets
 export const MAX_SHORTCUTS = 64 // core.MaxShortcuts
+/**
+ * The members of a generated enum that a mirrored list names, in the list's
+ * order. The lists below are written as the engine's plain names, which
+ * services/contract_test.go reads; here they become the enum's own values,
+ * so no view compares a name to an enum.
+ */
+function members<E extends string, N extends string>(
+  of: Readonly<Record<string, E>>,
+  names: readonly N[],
+): readonly Extract<E, N>[] {
+  const wanted: ReadonlySet<string> = new Set(names)
+  const found = Object.values(of).filter((member): member is Extract<E, N> => wanted.has(member))
+  return names.flatMap((name) => found.find((member) => member === name) ?? [])
+}
 /** The photo formats indexing can leave out, in the order the setting offers them (core.ExcludableFamilies). */
-export const EXCLUDABLE_FAMILIES = ['jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heif', 'avif', 'jxl', 'raw'] as const
+export const EXCLUDABLE_FAMILIES = members(Family, [
+  'jpeg',
+  'png',
+  'gif',
+  'webp',
+  'bmp',
+  'tiff',
+  'heif',
+  'avif',
+  'jxl',
+  'raw',
+])
 /** The screens Lumen can open on, in the order the setting offers them (core.StartViews). */
-export const START_VIEWS = [
+export const START_VIEWS = members(StartView, [
   'library',
   'favourites',
   'videos',
@@ -280,9 +305,9 @@ export const START_VIEWS = [
   'places',
   'events',
   'albums',
-] as const
+])
 /** The groups of settings a reset can name, in the order the settings show them (core.PrefCategories). */
-export const PREF_CATEGORIES = [
+export const PREF_CATEGORIES = members(PrefCategory, [
   'appearance',
   'library',
   'viewing',
@@ -291,7 +316,7 @@ export const PREF_CATEGORIES = [
   'indexing',
   'search',
   'files',
-] as const
+])
 export const ORGANISE_DEFAULT_TEMPLATE = '{Year}/{Month}/{Event}/{Name}' // fileops.DefaultTemplate
 /** The tokens an organise scheme may hold, in the order the editor offers them (fileops.Tokens). */
 export const ORGANISE_TOKENS = ['Year', 'Month', 'MonthName', 'Day', 'Event', 'Place', 'Camera', 'Name', 'Ext'] as const

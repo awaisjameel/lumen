@@ -8,8 +8,8 @@
 import UButton from '@nuxt/ui/components/Button.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import { computed, ref, shallowRef } from 'vue'
-import { engine, PREF_CATEGORIES, PrefCategory } from '../bridge'
-import type { CustomisationPreview } from '../bridge'
+import { engine, PREF_CATEGORIES } from '../bridge'
+import type { CustomisationPreview, Preferences, ViewerPreferences } from '../bridge'
 import { useLibrary } from '../library/store'
 import { confirm } from '../shared/confirm'
 import { errorText } from '../shared/errors'
@@ -25,10 +25,6 @@ const shows = useRowFilter(() => props.query)
 const prefs = usePreferences()
 const lib = useLibrary()
 
-// Every category, as the engine names them (the generated enum also carries Go's zero value).
-const byName = new Map<string, PrefCategory>(Object.values(PrefCategory).map((c) => [c, c]))
-const categories = PREF_CATEGORIES.flatMap((name) => byName.get(name) ?? [])
-
 const resetNote = ref('')
 const resetError = ref('')
 async function resetAll() {
@@ -37,7 +33,7 @@ async function resetAll() {
   if (!(await confirm(t('settings.resetAllTitle'), t('settings.resetAllText'), t('settings.resetAll')))) return
   emit('reset')
   try {
-    await lib.resetPreferences(categories)
+    await lib.resetPreferences(PREF_CATEGORIES)
     resetNote.value = t('settings.resetAllDone')
   } catch (e) {
     resetError.value = errorText(e)
@@ -57,8 +53,11 @@ async function exportFile() {
   }
 }
 
-// What each preference a file may change is called, by its name in the file.
-const labels: Record<string, MessageKey> = {
+// What each preference a file may change is called, by its name in the file
+// (core.PreferenceChanges). The type names every preference, so a new one
+// cannot be left without a name here.
+type PreferenceName = Exclude<keyof Preferences, 'viewer'> | `viewer.${keyof ViewerPreferences}`
+const labels: Record<PreferenceName, MessageKey> = {
   theme: 'settings.pref.theme',
   accent: 'settings.pref.accent',
   density: 'settings.pref.density',
@@ -104,8 +103,14 @@ const open = computed({
   },
 })
 // Several names in the file can be one setting on screen (the three badges).
+const labelOf = new Map<string, MessageKey>(Object.entries(labels))
 const changes = computed(() => [
-  ...new Set((preview.value?.changed ?? []).map((name) => (labels[name] ? t(labels[name]) : name))),
+  ...new Set(
+    (preview.value?.changed ?? []).map((name) => {
+      const label = labelOf.get(name)
+      return label ? t(label) : name // a name from a newer engine is shown as it is
+    }),
+  ),
 ])
 const importNote = ref('')
 const importError = ref('')

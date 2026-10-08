@@ -163,7 +163,7 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"START_VIEWS":         names(core.StartViews()),
 		"PREF_CATEGORIES":     names(core.PrefCategories()),
 	} {
-		if got := quoted(`(?s)export const ` + name + ` = \[(.*?)\] as const`); !slices.Equal(got, want) {
+		if got := quoted(`(?s)export const ` + name + ` = members\(\w+, \[(.*?)\]\)`); !slices.Equal(got, want) {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)
 		}
 	}

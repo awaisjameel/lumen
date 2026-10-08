@@ -10,6 +10,7 @@ import FormatSettings from './FormatSettings.vue'
 import ShortcutSettings from './ShortcutSettings.vue'
 import ExportPresets from './ExportPresets.vue'
 import CustomisationSettings from './CustomisationSettings.vue'
+import SectionHead from './SectionHead.vue'
 import {
   Accent,
   Density,
@@ -250,24 +251,11 @@ function setFocusRing(value: unknown) {
 }
 
 // A section's Reset puts its settings back to their defaults in the
-// library, after asking. These sections are the engine's categories
-// (core.PrefCategories); indexing, search and files hold engine settings,
-// which are read again afterwards.
-const resettable: Record<string, PrefCategory | undefined> = {
-  appearance: PrefCategory.PrefAppearance,
-  library: PrefCategory.PrefLibrary,
-  viewing: PrefCategory.PrefViewing,
-  video: PrefCategory.PrefVideo,
-  accessibility: PrefCategory.PrefAccessibility,
-  indexing: PrefCategory.PrefIndexing,
-  search: PrefCategory.PrefSearch,
-  files: PrefCategory.PrefFiles,
-}
-const resetNotes = ref<Record<string, string>>({})
-async function resetSection(id: string, section: string) {
-  const category = resettable[id]
-  if (!category) return
-  resetNotes.value = { ...resetNotes.value, [id]: '' }
+// library, after asking. The sections that have one are the engine's
+// categories (core.PrefCategories).
+const resetNotes = ref<Partial<Record<PrefCategory, string>>>({})
+async function resetSection(category: PrefCategory, section: string) {
+  resetNotes.value = { ...resetNotes.value, [category]: '' }
   if (
     !(await confirm(
       t('settings.resetSectionTitle', { section }),
@@ -279,7 +267,7 @@ async function resetSection(id: string, section: string) {
   saveConfidence()
   await run(async () => {
     await lib.resetPreferences([category])
-    resetNotes.value = { ...resetNotes.value, [id]: t('settings.resetDone', { section }) }
+    resetNotes.value = { ...resetNotes.value, [category]: t('settings.resetDone', { section }) }
   })
 }
 const query = ref('')
@@ -561,20 +549,12 @@ const shownCategories = computed(() =>
           data-category="appearance"
           :aria-label="t('settings.appearance')"
         >
-          <div class="section-head">
-            <h2>{{ t('settings.appearance') }}</h2>
-            <UButton
-              v-if="resettable['appearance']"
-              size="xs"
-              variant="ghost"
-              :icon="icons.reset"
-              :aria-label="t('settings.resetSectionNamed', { section: t('settings.appearance') })"
-              data-reset-section
-              @click="resetSection('appearance', t('settings.appearance'))"
-              >{{ t('settings.resetSection') }}</UButton
-            >
-          </div>
-          <p v-if="resetNotes['appearance']" role="status" class="text-muted">{{ resetNotes['appearance'] }}</p>
+          <SectionHead
+            :title="t('settings.appearance')"
+            :note="resetNotes.appearance"
+            resettable
+            @reset="resetSection(PrefCategory.PrefAppearance, t('settings.appearance'))"
+          />
           <PrefRow
             v-if="row('appearance', 'settings.theme', 'settings.themeHint')"
             :label="t('settings.theme')"
@@ -709,20 +689,12 @@ const shownCategories = computed(() =>
           data-category="library"
           :aria-label="t('settings.category.library')"
         >
-          <div class="section-head">
-            <h2>{{ t('settings.category.library') }}</h2>
-            <UButton
-              v-if="resettable['library']"
-              size="xs"
-              variant="ghost"
-              :icon="icons.reset"
-              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.library') })"
-              data-reset-section
-              @click="resetSection('library', t('settings.category.library'))"
-              >{{ t('settings.resetSection') }}</UButton
-            >
-          </div>
-          <p v-if="resetNotes['library']" role="status" class="text-muted">{{ resetNotes['library'] }}</p>
+          <SectionHead
+            :title="t('settings.category.library')"
+            :note="resetNotes.library"
+            resettable
+            @reset="resetSection(PrefCategory.PrefLibrary, t('settings.category.library'))"
+          />
           <PrefRow v-if="showFolders" :label="t('settings.folders')" :description="t('settings.foldersHint')">
             <template #default>
               <div class="flex flex-wrap gap-2">
@@ -779,20 +751,12 @@ const shownCategories = computed(() =>
           :aria-label="t('settings.category.viewing')"
           data-category="viewing"
         >
-          <div class="section-head">
-            <h2>{{ t('settings.category.viewing') }}</h2>
-            <UButton
-              v-if="resettable['viewing']"
-              size="xs"
-              variant="ghost"
-              :icon="icons.reset"
-              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.viewing') })"
-              data-reset-section
-              @click="resetSection('viewing', t('settings.category.viewing'))"
-              >{{ t('settings.resetSection') }}</UButton
-            >
-          </div>
-          <p v-if="resetNotes['viewing']" role="status" class="text-muted">{{ resetNotes['viewing'] }}</p>
+          <SectionHead
+            :title="t('settings.category.viewing')"
+            :note="resetNotes.viewing"
+            resettable
+            @reset="resetSection(PrefCategory.PrefViewing, t('settings.category.viewing'))"
+          />
           <ViewingSettings :query="query" />
         </section>
         <section
@@ -800,19 +764,12 @@ const shownCategories = computed(() =>
           :aria-label="t('settings.category.video')"
           data-category="video"
         >
-          <div class="section-head">
-            <h2>{{ t('settings.category.video') }}</h2>
-            <UButton
-              size="xs"
-              variant="ghost"
-              :icon="icons.reset"
-              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.video') })"
-              data-reset-section
-              @click="resetSection('video', t('settings.category.video'))"
-              >{{ t('settings.resetSection') }}</UButton
-            >
-          </div>
-          <p v-if="resetNotes.video" role="status" class="text-muted">{{ resetNotes.video }}</p>
+          <SectionHead
+            :title="t('settings.category.video')"
+            :note="resetNotes.video"
+            resettable
+            @reset="resetSection(PrefCategory.PrefVideo, t('settings.category.video'))"
+          />
           <VideoSettings :query="query" />
         </section>
         <section
@@ -820,20 +777,12 @@ const shownCategories = computed(() =>
           data-category="indexing"
           :aria-label="t('settings.category.indexing')"
         >
-          <div class="section-head">
-            <h2>{{ t('settings.category.indexing') }}</h2>
-            <UButton
-              v-if="resettable['indexing']"
-              size="xs"
-              variant="ghost"
-              :icon="icons.reset"
-              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.indexing') })"
-              data-reset-section
-              @click="resetSection('indexing', t('settings.category.indexing'))"
-              >{{ t('settings.resetSection') }}</UButton
-            >
-          </div>
-          <p v-if="resetNotes['indexing']" role="status" class="text-muted">{{ resetNotes['indexing'] }}</p>
+          <SectionHead
+            :title="t('settings.category.indexing')"
+            :note="resetNotes.indexing"
+            resettable
+            @reset="resetSection(PrefCategory.PrefIndexing, t('settings.category.indexing'))"
+          />
           <PrefRow
             v-if="row('indexing', 'settings.pause', 'settings.pauseHint')"
             :label="t('settings.pause')"
@@ -981,20 +930,12 @@ const shownCategories = computed(() =>
           data-category="search"
           :aria-label="t('settings.category.search')"
         >
-          <div class="section-head">
-            <h2>{{ t('settings.category.search') }}</h2>
-            <UButton
-              v-if="resettable['search']"
-              size="xs"
-              variant="ghost"
-              :icon="icons.reset"
-              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.search') })"
-              data-reset-section
-              @click="resetSection('search', t('settings.category.search'))"
-              >{{ t('settings.resetSection') }}</UButton
-            >
-          </div>
-          <p v-if="resetNotes['search']" role="status" class="text-muted">{{ resetNotes['search'] }}</p>
+          <SectionHead
+            :title="t('settings.category.search')"
+            :note="resetNotes.search"
+            resettable
+            @reset="resetSection(PrefCategory.PrefSearch, t('settings.category.search'))"
+          />
           <p v-if="row('search', 'settings.ai', 'settings.aiHint')" class="text-muted">{{ t('settings.aiHint') }}</p>
           <p>{{ aiStatus }}</p>
           <UAlert
@@ -1051,20 +992,12 @@ const shownCategories = computed(() =>
           data-category="files"
           :aria-label="t('settings.category.files')"
         >
-          <div class="section-head">
-            <h2>{{ t('settings.category.files') }}</h2>
-            <UButton
-              v-if="resettable['files']"
-              size="xs"
-              variant="ghost"
-              :icon="icons.reset"
-              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.files') })"
-              data-reset-section
-              @click="resetSection('files', t('settings.category.files'))"
-              >{{ t('settings.resetSection') }}</UButton
-            >
-          </div>
-          <p v-if="resetNotes['files']" role="status" class="text-muted">{{ resetNotes['files'] }}</p>
+          <SectionHead
+            :title="t('settings.category.files')"
+            :note="resetNotes.files"
+            resettable
+            @reset="resetSection(PrefCategory.PrefFiles, t('settings.category.files'))"
+          />
           <PrefRow
             v-if="row('files', 'settings.eventGap', 'settings.eventGapHint')"
             :label="t('settings.eventGap')"
@@ -1116,19 +1049,12 @@ const shownCategories = computed(() =>
           :aria-label="t('settings.category.accessibility')"
           data-category="accessibility"
         >
-          <div class="section-head">
-            <h2>{{ t('settings.category.accessibility') }}</h2>
-            <UButton
-              size="xs"
-              variant="ghost"
-              :icon="icons.reset"
-              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.accessibility') })"
-              data-reset-section
-              @click="resetSection('accessibility', t('settings.category.accessibility'))"
-              >{{ t('settings.resetSection') }}</UButton
-            >
-          </div>
-          <p v-if="resetNotes.accessibility" role="status" class="text-muted">{{ resetNotes.accessibility }}</p>
+          <SectionHead
+            :title="t('settings.category.accessibility')"
+            :note="resetNotes.accessibility"
+            resettable
+            @reset="resetSection(PrefCategory.PrefAccessibility, t('settings.category.accessibility'))"
+          />
           <PrefRow
             v-if="row('accessibility', 'settings.focusRing', 'settings.focusRingHint')"
             :label="t('settings.focusRing')"
@@ -1168,7 +1094,7 @@ const shownCategories = computed(() =>
           data-category="privacy"
           :aria-label="t('settings.privacy')"
         >
-          <h2>{{ t('settings.privacy') }}</h2>
+          <SectionHead :title="t('settings.privacy')" />
           <PrefRow
             v-if="row('privacy', 'settings.privacy', 'settings.privacyText')"
             :label="t('settings.privacy')"
@@ -1184,7 +1110,7 @@ const shownCategories = computed(() =>
           :aria-label="t('settings.category.presets')"
           data-category="presets"
         >
-          <h2>{{ t('settings.category.presets') }}</h2>
+          <SectionHead :title="t('settings.category.presets')" />
           <CustomisationSettings :query="query" @reset="saveConfidence" />
         </section>
         <section
@@ -1192,7 +1118,7 @@ const shownCategories = computed(() =>
           data-category="about"
           :aria-label="t('about.title')"
         >
-          <h2>{{ t('about.title') }}</h2>
+          <SectionHead :title="t('about.title')" />
           <AboutSection :query="query" />
         </section>
       </div>
@@ -1230,18 +1156,6 @@ section {
   margin-bottom: 2rem;
 }
 
-.section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
-}
-
-.section-head h2 {
-  margin: 0;
-}
-
 .saving {
   margin: 0 0 0.5rem;
 }
@@ -1249,13 +1163,6 @@ section {
 .subhead {
   margin: 1rem 0 0;
   font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--ui-text-highlighted);
-}
-
-h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
   font-weight: 600;
   color: var(--ui-text-highlighted);
 }

@@ -5,7 +5,7 @@
 // checked, so its files are found. Videos have their own switch.
 import { computed } from 'vue'
 import USwitch from '@nuxt/ui/components/Switch.vue'
-import { EXCLUDABLE_FAMILIES, Family } from '../bridge'
+import { EXCLUDABLE_FAMILIES } from '../bridge'
 import { useLibrary } from '../library/store'
 import { t } from '../shared/i18n'
 import PrefRow from '../shared/PrefRow.vue'
@@ -14,13 +14,7 @@ import { useSaveFeedback } from './saveFeedback'
 const lib = useLibrary()
 const { save, hint } = useSaveFeedback(() => lib.settingErrors.excludedFormats)
 
-const byName = new Map<string, Family>(Object.values(Family).map((f) => [f, f]))
-const formats = computed(() =>
-  EXCLUDABLE_FAMILIES.flatMap((name) => {
-    const family = byName.get(name)
-    return family ? [{ family, label: t(`settings.format.${name}`) }] : []
-  }),
-)
+const formats = computed(() => EXCLUDABLE_FAMILIES.map((family) => ({ family, label: t(`settings.format.${family}`) })))
 const off = computed(() => lib.settings.excludedFormats.length)
 </script>
 <template>

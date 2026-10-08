@@ -10,7 +10,7 @@ import {
 } from './commands'
 import type { Command } from './commands'
 import { t } from './i18n'
-import { canReassign, currentKeys, shortcutCatalogue, shortcutConflict } from './shortcuts'
+import { assignmentConflict, canReassign, shortcutCatalogue, shortcutConflict } from './shortcuts'
 import type { ShortcutEntry } from './shortcuts'
 import { MAX_SHORTCUTS } from '../bridge'
 
@@ -139,12 +139,25 @@ it('finds a conflict only between actions that hear the same key presses', () =>
 
   // Keys an action gave up are free; keys it was given are taken.
   setShortcutOverrides({ 'viewer.favourite': 'L', 'viewer.details': '' })
-  expect(currentKeys(entry('viewer.favourite'))).toBe('L')
+  expect(keysOf(entry('viewer.favourite'))).toBe('L')
   expect(shortcutConflict(entry('viewer.rotate'), 'F')).toBeUndefined()
   expect(shortcutConflict(entry('viewer.rotate'), 'I')).toBeUndefined()
   expect(shortcutConflict(entry('viewer.rotate'), 'l')?.id).toBe('viewer.favourite')
   setShortcutOverrides({ 'search.focus': '' })
   expect(shortcutConflict(entry('viewer.rotate'), '/')).toBeUndefined()
+})
+
+it('refuses to give an action back keys, or other keys of its own, that another has since taken', () => {
+  const search = entry('search.focus')
+  expect(assignmentConflict(search, undefined)).toBeUndefined()
+  expect(assignmentConflict(search, '')).toBeUndefined() // no shortcut conflicts with nothing
+  expect(assignmentConflict(entry('viewer.rotate'), 'Ctrl+F')).toEqual({ keys: 'Ctrl+F', taken: search })
+
+  // Reassigned, search gives up "/" as well; the viewer may take it.
+  setShortcutOverrides({ 'search.focus': 'Ctrl+J', 'viewer.rotate': '/' })
+  expect(assignmentConflict(search, undefined)).toEqual({ keys: '/', taken: entry('viewer.rotate') })
+  setShortcutOverrides({ 'search.focus': 'Ctrl+J', 'viewer.rotate': 'Ctrl+F' })
+  expect(assignmentConflict(search, undefined)).toEqual({ keys: 'Ctrl+F', taken: entry('viewer.rotate') })
 })
 
 it('stops reassigning at the number of shortcuts the library keeps', () => {

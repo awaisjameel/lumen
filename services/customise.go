@@ -113,28 +113,21 @@ func (s *LibraryService) resetIndexing(ctx context.Context) error {
 			return err
 		}
 	}
-	excluded, err := s.store.ExcludedFormats(ctx)
-	if err != nil || len(excluded) == 0 {
-		return err
+	changed, err := s.store.ClearExcludedFormats(ctx)
+	if changed {
+		s.ix.RescanAll() // the formats taken in again are found
 	}
-	if _, err := s.store.SetExcludedFormats(ctx, nil); err != nil {
-		return err
-	}
-	s.ix.RescanAll() // the formats taken in again are found
-	return nil
+	return err
 }
 
 // ExportCustomisation asks where to save the interface preferences, then
 // writes them there. It returns the file's name, "" if the user cancelled.
 func (s *LibraryService) ExportCustomisation(ctx context.Context) (string, error) {
-	path, err := application.Get().Dialog.SaveFile().
+	path, err := chosen(application.Get().Dialog.SaveFile().
 		SetFilename("Lumen customisation.json").
 		AddFilter("Lumen customisation", "*.json").
-		PromptForSingleSelection()
-	if (err != nil && err.Error() == dialogCancelled) || (err == nil && path == "") {
-		return "", nil
-	}
-	if err != nil {
+		PromptForSingleSelection())
+	if err != nil || path == "" {
 		return "", err
 	}
 	if err := s.writeCustomisation(ctx, path); err != nil {
@@ -154,25 +147,11 @@ func (s *LibraryService) writeCustomisation(ctx context.Context, path string) er
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".lumen-customisation-*.json")
-	if err != nil {
+	err = publishFile(ctx, path, ".lumen-customisation-*.json", func(f *os.File) error {
+		_, err := f.Write(append(data, '\n'))
 		return err
-	}
-	defer func() { _ = os.Remove(f.Name()) }() // only the temporary file this call created
-	_, err = f.Write(append(data, '\n'))
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
+	})
 	if err != nil {
-		return fmt.Errorf("write customisation: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := os.Rename(f.Name(), path); err != nil {
 		return fmt.Errorf("save customisation: %w", err)
 	}
 	return nil
@@ -183,17 +162,14 @@ func (s *LibraryService) writeCustomisation(ctx context.Context, path string) er
 // apply, and which of them differ from the library's, for the user to review.
 // They are applied with SetPreferences. The name is "" if the user cancelled.
 func (s *LibraryService) ReadCustomisation(ctx context.Context) (core.CustomisationPreview, error) {
-	path, err := application.Get().Dialog.OpenFile().
+	path, err := chosen(application.Get().Dialog.OpenFile().
 		SetTitle("Choose a Lumen customisation file").
 		AddFilter("Lumen customisation", "*.json").
 		CanChooseFiles(true).
 		CanChooseDirectories(false).
-		PromptForSingleSelection()
-	if (err != nil && err.Error() == dialogCancelled) || (err == nil && path == "") {
-		return core.CustomisationPreview{Changed: []string{}}, nil
-	}
-	if err != nil {
-		return core.CustomisationPreview{}, err
+		PromptForSingleSelection())
+	if err != nil || path == "" {
+		return core.CustomisationPreview{Changed: []string{}}, err
 	}
 	return s.readCustomisation(ctx, path)
 }
@@ -224,45 +200,39 @@ func (s *LibraryService) readCustomisation(ctx context.Context, path string) (co
 	if head.Version > customisationVersion {
 		return core.CustomisationPreview{}, ErrPresetNewer
 	}
-	if !bytes.HasPrefix(bytes.TrimSpace(head.Preferences), []byte("{")) {
+	// The preferences must be there, and an object: null or a list holds none.
+	var present map[string]json.RawMessage
+	if err := json.Unmarshal(head.Preferences, &present); err != nil || present == nil {
 		return core.CustomisationPreview{}, ErrPresetInvalid
-	}
-	var file customisationFile
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields() // only what the type lists is ever read
-	if err := dec.Decode(&file); err != nil {
-		return core.CustomisationPreview{}, errors.Join(ErrPresetInvalid, err)
 	}
 	current, err := s.store.Preferences(ctx)
 	if err != nil {
 		return core.CustomisationPreview{}, err
 	}
-	// Preferences the file leaves out keep the library's: an older file
-	// without a later preference must not reset it. A list the file holds
-	// replaces the library's whole.
-	var present struct {
-		Preferences map[string]json.RawMessage `json:"preferences"`
-	}
-	if err := json.Unmarshal(data, &present); err != nil {
-		return core.CustomisationPreview{}, errors.Join(ErrPresetInvalid, err)
-	}
-	merged := current
+	// The file is read over a copy of the library's own preferences, so one
+	// it leaves out keeps the library's value: an older file without a later
+	// preference must not reset it. A list the file holds replaces the
+	// library's whole, so that list starts empty (the decoder would add to a
+	// map). Names match as the decoder matches them, whatever their case.
+	file := customisationFile{Preferences: current}
 	viewer := *current.Viewer
-	merged.Viewer = &viewer
-	merged.Shortcuts, merged.ExportPresets = maps.Clone(current.Shortcuts), slices.Clone(current.ExportPresets)
-	for name := range present.Preferences {
+	file.Preferences.Viewer = &viewer
+	file.Preferences.Shortcuts = maps.Clone(current.Shortcuts)
+	file.Preferences.ExportPresets = slices.Clone(current.ExportPresets)
+	for name := range present {
 		switch {
 		case strings.EqualFold(name, "shortcuts"):
-			merged.Shortcuts = nil
+			file.Preferences.Shortcuts = nil
 		case strings.EqualFold(name, "exportPresets"):
-			merged.ExportPresets = nil
+			file.Preferences.ExportPresets = nil
 		}
 	}
-	overlay := customisationFile{Preferences: merged}
-	if err := json.Unmarshal(data, &overlay); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields() // only what the type lists is ever read
+	if err := dec.Decode(&file); err != nil {
 		return core.CustomisationPreview{}, errors.Join(ErrPresetInvalid, err)
 	}
-	next := overlay.Preferences.Normalised()
+	next := file.Preferences.Normalised()
 	changed := core.PreferenceChanges(current, next)
 	if changed == nil {
 		changed = []string{}

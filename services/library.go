@@ -146,18 +146,48 @@ func (s *LibraryService) SuggestedFolders() []string {
 // the user closes it (its error value is internal to Wails).
 const dialogCancelled = "cancelled by user"
 
-// PickFolder opens the native folder picker. It returns "" if cancelled.
-func (s *LibraryService) PickFolder() (string, error) {
-	path, err := application.Get().Dialog.OpenFile().
-		SetTitle("Choose a folder with photos").
-		CanChooseDirectories(true).
-		CanChooseFiles(false).
-		CanCreateDirectories(false).
-		PromptForSingleSelection()
+// chosen is what a file dialog answered: the path the user picked, or "" if
+// they closed it, which is no failure.
+func chosen(path string, err error) (string, error) {
 	if err != nil && err.Error() == dialogCancelled {
 		return "", nil
 	}
 	return path, err
+}
+
+// publishFile writes a file the user asked to save and puts it at path in
+// one rename, so a failed or cancelled save leaves an existing destination
+// exactly as it was. pattern names the temporary file made beside it.
+func publishFile(ctx context.Context, path, pattern string, write func(*os.File) error) error {
+	f, err := os.CreateTemp(filepath.Dir(path), pattern)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(f.Name()) }() // only the temporary file this call created
+	err = write(f)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+// PickFolder opens the native folder picker. It returns "" if cancelled.
+func (s *LibraryService) PickFolder() (string, error) {
+	return chosen(application.Get().Dialog.OpenFile().
+		SetTitle("Choose a folder with photos").
+		CanChooseDirectories(true).
+		CanChooseFiles(false).
+		CanCreateDirectories(false).
+		PromptForSingleSelection())
 }
 
 // SourcePathKey is the key source folders are compared by in the library.
