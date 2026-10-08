@@ -36,8 +36,12 @@ session.on('Fetch.requestPaused', async (e) => {
     /* the page went away */
   }
 })
+// An error says where it was seen: the screen being visited and the script line that logged it.
+let visiting = 'start'
 page.on('console', (m) => {
-  if (m.type() === 'error') report.consoleErrors.push(m.text())
+  if (m.type() !== 'error') return
+  const at = m.location()
+  report.consoleErrors.push(`${m.text()} [${visiting}; ${at.url ?? ''}:${at.lineNumber ?? ''}]`)
 })
 page.on('pageerror', (e) => report.consoleErrors.push(`pageerror: ${String(e).slice(0, 300)}`))
 
@@ -70,6 +74,10 @@ await page.evaluateOnNewDocument(() => {
       console.error('OBSERVER_DIAGNOSTIC:' + JSON.stringify(window.observerHistory))
   })
 })
+// Reload only once the app has started: a reload under its first calls aborts
+// them, and the app rightly logs a call that failed.
+await page.waitForSelector('.shell', { timeout: 60000 })
+await sleep(500)
 await page.reload()
 await sleep(2500)
 
@@ -138,6 +146,7 @@ const widths = [
 for (const [label, w, h] of widths) {
   await resize(page, w, h)
   for (const [name, path] of routes) {
+    visiting = `${label}-${name}`
     await go(page, path, 1200)
     await record(`${label}-${name}`)
   }

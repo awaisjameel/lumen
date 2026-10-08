@@ -698,7 +698,7 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 		}
 		// What to scan is read with the turn in hand: a source removed, or a
 		// setting changed, during a long hold must not be scanned as it was.
-		src, videos, err := ix.scanSettings(ctx, req)
+		src, opt, err := ix.scanSettings(ctx, req)
 		switch {
 		case ctx.Err() != nil:
 			<-ix.scanTurn
@@ -723,10 +723,7 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 		ix.stale.Store(true)
 
 		start := time.Now()
-		res, err := sc.Scan(ctx, src, req.under, scanner.Options{
-			Videos:   videos,
-			SkipDirs: ix.skipDirs(),
-		})
+		res, err := sc.Scan(ctx, src, req.under, opt)
 		<-ix.scanTurn
 		switch {
 		case ctx.Err() != nil:
@@ -759,18 +756,23 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 }
 
 // scanSettings returns the source a scan request is for (ID 0 if it is gone
-// or disabled) and whether videos are included.
-func (ix *Indexer) scanSettings(ctx context.Context, req scanRequest) (core.Source, bool, error) {
+// or disabled) and what the scan picks up: whether videos, and which formats
+// the user turned off.
+func (ix *Indexer) scanSettings(ctx context.Context, req scanRequest) (core.Source, scanner.Options, error) {
+	opt := scanner.Options{SkipDirs: ix.skipDirs()}
 	srcs, err := ix.store.ListSources(ctx)
 	if err != nil {
-		return core.Source{}, false, err
+		return core.Source{}, opt, err
 	}
 	i := slices.IndexFunc(srcs, func(s core.Source) bool { return s.ID == req.sourceID && s.Enabled })
 	if i < 0 {
-		return core.Source{}, false, nil
+		return core.Source{}, opt, nil
 	}
-	videos, err := ix.store.Bool(ctx, core.SettingVideos, false)
-	return srcs[i], videos, err
+	if opt.Videos, err = ix.store.Bool(ctx, core.SettingVideos, false); err != nil {
+		return core.Source{}, opt, err
+	}
+	opt.Excluded, err = ix.store.ExcludedFormats(ctx)
+	return srcs[i], opt, err
 }
 
 // skipDirs are folders a scan leaves out: Lumen's own data.

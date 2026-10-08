@@ -1,3 +1,4 @@
+import { RENDER_SIDE_HIGH, ViewerOpen, ViewerWheel } from '../bridge'
 import type { ViewerPreferences } from '../bridge'
 
 /** The fallback is core.DefaultViewerPreferences, until the library loads. */
@@ -13,5 +14,12 @@ export function viewerDefaults(): ViewerPreferences {
     speed: 1,
     skipSeconds: 10,
     resume: false,
+    open: ViewerOpen.ViewerOpenFit,
+    wheel: ViewerWheel.ViewerWheelZoom,
+    stillAnimations: false,
+    renderSide: RENDER_SIDE_HIGH,
+    videoLoop: false,
+    subtitles: false,
+    subtitleLanguage: '',
   }
 }

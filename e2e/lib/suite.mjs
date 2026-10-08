@@ -38,6 +38,10 @@ export const SUITES = {
   'file-tools': { port: 9407, about: 'the File tools dialog and its menu, windowed and in full screen' },
   branding: { port: 9408, about: 'the Lumen mark on every surface, in both themes' },
   formats: { port: 9409, about: 'camera RAW, JPEG XL, animated PNG, multi-page TIFF and the older video containers' },
+  customise: {
+    port: 9411,
+    about: 'every preference where it takes effect, shortcuts, format exclusion, viewing cache, presets, reset',
+  },
   showcase: { port: 9410, about: 'the component showcase of a development run (starts wails3 dev)', optIn: true },
 }
 export const BASE_PORT = 9400

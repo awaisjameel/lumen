@@ -20,13 +20,16 @@ defineProps<{
   durationMs?: number
   favourite?: boolean
   selected?: boolean
-  /** contain shows the whole picture; cover (the default) fills the tile. */
+  /**
+   * contain shows the whole picture; cover fills the tile. Left out, the
+   * tile follows the thumbnail preference (cover unless the user chose).
+   */
   fit?: 'cover' | 'contain'
 }>()
 </script>
 
 <template>
-  <div class="media-tile" :class="{ selected, contain: fit === 'contain' }">
+  <div class="media-tile" :class="{ selected, contain: fit === 'contain', cover: fit === 'cover' }">
     <slot name="media">
       <img
         v-if="id && thumb"
@@ -64,6 +67,15 @@ img,
 }
 .contain img {
   object-fit: contain;
+}
+/* The thumbnail and badge preferences, set on the root by appearance.ts. */
+:root[data-thumb-fit='contain'] .media-tile:not(.cover) img {
+  object-fit: contain;
+}
+:root[data-hide-favourite] .badge.fav,
+:root[data-hide-video] .badge.kind,
+:root[data-hide-duration] .badge.duration {
+  display: none;
 }
 /* Only a cell still waiting for its item shimmers; an item without a
    thumbnail yet is a still placeholder. */

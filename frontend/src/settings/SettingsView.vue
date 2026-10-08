@@ -4,9 +4,19 @@ import AboutSection from '../about/AboutSection.vue'
 import OcrSetting from './OcrSetting.vue'
 import XmpSetting from './XmpSetting.vue'
 import ViewingSettings from './ViewingSettings.vue'
+import VideoSettings from './VideoSettings.vue'
+import LibrarySettings from './LibrarySettings.vue'
+import FormatSettings from './FormatSettings.vue'
+import ShortcutSettings from './ShortcutSettings.vue'
+import ExportPresets from './ExportPresets.vue'
+import CustomisationSettings from './CustomisationSettings.vue'
 import {
   Accent,
   Density,
+  FocusRing,
+  Motion,
+  PrefCategory,
+  ViewerBackground,
   TEXT_SCALE_MIN,
   TEXT_SCALE_MAX,
   TEXT_SCALE_DEFAULT,
@@ -147,8 +157,32 @@ async function loadCacheSize() {
     logError(e)
   }
 }
+// The viewing copies are counted apart from the thumbnails: they are a
+// different, disposable cache with its own bound.
+const viewingBytes = ref<number | null>(null)
+const viewingNote = ref('')
+const viewingError = ref('')
+async function loadViewingSize() {
+  try {
+    viewingBytes.value = await engine.viewingCacheBytes()
+  } catch (e) {
+    logError(e)
+  }
+}
+async function clearViewingCache() {
+  viewingNote.value = ''
+  viewingError.value = ''
+  try {
+    const freed = await engine.clearViewingCache()
+    viewingNote.value = t('settings.viewingCacheCleared', { size: bytes(freed) })
+  } catch (e) {
+    viewingError.value = errorText(e)
+  }
+  await loadViewingSize()
+}
 let cacheTimer = 0
 onMounted(() => {
+  void loadViewingSize()
   void loadCacheSize()
   cacheTimer = window.setInterval(() => void loadCacheSize(), CACHE_SIZE_POLL_MS)
 })
@@ -193,6 +227,61 @@ function setDensity(value: unknown) {
 function setTextScale(value: number | number[] | undefined) {
   if (typeof value === 'number') void prefs.set({ textScale: value })
 }
+const motions = [Motion.MotionSystem, Motion.MotionReduced, Motion.MotionFull] as const
+const backgrounds = [
+  ViewerBackground.ViewerBackgroundDark,
+  ViewerBackground.ViewerBackgroundBlack,
+  ViewerBackground.ViewerBackgroundGrey,
+] as const
+const focusRings = [FocusRing.FocusStandard, FocusRing.FocusStrong] as const
+const motionItems = computed(() => motions.map((value) => ({ value, label: t(`settings.motion.${value}`) })))
+const backgroundItems = computed(() =>
+  backgrounds.map((value) => ({ value, label: t(`settings.viewerBackground.${value}`) })),
+)
+const focusItems = computed(() => focusRings.map((value) => ({ value, label: t(`settings.focusRing.${value}`) })))
+function setMotion(value: unknown) {
+  for (const motion of motions) if (motion === value) void prefs.set({ motion })
+}
+function setBackground(value: unknown) {
+  for (const viewerBackground of backgrounds) if (viewerBackground === value) void prefs.set({ viewerBackground })
+}
+function setFocusRing(value: unknown) {
+  for (const focusRing of focusRings) if (focusRing === value) void prefs.set({ focusRing })
+}
+
+// A section's Reset puts its settings back to their defaults in the
+// library, after asking. These sections are the engine's categories
+// (core.PrefCategories); indexing, search and files hold engine settings,
+// which are read again afterwards.
+const resettable: Record<string, PrefCategory | undefined> = {
+  appearance: PrefCategory.PrefAppearance,
+  library: PrefCategory.PrefLibrary,
+  viewing: PrefCategory.PrefViewing,
+  video: PrefCategory.PrefVideo,
+  accessibility: PrefCategory.PrefAccessibility,
+  indexing: PrefCategory.PrefIndexing,
+  search: PrefCategory.PrefSearch,
+  files: PrefCategory.PrefFiles,
+}
+const resetNotes = ref<Record<string, string>>({})
+async function resetSection(id: string, section: string) {
+  const category = resettable[id]
+  if (!category) return
+  resetNotes.value = { ...resetNotes.value, [id]: '' }
+  if (
+    !(await confirm(
+      t('settings.resetSectionTitle', { section }),
+      t('settings.resetSectionText'),
+      t('settings.resetSection'),
+    ))
+  )
+    return
+  saveConfidence()
+  await run(async () => {
+    await lib.resetPreferences([category])
+    resetNotes.value = { ...resetNotes.value, [id]: t('settings.resetDone', { section }) }
+  })
+}
 const query = ref('')
 const category = ref('')
 
@@ -201,13 +290,16 @@ function clearSearch() {
   category.value = ''
 }
 const categories = [
-  { id: 'viewing', label: 'viewer.settings' },
   { id: 'appearance', label: 'settings.appearance' },
   { id: 'library', label: 'settings.category.library' },
+  { id: 'viewing', label: 'settings.category.viewing' },
+  { id: 'video', label: 'settings.category.video' },
   { id: 'indexing', label: 'settings.category.indexing' },
   { id: 'search', label: 'settings.category.search' },
   { id: 'files', label: 'settings.category.files' },
+  { id: 'accessibility', label: 'settings.category.accessibility' },
   { id: 'privacy', label: 'settings.privacy' },
+  { id: 'presets', label: 'settings.category.presets' },
   { id: 'about', label: 'about.title' },
 ] as const
 function matches(...texts: string[]) {
@@ -278,18 +370,54 @@ onBeforeUnmount(saveConfidence)
 // Filtering keeps long-running child operations mounted so their busy state and results survive.
 const categoryKeys: Record<string, MessageKey[]> = {
   viewing: [
-    'viewer.settings',
+    'settings.category.viewing',
+    'viewer.open',
+    'viewer.openHint',
+    'viewer.wheel',
+    'viewer.wheelHint',
     'viewer.filmstrip',
     'viewer.autoHide',
     'viewer.interval',
-    'viewer.loop',
+    'viewer.slideshowLoop',
+    'viewer.animations',
+    'viewer.animationsHint',
+    'viewer.renderSide',
+    'viewer.renderSideHint',
+  ],
+  video: [
+    'settings.category.video',
     'viewer.autoplay',
     'viewer.volume',
-    'viewer.skipInterval',
+    'viewer.startMuted',
     'viewer.speed',
+    'viewer.skipInterval',
+    'viewer.videoLoop',
+    'viewer.subtitles',
+    'viewer.subtitlesHint',
+    'viewer.subtitleLanguage',
+    'viewer.subtitleLanguageHint',
     'viewer.resume',
     'viewer.resumeHint',
     'viewer.clearHistory',
+    'viewer.clearHistoryHint',
+  ],
+  accessibility: [
+    'settings.category.accessibility',
+    'settings.focusRing',
+    'settings.focusRingHint',
+    'settings.accessibilityAlso',
+    'settings.accessibilityAlsoHint',
+    'settings.shortcuts',
+    'settings.shortcutsHint',
+  ],
+  presets: [
+    'settings.category.presets',
+    'settings.resetAll',
+    'settings.resetAllHint',
+    'settings.presetExport',
+    'settings.presetExportHint',
+    'settings.presetImport',
+    'settings.presetImportHint',
   ],
   appearance: [
     'settings.theme',
@@ -300,8 +428,27 @@ const categoryKeys: Record<string, MessageKey[]> = {
     'settings.densityHint',
     'settings.textSize',
     'settings.textSizeHint',
+    'settings.motion',
+    'settings.motionHint',
+    'settings.viewerBackground',
+    'settings.viewerBackgroundHint',
   ],
-  library: [...folderKeys, 'settings.videos', 'settings.videosHint'],
+  library: [
+    ...folderKeys,
+    'settings.videos',
+    'settings.videosHint',
+    'settings.startView',
+    'settings.startViewHint',
+    'settings.thumbFit',
+    'settings.thumbFitHint',
+    'settings.badges',
+    'settings.badgesHint',
+    'settings.badgeFavourite',
+    'settings.badgeVideo',
+    'settings.badgeDuration',
+    'settings.sort',
+    'settings.sortHint',
+  ],
   indexing: [
     'settings.pause',
     'settings.pauseHint',
@@ -316,6 +463,11 @@ const categoryKeys: Record<string, MessageKey[]> = {
     'settings.cache',
     'settings.cacheLimit',
     'settings.cacheHint',
+    'settings.viewingCache',
+    'settings.viewingCacheHint',
+    'settings.viewingCacheClear',
+    'settings.formats',
+    'settings.formatsHint',
   ],
   search: [
     'settings.aiOnBattery',
@@ -338,6 +490,8 @@ const categoryKeys: Record<string, MessageKey[]> = {
     'settings.xmpExportHint',
     'settings.organise',
     'settings.organiseHint',
+    'settings.exportPresets',
+    'settings.exportPresetsHint',
   ],
   privacy: ['settings.privacy', 'settings.privacyText'],
   about: [
@@ -392,6 +546,7 @@ const shownCategories = computed(() =>
       </nav>
       <div class="settings-content">
         <UAlert v-if="error" :description="error" color="error" variant="subtle" role="alert" />
+        <p v-if="prefs.saving" role="status" class="saving text-muted">{{ t('settings.saving') }}</p>
         <FeatureState
           v-if="!shownCategories.length"
           kind="empty"
@@ -406,7 +561,20 @@ const shownCategories = computed(() =>
           data-category="appearance"
           :aria-label="t('settings.appearance')"
         >
-          <h2>{{ t('settings.appearance') }}</h2>
+          <div class="section-head">
+            <h2>{{ t('settings.appearance') }}</h2>
+            <UButton
+              v-if="resettable['appearance']"
+              size="xs"
+              variant="ghost"
+              :icon="icons.reset"
+              :aria-label="t('settings.resetSectionNamed', { section: t('settings.appearance') })"
+              data-reset-section
+              @click="resetSection('appearance', t('settings.appearance'))"
+              >{{ t('settings.resetSection') }}</UButton
+            >
+          </div>
+          <p v-if="resetNotes['appearance']" role="status" class="text-muted">{{ resetNotes['appearance'] }}</p>
           <PrefRow
             v-if="row('appearance', 'settings.theme', 'settings.themeHint')"
             :label="t('settings.theme')"
@@ -499,14 +667,62 @@ const shownCategories = computed(() =>
               </div>
             </template>
           </PrefRow>
-          <p v-if="prefs.saving" role="status" class="text-muted">{{ t('settings.saving') }}</p>
+          <PrefRow
+            v-if="row('appearance', 'settings.motion', 'settings.motionHint')"
+            :label="t('settings.motion')"
+            :description="t('settings.motionHint')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <URadioGroup
+                data-appearance="motion"
+                :model-value="motions.find((value) => value === prefs.prefs.motion)"
+                :items="motionItems"
+                orientation="horizontal"
+                class="appearance-choices"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="setMotion"
+              />
+            </template>
+          </PrefRow>
+          <PrefRow
+            v-if="row('appearance', 'settings.viewerBackground', 'settings.viewerBackgroundHint')"
+            :label="t('settings.viewerBackground')"
+            :description="t('settings.viewerBackgroundHint')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <URadioGroup
+                data-appearance="viewerBackground"
+                :model-value="backgrounds.find((value) => value === prefs.prefs.viewerBackground)"
+                :items="backgroundItems"
+                orientation="horizontal"
+                class="appearance-choices"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="setBackground"
+              />
+            </template>
+          </PrefRow>
         </section>
         <section
           v-show="shownCategories.some((item) => item.id === 'library')"
           data-category="library"
           :aria-label="t('settings.category.library')"
         >
-          <h2>{{ t('settings.category.library') }}</h2>
+          <div class="section-head">
+            <h2>{{ t('settings.category.library') }}</h2>
+            <UButton
+              v-if="resettable['library']"
+              size="xs"
+              variant="ghost"
+              :icon="icons.reset"
+              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.library') })"
+              data-reset-section
+              @click="resetSection('library', t('settings.category.library'))"
+              >{{ t('settings.resetSection') }}</UButton
+            >
+          </div>
+          <p v-if="resetNotes['library']" role="status" class="text-muted">{{ resetNotes['library'] }}</p>
           <PrefRow v-if="showFolders" :label="t('settings.folders')" :description="t('settings.foldersHint')">
             <template #default>
               <div class="flex flex-wrap gap-2">
@@ -556,13 +772,68 @@ const shownCategories = computed(() =>
               />
             </template>
           </PrefRow>
+          <LibrarySettings v-if="!category || category === 'library'" :query="query" />
+        </section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'viewing')"
+          :aria-label="t('settings.category.viewing')"
+          data-category="viewing"
+        >
+          <div class="section-head">
+            <h2>{{ t('settings.category.viewing') }}</h2>
+            <UButton
+              v-if="resettable['viewing']"
+              size="xs"
+              variant="ghost"
+              :icon="icons.reset"
+              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.viewing') })"
+              data-reset-section
+              @click="resetSection('viewing', t('settings.category.viewing'))"
+              >{{ t('settings.resetSection') }}</UButton
+            >
+          </div>
+          <p v-if="resetNotes['viewing']" role="status" class="text-muted">{{ resetNotes['viewing'] }}</p>
+          <ViewingSettings :query="query" />
+        </section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'video')"
+          :aria-label="t('settings.category.video')"
+          data-category="video"
+        >
+          <div class="section-head">
+            <h2>{{ t('settings.category.video') }}</h2>
+            <UButton
+              size="xs"
+              variant="ghost"
+              :icon="icons.reset"
+              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.video') })"
+              data-reset-section
+              @click="resetSection('video', t('settings.category.video'))"
+              >{{ t('settings.resetSection') }}</UButton
+            >
+          </div>
+          <p v-if="resetNotes.video" role="status" class="text-muted">{{ resetNotes.video }}</p>
+          <VideoSettings :query="query" />
         </section>
         <section
           v-show="shownCategories.some((item) => item.id === 'indexing')"
           data-category="indexing"
           :aria-label="t('settings.category.indexing')"
         >
-          <h2>{{ t('settings.category.indexing') }}</h2>
+          <div class="section-head">
+            <h2>{{ t('settings.category.indexing') }}</h2>
+            <UButton
+              v-if="resettable['indexing']"
+              size="xs"
+              variant="ghost"
+              :icon="icons.reset"
+              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.indexing') })"
+              data-reset-section
+              @click="resetSection('indexing', t('settings.category.indexing'))"
+              >{{ t('settings.resetSection') }}</UButton
+            >
+          </div>
+          <p v-if="resetNotes['indexing']" role="status" class="text-muted">{{ resetNotes['indexing'] }}</p>
           <PrefRow
             v-if="row('indexing', 'settings.pause', 'settings.pauseHint')"
             :label="t('settings.pause')"
@@ -683,13 +954,47 @@ const shownCategories = computed(() =>
           >
             {{ t('settings.cacheUsed', { size: bytes(cacheBytes) }) }}
           </p>
+          <PrefRow
+            v-if="row('indexing', 'settings.viewingCache', 'settings.viewingCacheHint', 'settings.viewingCacheClear')"
+            :label="t('settings.viewingCache')"
+            :description="t('settings.viewingCacheHint')"
+            :hint="
+              viewingNote ||
+              (viewingBytes === null ? '' : t('settings.viewingCacheUsed', { size: bytes(viewingBytes) }))
+            "
+            :error="viewingError"
+          >
+            <template #default>
+              <UButton
+                data-viewing-cache-clear
+                loading-auto
+                :disabled="viewingBytes === 0"
+                @click="clearViewingCache"
+                >{{ t('settings.viewingCacheClear') }}</UButton
+              >
+            </template>
+          </PrefRow>
+          <FormatSettings v-if="row('indexing', 'settings.formats', 'settings.formatsHint')" />
         </section>
         <section
           v-show="shownCategories.some((item) => item.id === 'search')"
           data-category="search"
           :aria-label="t('settings.category.search')"
         >
-          <h2>{{ t('settings.category.search') }}</h2>
+          <div class="section-head">
+            <h2>{{ t('settings.category.search') }}</h2>
+            <UButton
+              v-if="resettable['search']"
+              size="xs"
+              variant="ghost"
+              :icon="icons.reset"
+              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.search') })"
+              data-reset-section
+              @click="resetSection('search', t('settings.category.search'))"
+              >{{ t('settings.resetSection') }}</UButton
+            >
+          </div>
+          <p v-if="resetNotes['search']" role="status" class="text-muted">{{ resetNotes['search'] }}</p>
           <p v-if="row('search', 'settings.ai', 'settings.aiHint')" class="text-muted">{{ t('settings.aiHint') }}</p>
           <p>{{ aiStatus }}</p>
           <UAlert
@@ -746,7 +1051,20 @@ const shownCategories = computed(() =>
           data-category="files"
           :aria-label="t('settings.category.files')"
         >
-          <h2>{{ t('settings.category.files') }}</h2>
+          <div class="section-head">
+            <h2>{{ t('settings.category.files') }}</h2>
+            <UButton
+              v-if="resettable['files']"
+              size="xs"
+              variant="ghost"
+              :icon="icons.reset"
+              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.files') })"
+              data-reset-section
+              @click="resetSection('files', t('settings.category.files'))"
+              >{{ t('settings.resetSection') }}</UButton
+            >
+          </div>
+          <p v-if="resetNotes['files']" role="status" class="text-muted">{{ resetNotes['files'] }}</p>
           <PrefRow
             v-if="row('files', 'settings.eventGap', 'settings.eventGapHint')"
             :label="t('settings.eventGap')"
@@ -791,6 +1109,59 @@ const shownCategories = computed(() =>
               <UButton to="/settings/organise" :icon="icons.organise">{{ t('organise.link') }}</UButton>
             </template>
           </PrefRow>
+          <ExportPresets v-if="row('files', 'settings.exportPresets', 'settings.exportPresetsHint')" />
+        </section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'accessibility')"
+          :aria-label="t('settings.category.accessibility')"
+          data-category="accessibility"
+        >
+          <div class="section-head">
+            <h2>{{ t('settings.category.accessibility') }}</h2>
+            <UButton
+              size="xs"
+              variant="ghost"
+              :icon="icons.reset"
+              :aria-label="t('settings.resetSectionNamed', { section: t('settings.category.accessibility') })"
+              data-reset-section
+              @click="resetSection('accessibility', t('settings.category.accessibility'))"
+              >{{ t('settings.resetSection') }}</UButton
+            >
+          </div>
+          <p v-if="resetNotes.accessibility" role="status" class="text-muted">{{ resetNotes.accessibility }}</p>
+          <PrefRow
+            v-if="row('accessibility', 'settings.focusRing', 'settings.focusRingHint')"
+            :label="t('settings.focusRing')"
+            :description="t('settings.focusRingHint')"
+          >
+            <template #default="{ labelledBy, describedBy }">
+              <URadioGroup
+                data-accessibility="focusRing"
+                :model-value="focusRings.find((value) => value === prefs.prefs.focusRing)"
+                :items="focusItems"
+                orientation="horizontal"
+                class="appearance-choices"
+                :aria-labelledby="labelledBy"
+                :aria-describedby="describedBy"
+                @update:model-value="setFocusRing"
+              />
+            </template>
+          </PrefRow>
+          <PrefRow
+            v-if="row('accessibility', 'settings.accessibilityAlso', 'settings.accessibilityAlsoHint')"
+            :label="t('settings.accessibilityAlso')"
+            :description="t('settings.accessibilityAlsoHint')"
+          >
+            <template #default>
+              <UButton variant="outline" data-accessibility="appearance" @click="category = 'appearance'">{{
+                t('settings.appearance')
+              }}</UButton>
+            </template>
+          </PrefRow>
+          <template v-if="row('accessibility', 'settings.shortcuts', 'settings.shortcutsHint')">
+            <h3 class="subhead">{{ t('settings.shortcuts') }}</h3>
+            <ShortcutSettings />
+          </template>
         </section>
         <section
           v-show="shownCategories.some((item) => item.id === 'privacy')"
@@ -809,20 +1180,20 @@ const shownCategories = computed(() =>
           </PrefRow>
         </section>
         <section
+          v-show="shownCategories.some((item) => item.id === 'presets')"
+          :aria-label="t('settings.category.presets')"
+          data-category="presets"
+        >
+          <h2>{{ t('settings.category.presets') }}</h2>
+          <CustomisationSettings :query="query" @reset="saveConfidence" />
+        </section>
+        <section
           v-show="shownCategories.some((item) => item.id === 'about')"
           data-category="about"
           :aria-label="t('about.title')"
         >
           <h2>{{ t('about.title') }}</h2>
           <AboutSection :query="query" />
-        </section>
-        <section
-          v-show="shownCategories.some((item) => item.id === 'viewing')"
-          :aria-label="t('viewer.settings')"
-          data-category="viewing"
-        >
-          <h2>{{ t('viewer.settings') }}</h2>
-          <ViewingSettings />
         </section>
       </div>
     </div>
@@ -857,6 +1228,29 @@ const shownCategories = computed(() =>
 
 section {
   margin-bottom: 2rem;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.section-head h2 {
+  margin: 0;
+}
+
+.saving {
+  margin: 0 0 0.5rem;
+}
+
+.subhead {
+  margin: 1rem 0 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ui-text-highlighted);
 }
 
 h2 {

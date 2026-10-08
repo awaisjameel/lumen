@@ -97,6 +97,7 @@ beforeEach(() => {
     pauseFullScreen: true,
     pauseBusy: true,
     idleOnly: false,
+    excludedFormats: [],
   })
   vi.mocked(engine.progress).mockReset().mockResolvedValue(progress)
   vi.mocked(startMedia).mockReset().mockResolvedValue(undefined)

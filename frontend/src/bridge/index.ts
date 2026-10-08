@@ -24,17 +24,26 @@ import {
   ExportFormat,
   ExportState,
   FailReason,
+  Family,
   Filter,
+  FocusRing,
   Kind,
   Link,
+  Motion,
   OrganiseMoveState,
   OrganiseRunState,
   Playback,
+  PrefCategory,
   SidecarState,
+  StartView,
   TagKind,
   TagSource,
   Theme,
+  ThumbFit,
   TrackKind,
+  ViewerBackground,
+  ViewerOpen,
+  ViewerWheel,
   WaitReason,
 } from '../../bindings/lumen/internal/core'
 import type {
@@ -68,7 +77,8 @@ import type {
   MediaCaps,
   Person,
   Place,
-  Preferences,
+  Preferences as RawPreferences,
+  CustomisationPreview as RawCustomisationPreview,
   Progress,
   RenderInfo,
   DisplayAdjustment,
@@ -78,8 +88,9 @@ import type {
   Selection as RawSelection,
   ExportOptions,
   ExportJob,
+  ExportPreset,
   SearchResult,
-  Settings,
+  Settings as RawSettings,
   Source,
   Tag,
   TrashSelection as RawTrashSelection,
@@ -100,17 +111,26 @@ export {
   ExportFormat,
   ExportState,
   FailReason,
+  Family,
   Filter,
+  FocusRing,
   Kind,
   Link,
+  Motion,
   OrganiseMoveState,
   OrganiseRunState,
   Playback,
+  PrefCategory,
   SidecarState,
+  StartView,
   TagKind,
   TagSource,
   Theme,
+  ThumbFit,
   TrackKind,
+  ViewerBackground,
+  ViewerOpen,
+  ViewerWheel,
   WaitReason,
 }
 export type {
@@ -134,7 +154,6 @@ export type {
   OrganiseProgress,
   OrganiseRun,
   Place,
-  Preferences,
   Progress,
   RenderInfo,
   DisplayAdjustment,
@@ -142,7 +161,7 @@ export type {
   MediaTrack,
   ExportOptions,
   ExportJob,
-  Settings,
+  ExportPreset,
   Source,
   Tag,
   UIError,
@@ -178,6 +197,25 @@ export type MediaInspection = NonNullLists<RawMediaInspection, 'tracks'>
 export type Selection = NonNullLists<RawSelection, 'ids'>
 /** An organise preview: the moves a template would make. */
 export type OrganisePlan = NonNullLists<RawOrganisePlan, 'moves'>
+
+/** The interface preferences, their lists never null. */
+export type Preferences = Omit<RawPreferences, 'shortcuts' | 'exportPresets'> & {
+  shortcuts: Record<string, string>
+  exportPresets: ExportPreset[]
+}
+/** The engine's settings. */
+export type Settings = NonNullLists<RawSettings, 'excludedFormats'>
+/** A customisation file read for review: nothing of it is applied yet. */
+export type CustomisationPreview = Omit<RawCustomisationPreview, 'preferences' | 'changed'> & {
+  preferences: Preferences
+  changed: string[]
+}
+
+function preferencesOf(p: RawPreferences): Preferences {
+  const shortcuts: Record<string, string> = {}
+  for (const [id, keys] of Object.entries(p.shortcuts ?? {})) if (keys !== undefined) shortcuts[id] = keys
+  return { ...p, shortcuts, exportPresets: p.exportPresets ?? [] }
+}
 
 /** The files that couldn't be read for one reason. */
 export type FailureGroup = NonNullLists<RawFailureGroup, 'files'>
@@ -223,6 +261,37 @@ export const SKIP_SECONDS_MIN = 1 // core.SkipSecondsMin
 export const SKIP_SECONDS_MAX = 60 // core.SkipSecondsMax
 export const PLAYBACK_SPEED_MIN = 0.25 // core.PlaybackSpeedMin
 export const PLAYBACK_SPEED_MAX = 2 // core.PlaybackSpeedMax
+export const RENDER_SIDE_STANDARD = 2048 // core.RenderSideStandard: a viewing copy's longest edge
+export const RENDER_SIDE_HIGH = 4096 // core.RenderSideHigh
+export const EXPORT_QUALITY_MIN = 1 // core.ExportQualityMin
+export const EXPORT_QUALITY_MAX = 100 // core.ExportQualityMax
+export const EXPORT_QUALITY_DEFAULT = 92 // core.ExportQualityDefault
+export const MAX_EXPORT_PRESETS = 12 // core.MaxExportPresets
+export const MAX_SHORTCUTS = 64 // core.MaxShortcuts
+/** The photo formats indexing can leave out, in the order the setting offers them (core.ExcludableFamilies). */
+export const EXCLUDABLE_FAMILIES = ['jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heif', 'avif', 'jxl', 'raw'] as const
+/** The screens Lumen can open on, in the order the setting offers them (core.StartViews). */
+export const START_VIEWS = [
+  'library',
+  'favourites',
+  'videos',
+  'people',
+  'things',
+  'places',
+  'events',
+  'albums',
+] as const
+/** The groups of settings a reset can name, in the order the settings show them (core.PrefCategories). */
+export const PREF_CATEGORIES = [
+  'appearance',
+  'library',
+  'viewing',
+  'video',
+  'accessibility',
+  'indexing',
+  'search',
+  'files',
+] as const
 export const ORGANISE_DEFAULT_TEMPLATE = '{Year}/{Month}/{Event}/{Name}' // fileops.DefaultTemplate
 /** The tokens an organise scheme may hold, in the order the editor offers them (fileops.Tokens). */
 export const ORGANISE_TOKENS = ['Year', 'Month', 'MonthName', 'Day', 'Event', 'Place', 'Camera', 'Name', 'Ext'] as const
@@ -296,6 +365,8 @@ export const ErrorCode = {
   DestinationTaken: 'destination_taken',
   SourceChanged: 'source_changed',
   Unsupported: 'unsupported',
+  PresetInvalid: 'preset_invalid',
+  PresetNewer: 'preset_newer',
   SigninFailed: 'signin_failed',
   SigninUnavailable: 'signin_unavailable',
 } as const
@@ -375,8 +446,8 @@ export const engine = {
     LibraryService.SetPlaybackPosition(id, Math.round(position)),
   clearPlaybackHistory: (): Promise<void> => LibraryService.ClearPlaybackHistory(),
   /** The viewing copy of a photo, or of one page (from 0) of a file that holds several. */
-  render: (id: number, signal?: AbortSignal, page = 0): Promise<RenderInfo> =>
-    cancellable(MediaService.RenderPage(id, RENDER_SIDE, page), signal),
+  render: (id: number, signal?: AbortSignal, page = 0, side = RENDER_SIDE): Promise<RenderInfo> =>
+    cancellable(MediaService.RenderPage(id, side, page), signal),
   sources: async (): Promise<Source[]> => (await LibraryService.Sources()) ?? [],
   suggestedFolders: async (): Promise<string[]> => (await LibraryService.SuggestedFolders()) ?? [],
   sourcePathKey: (path: string): Promise<string> => LibraryService.SourcePathKey(path),
@@ -429,7 +500,13 @@ export const engine = {
   setPaused: (paused: boolean): Promise<void> => LibraryService.SetPaused(paused),
   failures: async (): Promise<FailureGroup[]> =>
     ((await LibraryService.Failures()) ?? []).map((g) => ({ ...g, files: g.files ?? [] })),
-  settings: (): Promise<Settings> => LibraryService.Settings(),
+  settings: async (): Promise<Settings> => {
+    const s = await LibraryService.Settings()
+    return { ...s, excludedFormats: s.excludedFormats ?? [] }
+  },
+  /** Makes indexing leave a photo format out, or take it in again; what the library holds of it stays. */
+  setFormatExcluded: (family: Family, excluded: boolean): Promise<void> =>
+    LibraryService.SetFormatExcluded(family, excluded),
   setVideos: (on: boolean): Promise<void> => LibraryService.SetVideos(on),
   setAIOnBattery: (on: boolean): Promise<void> => LibraryService.SetAIOnBattery(on),
   setPauseFullScreen: (on: boolean): Promise<void> => LibraryService.SetPauseFullScreen(on),
@@ -441,12 +518,26 @@ export const engine = {
   /** How many CPU threads indexing may keep busy; the engine holds it to the machine's. */
   setCPUThreads: (n: number): Promise<void> => LibraryService.SetCPUThreads(n),
   thumbCacheBytes: (): Promise<number> => MediaService.ThumbCacheBytes(),
+  /** How much disk the viewing copies take: they are made again when a photo is next opened. */
+  viewingCacheBytes: (): Promise<number> => MediaService.ViewingCacheBytes(),
+  /** Deletes the viewing copies; resolves to the bytes freed. */
+  clearViewingCache: (): Promise<number> => MediaService.ClearViewingCache(),
   /** How the user likes the interface to look. */
-  preferences: (): Promise<Preferences> => LibraryService.Preferences(),
+  preferences: async (): Promise<Preferences> => preferencesOf(await LibraryService.Preferences()),
   /** Stores every interface preference; resolves to them as stored (held to their ranges). */
-  setPreferences: (p: Preferences): Promise<Preferences> => LibraryService.SetPreferences(p),
+  setPreferences: async (p: Preferences): Promise<Preferences> => preferencesOf(await LibraryService.SetPreferences(p)),
   /** Offers the library, once, what an older Lumen kept in the WebView's storage; resolves to the preferences afterwards. */
-  migratePreferences: (legacy: LegacyPreferences): Promise<Preferences> => LibraryService.MigratePreferences(legacy),
+  migratePreferences: async (legacy: LegacyPreferences): Promise<Preferences> =>
+    preferencesOf(await LibraryService.MigratePreferences(legacy)),
+  /** Puts the settings of these categories back to their defaults; the library's contents are never touched. */
+  resetPreferences: (categories: PrefCategory[]): Promise<void> => LibraryService.ResetPreferences(categories),
+  /** Asks where, then saves the interface preferences there; "" if the user cancelled. */
+  exportCustomisation: (): Promise<string> => LibraryService.ExportCustomisation(),
+  /** Asks for a customisation file and reads it for review, applying nothing; its name is "" if the user cancelled. */
+  readCustomisation: async (): Promise<CustomisationPreview> => {
+    const r = await LibraryService.ReadCustomisation()
+    return { ...r, preferences: preferencesOf(r.preferences), changed: r.changed ?? [] }
+  },
   setOCR: (on: boolean): Promise<void> => LibraryService.SetOCR(on),
   setXMP: (on: boolean): Promise<void> => LibraryService.SetXMP(on),
   /** Writes every out-of-date XMP sidecar now. */
@@ -596,8 +687,8 @@ export function originalUrl(id: number): string {
   return `/media/original/${id}`
 }
 
-export function renderUrl(id: number, revision: string, page = 0): string {
-  const url = `/media/render/${id}/${RENDER_SIDE}?v=${encodeURIComponent(revision)}`
+export function renderUrl(id: number, revision: string, page = 0, side = RENDER_SIDE): string {
+  const url = `/media/render/${id}/${side}?v=${encodeURIComponent(revision)}`
   return page > 0 ? `${url}&page=${page}` : url
 }
 

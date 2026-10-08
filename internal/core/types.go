@@ -81,6 +81,9 @@ const (
 	SettingPauseFullScreen = "pause_full_screen" // bool: wait while a game or full-screen app is in front (on by default)
 	SettingPauseBusy       = "pause_busy"        // bool: wait while other programs keep the PC busy (on by default)
 	SettingIdleOnly        = "idle_only"         // bool: index only while the user is away (off by default)
+	// SettingFormatsExcluded lists the photo formats indexing leaves out, as
+	// comma-separated families (none by default).
+	SettingFormatsExcluded = "formats_excluded"
 )
 
 // DefaultOn reports whether an on/off setting is on until the user turns it
@@ -115,6 +118,10 @@ type Settings struct {
 	PauseFullScreen bool `json:"pauseFullScreen"`
 	PauseBusy       bool `json:"pauseBusy"`
 	IdleOnly        bool `json:"idleOnly"`
+	// ExcludedFormats are the photo formats indexing leaves out: files of
+	// these are not added or read again, and what the library already holds
+	// of them stays.
+	ExcludedFormats []Family `json:"excludedFormats"`
 }
 
 // XMPExport is what an export pass did.

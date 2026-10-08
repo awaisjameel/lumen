@@ -64,6 +64,16 @@ const (
 	SettingUISidebarWidth     = "ui_sidebar_width"
 	SettingUIInspectorWidth   = "ui_inspector_width"
 	SettingUIViewer           = "ui_viewer"
+	SettingUIMotion           = "ui_motion"
+	SettingUIViewerBackground = "ui_viewer_background"
+	SettingUIStartView        = "ui_start_view"
+	SettingUIThumbFit         = "ui_thumb_fit"
+	SettingUIFocusRing        = "ui_focus_ring"
+	SettingUIHideFavourite    = "ui_hide_favourite_badge"
+	SettingUIHideVideo        = "ui_hide_video_badge"
+	SettingUIHideDuration     = "ui_hide_duration_badge"
+	SettingUIShortcuts        = "ui_shortcuts"      // JSON: command id to shortcut
+	SettingUIExportPresets    = "ui_export_presets" // JSON: []ExportPreset
 	// SettingUILegacyMigrated marks that what an older Lumen kept in the
 	// WebView's storage was offered to this library once (bool).
 	SettingUILegacyMigrated = "ui_legacy_migrated"
@@ -82,6 +92,19 @@ type Preferences struct {
 	SidebarCollapsed bool               `json:"sidebarCollapsed"`
 	SidebarWidth     int                `json:"sidebarWidth"`   // SidebarWidthMin..SidebarWidthMax
 	InspectorWidth   int                `json:"inspectorWidth"` // InspectorWidthMin..InspectorWidthMax
+	Motion           Motion             `json:"motion"`
+	ViewerBackground ViewerBackground   `json:"viewerBackground"`
+	StartView        StartView          `json:"startView"`
+	ThumbFit         ThumbFit           `json:"thumbFit"`
+	FocusRing        FocusRing          `json:"focusRing"`
+	// The badges a thumbnail carries are shown unless hidden here.
+	HideFavouriteBadge bool `json:"hideFavouriteBadge"`
+	HideVideoBadge     bool `json:"hideVideoBadge"`
+	HideDurationBadge  bool `json:"hideDurationBadge"`
+	// Shortcuts holds the shortcuts the user reassigned, by command id; ""
+	// leaves a command without one. A command not listed keeps its own.
+	Shortcuts     map[string]string `json:"shortcuts"`
+	ExportPresets []ExportPreset    `json:"exportPresets"`
 }
 
 // DefaultPreferences is what a library starts with.
@@ -96,6 +119,8 @@ func DefaultPreferences() Preferences {
 		TileSize:       TileSizeDefault,
 		SidebarWidth:   SidebarWidthDefault,
 		InspectorWidth: InspectorWidthDefault,
+		Motion:         MotionSystem, ViewerBackground: ViewerBackgroundDark, StartView: StartLibrary,
+		ThumbFit: ThumbCover, FocusRing: FocusStandard,
 	}
 }
 
@@ -139,6 +164,23 @@ func (p Preferences) Normalised() Preferences {
 	p.TileSize = min(max(p.TileSize, TileSizeMin), TileSizeMax)
 	p.SidebarWidth = min(max(p.SidebarWidth, SidebarWidthMin), SidebarWidthMax)
 	p.InspectorWidth = min(max(p.InspectorWidth, InspectorWidthMin), InspectorWidthMax)
+	if !ValidMotion(p.Motion) {
+		p.Motion = def.Motion
+	}
+	if !ValidViewerBackground(p.ViewerBackground) {
+		p.ViewerBackground = def.ViewerBackground
+	}
+	if !ValidStartView(p.StartView) {
+		p.StartView = def.StartView
+	}
+	if !ValidThumbFit(p.ThumbFit) {
+		p.ThumbFit = def.ThumbFit
+	}
+	if !ValidFocusRing(p.FocusRing) {
+		p.FocusRing = def.FocusRing
+	}
+	p.Shortcuts = normalisedShortcuts(p.Shortcuts)
+	p.ExportPresets = normalisedExportPresets(p.ExportPresets)
 	return p
 }
 

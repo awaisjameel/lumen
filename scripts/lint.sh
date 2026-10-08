@@ -6,7 +6,7 @@
 #   scripts/lint.sh          check
 #   scripts/lint.sh --fix    first apply every automatic fix, then check
 #
-# Tools: deps/tools (scripts/deps.sh) and frontend/node_modules (npm install).
+# Tools: deps/tools (scripts/deps.sh) and frontend/node_modules (npm ci).
 # The Go checks compile the cgo packages, so CGO_ENABLED=1 and CC must be set
 # as for a build. govulncheck needs the network (Go's vulnerability database).
 set -uo pipefail
@@ -17,7 +17,7 @@ GO=(. ./internal/... ./services/... ./scripts/branding) # not ./...: build/ hold
 for tool in golangci-lint deadcode govulncheck ruff shellcheck; do
   [ -x "$T/$tool.exe" ] || { echo "missing $T/$tool.exe: run scripts/deps.sh" >&2; exit 2; }
 done
-[ -d frontend/node_modules ] || { echo "missing frontend/node_modules: run npm install in frontend/" >&2; exit 2; }
+[ -d frontend/node_modules ] || { echo "missing frontend/node_modules: run npm ci in frontend/" >&2; exit 2; }
 
 if [ "${1:-}" = --fix ]; then
   echo "== fixing"

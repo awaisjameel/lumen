@@ -25,6 +25,21 @@ type ViewerPreferences struct {
 	Speed            float64 `json:"speed"`
 	SkipSeconds      int     `json:"skipSeconds"`
 	Resume           bool    `json:"resume"`
+	// Open and Wheel are how a photo is first shown and what the wheel does.
+	Open  ViewerOpen  `json:"open"`
+	Wheel ViewerWheel `json:"wheel"`
+	// StillAnimations holds an animated image on its first frame until the
+	// user plays it; off, it plays as soon as it is shown.
+	StillAnimations bool `json:"stillAnimations"`
+	// RenderSide is the longest edge asked of a viewing copy:
+	// RenderSideStandard or RenderSideHigh.
+	RenderSide int `json:"renderSide"`
+	// VideoLoop starts each video looping. Subtitles shows a video's text
+	// subtitles from the start: those in SubtitleLanguage if it has them,
+	// else its first.
+	VideoLoop        bool   `json:"videoLoop"`
+	Subtitles        bool   `json:"subtitles"`
+	SubtitleLanguage string `json:"subtitleLanguage"`
 }
 
 // The ranges of the viewer preferences that are numbers.
@@ -40,7 +55,8 @@ const (
 
 // DefaultViewerPreferences supplies the initial viewing and playback choices.
 func DefaultViewerPreferences() ViewerPreferences {
-	return ViewerPreferences{SlideshowSeconds: 5, Autoplay: true, Volume: 1, Speed: 1, SkipSeconds: 10}
+	return ViewerPreferences{SlideshowSeconds: 5, Autoplay: true, Volume: 1, Speed: 1, SkipSeconds: 10,
+		Open: ViewerOpenFit, Wheel: ViewerWheelZoom, RenderSide: RenderSideHigh}
 }
 
 // Normalised bounds the values that controls and playback can apply.
@@ -55,6 +71,16 @@ func (v ViewerPreferences) Normalised() ViewerPreferences {
 	v.Volume = min(max(0, v.Volume), 1)
 	v.Speed = min(max(PlaybackSpeedMin, v.Speed), PlaybackSpeedMax)
 	v.SkipSeconds = min(max(SkipSecondsMin, v.SkipSeconds), SkipSecondsMax)
+	if v.Open != ViewerOpenFit && v.Open != ViewerOpenActual {
+		v.Open = ViewerOpenFit
+	}
+	if v.Wheel != ViewerWheelZoom && v.Wheel != ViewerWheelNavigate {
+		v.Wheel = ViewerWheelZoom
+	}
+	if v.RenderSide != RenderSideStandard && v.RenderSide != RenderSideHigh {
+		v.RenderSide = RenderSideHigh
+	}
+	v.SubtitleLanguage = normalisedSubtitleLanguage(v.SubtitleLanguage)
 	return v
 }
 

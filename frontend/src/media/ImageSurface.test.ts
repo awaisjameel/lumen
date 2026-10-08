@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import { DateSource, engine, Kind } from '../bridge'
+import { DateSource, engine, Kind, ViewerOpen, ViewerWheel } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { AssetDetail, RenderInfo } from '../bridge'
 import ImageSurface from './ImageSurface.vue'
@@ -170,5 +170,123 @@ it('keeps an already loaded original visible after presentation metadata refresh
     expect(wrapper.get('img.preview').isVisible()).toBe(false)
   } finally {
     wrapper.unmount()
+  }
+})
+
+const inspected = {
+  orientation: 1,
+  hasProfile: false,
+  profile: '',
+  lens: '',
+  exposure: '',
+  aperture: '',
+  iso: '',
+  frameRate: '',
+  pages: 1,
+  tracks: [],
+}
+
+it('opens a photo at its actual size when that is the preference, until the user fits it', async () => {
+  const photo = { ...detail(1), width: 600, height: 400, caps: { ...detail(1).caps, original: true } }
+  const props = { id: 1, thumb: 1, width: 600, height: 400, detail: photo }
+  const fitted = mount(ImageSurface, { props })
+  const actual = mount(ImageSurface, { props: { ...props, open: ViewerOpen.ViewerOpenActual } })
+  try {
+    await flushPromises()
+    // jsdom gives the surface no size, so a fitted picture is scaled far down.
+    expect(fitted.vm.scale).toBeLessThan(100)
+    expect(actual.vm.scale).toBe(100)
+    actual.vm.fit()
+    expect(actual.vm.scale).toBe(fitted.vm.scale)
+  } finally {
+    fitted.unmount()
+    actual.unmount()
+  }
+})
+
+it('steps between photos with the wheel when that is the preference, and zooms with Ctrl', async () => {
+  const photo = { ...detail(1), width: 600, height: 400, caps: { ...detail(1).caps, original: true } }
+  const props = { id: 1, thumb: 1, width: 600, height: 400, detail: photo, open: ViewerOpen.ViewerOpenActual }
+  const wrapper = mount(ImageSurface, { props: { ...props, wheel: ViewerWheel.ViewerWheelNavigate } })
+  const zooming = mount(ImageSurface, { props })
+  try {
+    await flushPromises()
+    await wrapper.trigger('wheel', { deltaY: 120 })
+    expect(wrapper.emitted('step')).toEqual([[1]])
+    expect(wrapper.vm.scale).toBe(100)
+    wrapper.element.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, ctrlKey: true, cancelable: true }))
+    await flushPromises()
+    expect(wrapper.emitted('step')).toHaveLength(1)
+    expect(wrapper.vm.scale).toBeGreaterThan(100)
+    // The default wheel zooms and never steps.
+    await zooming.trigger('wheel', { deltaY: -120 })
+    expect(zooming.emitted('step')).toBeUndefined()
+    expect(zooming.vm.scale).toBeGreaterThan(100)
+  } finally {
+    wrapper.unmount()
+    zooming.unmount()
+  }
+})
+
+it('asks for viewing copies at the preferred size', async () => {
+  vi.mocked(engine.render)
+    .mockReset()
+    .mockResolvedValue({ ...render, width: 2048, height: 1365 })
+  const wrapper = mount(ImageSurface, {
+    props: { id: 1, thumb: 1, width: 6000, height: 4000, detail: detail(1), side: 2048 },
+  })
+  try {
+    await flushPromises()
+    expect(vi.mocked(engine.render).mock.calls[0]?.[3]).toBe(2048)
+    expect(wrapper.get('.original').attributes('src')).toContain('/render/1/2048?v=new')
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('holds an animated image on its first frame until it is played', async () => {
+  vi.mocked(engine.render)
+    .mockReset()
+    .mockResolvedValue({ ...render, width: 600, height: 400, limited: false })
+  vi.mocked(engine.inspect)
+    .mockReset()
+    .mockResolvedValue({ ...inspected, pages: 12 })
+  const gif = { ...detail(1), ext: '.gif', width: 600, height: 400, caps: { ...detail(1).caps, original: true } }
+  const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 1, width: 600, height: 400, detail: gif, still: true } })
+  try {
+    // Nothing of the original is asked for before the file says whether it animates.
+    expect(wrapper.find('img.original').exists()).toBe(false)
+    await flushPromises()
+    expect(wrapper.vm.animated).toBe(true)
+    expect(wrapper.vm.playing).toBe(false)
+    expect(wrapper.get('img.original').attributes('src')).toContain('/render/1/')
+    wrapper.vm.toggleAnimation()
+    await flushPromises()
+    expect(wrapper.get('img.original').attributes('src')).toBe('/media/original/1')
+    wrapper.vm.toggleAnimation()
+    await flushPromises()
+    expect(wrapper.get('img.original').attributes('src')).toContain('/render/1/')
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('shows a still original as ever when animations are held, and an animated one when they are not', async () => {
+  vi.mocked(engine.render).mockReset()
+  vi.mocked(engine.inspect).mockReset().mockResolvedValue(inspected)
+  const png = { ...detail(1), ext: '.png', width: 600, height: 400, caps: { ...detail(1).caps, original: true } }
+  const props = { id: 1, thumb: 1, width: 600, height: 400, detail: png }
+  const held = mount(ImageSurface, { props: { ...props, still: true } })
+  const free = mount(ImageSurface, { props })
+  try {
+    await flushPromises()
+    expect(held.vm.animated).toBe(false)
+    expect(held.get('img.original').attributes('src')).toBe('/media/original/1')
+    expect(free.get('img.original').attributes('src')).toBe('/media/original/1')
+    expect(engine.inspect).toHaveBeenCalledOnce() // only the held one had to ask
+    expect(engine.render).not.toHaveBeenCalled()
+  } finally {
+    held.unmount()
+    free.unmount()
   }
 })

@@ -24,6 +24,15 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as core$0 from "../internal/core/models.js";
 
 /**
+ * ClearViewingCache deletes the viewing copies and returns the bytes freed.
+ * Each is made again when its photo is next opened; originals, thumbnails
+ * and everything the library knows stay as they are.
+ */
+export function ClearViewingCache(): $CancellablePromise<number> {
+    return $Call.ByID(2722673440);
+}
+
+/**
  * Inspect reads file metadata while holding its lifetime and privacy access.
  */
 export function Inspect(id: number): $CancellablePromise<core$0.MediaInspection> {
@@ -59,4 +68,12 @@ export function ThumbCacheBytes(): $CancellablePromise<number> {
  */
 export function VideoBase(): $CancellablePromise<string> {
     return $Call.ByID(2630873924);
+}
+
+/**
+ * ViewingCacheBytes is how much disk the viewing copies take: the bounded
+ * copies the viewer shows of photos the WebView cannot display itself.
+ */
+export function ViewingCacheBytes(): $CancellablePromise<number> {
+    return $Call.ByID(644026908);
 }

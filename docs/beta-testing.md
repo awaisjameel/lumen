@@ -44,13 +44,16 @@ folders when you use one of these, each of which asks first:
   cake", "receipt") and people's names once you have named them.
 - **People**: name a few people, merge duplicates, and correct mistakes.
 - **Things, Places, Events, Albums, Duplicates**: browse and correct them.
-- **Videos** are off by default: turn them on in Settings → Background work
+- **Videos** are off by default: turn them on in Settings → Library and folders
   if you like.
 - **Keep working as usual.** Lumen should not slow your PC down. It pauses
   while you play a game or watch something in full screen, and while other
-  programs keep the processor busy. Settings → Background work has these
+  programs keep the processor busy. Settings → Indexing and performance has these
   switches, how many processor threads Lumen may use, and an option to index
   only while you are away.
+- **Customise**: try the appearance, image viewing, video and shortcut settings.
+  Settings → Reset and presets lets you preview a customisation file before
+  applying it, and reset sections while keeping your folders, photos and PIN.
 
 ## What to tell us
 

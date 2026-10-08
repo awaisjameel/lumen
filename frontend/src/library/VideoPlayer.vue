@@ -25,7 +25,7 @@ import { duration } from '../shared/format'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import { logError } from '../shared/errors'
-import { subtitleCues } from '../media/subtitles'
+import { preferredSubtitle, subtitleCues } from '../media/subtitles'
 import { FileTools } from '../media/lazy'
 import { videoSpriteStyle } from '../shared/videoSprite'
 
@@ -42,7 +42,7 @@ const subtitleTracks = computed(() => tracksOf(TrackKind.TrackSubtitle))
 const trackLabel = (track: MediaTrack) => `${track.title || track.language || track.codec} (${track.index})`
 const audio = ref(-1)
 const subtitle = ref(-1)
-const looping = ref(viewing.value.loop)
+const looping = ref(viewing.value.videoLoop)
 const seekPreview = ref(false)
 const frameOpen = ref(false)
 const framePosition = ref(0)
@@ -361,7 +361,12 @@ onMounted(() => {
   void engine
     .inspect(props.detail.id, inspectionAbort.signal)
     .then((info) => {
-      if (!disposed) inspection.value = info
+      if (disposed) return
+      inspection.value = info
+      // Subtitles from the start (the playback preference), unless the user
+      // has already chosen a track for this video.
+      if (viewing.value.subtitles && subtitle.value < 0)
+        subtitle.value = preferredSubtitle(subtitleTracks.value, viewing.value.subtitleLanguage)
     })
     .catch((e: unknown) => {
       if (!isCancelled(e)) logError(e)

@@ -5,7 +5,7 @@ import { Accent, Density, engine, Theme } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Preferences } from '../bridge'
 import { ERROR_NOTIFICATION } from './errors'
-import { usePreferences } from './preferences'
+import { defaultPreferences, usePreferences } from './preferences'
 import { recordNotifications } from './testing'
 import type { RecordedNotifications } from './testing'
 
@@ -19,6 +19,7 @@ vi.mock('../bridge', async (importOriginal) => ({
 }))
 
 const stored: Preferences = {
+  ...defaultPreferences(),
   theme: Theme.ThemeDark,
   accent: Accent.AccentTeal,
   density: Density.DensityCompact,

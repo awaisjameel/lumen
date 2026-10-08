@@ -7,18 +7,19 @@ import type { CommandPaletteGroup, CommandPaletteItem } from '@nuxt/ui/component
 import UModal from '@nuxt/ui/components/Modal.vue'
 import { computed } from 'vue'
 import { icons } from '../design/icons'
-import { availableCommands, commandGroups, isEnabled, keyCaps, runCommand } from '../shared/commands'
+import { availableCommands, commandGroups, isEnabled, keyCaps, keysOf, runCommand } from '../shared/commands'
 import type { Command } from '../shared/commands'
 import { t } from '../shared/i18n'
 
 const open = defineModel<boolean>('open', { required: true })
 
 function item(c: Command): CommandPaletteItem {
+  const keys = keysOf(c)
   return {
     id: c.id,
     label: c.title(),
     icon: c.icon ? icons[c.icon] : undefined,
-    kbds: c.keys ? keyCaps(c.keys) : undefined,
+    kbds: keys ? keyCaps(keys) : undefined,
     disabled: !isEnabled(c),
     onSelect: () => {
       open.value = false

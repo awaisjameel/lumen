@@ -12,6 +12,8 @@ export interface LatestSave<T> {
   (value: T): Promise<void>
   /** Supersede older saves as soon as an input arrives, before its debounce. */
   touch: () => void
+  /** Waits for current and queued saves without writing another value. */
+  flush: () => Promise<void>
 }
 
 /**
@@ -63,6 +65,7 @@ export function latestSave<T>(
     return running
   }
   return Object.assign(set, {
+    flush: () => running ?? Promise.resolve(),
     touch: () => {
       revision++
     },

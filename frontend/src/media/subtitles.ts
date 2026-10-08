@@ -14,3 +14,24 @@ export function subtitleCues(vtt: string): { start: number; end: number; text: s
   }
   return out
 }
+
+/**
+ * The subtitle track to show from the start: the first that can be shown
+ * in the preferred language, else the first that can be shown; -1 if none
+ * can. A file names its language its own way ("eng" for "en"), so either
+ * may begin the other.
+ */
+export function preferredSubtitle(
+  tracks: readonly { index: number; language: string; supported: boolean }[],
+  language: string,
+): number {
+  const shown = tracks.filter((track) => track.supported)
+  const wanted = language.trim().toLowerCase().split('-')[0] ?? ''
+  const match = wanted
+    ? shown.find((track) => {
+        const has = track.language.trim().toLowerCase()
+        return has !== '' && (has.startsWith(wanted) || wanted.startsWith(has))
+      })
+    : undefined
+  return (match ?? shown[0])?.index ?? -1
+}

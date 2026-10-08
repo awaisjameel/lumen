@@ -408,6 +408,9 @@ func (s *LibraryService) Settings(ctx context.Context) (core.Settings, error) {
 	}
 	set.TagConfidence, set.EventGapHours, set.ThumbCacheMB = conf, gap, cacheMB
 	set.CPUThreads, set.MaxCPUThreads, set.DefaultCPUThreads = threads, core.MaxCPUThreads(), core.DefaultCPUThreads()
+	if set.ExcludedFormats, err = s.store.ExcludedFormats(ctx); err != nil {
+		return core.Settings{}, err
+	}
 	return set, nil
 }
 

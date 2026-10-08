@@ -117,6 +117,15 @@
   --lumen-accent-amber: var(--color-amber-400);
 }
 
+/* What surrounds a photo in the viewer (the viewer background preference).
+   Each is dark, so the viewer's light controls keep their contrast. */
+:root[data-viewer-bg='black'] {
+  --lumen-viewer-bg: #000000;
+}
+:root[data-viewer-bg='grey'] {
+  --lumen-viewer-bg: #2e2e33;
+}
+
 /* Compact density: the same hierarchy with less air. Control sizes follow
    through Nuxt UI's size variants (appearance.ts). */
 :root[data-density='compact'] {
@@ -162,6 +171,15 @@ body {
   outline-offset: 2px;
 }
 
+/* The stronger focus ring (the focus preference): thicker, in the text's
+   own colour over a halo of the surface's, so it shows on a photo, on the
+   accent and on either theme. */
+:root[data-focus='strong'] :focus-visible {
+  outline: 3px solid var(--ui-text-highlighted);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px var(--ui-bg);
+}
+
 /* Overlays and tooltips (see nuxt-ui.config.ts) take the panel motion. */
 .lumen-overlay,
 .lumen-tooltip {
@@ -194,11 +212,22 @@ body {
 }
 
 /* Reduced motion: nothing slides or pulses. Loading states say so in
-   words as well (FeatureState), so they still inform. */
+   words as well (FeatureState), so they still inform. The motion
+   preference decides (appearance.ts sets data-motion): "system" follows
+   Windows, and the other two hold whatever Windows says. Until the
+   preference is applied, Windows' own setting stands. */
+:root[data-motion='reduced'] *,
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  :root:not([data-motion]) *,
+  :root:not([data-motion]) *::before,
+  :root:not([data-motion]) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

@@ -5,11 +5,28 @@
 // accent colour and its controls' size). Portalled overlays follow, because
 // everything is set on the document's root.
 import { useAppConfig } from '@nuxt/ui/runtime/vue/composables/useAppConfig.js'
-import { Accent, Density, TEXT_SCALE_MAX, TEXT_SCALE_MIN, Theme } from '../bridge'
+import { Accent, Density, Motion, TEXT_SCALE_MAX, TEXT_SCALE_MIN, Theme } from '../bridge'
 import type { Preferences } from '../bridge'
 
 /** The preferences that decide the first frame. */
 export type Appearance = Pick<Preferences, 'theme' | 'accent' | 'density' | 'textScale'>
+
+/**
+ * The preferences that change how the page is drawn once it runs: how much
+ * it moves, what surrounds a photo in the viewer, how focus is drawn, how
+ * thumbnails fill their tiles and which badges they carry. Each becomes an
+ * attribute on the root that tokens.css and MediaTile read.
+ */
+export type Presentation = Pick<
+  Preferences,
+  | 'motion'
+  | 'viewerBackground'
+  | 'focusRing'
+  | 'thumbFit'
+  | 'hideFavouriteBadge'
+  | 'hideVideoBadge'
+  | 'hideDurationBadge'
+>
 
 // The last appearance applied, for painting the first frame before the
 // engine has answered. It is derived from the library's settings and
@@ -60,7 +77,9 @@ export function cachedAppearance(): Appearance | null {
 }
 
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
+const systemReduced = window.matchMedia('(prefers-reduced-motion: reduce)')
 let applied: Appearance | null = null
+let presented: Presentation | null = null
 
 // Nuxt UI's controls whose size follows the density.
 const SIZED = [
@@ -100,6 +119,39 @@ function paint(a: Appearance): void {
   root.style.setProperty('--lumen-text-scale', String(a.textScale / 100))
 }
 
+function present(p: Presentation): void {
+  const root = document.documentElement
+  // "System" follows Windows' animation setting; the other two say so
+  // whatever Windows has.
+  const reduced = p.motion === Motion.MotionReduced || (p.motion === Motion.MotionSystem && systemReduced.matches)
+  root.dataset.motion = reduced ? 'reduced' : 'full'
+  root.dataset.viewerBg = p.viewerBackground
+  root.dataset.focus = p.focusRing
+  root.dataset.thumbFit = p.thumbFit
+  root.toggleAttribute('data-hide-favourite', p.hideFavouriteBadge)
+  root.toggleAttribute('data-hide-video', p.hideVideoBadge)
+  root.toggleAttribute('data-hide-duration', p.hideDurationBadge)
+}
+
+/** Draws the page as these preferences say. Nothing of it is cached: it follows the first frame. */
+export function applyPresentation(p: Presentation): void {
+  presented = {
+    motion: p.motion,
+    viewerBackground: p.viewerBackground,
+    focusRing: p.focusRing,
+    thumbFit: p.thumbFit,
+    hideFavouriteBadge: p.hideFavouriteBadge,
+    hideVideoBadge: p.hideVideoBadge,
+    hideDurationBadge: p.hideDurationBadge,
+  }
+  present(presented)
+}
+
+/** Whether the interface is holding still now: the user's choice, or Windows' under "system". */
+export function motionReduced(): boolean {
+  return document.documentElement.dataset.motion === 'reduced'
+}
+
 /** Shows the interface as a says, and remembers it for the next start's first frame. */
 export function applyAppearance(a: Appearance): void {
   applied = { theme: a.theme, accent: a.accent, density: a.density, textScale: a.textScale }
@@ -115,4 +167,7 @@ export function applyAppearance(a: Appearance): void {
 // "System" follows Windows while Lumen runs.
 systemDark.addEventListener('change', () => {
   if (applied) paint(applied)
+})
+systemReduced.addEventListener('change', () => {
+  if (presented) present(presented)
 })
