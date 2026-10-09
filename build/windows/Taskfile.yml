@@ -109,6 +109,8 @@ tasks:
         msg: "Run scripts/deps.sh (Git Bash) once: it fetches NSIS, the WebView2 runtime the installer carries, and the licences."
       - sh: '[ "{{.ARCH}}" = "amd64" ]'
         msg: "Lumen's installer is x64 only, as its DLLs are."
+      - sh: '[ -f "{{.ROOT_DIR}}/deps/runtime/compress/jpegtran.exe" ] && [ -f "{{.ROOT_DIR}}/deps/runtime/compress/djpeg.exe" ] && [ -f "{{.ROOT_DIR}}/deps/runtime/compress/libjpeg-62.dll" ] && [ -f "{{.ROOT_DIR}}/deps/runtime/compress/oxipng.exe" ] && [ -f "{{.ROOT_DIR}}/deps/runtime/compress/cjxl.exe" ] && [ -f "{{.ROOT_DIR}}/deps/runtime/compress/djxl.exe" ]'
+        msg: "Compression tools missing: run scripts/deps.sh (Git Bash) before packaging."
       - sh: '{{if .SIGN_THUMBPRINT}}command -v signtool >/dev/null{{else}}true{{end}}'
         msg: "Signing needs the Windows SDK's signtool on PATH."
     cmds:

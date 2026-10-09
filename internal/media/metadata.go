@@ -54,29 +54,7 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 		return m, err
 	}
 
-	ex, exErr := imagemeta.Decode(f)
-	if exErr == nil {
-		// Only the dates of taking the photo; SelectedDate would fall back to
-		// the last time it was saved.
-		m.TakenAt = ex.ExifIFD.GetDateTimeOriginal()
-		if m.TakenAt.IsZero() {
-			m.TakenAt = ex.ExifIFD.GetCreateDate()
-		}
-		m.Modified = ex.ModifyDate()
-		if o := int(ex.IFD0.Orientation); o >= 1 && o <= 8 {
-			m.Orientation = o
-		}
-		if m.Width == 0 || m.Height == 0 {
-			m.Width, m.Height = int(ex.ExifIFD.PixelXDimension), int(ex.ExifIFD.PixelYDimension)
-		}
-		if m.Width == 0 || m.Height == 0 {
-			m.Width, m.Height = int(ex.IFD0.ImageWidth), int(ex.IFD0.ImageHeight)
-		}
-		m.Camera = cameraName(strings.TrimSpace(ex.CameraMake()), strings.TrimSpace(ex.IFD0.Model))
-		if lat, lon := ex.GPS.Latitude(), ex.GPS.Longitude(); validGPS(lat, lon) {
-			m.Lat, m.Lon = &lat, &lon
-		}
-	}
+	fillFromImagemeta(f, &m)
 
 	// imagemeta (needed for HEIC) silently returns nothing for some real JPEGs,
 	// e.g. GoPro files. goexif reads those, so it backs it up for JPEG/TIFF.
@@ -103,6 +81,34 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 		m.Modified = time.Time{}
 	}
 	return m, nil
+}
+
+// fillFromImagemeta gives embedded TIFF and ordinary image EXIF the same
+// preferred camera names, dates and coordinate interpretation.
+func fillFromImagemeta(r io.ReadSeeker, m *Metadata) {
+	ex, exErr := imagemeta.Decode(r)
+	if exErr == nil {
+		// Only the dates of taking the photo; SelectedDate would fall back to
+		// the last time it was saved.
+		m.TakenAt = ex.ExifIFD.GetDateTimeOriginal()
+		if m.TakenAt.IsZero() {
+			m.TakenAt = ex.ExifIFD.GetCreateDate()
+		}
+		m.Modified = ex.ModifyDate()
+		if o := int(ex.IFD0.Orientation); o >= 1 && o <= 8 {
+			m.Orientation = o
+		}
+		if m.Width == 0 || m.Height == 0 {
+			m.Width, m.Height = int(ex.ExifIFD.PixelXDimension), int(ex.ExifIFD.PixelYDimension)
+		}
+		if m.Width == 0 || m.Height == 0 {
+			m.Width, m.Height = int(ex.IFD0.ImageWidth), int(ex.IFD0.ImageHeight)
+		}
+		m.Camera = cameraName(strings.TrimSpace(ex.CameraMake()), strings.TrimSpace(ex.IFD0.Model))
+		if lat, lon := ex.GPS.Latitude(), ex.GPS.Longitude(); validGPS(lat, lon) {
+			m.Lat, m.Lon = &lat, &lon
+		}
+	}
 }
 
 // fillFromGoexif fills whatever m is missing from a second EXIF parser.

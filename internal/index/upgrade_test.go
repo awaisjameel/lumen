@@ -269,6 +269,20 @@ func TestThumbnailStandingUsesOnlyTheKindVersion(t *testing.T) {
 	}
 }
 
+func TestJPEGXLDecoderUpgradeRefreshesOnlyItsMetadataAndThumbnails(t *testing.T) {
+	for _, path := range []string{"photo.jpg", "photo.JXL"} {
+		want := core.FamilyOf(path) != core.FamilyJXL
+		metadata := store.JobItem{Kind: core.KindPhoto, Path: path, Prior: media.BeforeJXLMetadataVersion + "+" + media.VideoMetadataVersion}
+		if got := metadataStand(metadata); got != want {
+			t.Errorf("metadata at %s stands=%v, want %v", path, got, want)
+		}
+		thumbnail := store.JobItem{Kind: core.KindPhoto, Path: path, Prior: media.BeforeJXLColourVersion + "+" + media.VideoThumbnailVersion}
+		if got := thumbnailsStand(thumbnail); got != want {
+			t.Errorf("thumbnail at %s stands=%v, want %v", path, got, want)
+		}
+	}
+}
+
 func TestUpgradeRequeuesVideoMetadata(t *testing.T) {
 	ctx := t.Context()
 	paths := core.PathsIn(t.TempDir())

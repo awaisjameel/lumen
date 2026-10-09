@@ -450,9 +450,8 @@ func metadataDateGuesses(ctx context.Context, tx *sql.Tx, rs []MetadataResult) (
 
 // SaveThumbnails records a batch of finished thumbnails and closes their
 // jobs. An Unchanged result only records the version. New thumbnails of an
-// asset already embedded (an upgrade made them afresh) put its embedding
-// back in the queue: the image model reads the thumbnail, so its vector and
-// tags were made from the old pixels.
+// asset already analysed (an upgrade made them afresh) put its image analysis
+// back in the queue: embeddings, faces and text were made from the old pixels.
 func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbResult) error {
 	if len(rs) == 0 {
 		return nil
@@ -465,13 +464,13 @@ func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbRe
 		}
 		defer upd.Close()
 		// Settled with the thumbnail job, below.
-		reembed, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?,
+		reanalyse, err := tx.PrepareContext(ctx, `UPDATE asset_jobs SET status = 'pending', error = NULL, attempts = 0, updated_at = ?,
 				prior_version = NULL
 			WHERE asset_id = ? AND stage = ? AND status NOT IN `+unfinished)
 		if err != nil {
 			return err
 		}
-		defer reembed.Close()
+		defer reanalyse.Close()
 		job, err := prepareJobUpdate(ctx, tx)
 		if err != nil {
 			return err
@@ -486,8 +485,10 @@ func (s *Store) SaveThumbnails(ctx context.Context, version string, rs []ThumbRe
 				if _, err := upd.ExecContext(ctx, ph, r.AssetID); err != nil {
 					return err
 				}
-				if _, err := reembed.ExecContext(ctx, now, r.AssetID, core.StageEmbedding); err != nil {
-					return err
+				for _, stage := range []core.Stage{core.StageEmbedding, core.StageFaces, core.StageOCR} {
+					if _, err := reanalyse.ExecContext(ctx, now, r.AssetID, stage); err != nil {
+						return err
+					}
 				}
 			}
 			if err := execJob(ctx, job, r.AssetID, core.StageThumbnail, version, jobStatus(r.Err, r.Skipped), r.Err, now); err != nil {

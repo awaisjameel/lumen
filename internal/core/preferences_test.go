@@ -25,6 +25,7 @@ func TestNormalisedPreferencesKeepValidChoices(t *testing.T) {
 		ExportPresets: []ExportPreset{{Name: "Web", Format: ExportJPEG, Side: 2048, Quality: 80}}}
 	viewer := DefaultViewerPreferences()
 	p.Viewer = &viewer
+	p.Compression = DefaultCompressionOptions()
 	if got := p.Normalised(); !reflect.DeepEqual(got, p) {
 		t.Errorf("Normalised() = %+v, want it unchanged: %+v", got, p)
 	}

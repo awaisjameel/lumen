@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"lumen/internal/compress"
 	"lumen/internal/fileops"
 	"lumen/internal/index"
 	"lumen/internal/media"
@@ -64,8 +65,13 @@ const (
 	CodeSourceChanged       ErrorCode = "source_changed"       // the file changed after the preview
 	CodeUnsupported         ErrorCode = "unsupported"          // nothing here can read or write that format
 
-	CodePresetInvalid ErrorCode = "preset_invalid" // not a customisation file Lumen wrote
-	CodePresetNewer   ErrorCode = "preset_newer"   // a customisation file from a later Lumen
+	CodePresetInvalid    ErrorCode = "preset_invalid" // not a customisation file Lumen wrote
+	CodePresetNewer      ErrorCode = "preset_newer"   // a customisation file from a later Lumen
+	CodeCompressionBusy  ErrorCode = "compression_busy"
+	CodeCompressionState ErrorCode = "compression_state"
+	CodeCompressionPlan  ErrorCode = "compression_plan"
+	CodePreservation     ErrorCode = "preservation"
+	CodeCopySpace        ErrorCode = "copy_space"
 
 	CodeSigninFailed ErrorCode = "signin_failed"      // the Windows sign-in was cancelled, or wrong
 	CodeNoSignin     ErrorCode = "signin_unavailable" // this PC has no way to check a Windows sign-in
@@ -125,6 +131,12 @@ var errorCodes = []struct {
 	{fileops.ErrExists, CodeDestinationTaken},
 	{fileops.ErrSourceChanged, CodeSourceChanged},
 	{media.ErrUnsupported, CodeUnsupported},
+	{compress.ErrUnsupported, CodeUnsupported},
+	{compress.ErrPreservation, CodePreservation},
+	{compress.ErrPlan, CodeCompressionPlan},
+	{fileops.ErrCopySpace, CodeCopySpace},
+	{ErrCompressionBusy, CodeCompressionBusy},
+	{ErrCompressionState, CodeCompressionState},
 	{ErrPresetInvalid, CodePresetInvalid},
 	{ErrPresetNewer, CodePresetNewer},
 	{signin.ErrNotVerified, CodeSigninFailed},

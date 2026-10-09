@@ -42,6 +42,7 @@ import DetailsPanel from './DetailsPanel.vue'
 import VideoThumb from './VideoThumb.vue'
 import SelectionBar from '../shared/SelectionBar.vue'
 import { BatchTools, FileTools } from '../media/lazy'
+import { compressionCommand } from '../shared/compression'
 
 const PAD = 20 // horizontal padding of the grid
 
@@ -52,6 +53,14 @@ const filesOpen = ref(false)
 const batchOpen = ref(false)
 const fileIDs = computed(() => (lib.selectedIDs.size ? [...lib.selectedIDs] : lib.selected ? [lib.selected.id] : []))
 const fileMenu = computed(() => [
+  {
+    label: t('compression.action'),
+    icon: icons.files,
+    disabled: !fileIDs.value.length || lib.inTrash,
+    onSelect: () => {
+      void runCommand('library.compress')
+    },
+  },
   {
     label: t('files.title'),
     icon: icons.files,
@@ -353,6 +362,13 @@ function setTileSize(v: number) {
   void prefs.set({ tileSize: Math.min(TILE_SIZE_MAX, Math.max(TILE_SIZE_MIN, v)) })
 }
 useCommands([
+  compressionCommand(
+    'library.compress',
+    () => !!fileIDs.value.length && !lib.inTrash && !lib.viewer,
+    () => fileIDs.value.map((assetId) => ({ assetId, path: '' })),
+    'grid',
+    () => lib.selectionSnapshot,
+  ),
   {
     id: 'library.files',
     group: 'media',
@@ -650,6 +666,13 @@ const searchNotes = computed(() => {
           <RouterLink to="/settings/blocked" class="link">{{ t('search.openBlocked') }}</RouterLink>
         </p>
         <SelectionBar :summary="t('selection.count', { n: fileIDs.length })">
+          <UButton
+            v-if="!lib.inTrash"
+            :disabled="!fileIDs.length"
+            :icon="icons.files"
+            @click="runCommand('library.compress')"
+            >{{ t('compression.action') }}</UButton
+          >
           <UButton variant="ghost" @click="selectVisible">{{ t('selection.visible') }}</UButton>
           <UButton variant="ghost" @click="lib.selectAllResults()">{{ t('selection.all') }}</UButton>
           <UButton :disabled="!fileIDs.length" variant="ghost" @click="clearSelection">{{

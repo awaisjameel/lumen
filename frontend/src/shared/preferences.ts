@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import {
+  CompressionMode,
+  CompressionEffort,
   Accent,
   Density,
   engine,
@@ -17,7 +19,7 @@ import {
   TILE_SIZE_MIN,
   ViewerBackground,
 } from '../bridge'
-import type { ExportPreset, LegacyPreferences, PrefCategory, Preferences } from '../bridge'
+import type { CompressionOptions, ExportPreset, LegacyPreferences, PrefCategory, Preferences } from '../bridge'
 import { applyAppearance, applyPresentation, cachedAppearance } from '../design/appearance'
 import { setShortcutOverrides } from './commands'
 import { reportError } from './errors'
@@ -49,6 +51,12 @@ export function defaultPreferences(): Preferences {
     hideDurationBadge: false,
     shortcuts: {},
     exportPresets: [],
+    compression: {
+      mode: CompressionMode.CompressCompatible,
+      effort: CompressionEffort.CompressBalanced,
+      minSavings: 0,
+      threads: 1,
+    },
   }
 }
 
@@ -199,6 +207,11 @@ export const usePreferences = defineStore('preferences', () => {
     return set({ exportPresets })
   }
 
+  /** Changes compression defaults in save order, without starting a job. */
+  function setCompression(patch: Partial<CompressionOptions>): Promise<boolean> {
+    return change((now) => ({ compression: { ...now.compression, ...patch } }))
+  }
+
   /**
    * Puts whole categories of settings back to their defaults in the library,
    * then shows the preferences as it now holds them. Changes still on their
@@ -220,5 +233,5 @@ export const usePreferences = defineStore('preferences', () => {
     })
   }
 
-  return { prefs, viewer, loaded, saving, load, set, setViewer, setShortcut, setExportPresets, reset }
+  return { prefs, viewer, loaded, saving, load, set, setViewer, setShortcut, setExportPresets, setCompression, reset }
 })

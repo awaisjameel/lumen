@@ -42,6 +42,10 @@ export const SUITES = {
     port: 9411,
     about: 'every preference where it takes effect, shortcuts, format exclusion, viewing cache, presets, reset',
   },
+  compression: {
+    port: 9412,
+    about: 'verified lossless copies, partial bulk outcomes, restart, JPEG XL restoration and local presets',
+  },
   showcase: { port: 9410, about: 'the component showcase of a development run (starts wails3 dev)', optIn: true },
 }
 export const BASE_PORT = 9400

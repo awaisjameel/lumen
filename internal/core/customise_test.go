@@ -128,6 +128,7 @@ func changed() Preferences {
 		FocusRing: FocusStrong, HideFavouriteBadge: true, HideVideoBadge: true, HideDurationBadge: true,
 		Shortcuts:     map[string]string{"viewer.zoomIn": "Z"},
 		ExportPresets: []ExportPreset{{Name: "Web", Format: ExportJPEG, Side: 2048, Quality: 80}},
+		Compression:   CompressionOptions{Mode: CompressReversible, Effort: CompressMaximum, MinSavings: 5, Threads: 1},
 	}.Normalised()
 }
 

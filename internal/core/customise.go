@@ -255,12 +255,13 @@ const (
 	PrefIndexing      PrefCategory = "indexing"      // what indexing waits for, threads, cache cap, formats
 	PrefSearch        PrefCategory = "search"        // working on battery, tag confidence
 	PrefFiles         PrefCategory = "files"         // event gap, export presets
+	PrefCompression   PrefCategory = "compression"   // safe compression defaults
 )
 
 // PrefCategories lists every category, in the order the settings show them.
 func PrefCategories() []PrefCategory {
 	return []PrefCategory{PrefAppearance, PrefLibrary, PrefViewing, PrefVideo, PrefAccessibility, PrefIndexing,
-		PrefSearch, PrefFiles}
+		PrefSearch, PrefFiles, PrefCompression}
 }
 
 // Reset is p with one category's interface preferences put back to their
@@ -293,6 +294,8 @@ func (p Preferences) Reset(c PrefCategory) Preferences {
 		p.FocusRing, p.Shortcuts = def.FocusRing, nil
 	case PrefFiles:
 		p.ExportPresets = nil
+	case PrefCompression:
+		p.Compression = def.Compression
 	case PrefIndexing, PrefSearch:
 		return p // engine settings: not part of the preferences
 	}

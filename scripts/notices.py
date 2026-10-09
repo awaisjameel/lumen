@@ -42,11 +42,11 @@ def go(*args: str) -> str:
     return subprocess.run([exe, *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout  # noqa: S603
 
 
-def pinned(pattern: str) -> str:
+def pinned(pattern: str, source: Path = DEPS_SH) -> str:
     """The version deps.sh pins, from the first match of pattern's group."""
-    m = re.search(pattern, DEPS_SH.read_text(encoding="utf-8"))
+    m = re.search(pattern, source.read_text(encoding="utf-8"))
     if not m:
-        raise SystemExit(f"notices: deps.sh no longer matches {pattern!r}; update scripts/notices.py")
+        raise SystemExit(f"notices: {source.name} no longer matches {pattern!r}; update scripts/notices.py")
     return m.group(1)
 
 
@@ -123,6 +123,10 @@ def main() -> None:
     libraw = pinned(r"libraw\.org/data/LibRaw-([0-9.]+)\.tar\.gz")
     ort = pinned(r"microsoft\.ml\.onnxruntime\.directml/([0-9.]+)/")
     dml = pinned(r"microsoft\.ai\.directml/([0-9.]+)/")
+    compression_source = ROOT / "scripts" / "compression-deps.sh"
+    jpeg = pinned(r"libjpeg-turbo/releases/download/([0-9.]+)/", compression_source)
+    oxipng = pinned(r"crates/oxipng/oxipng-([0-9.]+)\.crate", ROOT / "scripts" / "oxipng-deps.sh")
+    jxl = pinned(r"libjxl/releases/download/v([0-9.]+)/", compression_source)
     vips_libs: dict[str, str] = json.loads(licence("libvips.versions.json"))
     bundled = wrap([f"{name} {version}" for name, version in sorted(vips_libs.items()) if name != "vips"])
     go_version, go_text = go_licence()
@@ -155,7 +159,15 @@ def main() -> None:
             f"ONNX Runtime {ort} with DirectML (onnxruntime.dll, onnxruntime_providers_shared.dll): MIT.\n"
             "  https://github.com/microsoft/onnxruntime\n\n"
             f"DirectML {dml} (DirectML.dll): Microsoft Software License Terms, which allow it to be\n"
-            "  distributed with applications. https://github.com/microsoft/DirectML",
+            "  distributed with applications. https://github.com/microsoft/DirectML\n\n"
+            f"Compression tools (compress\\): libjpeg-turbo {jpeg} (BSD/IJG/zlib), OxiPNG {oxipng} (MIT),\n"
+            f"  and libjxl {jxl} (BSD-3-Clause, with statically linked libraries' licences below).\n"
+            "  Pinned and bundled by scripts/compression-deps.sh; no runtime downloads.\n"
+            "  https://github.com/libjpeg-turbo/libjpeg-turbo\n"
+            "  https://github.com/oxipng/oxipng\n"
+            "  https://github.com/libjxl/libjxl\n"
+            "  OxiPNG is built from its pinned source with Rust's GNU target; its dependency\n"
+            "  notices and Rust's standard-library licences are included below.",
         ),
         section(
             "Models (models\\)",
@@ -198,6 +210,9 @@ def main() -> None:
         ),
         "\nLICENCE TEXTS\n",
         section("libvips: GNU Lesser General Public License 2.1", licence("libvips.LICENSE.txt")),
+        section("libjpeg-turbo: component licences", licence("jpeg-turbo.LICENSE.txt")),
+        section("OxiPNG and its static dependencies: component licences", licence("oxipng.LICENSE.txt")),
+        section("libjxl and its static dependencies: component licences", licence("jxl.LICENSE.txt")),
         section("FFmpeg: GNU Lesser General Public License 3", licence("ffmpeg.LICENSE.txt")),
         section("LibRaw: copyright notice", licence("libraw.COPYRIGHT.txt")),
         section("LibRaw: Common Development and Distribution License 1.0", licence("libraw.LICENSE.CDDL.txt")),

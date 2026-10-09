@@ -25,6 +25,7 @@ export const navEntries: readonly NavEntry[] = [
   { name: 'events', path: '/events', label: 'nav.events', icon: 'events', section: 'library' },
   { name: 'albums', path: '/albums', label: 'nav.albums', icon: 'albums', section: 'library' },
   { name: 'duplicates', path: '/duplicates', label: 'nav.duplicates', icon: 'duplicates', section: 'tools' },
+  { name: 'compression', path: '/compression', label: 'compression.title', icon: 'files', section: 'tools' },
   { name: 'trash', path: '/trash', label: 'nav.trash', icon: 'trash', section: 'tools' },
   { name: 'settings', path: '/settings', label: 'nav.settings', icon: 'settings', section: 'app' },
 ]

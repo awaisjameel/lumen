@@ -120,13 +120,13 @@ func run() error {
 	}
 	defer st.Close()
 
-	decoders := media.Decoders{FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe(), Raw: paths.Raw()}
+	decoders := media.Decoders{FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe(), Raw: paths.Raw(), JXL: paths.JXL()}
 	cache := media.NewCache(paths.ThumbDir, decoders)
 	executable, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	cache.Renderer = media.ProcessRenderer{Executable: executable, FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe(), Raw: paths.Raw()}
+	cache.Renderer = media.ProcessRenderer{Executable: executable, FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe(), Raw: paths.Raw(), JXL: paths.JXL()}
 	// The Blocked screen's lock, shared so that covered photos and videos are
 	// served only while it is open.
 	gate := &services.BlockGate{}
@@ -142,6 +142,7 @@ func run() error {
 	for _, svc := range []application.Service{
 		service(&background{ix: ix, search: models.Search, cache: cache, stream: stream}, application.ServiceOptions{}),
 		service(lib, application.ServiceOptions{}),
+		service(services.NewCompressionService(st, lib, paths), application.ServiceOptions{}),
 		service(services.NewSystemService(lib, reports, paths, version), application.ServiceOptions{}),
 		service(services.NewSearchService(st, models.Search, models.People != nil, ix), application.ServiceOptions{}),
 		service(services.NewPeopleService(st, models.People), application.ServiceOptions{}),

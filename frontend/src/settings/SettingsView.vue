@@ -11,6 +11,7 @@ import ShortcutSettings from './ShortcutSettings.vue'
 import ExportPresets from './ExportPresets.vue'
 import CustomisationSettings from './CustomisationSettings.vue'
 import SectionHead from './SectionHead.vue'
+import CompressionSettings from './CompressionSettings.vue'
 import {
   Accent,
   Density,
@@ -285,6 +286,7 @@ const categories = [
   { id: 'indexing', label: 'settings.category.indexing' },
   { id: 'search', label: 'settings.category.search' },
   { id: 'files', label: 'settings.category.files' },
+  { id: 'compression', label: 'compression.title' },
   { id: 'accessibility', label: 'settings.category.accessibility' },
   { id: 'privacy', label: 'settings.privacy' },
   { id: 'presets', label: 'settings.category.presets' },
@@ -357,6 +359,13 @@ function onConfidence(value: number | number[] | undefined) {
 onBeforeUnmount(saveConfidence)
 // Filtering keeps long-running child operations mounted so their busy state and results survive.
 const categoryKeys: Record<string, MessageKey[]> = {
+  compression: [
+    'compression.title',
+    'compression.mode',
+    'compression.effort',
+    'compression.minSavings',
+    'compression.threads',
+  ],
   viewing: [
     'settings.category.viewing',
     'viewer.open',
@@ -1043,6 +1052,19 @@ const shownCategories = computed(() =>
             </template>
           </PrefRow>
           <ExportPresets v-if="row('files', 'settings.exportPresets', 'settings.exportPresetsHint')" />
+        </section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'compression')"
+          :aria-label="t('compression.title')"
+          data-category="compression"
+        >
+          <SectionHead
+            :title="t('compression.title')"
+            :note="resetNotes.compression"
+            resettable
+            @reset="resetSection(PrefCategory.PrefCompression, t('compression.title'))"
+          />
+          <CompressionSettings :query="query" />
         </section>
         <section
           v-show="shownCategories.some((item) => item.id === 'accessibility')"

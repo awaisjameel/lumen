@@ -527,7 +527,7 @@ func TestUpgradeRemembersWhatMadeTheOutput(t *testing.T) {
 
 // Thumbnails made afresh (an upgrade) re-run the image model, which reads
 // them; thumbnails that stand leave the embedding as it is.
-func TestNewThumbnailsRequeueTheEmbedding(t *testing.T) {
+func TestNewThumbnailsRequeueDependentImageAnalysis(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
 	src, err := st.AddSource(ctx, `C:\Photos`)
 	check(t, err)
@@ -538,16 +538,29 @@ func TestNewThumbnailsRequeueTheEmbedding(t *testing.T) {
 	check(t, st.SaveMetadata(ctx, "m", []MetadataResult{{AssetID: id, Orientation: 1}}))
 	check(t, st.SaveThumbnails(ctx, "t1", []ThumbResult{{AssetID: id}}))
 	check(t, st.SaveEmbeddings(ctx, "model", "e", []EmbedResult{{AssetID: id, Vec: make([]int8, 4), Scale: 1}}))
+	check(t, errOf(st.w.ExecContext(ctx, "UPDATE asset_jobs SET status = 'done' WHERE asset_id = ? AND stage = 'faces'", id)))
+	check(t, errOf(st.w.ExecContext(ctx, "INSERT INTO asset_jobs (asset_id, stage, status, kind, updated_at) VALUES (?, 'ocr', 'done', 'photo', 0)", id)))
 	if status, _ := readJob(t, st, id, core.StageEmbedding); status != core.JobDone {
 		t.Fatalf("embedding before: %s", status)
 	}
 	check(t, st.SaveThumbnails(ctx, "t2", []ThumbResult{{AssetID: id, Unchanged: true}}))
+	for _, stage := range []core.Stage{core.StageFaces, core.StageOCR} {
+		if status, _ := readJob(t, st, id, stage); status != core.JobDone {
+			t.Fatalf("%s after standing thumbnails: %s", stage, status)
+		}
+	}
 	if status, _ := readJob(t, st, id, core.StageEmbedding); status != core.JobDone {
 		t.Fatalf("embedding after standing thumbnails: %s", status)
 	}
 	check(t, st.SaveThumbnails(ctx, "t3", []ThumbResult{{AssetID: id}}))
 	if status, _ := readJob(t, st, id, core.StageEmbedding); status != core.JobPending {
 		t.Fatalf("embedding after new thumbnails: %s", status)
+	}
+	if status, _ := readJob(t, st, id, core.StageFaces); status != core.JobPending {
+		t.Fatalf("faces after new thumbnails: %s", status)
+	}
+	if status, _ := readJob(t, st, id, core.StageOCR); status != core.JobWaiting {
+		t.Fatalf("OCR must wait for the refreshed embedding: %s", status)
 	}
 }
 

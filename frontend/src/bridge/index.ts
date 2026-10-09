@@ -5,6 +5,7 @@
 import { Call, CancelError, CancelledRejectionError, Events } from '@wailsio/runtime'
 import type { CancellablePromise } from '@wailsio/runtime'
 import {
+  CompressionService,
   LibraryService,
   MediaService,
   PeopleService,
@@ -17,6 +18,9 @@ import {
   BatchAction,
   BlockKind,
   BlockMode,
+  CompressionEffort,
+  CompressionMode,
+  CompressionState,
   DateSource,
   Density,
   Device,
@@ -63,6 +67,11 @@ import type {
   AssetDetail as RawAssetDetail,
   AssetTag,
   Changes,
+  CompressionInput,
+  CompressionJob,
+  CompressionOptions,
+  CompressionPage as RawCompressionPage,
+  CompressionRun,
   DayBucket,
   DayItems as RawDayItems,
   DiskDeletion as RawDiskDeletion,
@@ -104,6 +113,9 @@ export {
   BatchAction,
   BlockKind,
   BlockMode,
+  CompressionEffort,
+  CompressionMode,
+  CompressionState,
   DateSource,
   Density,
   Device,
@@ -142,6 +154,10 @@ export type {
   BlockChange,
   AssetTag,
   Changes,
+  CompressionInput,
+  CompressionJob,
+  CompressionOptions,
+  CompressionRun,
   DayBucket,
   Face,
   GridItem,
@@ -197,6 +213,8 @@ export type MediaInspection = NonNullLists<RawMediaInspection, 'tracks'>
 export type Selection = NonNullLists<RawSelection, 'ids'>
 /** An organise preview: the moves a template would make. */
 export type OrganisePlan = NonNullLists<RawOrganisePlan, 'moves'>
+/** One page of a compression run's outcomes, with how many there are in all. */
+export type CompressionPage = NonNullLists<RawCompressionPage, 'jobs'>
 
 /** The interface preferences, their lists never null. */
 export type Preferences = Omit<RawPreferences, 'shortcuts' | 'exportPresets'> & {
@@ -268,6 +286,8 @@ export const EXPORT_QUALITY_MAX = 100 // core.ExportQualityMax
 export const EXPORT_QUALITY_DEFAULT = 92 // core.ExportQualityDefault
 export const MAX_EXPORT_PRESETS = 12 // core.MaxExportPresets
 export const MAX_SHORTCUTS = 64 // core.MaxShortcuts
+export const COMPRESSION_PAGE_SIZE = 100 // core.CompressionPageSize: outcomes in one page of a run
+export const COMPRESSION_SAVINGS_MAX = 90 // core.CompressionMinSavingsMax: percent
 /**
  * The members of a generated enum that a mirrored list names, in the list's
  * order. The lists below are written as the engine's plain names, which
@@ -316,6 +336,7 @@ export const PREF_CATEGORIES = members(PrefCategory, [
   'indexing',
   'search',
   'files',
+  'compression',
 ])
 export const ORGANISE_DEFAULT_TEMPLATE = '{Year}/{Month}/{Event}/{Name}' // fileops.DefaultTemplate
 /** The tokens an organise scheme may hold, in the order the editor offers them (fileops.Tokens). */
@@ -392,6 +413,11 @@ export const ErrorCode = {
   Unsupported: 'unsupported',
   PresetInvalid: 'preset_invalid',
   PresetNewer: 'preset_newer',
+  CompressionBusy: 'compression_busy',
+  CompressionState: 'compression_state',
+  CompressionPlan: 'compression_plan',
+  Preservation: 'preservation',
+  CopySpace: 'copy_space',
   SigninFailed: 'signin_failed',
   SigninUnavailable: 'signin_unavailable',
 } as const
@@ -441,6 +467,24 @@ function queueBlockSession(action: () => Promise<void>): Promise<void> {
 }
 
 export const engine = {
+  compressionAvailable: (): Promise<boolean> => CompressionService.Available(),
+  planCompression: (
+    inputs: CompressionInput[],
+    directory: string,
+    options: CompressionOptions,
+  ): Promise<CompressionRun> => CompressionService.Plan(inputs, directory, options),
+  compressionRuns: async (): Promise<CompressionRun[]> => (await CompressionService.Runs()) ?? [],
+  compressionJobs: async (run: number, offset = 0): Promise<CompressionPage> => {
+    const page = await CompressionService.Jobs(run, offset)
+    return { ...page, jobs: page.jobs ?? [] }
+  },
+  analyseCompression: (run: number): Promise<void> => CompressionService.Analyse(run),
+  commitCompression: (run: number, jobs: number[]): Promise<void> => CompressionService.Commit(run, jobs),
+  pauseCompression: (run: number): Promise<void> => CompressionService.Pause(run),
+  cancelCompression: (run: number): Promise<void> => CompressionService.Cancel(run),
+  restoreCompression: (run: number, job: number, directory: string): Promise<CompressionRun> =>
+    CompressionService.Restore(run, job, directory),
+  revealCompression: (run: number, job: number): Promise<void> => CompressionService.Reveal(run, job),
   selection: async (view: View, ids: number[], search: boolean): Promise<Selection> => {
     const result = await LibraryService.Selection(view, ids, search)
     return { ...result, ids: result.ids ?? [] }

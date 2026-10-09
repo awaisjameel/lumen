@@ -90,6 +90,8 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"EXPORT_QUALITY_DEFAULT":    core.ExportQualityDefault,
 		"MAX_EXPORT_PRESETS":        core.MaxExportPresets,
 		"MAX_SHORTCUTS":             core.MaxShortcuts,
+		"COMPRESSION_PAGE_SIZE":     core.CompressionPageSize,
+		"COMPRESSION_SAVINGS_MAX":   core.CompressionMinSavingsMax,
 	} {
 		if got := constant(name); got != want {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)

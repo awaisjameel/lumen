@@ -23,7 +23,7 @@ Brand assets and their regeneration workflow are documented in [the branding gui
 
 **Phase 2 (search and Things)** is working:
 
-- Thumbnails through **libvips** (JPEG, PNG, WebP, GIF, TIFF, AVIF, shrink-on-load); **HEIC** through Windows' decoder (WIC), falling back to the bundled FFmpeg; BMP through Go; camera RAW through LibRaw and JPEG XL through FFmpeg (Phase 9)
+- Thumbnails through **libvips** (JPEG, PNG, WebP, GIF, TIFF, AVIF, shrink-on-load); **HEIC** through Windows' decoder (WIC), falling back to the bundled FFmpeg; BMP through Go; camera RAW through LibRaw and JPEG XL through the bundled native decoder
 - **SigLIP 2** image embeddings on the GPU through DirectML (CPU fallback), batches of 16, loaded only while there is work
 - **Natural-language search** from the search box (Ctrl+F): results best first, cut relative to the best match so a query matching nothing returns nothing; an in-memory int8 index answers in milliseconds
 - **Things**: about 180 built-in labels, the broad kind of each photo (People, Screenshots, Documents…), labels users add ("Eiffel Tower", found across the library at once), tags users add or remove on any photo (their edits always win), a confidence slider
@@ -92,7 +92,7 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 
 - **Camera RAW**: Adobe DNG, Canon (CR2, CR3, CRW), Nikon (NEF, NRW), Sony (ARW, SR2, SRF), Fujifilm (RAF), Olympus and OM System (ORF), Panasonic (RW2) and Pentax (PEF). LibRaw develops the sensor data in a worker process of its own (`lumen-raw.exe`), with a memory budget and a lifetime per file. One neutral development (the camera's white balance and colour matrix, sRGB, upright) feeds thumbnails, the perceptual hash, the AI and the viewer, so it does not have the camera's own JPEG look. A file LibRaw cannot develop shows its embedded camera preview, labelled as one; a file it cannot read at all is skipped with a reason. A RAW and the JPEG beside it stay two photos, and are never offered as similar copies.
 - **One format catalogue** (`internal/core/formats.go`) names every extension, its kind, its family and what the WebView is sent; the scanner, decoders and services read it.
-- **JPEG XL** is decoded by the bundled FFmpeg; **animated PNG** joins the animations the WebView plays from the original; a **multi-page TIFF** is turned through page by page in the viewer.
+- **JPEG XL** uses the bundled native decoder (extended in Phase 11 to retain colour profiles, transparency and EXIF); **animated PNG** joins the animations the WebView plays from the original; a **multi-page TIFF** is turned through page by page in the viewer.
 - **More video containers**: MPG/MPEG, TS, OGV and ASF, converted as they play. A TypeScript source named `.ts` is told from a transport stream by its first packets.
 - The tested camera matrix, measurements, decisions and limits: [Phase 9 record](docs/phase9-formats-2026-10-07.md).
 
@@ -104,22 +104,29 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 - **Export presets**, a Reset for each settings section and for all, and **customisation files** that carry the interface preferences between libraries with a preview before anything is applied. A file holds no folder, history, PIN or block and cannot turn on a feature that writes files.
 - What each preference is, its default, range, owner and limits: [Phase 10 record](docs/phase10-customisation-2026-10-08.md).
 
-**Next development is planned:** individual/bulk
-lossless image compression, and automatic update checking with background
+**Phase 11 (lossless image compression)** is implemented locally through 11A–D:
+
+- Individual and bulk actions in the grid, viewer and inspector open the Tools workspace. Analyse first, review measured results, then save selected new copies. Originals remain unchanged.
+- Compatible JPEG/PNG optimisation, reversible JPEG-to-JPEG-XL with byte-exact JPEG restoration, and conservatively supported PNG-to-JPEG-XL conversion use pinned offline encoders and independent preservation checks.
+- Durable per-file history, pause/cancel, restart recovery, duplicate-copy choice, destination collision protection, related-copy annotations, and portable compression defaults with category reset.
+- Supported inputs, measurements, verification and limits: [Phase 11 record](docs/phase11-compression-2026-10-09.md). Optional same-format replacement and Undo (11E) remain deferred.
+- Sources above 16 megapixels are skipped for now, and history keeps the newest 100 runs: [Phase 11 audit](docs/phase11-audit-2026-10-10.md), which corrects the record where they differ.
+
+**Next development is planned:** automatic update checking with background
 preparation and a user-approved restart. The updater's limited network exception and
 recovery design are in [the automatic update plan](docs/automatic-updates-plan-2026-10-04.md).
 The phased scope, architecture,
 migration rules and acceptance gates are in
 [the next development plan](docs/next-development-plan-2026-10-04.md).
-Phases 10–12 have not started.
+Phase 12 has not started.
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
 ## Setup (Windows)
 
-Needs Go 1.27, Node 22.22.2+ / 24.15+ / 26+ and npm 11.19+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, and Python 3.14 (only to prepare the models; `ruff.toml` targets it). Toolchain used:
+Needs Go 1.27.2, Node 22.22.2+ / 24.15+ / 26+ and npm 11.19+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, 7-Zip on PATH, and Python 3.14 (`ruff.toml` targets it). Toolchain used:
 
-- Go 1.27.1 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
+- Go 1.27.2 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
 - User environment: `CGO_ENABLED=1`, `CC=clang`, `CXX=clang++`
 - Wails CLI pinned to the beta the project uses: `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.26`
 
@@ -133,6 +140,13 @@ It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, F
 
 Check with `wails3 doctor`.
 
+Compression adds pinned libjpeg-turbo 3.1.2 and libjxl 0.12.0 tools in
+`deps/runtime/compress/`. OxiPNG 9.1.5 is built from its locked source using
+a pinned portable Rust 1.99.0 GNU toolchain and the existing clang compiler.
+The Rust compiler and Cargo cache remain in `deps/`; only the encoder ships.
+Dependency licence texts are collected for the installer notices. These are
+development downloads; the installed app remains offline.
+
 Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), whatever `core.autocrlf` says.
 
 ## Code quality
@@ -141,7 +155,7 @@ Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), what
 
 | Code     | Formatting       | Linting                                                                                                   | Config                                                                             |
 | -------- | ---------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Go       | gofmt, goimports | golangci-lint 2.13 (vet, staticcheck, errcheck, gosec, errorlint, revive and more), deadcode, govulncheck | `.golangci.yml`                                                                    |
+| Go       | gofmt, goimports | golangci-lint 2.14 (vet, staticcheck, errcheck, gosec, errorlint, revive and more), deadcode, govulncheck | `.golangci.yml`                                                                    |
 | Frontend | Prettier 3.9     | ESLint 10 with typescript-eslint (strict, type-aware) and eslint-plugin-vue, plus `vue-tsc`; import boundaries between `design`, `shared`, features and `app` | `frontend/eslint.config.js`, `frontend/.prettierrc.json`, `frontend/tsconfig.json` |
 | Python   | Ruff             | Ruff                                                                                                      | `ruff.toml`                                                                        |
 | Shell    |                  | ShellCheck                                                                                                |                                                                                    |
@@ -197,6 +211,7 @@ internal/scanner     folder walk, hashing, Windows folder watcher
 internal/media       EXIF, filename dates, thumbnails and their cache, perceptual hash
 internal/media/vips  the libvips calls (cgo), one C function per job
 internal/media/wic   Windows Imaging Component decoding (HEIC)
+internal/compress    verified lossless candidates, durable compression coordination and restoration
 native/lumen-raw     the camera RAW worker (C++, LibRaw linked statically); scripts/deps.sh builds it into deps/runtime
 internal/ai          ONNX Runtime sessions, SigLIP 2 image/text encoders, tokenizer, face detection/alignment/recognition
 internal/search      in-memory int8 vector index, search, Things vocabulary and tagging
@@ -210,7 +225,7 @@ internal/xmp         the XMP sidecar packet (pure Go)
 internal/parallel    the worker pool loops run on
 internal/testenv     finds deps/runtime for tests, skipping cleanly without it
 e2e/                 end-to-end suites on the built app in WebView2, their fixture generators and perf scripts (e2e/README.md)
-services/            Wails services (Library, Search, People, Media, System), the block gate, the loopback video server, error codes
+services/            Wails services (Library, Search, People, Media, System, Compression), the block gate, the loopback video server, error codes
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/design  design tokens (tokens.css), the icon manifest, how the appearance preferences are applied
 frontend/src/shared  compositions (Page, PageHeader, FeatureState, CollectionCard, MediaTile…), the preference store, command registry, overlay coordinator, notifications, i18n

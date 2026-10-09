@@ -100,6 +100,13 @@ func (s *Store) preferences(ctx context.Context) (core.Preferences, error) {
 	if ok && json.Unmarshal([]byte(presets), &p.ExportPresets) != nil {
 		p.ExportPresets = nil
 	}
+	compression, ok, err := s.setting(ctx, core.SettingUICompression)
+	if err != nil {
+		return core.Preferences{}, err
+	}
+	if ok && json.Unmarshal([]byte(compression), &p.Compression) != nil {
+		p.Compression = core.DefaultCompressionOptions()
+	}
 	return p.Normalised(), nil
 }
 
@@ -122,6 +129,7 @@ func (s *Store) setPreferences(ctx context.Context, p core.Preferences) (core.Pr
 		{core.SettingUIViewer, p.Viewer},
 		{core.SettingUIShortcuts, p.Shortcuts},
 		{core.SettingUIExportPresets, p.ExportPresets},
+		{core.SettingUICompression, p.Compression},
 	} {
 		data, err := json.Marshal(part.value)
 		if err != nil {

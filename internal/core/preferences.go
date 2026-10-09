@@ -74,6 +74,7 @@ const (
 	SettingUIHideDuration     = "ui_hide_duration_badge"
 	SettingUIShortcuts        = "ui_shortcuts"      // JSON: command id to shortcut
 	SettingUIExportPresets    = "ui_export_presets" // JSON: []ExportPreset
+	SettingUICompression      = "ui_compression"    // JSON: CompressionOptions
 	// SettingUILegacyMigrated marks that what an older Lumen kept in the
 	// WebView's storage was offered to this library once (bool).
 	SettingUILegacyMigrated = "ui_legacy_migrated"
@@ -103,8 +104,9 @@ type Preferences struct {
 	HideDurationBadge  bool `json:"hideDurationBadge"`
 	// Shortcuts holds the shortcuts the user reassigned, by command id; ""
 	// leaves a command without one. A command not listed keeps its own.
-	Shortcuts     map[string]string `json:"shortcuts"`
-	ExportPresets []ExportPreset    `json:"exportPresets"`
+	Shortcuts     map[string]string  `json:"shortcuts"`
+	ExportPresets []ExportPreset     `json:"exportPresets"`
+	Compression   CompressionOptions `json:"compression"`
 }
 
 // DefaultPreferences is what a library starts with.
@@ -121,6 +123,7 @@ func DefaultPreferences() Preferences {
 		InspectorWidth: InspectorWidthDefault,
 		Motion:         MotionSystem, ViewerBackground: ViewerBackgroundDark, StartView: StartLibrary,
 		ThumbFit: ThumbCover, FocusRing: FocusStandard,
+		Compression: DefaultCompressionOptions(),
 	}
 }
 
@@ -181,6 +184,7 @@ func (p Preferences) Normalised() Preferences {
 	}
 	p.Shortcuts = normalisedShortcuts(p.Shortcuts)
 	p.ExportPresets = normalisedExportPresets(p.ExportPresets)
+	p.Compression = p.Compression.Normalised()
 	return p
 }
 

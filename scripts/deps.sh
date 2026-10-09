@@ -173,12 +173,22 @@ get https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-
 # version is already there.
 goinstall() {
   local bin=$T/$1.exe pkg=$2 want=${2##*@}
-  [ -f "$bin" ] && go version -m "$bin" | grep -q "^[[:space:]]mod[[:space:]].*[[:space:]]${want}[[:space:]]" && return
+  local metadata buildgo
+  buildgo=$(go env GOVERSION)
+  if [ -f "$bin" ]; then
+    metadata=$(go version -m "$bin")
+    # Analysis tools read the compiler's export format, which can change
+    # in a patch release too. Rebuild when the project toolchain changes.
+    if grep -q "^[[:space:]]mod[[:space:]].*[[:space:]]${want}[[:space:]]" <<<"$metadata" &&
+      head -n 1 <<<"$metadata" | grep -q "${buildgo}$"; then
+      return
+    fi
+  fi
   echo "build $1 $want"
   GOBIN=$T CGO_ENABLED=0 go install "$pkg"
 }
-goinstall golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
-goinstall deadcode golang.org/x/tools/cmd/deadcode@v0.50.0
+goinstall golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+goinstall deadcode golang.org/x/tools/cmd/deadcode@v0.51.0
 goinstall govulncheck golang.org/x/vuln/cmd/govulncheck@v1.8.0
 
 # The installer (task package): NSIS 3.13 builds it, and Microsoft's
@@ -201,6 +211,8 @@ mkdir -p "$D/installer"
 ln -f "$D/cache/webview2-x64.exe" "$D/installer/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
 
 # Stage the runtime beside the executable (hard links: no copies of 700 MB).
+# shellcheck source=scripts/compression-deps.sh
+source "$ROOT/scripts/compression-deps.sh"
 mkdir -p "$ROOT/bin"
 cp -r -l -f "$RT/." "$ROOT/bin/"
 echo "deps ready: $(du -sh "$RT" | cut -f1) runtime, staged into bin/"
