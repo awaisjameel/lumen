@@ -76,6 +76,7 @@ const labels: Record<PreferenceName, MessageKey> = {
   hideDurationBadge: 'settings.badges',
   shortcuts: 'settings.shortcuts',
   exportPresets: 'settings.exportPresets',
+  compression: 'compression.title',
   'viewer.filmstrip': 'viewer.filmstrip',
   'viewer.autoHide': 'viewer.autoHide',
   'viewer.slideshowSeconds': 'viewer.interval',

@@ -35,8 +35,13 @@ function press(init: KeyboardEventInit): KeyboardEvent {
 // group, keys and zone written beside it.
 function declared(): Map<string, { group?: string; keys?: string; altKeys?: string[]; zone?: string }> {
   const sources = import.meta.glob<string>('../**/*.vue', { query: '?raw', import: 'default', eager: true })
+  const factories = import.meta.glob<string>('./compression.ts', { query: '?raw', import: 'default', eager: true })
+  const compressionGroup = /group: '([^']+)'/.exec(Object.values(factories).join('\n'))?.[1]
   const out = new Map<string, { group?: string; keys?: string; altKeys?: string[]; zone?: string }>()
   for (const source of Object.values(sources)) {
+    for (const call of source.matchAll(/compressionCommand\(\s*'([^']+)'[\s\S]*?\n\s*'(grid|viewer)',/g)) {
+      if (call[1]) out.set(call[1], { group: compressionGroup, zone: call[2] })
+    }
     for (const block of source.split(/\n\s*\{\n\s*id: '/).slice(1)) {
       const id = block.slice(0, block.indexOf("'"))
       const body = block.slice(0, block.search(/\n\s*run[:(]|\n\s*run,/))

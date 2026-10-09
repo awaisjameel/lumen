@@ -24,8 +24,8 @@ import (
 // a fix); the indexer then re-runs just that stage.
 // Photos and videos have their own, as different code serves them.
 const (
-	MetadataVersion       = "imagemeta-1.1+goexif+vips-4" // unset epoch capture dates are ignored
-	ThumbnailVersion      = "vips-8.18-3"                 // colour profiles converted to sRGB, also in HEIC FFmpeg decodes
+	MetadataVersion       = "imagemeta-1.1+goexif+vips-5" // JPEG XL's EXIF is extracted by the bundled decoder.
+	ThumbnailVersion      = "vips-8.18-4"                 // JPEG XL keeps colour profiles and straight alpha.
 	VideoMetadataVersion  = "ffprobe-9.0-2"
 	VideoThumbnailVersion = "ffmpeg-9.0+vips-8.18-2" // frame times are relative to playback, including offset containers
 )
@@ -112,7 +112,7 @@ type Subtitler interface {
 //
 //   - HEIC/HEIF: Windows' own decoder (WIC), else FFmpeg
 //   - camera RAW: the LibRaw worker (see raw.go)
-//   - JPEG XL: FFmpeg (the libvips build has no JPEG XL loader)
+//   - JPEG XL: djxl to PNG, then the common libvips pipeline
 //   - BMP: Go (the libvips build ships without ImageMagick)
 //   - videos: FFmpeg, which also turns them upright
 //   - everything else (JPEG, PNG, WebP, GIF, TIFF, AVIF): libvips, shrinking on load
@@ -120,9 +120,10 @@ type Subtitler interface {
 // Thumbnails and Decode share that routing, so a face box found in a Decode
 // image lands on the same spot of the thumbnail.
 type Decoders struct {
-	FFmpeg  string // ffmpeg.exe, for videos, JPEG XL, and HEIC when WIC can't decode it; "" = none
+	FFmpeg  string // ffmpeg.exe, for videos and HEIC when WIC can't decode it; "" = none
 	FFprobe string // ffprobe.exe, for videos and the size of a JPEG XL; "" = none
 	Raw     string // lumen-raw.exe, for camera RAW; "" = none
+	JXL     string // djxl.exe, preserving JPEG XL's profile, alpha and metadata; "" = none
 
 	// foreground runs the tools at normal priority: a viewer is waiting.
 	foreground bool
@@ -247,7 +248,7 @@ func (d Decoders) open(ctx context.Context, path string, kind core.Kind, orienta
 	case core.FamilyRAW:
 		return d.rawSource(ctx, path, maxSide)
 	case core.FamilyJXL:
-		return d.jxl(ctx, path, maxSide)
+		return d.jxl(ctx, path)
 	case core.FamilyBMP:
 		return goDecode(path)
 	default:
@@ -276,33 +277,6 @@ func (d Decoders) heif(ctx context.Context, path string, orientation, maxSide in
 		icc = nil // as sRGB, as before profiles were read
 	}
 	return source{pixels: vips.Pixels{Pix: pix, W: w, H: h, Bands: 3, Orientation: orientation, ICC: icc}}, nil
-}
-
-// jxl decodes JPEG XL with FFmpeg's libjxl, which applies the orientation
-// the file declares. The pixels are taken for sRGB: FFmpeg hands over
-// neither the file's profile nor a conversion from it.
-func (d Decoders) jxl(ctx context.Context, path string, maxSide int) (source, error) {
-	if d.FFmpeg == "" {
-		return source{}, ErrUnsupported
-	}
-	pix, w, h, err := ffmpegDecode(ctx, d.FFmpeg, path, maxSide)
-	if err != nil {
-		return source{}, fmt.Errorf("decode JPEG XL: %w", err)
-	}
-	return source{pixels: vips.RGBPixels(pix, w, h)}, nil
-}
-
-// jxlMetadata is Metadata for a JPEG XL: its size as FFprobe reads it. No
-// reader here finds the EXIF a JPEG XL may carry, so its date comes from the
-// file's name or time like any photo without one.
-func (d Decoders) jxlMetadata(ctx context.Context, path string) (Metadata, error) {
-	m := Metadata{Orientation: 1}
-	v, err := d.probe(ctx, path)
-	if err != nil {
-		return m, err
-	}
-	m.Width, m.Height = v.Width, v.Height
-	return m, nil
 }
 
 // goDecode reads formats libvips lacks with Go's image packages. They carry

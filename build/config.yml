@@ -11,7 +11,7 @@ info:
   description: "Local, private AI photo gallery" # The application description
   copyright: "(c) 2026, Lumen contributors" # Copyright text
   comments: "Runs entirely on your computer" # Comments
-  version: "0.10.0" # The application version: the one source of every other (see TestVersionsAgree)
+  version: "0.11.0" # The application version: the one source of every other (see TestVersionsAgree)
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)
   #                               # Should match the name of your .icon file without the extension
   #                               # If not set and Assets.car exists, defaults to "appicon"

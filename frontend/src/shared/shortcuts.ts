@@ -36,6 +36,7 @@ export const shortcutCatalogue: readonly ShortcutEntry[] = [
   { id: 'media.favourite', group: 'media', title: 'details.favourite', keys: 'F', zone: 'grid' },
   { id: 'view.details', group: 'view', title: 'library.info', keys: 'I', zone: 'grid' },
   { id: 'library.files', group: 'media', title: 'files.title', zone: 'grid' },
+  { id: 'library.compress', group: 'media', title: 'compression.action', zone: 'grid' },
   { id: 'library.batch', group: 'media', title: 'files.batch', zone: 'grid' },
   { id: 'library.open', group: 'media', title: 'files.open', zone: 'grid' },
 
@@ -56,6 +57,7 @@ export const shortcutCatalogue: readonly ShortcutEntry[] = [
   { id: 'viewer.flip', group: 'media', title: 'viewer.flip', zone: 'viewer' },
   { id: 'viewer.resetAdjustment', group: 'media', title: 'viewer.resetAdjustment', zone: 'viewer' },
   { id: 'viewer.trash', group: 'media', title: 'trash.move', zone: 'viewer' },
+  { id: 'viewer.compress', group: 'media', title: 'compression.action', zone: 'viewer' },
 ]
 
 /** Where a shortcut works, in the order the settings list them. */

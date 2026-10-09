@@ -89,7 +89,7 @@ func (b *cpuBudget) acquire(ctx context.Context, n int) (context.Context, func()
 
 func (b *cpuBudget) held(ctx context.Context, n int) (context.Context, func(), error) {
 	var once sync.Once
-	return context.WithValue(ctx, holdingKey{}, true), func() {
+	return context.WithValue(ctx, holdingKey{}, n), func() {
 		once.Do(func() {
 			b.mu.Lock()
 			b.free += n

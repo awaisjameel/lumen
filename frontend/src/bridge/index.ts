@@ -6,6 +6,7 @@ import { Call, CancelError, CancelledRejectionError, Events } from '@wailsio/run
 import type { CancellablePromise } from '@wailsio/runtime'
 import {
   LibraryService,
+  CompressionService,
   MediaService,
   PeopleService,
   SearchService,
@@ -15,6 +16,9 @@ import {
   Accent,
   AlbumKind,
   BatchAction,
+  CompressionMode,
+  CompressionEffort,
+  CompressionState,
   BlockKind,
   BlockMode,
   DateSource,
@@ -47,6 +51,11 @@ import {
   WaitReason,
 } from '../../bindings/lumen/internal/core'
 import type {
+  CompressionOptions,
+  CompressionInput,
+  CompressionJob,
+  CompressionRun,
+  CompressionCapability,
   About,
   Album,
   BatchOutcome,
@@ -99,6 +108,9 @@ import type {
 } from '../../bindings/lumen/internal/core'
 
 export {
+  CompressionMode,
+  CompressionEffort,
+  CompressionState,
   Accent,
   AlbumKind,
   BatchAction,
@@ -134,6 +146,11 @@ export {
   WaitReason,
 }
 export type {
+  CompressionOptions,
+  CompressionInput,
+  CompressionJob,
+  CompressionRun,
+  CompressionCapability,
   About,
   Album,
   BatchOutcome,
@@ -316,6 +333,7 @@ export const PREF_CATEGORIES = members(PrefCategory, [
   'indexing',
   'search',
   'files',
+  'compression',
 ])
 export const ORGANISE_DEFAULT_TEMPLATE = '{Year}/{Month}/{Event}/{Name}' // fileops.DefaultTemplate
 /** The tokens an organise scheme may hold, in the order the editor offers them (fileops.Tokens). */
@@ -392,6 +410,11 @@ export const ErrorCode = {
   Unsupported: 'unsupported',
   PresetInvalid: 'preset_invalid',
   PresetNewer: 'preset_newer',
+  CompressionBusy: 'compression_busy',
+  CompressionState: 'compression_state',
+  CompressionPlan: 'compression_plan',
+  Preservation: 'preservation',
+  CopySpace: 'copy_space',
   SigninFailed: 'signin_failed',
   SigninUnavailable: 'signin_unavailable',
 } as const
@@ -441,6 +464,26 @@ function queueBlockSession(action: () => Promise<void>): Promise<void> {
 }
 
 export const engine = {
+  compressionAvailable: (): Promise<boolean> => CompressionService.Available(),
+  compressionCapabilities: async (): Promise<CompressionCapability[]> =>
+    (await CompressionService.Capabilities()) ?? [],
+  planCompression: (
+    inputs: CompressionInput[],
+    directory: string,
+    options: CompressionOptions,
+  ): Promise<CompressionRun> => CompressionService.Plan(inputs, directory, options),
+  compressionRuns: async (): Promise<CompressionRun[]> => (await CompressionService.Runs()) ?? [],
+  compressionJobs: async (run: number, offset = 0) => {
+    const page = await CompressionService.Jobs(run, offset)
+    return { ...page, jobs: page.jobs ?? [] }
+  },
+  analyseCompression: (run: number): Promise<void> => CompressionService.Analyse(run),
+  commitCompression: (run: number, jobs: number[]): Promise<void> => CompressionService.Commit(run, jobs),
+  pauseCompression: (run: number): Promise<void> => CompressionService.Pause(run),
+  cancelCompression: (run: number): Promise<void> => CompressionService.Cancel(run),
+  restoreCompression: (run: number, job: number, directory: string): Promise<CompressionRun> =>
+    CompressionService.Restore(run, job, directory),
+  revealCompression: (run: number, job: number): Promise<void> => CompressionService.Reveal(run, job),
   selection: async (view: View, ids: number[], search: boolean): Promise<Selection> => {
     const result = await LibraryService.Selection(view, ids, search)
     return { ...result, ids: result.ids ?? [] }

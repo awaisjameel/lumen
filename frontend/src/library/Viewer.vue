@@ -11,6 +11,7 @@ import { engine, isCancelled, videosAvailable } from '../bridge'
 import type { AssetDetail, GridItem } from '../bridge'
 import { icons } from '../design/icons'
 import { capsOf, dispatchKey, runCommand, useCommands } from '../shared/commands'
+import { compressionCommand } from '../shared/compression'
 import { errorText, reportError } from '../shared/errors'
 import FeatureState from '../shared/FeatureState.vue'
 import { dateTime } from '../shared/format'
@@ -265,6 +266,12 @@ function onKey(e: KeyboardEvent) {
 }
 
 useCommands([
+  compressionCommand(
+    'viewer.compress',
+    () => !!image.value && ordinary.value,
+    () => (detail.value ? [{ assetId: detail.value.id, path: '' }] : []),
+    'viewer',
+  ),
   {
     id: 'viewer.fullscreen',
     group: 'view',
@@ -521,6 +528,13 @@ onBeforeUnmount(() => {
             @click="runCommand('viewer.slideshow')"
           />
           <div class="grow" />
+          <IconButton
+            v-if="image && ordinary"
+            :icon="icons.files"
+            :label="t('compression.action')"
+            variant="ghost"
+            @click="runCommand('viewer.compress')"
+          />
           <!-- In the Trash the two actions are spelt out: what each does to
                the file must be read without hovering. -->
           <UButton

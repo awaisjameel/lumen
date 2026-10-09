@@ -2,6 +2,7 @@ package media
 
 import (
 	"os/exec"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -15,7 +16,8 @@ func contain(cmd *exec.Cmd, memory uintptr) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	closeJob := func() { _ = windows.CloseHandle(job) }
+	var once sync.Once
+	closeJob := func() { once.Do(func() { _ = windows.CloseHandle(job) }) }
 	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
 	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | windows.JOB_OBJECT_LIMIT_JOB_MEMORY
 	info.JobMemoryLimit = memory

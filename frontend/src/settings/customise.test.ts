@@ -390,6 +390,7 @@ it('resets every category only after the user confirms, then shows what the libr
     PrefCategory.PrefIndexing,
     PrefCategory.PrefSearch,
     PrefCategory.PrefFiles,
+    PrefCategory.PrefCompression,
   ])
   expect(prefs.prefs).toEqual(defaultPreferences())
   expect(document.documentElement.dataset.focus).toBe('standard')

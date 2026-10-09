@@ -37,6 +37,7 @@ Needs: Node (as `package.json` says), Python with Pillow, and `deps/` from `scri
 | `branding` | The Lumen mark on every surface in both themes, and the favicon | one photo |
 | `formats` | Camera RAW of every family, JPEG XL, animated PNG, multi-page TIFF, MPEG/TS/Ogg/ASF video, from indexing to the viewer | `formats` |
 | `customise` | Changes every preference in Settings and sees it take effect (page, grid, viewer) and survive a restart; reassigns a shortcut and uses it; turns a photo format off and on; holds an animation still; clears the viewing copies; saves an export preset; resets a section and everything | base library + three files of its own |
+| `compression` | Reviewed JPEG/PNG copies, JPEG XL native rendering and byte-exact JPEG restoration, partial outcomes, pause/cancel, restart, collisions and compression defaults | Generated scratch JPEG/PNG/BMP files, duplicate JPEG and XMP |
 | `showcase` | The component showcase of a development run. Only when named: it starts `wails3 dev`, so it needs the build toolchain in the environment | base library |
 
 ## Fixtures
@@ -65,6 +66,7 @@ Some Go tests run on real files and skip without them (from the repository root,
 LUMEN_RAW_SAMPLES="$PWD/e2e/.cache/raw" go test -race -timeout 900s ./internal/media ./internal/index
 LUMEN_FACE_PHOTOS="<a folder of photos of people>" go test -race -timeout 900s ./internal/ai ./internal/index
 python e2e/perf/raw_matrix.py     # lumen-raw on every sample: time, peak memory, output size
+python e2e/perf/compression.py    # pinned encoder time, peak private commit and sizes on generated fixtures
 ```
 
 ## Performance

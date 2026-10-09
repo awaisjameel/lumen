@@ -142,6 +142,7 @@ await guard('sections', async () => {
       'accessibility',
       'privacy',
       'presets',
+      'compression',
       'about',
     ].every((id) => sections.includes(id)),
     sections.join(','),
@@ -370,7 +371,13 @@ await guard('formats', async () => {
 
   await settings('indexing')
   await click('[data-format="png"]')
-  const off = (await lib(page, 'Settings')).excludedFormats
+  // Scanner ownership can delay the durable write beyond the click feedback.
+  const savedBy = Date.now() + 10_000
+  let off = (await lib(page, 'Settings')).excludedFormats
+  while (JSON.stringify(off) !== '["png"]' && Date.now() < savedBy) {
+    await sleep(100)
+    off = (await lib(page, 'Settings')).excludedFormats
+  }
   check('turning PNG off in Settings is saved', JSON.stringify(off) === '["png"]', JSON.stringify(off))
   await page.screenshot({ path: join(s.out, 'formats.png') })
 

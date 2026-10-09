@@ -828,6 +828,12 @@ useCommands([
         </template>
         <template v-else>
           <UButton :icon="icons.files" @click="runCommand('inspector.files')">{{ t('files.title') }}</UButton>
+          <UButton
+            v-if="detail.kind === Kind.KindPhoto"
+            :icon="icons.files"
+            @click="runCommand(lib.viewer ? 'viewer.compress' : 'library.compress')"
+            >{{ t('compression.action') }}</UButton
+          >
           <UButton :icon="icons.external" @click="runCommand('inspector.open')">{{ t('files.open') }}</UButton>
           <UButton :icon="icons['eye-off']" @click="runCommand('inspector.block')">{{ t('blocked.block') }}</UButton>
           <UButton

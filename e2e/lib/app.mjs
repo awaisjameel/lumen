@@ -108,6 +108,7 @@ const service =
   (name) =>
   (page, method, ...args) =>
     call(page, `lumen/services.${name}.${method}`, ...args)
+export const compression = service('CompressionService')
 export const lib = service('LibraryService')
 export const media = service('MediaService')
 export const search = service('SearchService')

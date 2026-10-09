@@ -40,8 +40,7 @@ func (d Decoders) Inspect(ctx context.Context, path string, kind core.Kind) (cor
 	case core.FamilyRAW:
 		return d.rawInspection(ctx, path)
 	case core.FamilyJXL:
-		info.Orientation = 1 // the decoder turns it; nothing else is read from it
-		return info, nil
+		return d.jxlInspection(ctx, path)
 	default: // read below, by the readers of the common formats
 	}
 	m, err := ReadMetadata(path, kind)
@@ -60,7 +59,13 @@ func (d Decoders) Inspect(ctx context.Context, path string, kind core.Kind) (cor
 		return info, err
 	}
 	defer f.Close()
-	x, err := goexif.Decode(f)
+	fillInspectionEXIF(f, &info)
+	return info, nil
+}
+
+// fillInspectionEXIF shares the inspector's optional fields with extracted JPEG XL EXIF.
+func fillInspectionEXIF(reader io.Reader, info *core.MediaInspection) {
+	x, err := goexif.Decode(reader)
 	if err == nil {
 		for name, to := range map[goexif.FieldName]*string{goexif.LensModel: &info.Lens, goexif.ExposureTime: &info.Exposure, goexif.FNumber: &info.Aperture, goexif.ISOSpeedRatings: &info.ISO} {
 			if tag, err := x.Get(name); err == nil {
@@ -68,7 +73,6 @@ func (d Decoders) Inspect(ctx context.Context, path string, kind core.Kind) (cor
 			}
 		}
 	}
-	return info, nil
 }
 
 var textSubtitles = map[string]bool{"subrip": true, "ass": true, "ssa": true, "webvtt": true, "mov_text": true, "text": true}

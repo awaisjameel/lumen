@@ -46,6 +46,12 @@ func metadataStand(j store.JobItem) bool {
 	if photo == media.MetadataVersion {
 		return true
 	}
+	if core.FamilyOf(j.Path) == core.FamilyJXL {
+		return false
+	}
+	if photo == media.BeforeJXLMetadataVersion {
+		return true
+	}
 	if photo != media.EpochDatesMetadataVersion {
 		return false
 	}

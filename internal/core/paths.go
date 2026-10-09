@@ -93,6 +93,9 @@ func (p Paths) FFmpeg() string { return p.runtimeTool("ffmpeg", "ffmpeg.exe") }
 // FFprobe is the bundled ffprobe.exe, "" if it isn't there (see FFmpeg).
 func (p Paths) FFprobe() string { return p.runtimeTool("ffmpeg", "ffprobe.exe") }
 
+// JXL is the bundled JPEG XL decoder, including its colour and metadata handling.
+func (p Paths) JXL() string { return p.runtimeTool("compress", "djxl.exe") }
+
 // Raw is the bundled camera RAW worker, lumen-raw.exe, "" if it isn't there
 // (see FFmpeg).
 func (p Paths) Raw() string { return p.runtimeTool("lumen-raw.exe") }

@@ -301,6 +301,151 @@ export interface Changes {
 }
 
 /**
+ * CompressionCapability is the catalogue's conservative source eligibility.
+ */
+export interface CompressionCapability {
+    "family": Family;
+    "compatible": boolean;
+    "reversible": boolean;
+    "convert": boolean;
+}
+
+/**
+ * CompressionEffort changes search time, with unchanged preservation checks.
+ */
+export enum CompressionEffort {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The bounded effort presets.
+     */
+    CompressFast = "fast",
+    CompressBalanced = "balanced",
+    CompressMaximum = "maximum",
+};
+
+/**
+ * CompressionInput explicitly chooses a duplicate path, or the first readable copy.
+ */
+export interface CompressionInput {
+    "assetId": number;
+    "path": string;
+}
+
+/**
+ * CompressionJob is a measured candidate and its publication journal.
+ */
+export interface CompressionJob {
+    "id": number;
+    "runId": number;
+    "assetId": number;
+    "from": string;
+    "to": string;
+    "copies": number;
+    "size": number;
+    "mtime": number;
+    "digest": string;
+    "outputSize": number;
+    "outputDigest": string;
+    "state": CompressionState;
+    "reason": string;
+    "verification": string;
+    "tool": string;
+    "outputAssetId": number;
+}
+
+/**
+ * CompressionMode describes the preservation promise, never a quality level.
+ */
+export enum CompressionMode {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * Compression modes all publish new copies. Restoration is offered from a verified run.
+     */
+    CompressCompatible = "compatible",
+    CompressReversible = "reversible",
+    CompressConvert = "convert",
+    CompressRestore = "restore",
+};
+
+/**
+ * CompressionOptions contains portable defaults only: no paths or automatic actions.
+ */
+export interface CompressionOptions {
+    "mode": CompressionMode;
+    "effort": CompressionEffort;
+
+    /**
+     * percent, 0..90
+     */
+    "minSavings": number;
+
+    /**
+     * at most the shared indexing budget
+     */
+    "threads": number;
+}
+
+/**
+ * CompressionPage bounds a public result list even for a large run.
+ */
+export interface CompressionPage {
+    "jobs": CompressionJob[] | null;
+    "offset": number;
+    "total": number;
+}
+
+/**
+ * CompressionRun keeps local history and bounded progress, without codec percentages.
+ */
+export interface CompressionRun {
+    "id": number;
+    "createdAt": number;
+    "options": CompressionOptions;
+    "state": CompressionState;
+    "total": number;
+    "processed": number;
+    "ready": number;
+    "done": number;
+    "skipped": number;
+    "failed": number;
+    "cancelled": number;
+    "savedBytes": number;
+    "addedBytes": number;
+}
+
+/**
+ * CompressionState is a durable run or per-file state.
+ */
+export enum CompressionState {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The journal records every boundary that can be interrupted.
+     */
+    CompressionPlanned = "planned",
+    CompressionEncoding = "encoding",
+    CompressionVerifying = "verifying",
+    CompressionReady = "ready",
+    CompressionCommitting = "committing",
+    CompressionDone = "done",
+    CompressionPaused = "paused",
+    CompressionSkipped = "skipped",
+    CompressionCancelled = "cancelled",
+    CompressionFailed = "failed",
+};
+
+/**
  * CoveredItem is a photo a block covers, as the Blocked screen's browser
  * lists it: its grid cell and the other photo-mode blocks that also hide it.
  */
@@ -1300,6 +1445,11 @@ export enum PrefCategory {
      * event gap, export presets
      */
     PrefFiles = "files",
+
+    /**
+     * safe compression defaults
+     */
+    PrefCompression = "compression",
 };
 
 /**
@@ -1352,6 +1502,7 @@ export interface Preferences {
      */
     "shortcuts": { [_ in string]?: string } | null;
     "exportPresets": ExportPreset[] | null;
+    "compression": CompressionOptions;
 }
 
 /**

@@ -29,7 +29,7 @@ const (
 	renderPixels     = 100_000_000
 	renderBytes      = 64 << 20
 	renderCacheBytes = 256 << 20
-	renderVersion    = "srgb-upright-v1"
+	renderVersion    = "srgb-upright-v2" // JPEG XL now retains its colour profile.
 	// renderMemory is the render worker's job limit. It covers the worker, a
 	// camera RAW it has developed (rawMemory) and the pixels it then holds.
 	renderMemory = 1536 << 20
@@ -56,12 +56,12 @@ type PageRenderer interface {
 }
 
 // ProcessRenderer launches the installed runtime in its private worker mode.
-type ProcessRenderer struct{ Executable, FFmpeg, FFprobe, Raw string }
+type ProcessRenderer struct{ Executable, FFmpeg, FFprobe, Raw, JXL string }
 
 type renderInput struct {
-	Path, FFmpeg, FFprobe, Raw string
-	Orientation, Side, Page    int
-	Operation                  string
+	Path, FFmpeg, FFprobe, Raw, JXL string
+	Orientation, Side, Page         int
+	Operation                       string
 }
 
 // Render decodes one image in a cancellable, bounded worker process.
@@ -71,12 +71,12 @@ func (p ProcessRenderer) Render(ctx context.Context, path string, orientation, s
 
 // RenderPage is Render for one page of a file, counted from 0.
 func (p ProcessRenderer) RenderPage(ctx context.Context, path string, orientation, side, page int) ([]byte, error) {
-	return p.worker(ctx, renderInput{Path: path, FFmpeg: p.FFmpeg, FFprobe: p.FFprobe, Raw: p.Raw, Orientation: orientation, Side: side, Page: page})
+	return p.worker(ctx, renderInput{Path: path, FFmpeg: p.FFmpeg, FFprobe: p.FFprobe, Raw: p.Raw, JXL: p.JXL, Orientation: orientation, Side: side, Page: page})
 }
 
 // Inspect reads image metadata inside the same bounded native worker.
 func (p ProcessRenderer) Inspect(ctx context.Context, path string) (core.MediaInspection, error) {
-	data, err := p.worker(ctx, renderInput{Path: path, FFmpeg: p.FFmpeg, FFprobe: p.FFprobe, Raw: p.Raw, Operation: "inspect"})
+	data, err := p.worker(ctx, renderInput{Path: path, FFmpeg: p.FFmpeg, FFprobe: p.FFprobe, Raw: p.Raw, JXL: p.JXL, Operation: "inspect"})
 	var info core.MediaInspection
 	if err != nil {
 		return info, err
@@ -137,7 +137,7 @@ func RenderWorker(ctx context.Context, input io.Reader, output io.Writer) error 
 	if err := json.NewDecoder(io.LimitReader(input, 64<<10)).Decode(&in); err != nil {
 		return err
 	}
-	d := Decoders{FFmpeg: in.FFmpeg, FFprobe: in.FFprobe, Raw: in.Raw, foreground: true}
+	d := Decoders{FFmpeg: in.FFmpeg, FFprobe: in.FFprobe, Raw: in.Raw, JXL: in.JXL, foreground: true}
 	if in.Operation == "inspect" {
 		info, err := d.Inspect(ctx, in.Path, core.KindPhoto)
 		if err != nil {

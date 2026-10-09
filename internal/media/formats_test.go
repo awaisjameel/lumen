@@ -73,9 +73,9 @@ func TestTheNewerVideoContainersAreIndexedAndConverted(t *testing.T) {
 	}
 }
 
-func TestJPEGXLIsDecodedByFFmpeg(t *testing.T) {
+func TestJPEGXLIsDecodedByTheBundledCodec(t *testing.T) {
 	ffmpeg := testenv.File(t, "ffmpeg", "ffmpeg.exe")
-	d := Decoders{FFmpeg: ffmpeg, FFprobe: testenv.File(t, "ffmpeg", "ffprobe.exe")}
+	d := Decoders{FFmpeg: ffmpeg, FFprobe: testenv.File(t, "ffmpeg", "ffprobe.exe"), JXL: testenv.File(t, "compress", "djxl.exe")}
 	ctx := context.Background()
 	// Red on the left, blue on the right, 300x200, lossless.
 	path := makeSample(t, ffmpeg, "picture.jxl", "-f", "lavfi", "-i", "color=red:size=150x200,format=rgb24", "-f", "lavfi", "-i",
@@ -108,7 +108,7 @@ func TestJPEGXLIsDecodedByFFmpeg(t *testing.T) {
 	if core.WebNative(".jxl") {
 		t.Error("the WebView is offered a JPEG XL it cannot show")
 	}
-	// Without FFmpeg it is skipped, like a HEIC nothing here decodes.
+	// Without its native decoder it is skipped, like a HEIC nothing here decodes.
 	if _, err := (Decoders{}).Decode(ctx, path, core.KindPhoto, 1, 150); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("no FFmpeg: %v, want ErrUnsupported", err)
 	}

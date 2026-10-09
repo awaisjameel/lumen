@@ -45,6 +45,7 @@ export const router = createRouter({
     { path: '/events', name: 'events', component: EventsView },
     { path: '/events/:id(\\d+)', name: 'event', component: LibraryView, meta: { filter: Filter.FilterAll } },
     { path: '/duplicates', name: 'duplicates', component: DuplicatesView },
+    { path: '/compression', name: 'compression', component: () => import('./compression/CompressionView.vue') },
     { path: '/search', name: 'search', component: LibraryView },
     { path: '/settings', name: 'settings', component: SettingsView },
     { path: '/settings/blocked', name: 'blocked', component: BlockedView },
