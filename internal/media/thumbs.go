@@ -112,7 +112,7 @@ type Subtitler interface {
 //
 //   - HEIC/HEIF: Windows' own decoder (WIC), else FFmpeg
 //   - camera RAW: the LibRaw worker (see raw.go)
-//   - JPEG XL: djxl to PNG, then the common libvips pipeline
+//   - JPEG XL: djxl to PNG, then the common libvips pipeline (FFmpeg for one too large for that)
 //   - BMP: Go (the libvips build ships without ImageMagick)
 //   - videos: FFmpeg, which also turns them upright
 //   - everything else (JPEG, PNG, WebP, GIF, TIFF, AVIF): libvips, shrinking on load
@@ -120,7 +120,7 @@ type Subtitler interface {
 // Thumbnails and Decode share that routing, so a face box found in a Decode
 // image lands on the same spot of the thumbnail.
 type Decoders struct {
-	FFmpeg  string // ffmpeg.exe, for videos and HEIC when WIC can't decode it; "" = none
+	FFmpeg  string // ffmpeg.exe, for videos, HEIC when WIC can't decode it, and a JPEG XL too large for djxl's bounded output; "" = none
 	FFprobe string // ffprobe.exe, for videos and the size of a JPEG XL; "" = none
 	Raw     string // lumen-raw.exe, for camera RAW; "" = none
 	JXL     string // djxl.exe, preserving JPEG XL's profile, alpha and metadata; "" = none
@@ -248,7 +248,7 @@ func (d Decoders) open(ctx context.Context, path string, kind core.Kind, orienta
 	case core.FamilyRAW:
 		return d.rawSource(ctx, path, maxSide)
 	case core.FamilyJXL:
-		return d.jxl(ctx, path)
+		return d.jxl(ctx, path, maxSide)
 	case core.FamilyBMP:
 		return goDecode(path)
 	default:

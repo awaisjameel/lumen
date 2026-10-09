@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import USelect from '@nuxt/ui/components/Select.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
+import { COMPRESSION_SAVINGS_MAX } from '../bridge'
 import type { CompressionOptions } from '../bridge'
 import { compressionModes, compressionEfforts } from '../shared/compression'
 import PrefRow from '../shared/PrefRow.vue'
@@ -58,7 +59,7 @@ function number(event: Event, key: 'minSavings' | 'threads') {
         :model-value="options.minSavings"
         type="number"
         :min="0"
-        :max="90"
+        :max="COMPRESSION_SAVINGS_MAX"
         :aria-label="t('compression.minSavings')"
         @change="number($event, 'minSavings')"
       />

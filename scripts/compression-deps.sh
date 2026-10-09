@@ -8,7 +8,7 @@ mkdir -p "$RT/compress" "$D/jpeg"
 unzip -q -o -j "$D/cache/jxl-0.12.0.zip" '*/bin/cjxl.exe' '*/bin/djxl.exe' -d "$RT/compress"
 # shellcheck source=scripts/oxipng-deps.sh
 source "$ROOT/scripts/oxipng-deps.sh"
-# Extract NSIS without installing it or changing the machine's PATH.
+# The release is an NSIS installer: take its files without running it or changing the machine's PATH.
 command -v 7z >/dev/null || { echo '7-Zip is required to extract the pinned compression tools' >&2; exit 1; }
 7z x -y "-o$D/jpeg" "$D/cache/jpeg-3.1.2.exe" >/dev/null
 cp "$D/jpeg/bin/jpegtran.exe" "$D/jpeg/bin/djpeg.exe" "$D/jpeg/bin/libjpeg-62.dll" "$RT/compress/"

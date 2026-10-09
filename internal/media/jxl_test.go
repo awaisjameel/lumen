@@ -2,11 +2,15 @@ package media
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -117,5 +121,62 @@ func TestJPEGXLUsesTheSameCameraNamingAsJPEG(t *testing.T) {
 	}
 	if a.Camera == "" || a.Camera != b.Camera || a.TakenAt != b.TakenAt || a.Width != b.Width || a.Height != b.Height {
 		t.Fatalf("camera interpretation changed: %+v -> %+v", a, b)
+	}
+}
+
+// djxl cannot shrink while it decodes, and its PNG is held in memory under a
+// bound. A picture over it (tens of megapixels) is still shown, by FFmpeg at
+// the size asked for, as every JPEG XL was before djxl read them.
+func TestAJPEGXLTooLargeForTheBoundedDecodeIsStillShown(t *testing.T) {
+	d := Decoders{JXL: testenv.File(t, "compress", "djxl.exe"), FFmpeg: testenv.File(t, "ffmpeg", "ffmpeg.exe")}
+	// Noise does not compress: the PNG is as large as its 72 MB of samples.
+	const w, h = 6000, 4000
+	header := fmt.Sprintf("P6\n%d %d\n255\n", w, h)
+	noise := make([]byte, len(header)+w*h*3)
+	copy(noise, header)
+	if _, err := rand.Read(noise[len(header):]); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source, path := filepath.Join(dir, "noise.ppm"), filepath.Join(dir, "noise.jxl")
+	if err := os.WriteFile(source, noise, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runContainedToolAs(t.Context(), hideWindow, testenv.File(t, "compress", "cjxl.exe"), "", io.Discard, renderMemory,
+		source, path, "--distance=1", "--effort=1", "--num_threads=2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.jxlPNG(t.Context(), path); !errors.Is(err, errOutputBudget) {
+		t.Fatalf("the fixture's PNG no longer exceeds the budget: %v", err)
+	}
+	img, err := d.Decode(t.Context(), path, core.KindPhoto, 1, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.W != 300 || img.H != 200 {
+		t.Fatalf("decoded %dx%d, want 300x200", img.W, img.H)
+	}
+	if _, err := d.Inspect(t.Context(), path, core.KindPhoto); err != nil {
+		t.Fatalf("inspecting it: %v", err)
+	}
+	d.FFmpeg = ""
+	if _, err := d.Decode(t.Context(), path, core.KindPhoto, 1, 300); !errors.Is(err, errOutputBudget) {
+		t.Fatalf("without FFmpeg: %v, want the budget's refusal", err)
+	}
+}
+
+// os/exec copies a tool's output with io.Copy, which prefers a writer's
+// ReadFrom: the cap must hold on that path too, not only for a plain Write.
+func TestCappedOutputRefusesMoreThanTheBudgetHoweverItIsCopied(t *testing.T) {
+	var within cappedBuffer
+	if n, err := io.Copy(&within, io.LimitReader(rand.Reader, renderBytes)); err != nil || n != renderBytes || within.full {
+		t.Fatalf("output within the budget: %d bytes, %v", n, err)
+	}
+	var over cappedBuffer
+	if _, err := io.Copy(&over, io.LimitReader(rand.Reader, renderBytes+1)); !errors.Is(err, errOutputBudget) || !over.full {
+		t.Fatalf("output over the budget: %v, full %t", err, over.full)
+	}
+	if len(over.Bytes()) > renderBytes {
+		t.Fatalf("kept %d bytes, over the budget", len(over.Bytes()))
 	}
 }

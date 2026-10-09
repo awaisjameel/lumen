@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"lumen/internal/core"
@@ -45,7 +46,7 @@ func (s *Store) SaveCompressionPlan(ctx context.Context, options core.Compressio
 
 // CompressionJobs reads an internal journal, including owned temporary paths.
 func (s *Store) CompressionJobs(ctx context.Context, run int64) ([]core.CompressionJob, error) {
-	return s.compressionJobs(ctx, run, false)
+	return queryAll(ctx, s.r, readCompressionJob, "SELECT "+compressionColumns+" FROM compression_jobs j WHERE j.run_id = ? ORDER BY j.id", run)
 }
 
 // CompressionRecoveryJobs loads only unfinished checkpoints and pending cleanup.
@@ -65,18 +66,24 @@ func (s *Store) CompressionJob(ctx context.Context, id int64) (core.CompressionJ
 	return jobs[0], nil
 }
 
-// VisibleCompressionJobs omits covered sources and destinations from public history.
-func (s *Store) VisibleCompressionJobs(ctx context.Context, run int64) ([]core.CompressionJob, error) {
-	jobs, err := s.compressionJobs(ctx, run, true)
+// VisibleCompressionJob is one outcome of a run as public history shows it:
+// ErrNotFound when its source or destination is covered, and without the
+// owned temporary paths.
+func (s *Store) VisibleCompressionJob(ctx context.Context, run, id int64) (core.CompressionJob, error) {
+	jobs, err := queryAll(ctx, s.r, readCompressionJob, "SELECT "+compressionColumns+" FROM compression_jobs j WHERE j.id = ? AND j.run_id = ? AND "+compressionVisible, id, run)
 	if err != nil {
-		return nil, err
+		return core.CompressionJob{}, err
 	}
-	visibleJobs := make([]core.CompressionJob, 0, len(jobs))
-	for _, j := range jobs {
-		j.Temp, j.PublishTemp, j.SidecarDigest = "", "", ""
-		visibleJobs = append(visibleJobs, j)
+	if len(jobs) == 0 {
+		return core.CompressionJob{}, ErrNotFound
 	}
-	return visibleJobs, nil
+	return public(jobs[0]), nil
+}
+
+// public is a journal row without what only its owner may read.
+func public(j core.CompressionJob) core.CompressionJob {
+	j.Temp, j.PublishTemp, j.SidecarDigest = "", "", ""
+	return j
 }
 
 // compressionVisible extends the canonical asset predicate to both sides of
@@ -113,32 +120,25 @@ func readCompressionJob(r *sql.Rows) (j core.CompressionJob, err error) {
 	return j, err
 }
 
-// CompressionPage returns at most 100 visible outcomes from a consistent snapshot.
+// CompressionPage returns at most core.CompressionPageSize visible outcomes
+// from a consistent snapshot.
 func (s *Store) CompressionPage(ctx context.Context, runID int64, offset int) (core.CompressionPage, error) {
 	page := core.CompressionPage{Offset: max(offset, 0)}
 	err := s.read(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM compression_jobs j WHERE j.run_id = ? AND "+compressionVisible, runID).Scan(&page.Total); err != nil {
 			return err
 		}
-		jobs, err := queryAll(ctx, tx, readCompressionJob, "SELECT "+compressionColumns+" FROM compression_jobs j WHERE j.run_id = ? AND "+compressionVisible+" ORDER BY j.id LIMIT 100 OFFSET ?", runID, page.Offset)
+		jobs, err := queryAll(ctx, tx, readCompressionJob, "SELECT "+compressionColumns+" FROM compression_jobs j WHERE j.run_id = ? AND "+compressionVisible+" ORDER BY j.id LIMIT ? OFFSET ?", runID, core.CompressionPageSize, page.Offset)
 		if err != nil {
 			return err
 		}
 		for i := range jobs {
-			jobs[i].Temp, jobs[i].PublishTemp, jobs[i].SidecarDigest = "", "", ""
+			jobs[i] = public(jobs[i])
 		}
 		page.Jobs = jobs
 		return nil
 	})
 	return page, err
-}
-
-func (s *Store) compressionJobs(ctx context.Context, run int64, visibleOnly bool) ([]core.CompressionJob, error) {
-	where := ""
-	if visibleOnly {
-		where = " AND " + compressionVisible
-	}
-	return queryAll(ctx, s.r, readCompressionJob, "SELECT "+compressionColumns+" FROM compression_jobs j WHERE (? = 0 OR j.run_id = ?)"+where+" ORDER BY j.id", run, run)
 }
 
 // SetCompressionJob checkpoints generation or publication without changing its plan.
@@ -180,7 +180,32 @@ func (s *Store) CompressionRuns(ctx context.Context) ([]core.CompressionRun, err
 		sum(j.state = 'ready'), sum(j.state = 'done'), sum(j.state = 'skipped'), sum(j.state = 'failed'), sum(j.state = 'cancelled'),
 		sum(CASE WHEN j.state = 'done' THEN max(j.size-j.output_size, 0) ELSE 0 END),
 		sum(CASE WHEN j.state = 'done' THEN j.output_size+j.sidecar_size ELSE 0 END)
-		FROM compression_runs r JOIN compression_jobs j ON j.run_id = r.id WHERE `+compressionVisible+` GROUP BY r.id ORDER BY r.id DESC LIMIT 100`)
+		FROM compression_runs r JOIN compression_jobs j ON j.run_id = r.id
+		WHERE r.id IN (`+keptCompressionRuns+`) AND `+compressionVisible+` GROUP BY r.id ORDER BY r.id DESC`, core.CompressionHistoryRuns)
+}
+
+// keptCompressionRuns selects the newest runs: the history shown, and what
+// pruning leaves. Its one parameter is how many.
+const keptCompressionRuns = "SELECT id FROM compression_runs ORDER BY id DESC LIMIT ?"
+
+// ExpiredCompressionCandidates lists the owned candidate files of the runs
+// PruneCompressionRuns would delete, for their owner to discard first. A run
+// with a publication still to settle is kept, whatever its age.
+func (s *Store) ExpiredCompressionCandidates(ctx context.Context) ([]string, error) {
+	return queryAll(ctx, s.r, func(r *sql.Rows) (path string, err error) { err = r.Scan(&path); return path, err },
+		"SELECT j.temp FROM compression_jobs j WHERE j.temp != '' AND "+expiredCompressionRun("j.run_id")+" ORDER BY j.id", core.CompressionHistoryRuns)
+}
+
+// PruneCompressionRuns deletes the runs history no longer reaches, with their
+// outcomes. Saved copies are files of the library like any other; only the
+// record of how they were made goes.
+func (s *Store) PruneCompressionRuns(ctx context.Context) error {
+	_, err := s.w.ExecContext(ctx, "DELETE FROM compression_runs WHERE "+expiredCompressionRun("id"), core.CompressionHistoryRuns)
+	return err
+}
+
+func expiredCompressionRun(id string) string {
+	return id + " NOT IN (" + keptCompressionRuns + ") AND " + id + " NOT IN (SELECT run_id FROM compression_jobs WHERE state = 'committing')"
 }
 
 // FinishCompression registers a related output and transfers user annotations
@@ -225,7 +250,7 @@ func (s *Store) FinishCompression(ctx context.Context, j core.CompressionJob, ha
 			err = tx.QueryRowContext(ctx, "SELECT id FROM assets WHERE content_hash = ?", hash).Scan(&output)
 			if errors.Is(err, sql.ErrNoRows) {
 				res, err := tx.ExecContext(ctx, `INSERT INTO assets(content_hash, kind, ext, taken_at, date_from, added_at, favourite, display_rotation, display_flip, width, height, orientation, lat, lon, camera, place_id, place_checked)
-					SELECT ?, kind, ?, taken_at, date_from, ?, favourite, display_rotation, display_flip, width, height, orientation, lat, lon, camera, place_id, place_checked FROM assets WHERE id = ?`, hash, filepath.Ext(j.To), time.Now().Unix(), j.AssetID)
+					SELECT ?, kind, ?, taken_at, date_from, ?, favourite, display_rotation, display_flip, width, height, orientation, lat, lon, camera, place_id, place_checked FROM assets WHERE id = ?`, hash, strings.ToLower(filepath.Ext(j.To)), time.Now().Unix(), j.AssetID)
 				if err != nil {
 					return err
 				}

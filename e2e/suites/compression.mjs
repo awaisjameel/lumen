@@ -188,6 +188,10 @@ try {
         !existsSync(job.to),
       job,
     )
+    // The run was planned through the service, which the open page cannot
+    // know of: it reloads on its own actions and while a run is working.
+    // Open it afresh, as it is found after a restart.
+    await go(page, '/')
     await go(page, '/compression')
     await page.waitForFunction(() =>
       [...document.querySelectorAll('button')].some((button) =>

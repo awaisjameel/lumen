@@ -29,7 +29,8 @@ tooling; this file covers how code is written.
   records. Phase 10 (customisation and preference UX) is built as
   `docs/phase10-customisation-2026-10-08.md` records. Phase 11 (lossless
   compression, 11A–D) is built as `docs/phase11-compression-2026-10-09.md`
-  records; optional same-format replacement is deferred. Phase 6 (the installer, politeness controls, crash reports and
+  records, as corrected by `docs/phase11-audit-2026-10-10.md`; optional
+  same-format replacement is deferred. Phase 6 (the installer, politeness controls, crash reports and
   diagnostics, onboarding and empty states, the performance pass) is built
   as `docs/phase6-design-2026-10-03.md` sets out; its decisions are not
   reopened except by a later explicit product-owner decision. Lumen currently

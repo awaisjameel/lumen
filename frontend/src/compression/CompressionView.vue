@@ -5,7 +5,7 @@ import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
-import { CompressionMode, CompressionState, engine } from '../bridge'
+import { COMPRESSION_PAGE_SIZE, COMPRESSION_SAVINGS_MAX, CompressionMode, CompressionState, engine } from '../bridge'
 import type { CompressionInput, CompressionJob, CompressionOptions, CompressionRun } from '../bridge'
 import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
@@ -175,8 +175,17 @@ function inspect(id: number) {
 }
 function pageBy(step: number) {
   generation++
-  offset.value = Math.max(0, offset.value + step * 100)
+  offset.value = Math.max(0, offset.value + step * COMPRESSION_PAGE_SIZE)
   void refresh()
+}
+// The field holds whatever was typed; the plan takes only a whole percentage
+// within the engine's bounds, which is also what the field then shows.
+function setMinSavings(event: Event) {
+  if (!(event.target instanceof HTMLInputElement)) return
+  const n = Math.round(Number(event.target.value))
+  const percent = Number.isFinite(n) ? Math.min(COMPRESSION_SAVINGS_MAX, Math.max(0, n)) : 0
+  options.value.minSavings = percent
+  event.target.value = String(percent)
 }
 function toggle(id: number, value: boolean | 'indeterminate') {
   const next = new Set(selected.value)
@@ -226,8 +235,10 @@ onMounted(async () => {
     error.value = errorText(e)
   }
   await refresh()
+  // Only a running worker changes anything between the user's own actions,
+  // each of which reloads: an idle page asks the engine nothing.
   poll = setInterval(() => {
-    void refresh()
+    if (anyActive.value) void refresh()
   }, 500)
 })
 onBeforeUnmount(() => {
@@ -276,12 +287,13 @@ onBeforeUnmount(() => {
           <label
             >{{ t('compression.minSavings')
             }}<UInput
-              v-model.number="options.minSavings"
+              :model-value="options.minSavings"
               type="number"
               :min="0"
-              :max="90"
+              :max="COMPRESSION_SAVINGS_MAX"
               :disabled="working || submitting"
               :aria-label="t('compression.minSavings')"
+              @change="setMinSavings"
           /></label>
           <label
             >{{ t('compression.destination')
@@ -397,14 +409,19 @@ onBeforeUnmount(() => {
             >
           </div>
         </OutcomeList>
-        <div v-if="total > 100" class="compression-actions">
+        <div v-if="total > COMPRESSION_PAGE_SIZE" class="compression-actions">
           <UButton variant="outline" :disabled="!offset || submitting" @click="pageBy(-1)">{{
             t('compression.previous')
           }}</UButton>
-          <span>{{ t('compression.page', { first: offset + 1, last: Math.min(offset + 100, total), total }) }}</span>
-          <UButton variant="outline" :disabled="offset + 100 >= total || submitting" @click="pageBy(1)">{{
-            t('compression.next')
-          }}</UButton>
+          <span>{{
+            t('compression.page', { first: offset + 1, last: Math.min(offset + COMPRESSION_PAGE_SIZE, total), total })
+          }}</span>
+          <UButton
+            variant="outline"
+            :disabled="offset + COMPRESSION_PAGE_SIZE >= total || submitting"
+            @click="pageBy(1)"
+            >{{ t('compression.next') }}</UButton
+          >
         </div>
         <div class="compression-actions">
           <span v-if="selected.size">{{ t('compression.selected', { n: selected.size }) }}</span>

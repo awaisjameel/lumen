@@ -110,6 +110,7 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 - Compatible JPEG/PNG optimisation, reversible JPEG-to-JPEG-XL with byte-exact JPEG restoration, and conservatively supported PNG-to-JPEG-XL conversion use pinned offline encoders and independent preservation checks.
 - Durable per-file history, pause/cancel, restart recovery, duplicate-copy choice, destination collision protection, related-copy annotations, and portable compression defaults with category reset.
 - Supported inputs, measurements, verification and limits: [Phase 11 record](docs/phase11-compression-2026-10-09.md). Optional same-format replacement and Undo (11E) remain deferred.
+- Sources above 16 megapixels are skipped for now, and history keeps the newest 100 runs: [Phase 11 audit](docs/phase11-audit-2026-10-10.md), which corrects the record where they differ.
 
 **Next development is planned:** automatic update checking with background
 preparation and a user-approved restart. The updater's limited network exception and

@@ -9,8 +9,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// LeaseCopyFolders holds each ancestor against writes and renames, closing the
-// junction-swap window between checking a path and publishing into it.
+// LeaseCopyFolders holds each folder and its ancestors against renames and
+// deletion, closing the junction-swap window between checking a path and
+// publishing into it. Windows applies a share mode only to a handle that asks
+// to read, write or delete, so each folder is opened for listing: a handle
+// that reads attributes alone would leave the folder itself free to be moved.
 func LeaseCopyFolders(ctx context.Context, dirs ...string) (func(), error) {
 	var handles []windows.Handle
 	var once sync.Once
@@ -44,7 +47,7 @@ func LeaseCopyFolders(ctx context.Context, dirs ...string) (func(), error) {
 				release()
 				return nil, err
 			}
-			h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+			h, err := windows.CreateFile(p, windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 			if err != nil {
 				release()
 				return nil, err

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"lumen/internal/core"
@@ -31,7 +32,7 @@ type Coordinator struct {
 
 // Plan resolves exactly the requested copies; absent paths choose one readable copy.
 func (c *Coordinator) Plan(ctx context.Context, inputs []core.CompressionInput, directory string, options core.CompressionOptions) (int64, error) {
-	if len(inputs) == 0 || len(inputs) > 10000 || options != options.Normalised() || directory != "" && !filepath.IsAbs(directory) {
+	if len(inputs) == 0 || len(inputs) > core.CompressionMaxInputs || options != options.Normalised() || directory != "" && !filepath.IsAbs(directory) {
 		return 0, ErrPlan
 	}
 	jobs := make([]core.CompressionJob, 0, len(inputs))
@@ -78,8 +79,7 @@ func (c *Coordinator) Plan(ctx context.Context, inputs []core.CompressionInput, 
 		if err := c.Store.ExportAllowed(ctx, input.AssetID, j.To); err != nil {
 			return 0, err
 		}
-		family := core.FamilyOf(path)
-		eligible := f.Kind == core.KindPhoto && (options.Mode == core.CompressCompatible && (family == core.FamilyJPEG || family == core.FamilyPNG) || options.Mode == core.CompressReversible && family == core.FamilyJPEG || options.Mode == core.CompressConvert && family == core.FamilyPNG)
+		eligible := f.Kind == core.KindPhoto && core.CompressionSupported(core.FamilyOf(path), options.Mode)
 		info, err := os.Lstat(path)
 		switch {
 		case !eligible:
@@ -138,6 +138,7 @@ func (c *Coordinator) analyseOne(ctx context.Context, j core.CompressionJob, opt
 	defer cancel()
 	// Ordinary compression never reads through BlockGate. A newly applied
 	// block cancels the current worker and removes its uncommitted result.
+	var covered atomic.Bool
 	monitorDone := make(chan struct{})
 	go func() {
 		defer close(monitorDone)
@@ -148,7 +149,8 @@ func (c *Coordinator) analyseOne(ctx context.Context, j core.CompressionJob, opt
 			case <-monitorCtx.Done():
 				return
 			case <-timer.C:
-				if err := c.Store.ExportAllowed(monitorCtx, j.AssetID, j.To); err != nil {
+				if err := c.Store.ExportAllowed(monitorCtx, j.AssetID, j.To); errors.Is(err, store.ErrNotFound) {
+					covered.Store(true)
 					cancel()
 					return
 				}
@@ -156,16 +158,7 @@ func (c *Coordinator) analyseOne(ctx context.Context, j core.CompressionJob, opt
 		}
 	}()
 	defer func() { cancel(); <-monitorDone }()
-	if c.Acquire != nil {
-		workCtx, release, threads, err := c.Acquire(runCtx, options.Threads)
-		if err != nil {
-			return err
-		}
-		defer release()
-		runCtx = workCtx
-		options.Threads = threads
-	}
-	err := c.encodeOne(runCtx, &j, options)
+	err := c.encodeInTurn(runCtx, &j, options)
 	if err == nil {
 		return nil
 	}
@@ -177,7 +170,11 @@ func (c *Coordinator) analyseOne(ctx context.Context, j core.CompressionJob, opt
 	if errors.Is(err, ErrUnsupported) || errors.Is(err, ErrPreservation) {
 		j.State = core.CompressionSkipped
 	}
-	if runCtx.Err() != nil {
+	switch {
+	case covered.Load():
+		// The run goes on to its other files; this one says why it stopped.
+		j.State, j.Reason = core.CompressionFailed, reason(store.ErrNotFound)
+	case runCtx.Err() != nil:
 		j.State, j.Reason = core.CompressionPlanned, "interrupted"
 	}
 	if saveErr := c.Store.SetCompressionJob(context.WithoutCancel(ctx), j); saveErr != nil {
@@ -187,6 +184,21 @@ func (c *Coordinator) analyseOne(ctx context.Context, j core.CompressionJob, opt
 		return ctx.Err()
 	}
 	return nil
+}
+
+// encodeInTurn waits for the shared CPU budget and the indexer's politeness,
+// which can take as long as a film played full screen, then encodes with the
+// threads it was granted.
+func (c *Coordinator) encodeInTurn(ctx context.Context, j *core.CompressionJob, options core.CompressionOptions) error {
+	if c.Acquire != nil {
+		workCtx, release, threads, err := c.Acquire(ctx, options.Threads)
+		if err != nil {
+			return err
+		}
+		defer release()
+		ctx, options.Threads = workCtx, threads
+	}
+	return c.encodeOne(ctx, j, options)
 }
 
 func (c *Coordinator) encodeOne(ctx context.Context, j *core.CompressionJob, options core.CompressionOptions) error {
@@ -263,21 +275,7 @@ func (c *Coordinator) encodeOne(ctx context.Context, j *core.CompressionJob, opt
 	notify := func() error { j.State = core.CompressionVerifying; return c.Store.SetCompressionJob(ctx, *j) }
 	var path, verification, tool string
 	if options.Mode == core.CompressRestore {
-		path = filepath.Join(dir, "candidate.jpg")
-		if err := c.Codec.run(ctx, "djxl", dir, source, path, "--reconstruct_jpeg", "--num_threads=1"); err != nil {
-			return err
-		}
-		if err := notify(); err != nil {
-			return err
-		}
-		digest, size, err := fileops.FileDigest(ctx, path)
-		if err != nil {
-			return err
-		}
-		if digest != j.RestoreDigest || size != j.RestoreSize {
-			return ErrPreservation
-		}
-		verification, tool = "jpeg-full-sha256", jxlTool
+		path, verification, tool, err = c.Codec.Restore(ctx, source, dir, j.RestoreDigest, j.RestoreSize, notify)
 	} else {
 		path, verification, tool, err = c.Codec.Encode(ctx, source, dir, options, notify)
 	}
@@ -314,17 +312,13 @@ func (c *Coordinator) RestorePlan(ctx context.Context, runID, jobID int64, direc
 	if run.Options.Mode != core.CompressReversible {
 		return 0, ErrPlan
 	}
-	jobs, err := c.Store.VisibleCompressionJobs(ctx, runID)
+	old, err := c.Store.VisibleCompressionJob(ctx, runID, jobID)
 	if err != nil {
 		return 0, err
 	}
-	i := slices.IndexFunc(jobs, func(j core.CompressionJob) bool {
-		return j.ID == jobID && j.State == core.CompressionDone
-	})
-	if i < 0 {
+	if old.State != core.CompressionDone {
 		return 0, store.ErrNotFound
 	}
-	old := jobs[i]
 	assetID := old.OutputAssetID
 	if assetID == 0 {
 		assetID = old.AssetID
@@ -498,44 +492,65 @@ func (c *Coordinator) publish(ctx context.Context, publisher *fileops.Compressio
 
 // Recover makes interrupted encoding retryable and settles committed bytes.
 // Ready candidates remain ready, requiring the user's review after restart.
+// One row that cannot be settled now (its drive is away, say) does not hold
+// up the others: they are all tried, and what failed is returned together.
 func (c *Coordinator) Recover(ctx context.Context) error {
 	jobs, err := c.Store.CompressionRecoveryJobs(ctx)
 	if err != nil {
 		return err
 	}
+	var failed []error
 	for _, j := range jobs {
-		interrupted := false
-		switch j.State {
-		case core.CompressionEncoding, core.CompressionVerifying:
-			interrupted = true
-			if err := c.discard(ctx, j.Temp); err != nil {
-				return err
-			}
-			j.Temp, j.State, j.Reason = "", core.CompressionPlanned, "interrupted"
-			if err := c.Store.SetCompressionJob(ctx, j); err != nil {
-				return err
-			}
-		case core.CompressionCommitting:
-			interrupted = true
-			if err := c.recoverPublication(ctx, j, "interrupted"); err != nil {
-				return err
-			}
-			if err := c.cleanDone(ctx, j.RunID, j.ID); err != nil {
-				return err
-			}
-		case core.CompressionDone:
-			if err := c.cleanDone(ctx, j.RunID, j.ID); err != nil {
-				return err
-			}
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if interrupted {
-			if err := c.Store.SetCompressionRun(ctx, j.RunID, core.CompressionPaused); err != nil {
-				return err
-			}
+		if err := c.recoverOne(ctx, j); err != nil {
+			failed = append(failed, fmt.Errorf("compression job %d: %w", j.ID, err))
 		}
 	}
-	return nil
+	if err := c.prune(ctx); err != nil {
+		failed = append(failed, fmt.Errorf("prune compression history: %w", err))
+	}
+	return errors.Join(failed...)
+}
+
+func (c *Coordinator) recoverOne(ctx context.Context, j core.CompressionJob) error {
+	switch j.State {
+	case core.CompressionEncoding, core.CompressionVerifying:
+		if err := c.discard(ctx, j.Temp); err != nil {
+			return err
+		}
+		j.Temp, j.State, j.Reason = "", core.CompressionPlanned, "interrupted"
+		if err := c.Store.SetCompressionJob(ctx, j); err != nil {
+			return err
+		}
+	case core.CompressionCommitting:
+		if err := c.recoverPublication(ctx, j, "interrupted"); err != nil {
+			return err
+		}
+		if err := c.cleanDone(ctx, j.RunID, j.ID); err != nil {
+			return err
+		}
+	default: // done, with its candidate still to remove
+		return c.cleanDone(ctx, j.RunID, j.ID)
+	}
+	return c.Store.SetCompressionRun(ctx, j.RunID, core.CompressionPaused)
+}
+
+// prune discards the candidates of runs older than history reaches, then
+// their rows: otherwise reviews never saved or cancelled would keep their
+// files for good, with no screen left to discard them from.
+func (c *Coordinator) prune(ctx context.Context) error {
+	candidates, err := c.Store.ExpiredCompressionCandidates(ctx)
+	if err != nil {
+		return err
+	}
+	for _, path := range candidates {
+		if err := c.discard(ctx, path); err != nil {
+			return err
+		}
+	}
+	return c.Store.PruneCompressionRuns(ctx)
 }
 
 func (c *Coordinator) recoverPublication(ctx context.Context, j core.CompressionJob, failure string) error {

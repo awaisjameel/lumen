@@ -36,13 +36,6 @@ export function Cancel(runID: number): $CancellablePromise<void> {
 }
 
 /**
- * Capabilities comes from the format catalogue's conservative preservation paths.
- */
-export function Capabilities(): $CancellablePromise<core$0.CompressionCapability[] | null> {
-    return $Call.ByID(313010042);
-}
-
-/**
  * Commit publishes exactly the selected reviewed candidates in the background.
  */
 export function Commit(runID: number, jobs: number[] | null): $CancellablePromise<void> {

@@ -7,6 +7,7 @@ import type * as Bridge from '../bridge'
 import type { CompressionJob, CompressionRun } from '../bridge'
 import { confirm } from '../shared/confirm'
 import { compressionRequest } from '../shared/compression'
+import { t } from '../shared/i18n'
 import { defaultPreferences } from '../shared/preferences'
 import { mountInApp } from '../shared/testing'
 import CompressionView from './CompressionView.vue'
@@ -150,4 +151,40 @@ it('refuses publication if the selection changes while confirmation is open', as
   finish?.(true)
   await flushPromises()
   expect(engine.commitCompression).not.toHaveBeenCalled()
+})
+
+it('asks the engine nothing while no run is working, and follows one that is', async () => {
+  vi.useFakeTimers()
+  try {
+    await open()
+    vi.mocked(engine.compressionRuns).mockClear()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(engine.compressionRuns).not.toHaveBeenCalled()
+
+    vi.mocked(engine.compressionRuns).mockResolvedValue([{ ...run(), state: CompressionState.CompressionEncoding }])
+    await wrapper?.get('[data-compression-plan]').trigger('click')
+    await vi.advanceTimersByTimeAsync(0)
+    vi.mocked(engine.compressionRuns).mockClear()
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(engine.compressionRuns).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('plans with a whole minimum saving inside the bounds whatever is typed', async () => {
+  const view = await open()
+  const field = view.get<HTMLInputElement>(`input[aria-label="${t('compression.minSavings')}"]`)
+  for (const [typed, percent] of [
+    ['150', 90],
+    ['', 0],
+    ['12.6', 13],
+  ] as const) {
+    field.element.value = typed
+    await field.trigger('change')
+    expect(field.element.value).toBe(String(percent))
+    await view.get('[data-compression-plan]').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(engine.planCompression).mock.lastCall?.[2].minSavings).toBe(percent)
+  }
 })

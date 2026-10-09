@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"lumen/internal/core"
+	"lumen/internal/media/vips"
 )
 
 // jxlPNG keeps the original profile and alpha until the common libvips
-// conversion. Bounded memory avoids decoded temporary files after a worker crash.
+// conversion. Bounded memory avoids decoded temporary files after a worker
+// crash; a picture whose PNG is over the bound is errOutputBudget.
 func (d Decoders) jxlPNG(ctx context.Context, path string) ([]byte, error) {
 	if d.JXL == "" {
 		return nil, ErrUnsupported
@@ -24,14 +26,30 @@ func (d Decoders) jxlPNG(ctx context.Context, path string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, ffmpegTimeout)
 	defer cancel()
 	var output cappedBuffer
-	if err := d.runJXLTool(ctx, "", &output, path, "-", "--output_format=png", "--bits_per_sample=8", "--num_threads="+strconv.Itoa(DecodeThreads), "--quiet"); err != nil {
+	err := d.runJXLTool(ctx, "", &output, path, "-", "--output_format=png", "--bits_per_sample=8", "--num_threads="+strconv.Itoa(DecodeThreads), "--quiet")
+	if output.full {
+		return nil, errOutputBudget
+	}
+	if err != nil {
 		return nil, err
 	}
 	return output.Bytes(), nil
 }
 
-func (d Decoders) jxl(ctx context.Context, path string) (source, error) {
+// jxl decodes JPEG XL with the bundled djxl, which applies the orientation
+// the file declares and hands over its profile and alpha. djxl cannot shrink
+// while decoding, so a picture too large for the bounded PNG (tens of
+// megapixels) is read by FFmpeg's libjxl at maxSide instead, as every JPEG XL
+// was before: upright too, but taken for sRGB, as FFmpeg hands over no profile.
+func (d Decoders) jxl(ctx context.Context, path string, maxSide int) (source, error) {
 	data, err := d.jxlPNG(ctx, path)
+	if errors.Is(err, errOutputBudget) && d.FFmpeg != "" {
+		pix, w, h, err := ffmpegDecode(ctx, d.FFmpeg, path, maxSide)
+		if err != nil {
+			return source{}, fmt.Errorf("decode JPEG XL: %w", err)
+		}
+		return source{pixels: vips.RGBPixels(pix, w, h)}, nil
+	}
 	if err != nil {
 		return source{}, fmt.Errorf("decode JPEG XL: %w", err)
 	}
@@ -111,6 +129,9 @@ func (d Decoders) jxlInspection(ctx context.Context, path string) (core.MediaIns
 	}
 	fillInspectionEXIF(bytes.NewReader(data), &info)
 	decoded, err := d.jxlPNG(ctx, path)
+	if errors.Is(err, errOutputBudget) {
+		return info, nil // too large to read its profile within the bound; shown without one
+	}
 	if err != nil {
 		return info, err
 	}

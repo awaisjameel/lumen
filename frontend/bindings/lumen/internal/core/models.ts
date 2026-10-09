@@ -301,16 +301,6 @@ export interface Changes {
 }
 
 /**
- * CompressionCapability is the catalogue's conservative source eligibility.
- */
-export interface CompressionCapability {
-    "family": Family;
-    "compatible": boolean;
-    "reversible": boolean;
-    "convert": boolean;
-}
-
-/**
  * CompressionEffort changes search time, with unchanged preservation checks.
  */
 export enum CompressionEffort {
@@ -383,7 +373,7 @@ export interface CompressionOptions {
     "effort": CompressionEffort;
 
     /**
-     * percent, 0..90
+     * percent, 0..CompressionMinSavingsMax
      */
     "minSavings": number;
 

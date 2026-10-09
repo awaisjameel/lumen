@@ -25,7 +25,7 @@ const (
 type CompressionOptions struct {
 	Mode       CompressionMode   `json:"mode"`
 	Effort     CompressionEffort `json:"effort"`
-	MinSavings int               `json:"minSavings"` // percent, 0..90
+	MinSavings int               `json:"minSavings"` // percent, 0..CompressionMinSavingsMax
 	Threads    int               `json:"threads"`    // at most the shared indexing budget
 }
 
@@ -46,7 +46,7 @@ func (o CompressionOptions) Normalised() CompressionOptions {
 	default:
 		o.Effort = CompressBalanced
 	}
-	o.MinSavings = min(max(o.MinSavings, 0), 90)
+	o.MinSavings = min(max(o.MinSavings, 0), CompressionMinSavingsMax)
 	o.Threads = min(max(o.Threads, 1), DefaultCPUThreads())
 	return o
 }
@@ -117,6 +117,14 @@ type CompressionRun struct {
 	AddedBytes int64              `json:"addedBytes"`
 }
 
+// The bounds of what a run takes and of what history keeps and returns.
+const (
+	CompressionMaxInputs     = 10_000 // sources in one run
+	CompressionHistoryRuns   = 100    // runs kept; older ones are pruned at startup
+	CompressionPageSize      = 100    // outcomes in one page of results
+	CompressionMinSavingsMax = 90     // percent: the largest saving a run may insist on
+)
+
 // CompressionPage bounds a public result list even for a large run.
 type CompressionPage struct {
 	Jobs   []CompressionJob `json:"jobs"`
@@ -135,4 +143,25 @@ type CompressionCapability struct {
 // CompressionCapabilities advertises only implemented, verified preservation paths.
 func CompressionCapabilities() []CompressionCapability {
 	return []CompressionCapability{{Family: FamilyJPEG, Compatible: true, Reversible: true}, {Family: FamilyPNG, Compatible: true, Convert: true}}
+}
+
+// CompressionSupported reports whether a mode has a verified path for a
+// family of photo. Restoration reads only the JPEG XL files a reversible run made.
+func CompressionSupported(family Family, mode CompressionMode) bool {
+	for _, c := range CompressionCapabilities() {
+		if c.Family != family {
+			continue
+		}
+		switch mode {
+		case CompressCompatible:
+			return c.Compatible
+		case CompressReversible:
+			return c.Reversible
+		case CompressConvert:
+			return c.Convert
+		case CompressRestore:
+			return false
+		}
+	}
+	return false
 }

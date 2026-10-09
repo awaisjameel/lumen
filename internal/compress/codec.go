@@ -57,12 +57,44 @@ func (c Codec) Available(ctx context.Context) bool {
 	return true
 }
 
+// The time one file's codec work may take, by effort.
+const (
+	encodeLimit        = 90 * time.Second
+	encodeLimitMaximum = 5 * time.Minute
+)
+
+// verifiedJPEGBytes names the check both directions of the reversible mode
+// record: the whole original JPEG, by SHA-256 and length.
+const verifiedJPEGBytes = "jpeg-full-sha256"
+
+// Restore reconstructs the complete JPEG a reversible run recompressed, and
+// accepts it only if it is that file byte for byte. It never decodes pixels.
+func (c Codec) Restore(ctx context.Context, source, dir, digest string, size int64, notify func() error) (path, verification, tool string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, encodeLimit)
+	defer cancel()
+	path = filepath.Join(dir, "candidate.jpg")
+	if err := c.run(ctx, "djxl", dir, source, path, "--reconstruct_jpeg", "--num_threads=1"); err != nil {
+		return "", "", "", err
+	}
+	if err := notify(); err != nil {
+		return "", "", "", err
+	}
+	got, n, err := fileops.FileDigest(ctx, path)
+	if err != nil {
+		return "", "", "", err
+	}
+	if got != digest || n != size {
+		return "", "", "", ErrPreservation
+	}
+	return path, verifiedJPEGBytes, jxlTool, nil
+}
+
 // Encode keeps the smallest candidate that passes independent checks, within
 // the preset's bounded search. notify checkpoints the verification phase.
 func (c Codec) Encode(ctx context.Context, source, dir string, options core.CompressionOptions, notify func() error) (path, verification, tool string, err error) {
-	limit := 90 * time.Second
+	limit := encodeLimit
 	if options.Effort == core.CompressMaximum {
-		limit = 5 * time.Minute
+		limit = encodeLimitMaximum
 	}
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
@@ -99,7 +131,7 @@ func (c Codec) Encode(ctx context.Context, source, dir string, options core.Comp
 		if a != b || size != outputSize {
 			return "", "", "", ErrPreservation
 		}
-		return path, "jpeg-full-sha256", jxlTool, nil
+		return path, verifiedJPEGBytes, jxlTool, nil
 	case core.CompressConvert:
 		if family != core.FamilyPNG {
 			return "", "", "", ErrUnsupported

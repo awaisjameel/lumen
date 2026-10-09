@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -35,8 +36,8 @@ type CompressionService struct {
 	wg          sync.WaitGroup
 	ctx         context.Context
 	stop        context.CancelFunc
-	recovery    sync.Once
-	recoveryErr error
+	recovery    sync.Mutex // one recovery at a time; guards recovered
+	recovered   bool
 }
 
 // NewCompressionService shares the library's file-operation and resource owners.
@@ -60,24 +61,41 @@ func NewCompressionService(st *store.Store, library *LibraryService, paths core.
 	}
 	s := &CompressionService{coordinator: c, library: library, ctx: ctx, stop: stop}
 	if library.ix != nil {
-		library.ix.BeforeFirstScan(s.recover)
+		library.ix.BeforeFirstScan(s.settle)
 	}
 	return s
 }
 
 // ServiceStartup settles interrupted publications before admitting new runs.
+// A journal that cannot be settled yet is logged, never returned: Wails stops
+// the whole application on a service's start-up error, and the library must
+// still open when, say, a copy's drive is unplugged. Compression then refuses
+// new work until a later attempt settles it (see begin).
 func (s *CompressionService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	s.recover(s.ctx)
-	return s.recoveryErr
+	s.settle(s.ctx)
+	return nil
 }
 
-func (s *CompressionService) recover(ctx context.Context) {
-	s.recovery.Do(func() {
-		s.recoveryErr = s.coordinator.Recover(ctx)
-		if s.recoveryErr != nil {
-			slog.Error("recover compression journal", "err", s.recoveryErr)
-		}
-	})
+// settle is recover for the indexer's first scan, which has nowhere to report to.
+func (s *CompressionService) settle(ctx context.Context) {
+	if err := s.recover(ctx); err != nil {
+		slog.Error("recover compression journal", "err", err)
+	}
+}
+
+// recover settles the journal once. A failed attempt is made again by the
+// next caller, so a passing fault does not disable compression until restart.
+func (s *CompressionService) recover(ctx context.Context) error {
+	s.recovery.Lock()
+	defer s.recovery.Unlock()
+	if s.recovered {
+		return nil
+	}
+	if err := s.coordinator.Recover(ctx); err != nil {
+		return err
+	}
+	s.recovered = true
+	return nil
 }
 
 // Restore creates a reviewed restoration plan for a verified reversible run.
@@ -109,22 +127,15 @@ func (s *CompressionService) Available(ctx context.Context) bool {
 	return s.coordinator.Codec.Available(ctx)
 }
 
-// Capabilities comes from the format catalogue's conservative preservation paths.
-func (s *CompressionService) Capabilities() []core.CompressionCapability {
-	return core.CompressionCapabilities()
-}
-
 // Reveal opens a verified saved output, including a copy outside the library.
 func (s *CompressionService) Reveal(ctx context.Context, runID, jobID int64) error {
-	jobs, err := s.coordinator.Store.VisibleCompressionJobs(ctx, runID)
+	j, err := s.coordinator.Store.VisibleCompressionJob(ctx, runID, jobID)
 	if err != nil {
 		return err
 	}
-	i := slices.IndexFunc(jobs, func(j core.CompressionJob) bool { return j.ID == jobID && j.State == core.CompressionDone })
-	if i < 0 {
+	if j.State != core.CompressionDone {
 		return store.ErrNotFound
 	}
-	j := jobs[i]
 	release, err := fileops.LeaseCopyFolders(ctx, filepath.Dir(j.To))
 	if err != nil {
 		return err
@@ -208,9 +219,8 @@ func (s *CompressionService) begin(ctx context.Context, id int64, state core.Com
 	if s.active != 0 {
 		return ErrCompressionBusy
 	}
-	s.recover(ctx)
-	if s.recoveryErr != nil {
-		return s.recoveryErr
+	if err := s.recover(ctx); err != nil {
+		return fmt.Errorf("recover compression journal: %w", err)
 	}
 	run, err := s.coordinator.Store.CompressionRun(ctx, id)
 	if err != nil {

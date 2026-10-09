@@ -5,8 +5,8 @@
 import { Call, CancelError, CancelledRejectionError, Events } from '@wailsio/runtime'
 import type { CancellablePromise } from '@wailsio/runtime'
 import {
-  LibraryService,
   CompressionService,
+  LibraryService,
   MediaService,
   PeopleService,
   SearchService,
@@ -16,11 +16,11 @@ import {
   Accent,
   AlbumKind,
   BatchAction,
-  CompressionMode,
-  CompressionEffort,
-  CompressionState,
   BlockKind,
   BlockMode,
+  CompressionEffort,
+  CompressionMode,
+  CompressionState,
   DateSource,
   Density,
   Device,
@@ -51,11 +51,6 @@ import {
   WaitReason,
 } from '../../bindings/lumen/internal/core'
 import type {
-  CompressionOptions,
-  CompressionInput,
-  CompressionJob,
-  CompressionRun,
-  CompressionCapability,
   About,
   Album,
   BatchOutcome,
@@ -72,6 +67,11 @@ import type {
   AssetDetail as RawAssetDetail,
   AssetTag,
   Changes,
+  CompressionInput,
+  CompressionJob,
+  CompressionOptions,
+  CompressionPage as RawCompressionPage,
+  CompressionRun,
   DayBucket,
   DayItems as RawDayItems,
   DiskDeletion as RawDiskDeletion,
@@ -108,14 +108,14 @@ import type {
 } from '../../bindings/lumen/internal/core'
 
 export {
-  CompressionMode,
-  CompressionEffort,
-  CompressionState,
   Accent,
   AlbumKind,
   BatchAction,
   BlockKind,
   BlockMode,
+  CompressionEffort,
+  CompressionMode,
+  CompressionState,
   DateSource,
   Density,
   Device,
@@ -146,11 +146,6 @@ export {
   WaitReason,
 }
 export type {
-  CompressionOptions,
-  CompressionInput,
-  CompressionJob,
-  CompressionRun,
-  CompressionCapability,
   About,
   Album,
   BatchOutcome,
@@ -159,6 +154,10 @@ export type {
   BlockChange,
   AssetTag,
   Changes,
+  CompressionInput,
+  CompressionJob,
+  CompressionOptions,
+  CompressionRun,
   DayBucket,
   Face,
   GridItem,
@@ -214,6 +213,8 @@ export type MediaInspection = NonNullLists<RawMediaInspection, 'tracks'>
 export type Selection = NonNullLists<RawSelection, 'ids'>
 /** An organise preview: the moves a template would make. */
 export type OrganisePlan = NonNullLists<RawOrganisePlan, 'moves'>
+/** One page of a compression run's outcomes, with how many there are in all. */
+export type CompressionPage = NonNullLists<RawCompressionPage, 'jobs'>
 
 /** The interface preferences, their lists never null. */
 export type Preferences = Omit<RawPreferences, 'shortcuts' | 'exportPresets'> & {
@@ -285,6 +286,8 @@ export const EXPORT_QUALITY_MAX = 100 // core.ExportQualityMax
 export const EXPORT_QUALITY_DEFAULT = 92 // core.ExportQualityDefault
 export const MAX_EXPORT_PRESETS = 12 // core.MaxExportPresets
 export const MAX_SHORTCUTS = 64 // core.MaxShortcuts
+export const COMPRESSION_PAGE_SIZE = 100 // core.CompressionPageSize: outcomes in one page of a run
+export const COMPRESSION_SAVINGS_MAX = 90 // core.CompressionMinSavingsMax: percent
 /**
  * The members of a generated enum that a mirrored list names, in the list's
  * order. The lists below are written as the engine's plain names, which
@@ -465,15 +468,13 @@ function queueBlockSession(action: () => Promise<void>): Promise<void> {
 
 export const engine = {
   compressionAvailable: (): Promise<boolean> => CompressionService.Available(),
-  compressionCapabilities: async (): Promise<CompressionCapability[]> =>
-    (await CompressionService.Capabilities()) ?? [],
   planCompression: (
     inputs: CompressionInput[],
     directory: string,
     options: CompressionOptions,
   ): Promise<CompressionRun> => CompressionService.Plan(inputs, directory, options),
   compressionRuns: async (): Promise<CompressionRun[]> => (await CompressionService.Runs()) ?? [],
-  compressionJobs: async (run: number, offset = 0) => {
+  compressionJobs: async (run: number, offset = 0): Promise<CompressionPage> => {
     const page = await CompressionService.Jobs(run, offset)
     return { ...page, jobs: page.jobs ?? [] }
   },

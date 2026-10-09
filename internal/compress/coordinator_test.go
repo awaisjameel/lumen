@@ -159,9 +159,8 @@ func TestCompressionCancellationAndBlockingNeverPublishCandidates(t *testing.T) 
 	if _, err := os.Stat(j.To); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("blocked asset published")
 	}
-	visible, err := c.Store.VisibleCompressionJobs(t.Context(), run)
-	if err != nil || len(visible) != 0 {
-		t.Fatal("blocked history disclosed")
+	if _, err := c.Store.VisibleCompressionJob(t.Context(), run, j.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("blocked history disclosed: %v", err)
 	}
 }
 
@@ -277,5 +276,88 @@ func TestRestartSettlesPublishedBytesOnceAndPreservesAnUnrelatedDestination(t *t
 				t.Fatal("recovery modified the destination")
 			}
 		})
+	}
+}
+
+// Waiting for the indexer's politeness can take hours. A block applied
+// meanwhile stops that one file, with its reason, and never the whole run.
+func TestABlockAppliedWhileAFileWaitsItsTurnStopsOnlyThatFile(t *testing.T) {
+	c, run, _ := compressionFixture(t, core.CompressCompatible)
+	c.Acquire = func(ctx context.Context, _ int) (context.Context, func(), int, error) {
+		if _, err := c.Store.SetBlock(t.Context(), core.BlockAsset, 1, "", core.BlockPhotos); err != nil {
+			t.Error(err)
+		}
+		<-ctx.Done()
+		return ctx, nil, 0, ctx.Err()
+	}
+	if err := c.Analyse(t.Context(), run); err != nil {
+		t.Fatalf("the run stopped with its blocked file: %v", err)
+	}
+	if j := firstJob(t, c, run); j.State != core.CompressionFailed || j.Reason != "not_visible" || j.Temp != "" {
+		t.Fatalf("blocked file: %+v", j)
+	}
+}
+
+func TestRecoverySettlesEveryRowEvenWhenOneCannotBeSettled(t *testing.T) {
+	c, stuck, _ := compressionFixture(t, core.CompressCompatible)
+	later, err := c.Plan(t.Context(), []core.CompressionInput{{AssetID: 1}}, "", core.DefaultCompressionOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A candidate path outside the owned folder is never removed: that row stays in doubt.
+	foreign := firstJob(t, c, stuck)
+	foreign.State, foreign.Temp = core.CompressionEncoding, filepath.Join(t.TempDir(), "elsewhere", "candidate")
+	if err := c.Store.SetCompressionJob(t.Context(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	interrupted := firstJob(t, c, later)
+	interrupted.State = core.CompressionVerifying
+	if err := c.Store.SetCompressionJob(t.Context(), interrupted); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Recover(t.Context()); !errors.Is(err, ErrPlan) {
+		t.Fatalf("recovery: %v, want the row it could not settle", err)
+	}
+	if j := firstJob(t, c, stuck); j.State != core.CompressionEncoding {
+		t.Fatalf("the row in doubt was settled: %+v", j)
+	}
+	if j := firstJob(t, c, later); j.State != core.CompressionPlanned || j.Reason != "interrupted" {
+		t.Fatalf("a later row was left unsettled: %+v", j)
+	}
+}
+
+// A review never saved or cancelled keeps its candidate file. Once history no
+// longer reaches its run, nothing in the interface could discard it.
+func TestRunsOlderThanHistoryReachesAreRemovedWithTheirCandidates(t *testing.T) {
+	c, old, _ := compressionFixture(t, core.CompressCompatible)
+	if err := c.Analyse(t.Context(), old); err != nil {
+		t.Fatal(err)
+	}
+	candidate := firstJob(t, c, old)
+	if candidate.State != core.CompressionReady {
+		t.Fatalf("candidate: %+v", candidate)
+	}
+	for range core.CompressionHistoryRuns - 1 {
+		if _, err := c.Store.SaveCompressionPlan(t.Context(), core.DefaultCompressionOptions(), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.Recover(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(candidate.Temp); err != nil {
+		t.Fatalf("a candidate history still reaches was removed: %v", err)
+	}
+	if _, err := c.Store.SaveCompressionPlan(t.Context(), core.DefaultCompressionOptions(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Recover(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(candidate.Temp)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an unreachable candidate was kept: %v", err)
+	}
+	if _, err := c.Store.CompressionRun(t.Context(), old); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("an unreachable run was kept: %v", err)
 	}
 }

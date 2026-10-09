@@ -52,7 +52,6 @@ export type {
     BlockChange,
     BlockRef,
     Changes,
-    CompressionCapability,
     CompressionInput,
     CompressionJob,
     CompressionOptions,

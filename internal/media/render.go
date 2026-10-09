@@ -120,14 +120,29 @@ func (p ProcessRenderer) worker(ctx context.Context, in renderInput) ([]byte, er
 	return output.Bytes(), nil
 }
 
-type cappedBuffer struct{ bytes.Buffer }
+// errOutputBudget means a tool wrote more than renderBytes.
+var errOutputBudget = errors.New("render output exceeds budget")
+
+// cappedBuffer holds a tool's output up to renderBytes. The buffer is a field,
+// not embedded: os/exec copies a tool's output with io.Copy, which would use
+// an embedded bytes.Buffer's ReadFrom and never pass through Write, so the cap
+// would bound nothing. full records a refused write: the tool then dies of its
+// closed pipe, and its exit status would otherwise be all the caller learns.
+type cappedBuffer struct {
+	data bytes.Buffer
+	full bool
+}
 
 func (b *cappedBuffer) Write(p []byte) (int, error) {
-	if len(p) > renderBytes-b.Len() {
-		return 0, errors.New("render output exceeds budget")
+	if len(p) > renderBytes-b.data.Len() {
+		b.full = true
+		return 0, errOutputBudget
 	}
-	return b.Buffer.Write(p)
+	return b.data.Write(p)
 }
+
+// Bytes is what was written, valid until the next Write.
+func (b *cappedBuffer) Bytes() []byte { return b.data.Bytes() }
 
 // RenderWorker reads only its explicit input. It never opens a library,
 // starts Wails, or alters originals. Native pixels use the indexer's existing

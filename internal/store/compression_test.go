@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -138,5 +139,73 @@ func TestRelatedCopiesKeepKnownPlaceAndLookalikeBlocksBeforeAnalysis(t *testing.
 				t.Fatal("known blocked content became visible while analysis was pending")
 			}
 		})
+	}
+}
+
+// The scanner stores a file's extension in lower case; a copy registered at
+// publication is the same kind of row, whatever the case of the name it took.
+func TestACompressedCopyIsRegisteredWithItsExtensionInLowerCase(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	source, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(source.ID, `C:\Photos\ONE.JPG`, "one")})))
+	run, err := st.SaveCompressionPlan(ctx, core.DefaultCompressionOptions(), []core.CompressionJob{{AssetID: 1, From: `C:\Photos\ONE.JPG`, To: `C:\Photos\ONE-compressed.JPG`, State: core.CompressionCommitting}})
+	check(t, err)
+	jobs, err := st.CompressionJobs(ctx, run)
+	check(t, err)
+	check(t, st.FinishCompression(ctx, jobs[0], []byte("smaller content"), 1))
+	var scanned, registered string
+	check(t, st.r.QueryRowContext(ctx, "SELECT ext FROM assets WHERE id = 1").Scan(&scanned))
+	check(t, st.r.QueryRowContext(ctx, "SELECT a.ext FROM assets a JOIN compression_jobs j ON j.output_asset_id = a.id WHERE j.run_id = ?", run).Scan(&registered))
+	if registered != scanned || registered != ".jpg" {
+		t.Fatalf("extension %q, a scanned file's is %q", registered, scanned)
+	}
+}
+
+func TestOnlyRunsBeyondHistoryAreExpiredAndNeverOneStillPublishing(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	source, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(source.ID, `C:\Photos\one.jpg`, "one")})))
+	plan := func(state core.CompressionState, temp string) int64 {
+		t.Helper()
+		run, err := st.SaveCompressionPlan(ctx, core.DefaultCompressionOptions(), []core.CompressionJob{{AssetID: 1, From: `C:\Photos\one.jpg`, To: `C:\Photos\one-compressed.jpg`, State: core.CompressionPlanned}})
+		check(t, err)
+		jobs, err := st.CompressionJobs(ctx, run)
+		check(t, err)
+		jobs[0].State, jobs[0].Temp = state, temp
+		check(t, st.SetCompressionJob(ctx, jobs[0]))
+		return run
+	}
+	reviewed := plan(core.CompressionReady, `C:\Data\compression\run-1-job-1-a\candidate.jpg`)
+	publishing := plan(core.CompressionCommitting, `C:\Data\compression\run-2-job-2-b\candidate.jpg`)
+	for range core.CompressionHistoryRuns - 2 {
+		plan(core.CompressionPlanned, "")
+	}
+	expired, err := st.ExpiredCompressionCandidates(ctx)
+	check(t, err)
+	if len(expired) != 0 {
+		t.Fatalf("history still reaches every run, yet these expired: %v", expired)
+	}
+	newest := plan(core.CompressionReady, `C:\Data\compression\run-9-job-9-c\candidate.jpg`)
+	plan(core.CompressionPlanned, "")
+	expired, err = st.ExpiredCompressionCandidates(ctx)
+	check(t, err)
+	if len(expired) != 1 || expired[0] != `C:\Data\compression\run-1-job-1-a\candidate.jpg` {
+		t.Fatalf("expired candidates: %v", expired)
+	}
+	check(t, st.PruneCompressionRuns(ctx))
+	if _, err := st.CompressionRun(ctx, reviewed); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a run beyond history was kept: %v", err)
+	}
+	for _, kept := range []int64{publishing, newest} {
+		if _, err := st.CompressionRun(ctx, kept); err != nil {
+			t.Fatalf("run %d was pruned: %v", kept, err)
+		}
+	}
+	jobs, err := st.CompressionJobs(ctx, reviewed)
+	check(t, err)
+	if len(jobs) != 0 {
+		t.Fatalf("a pruned run left its outcomes: %+v", jobs)
 	}
 }
