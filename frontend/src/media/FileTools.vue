@@ -13,6 +13,7 @@ import { errorText } from '../shared/errors'
 import { reasonText } from '../shared/fileReasons'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
+import { usePreferences } from '../shared/preferences'
 import OutcomeList from './OutcomeList.vue'
 
 type Operation = ExportFormat | 'move' | 'rename'
@@ -36,6 +37,26 @@ const side = ref(String(RENDER_SIDE))
 const adjust = ref(true)
 const busy = ref(false)
 const error = ref('')
+// A saved preset fills in the export's choices; they can still be changed
+// before the preview, and the destination is always chosen here.
+const NO_PRESET = ''
+const prefs = usePreferences()
+const preset = ref(NO_PRESET)
+const presetItems = computed(() => [
+  { value: NO_PRESET, label: t('files.presetNone') },
+  ...prefs.prefs.exportPresets
+    // A video frame can only be rendered, so a preset for originals does not apply to it.
+    .filter((p) => props.frame === undefined || p.format !== ExportFormat.ExportOriginal)
+    .map((p) => ({ value: p.name, label: p.name })),
+])
+watch(preset, (name) => {
+  const chosen = prefs.prefs.exportPresets.find((p) => p.name === name)
+  if (!chosen) return
+  operation.value = chosen.format
+  side.value = String(chosen.side)
+  quality.value = String(chosen.quality)
+  adjust.value = chosen.adjust
+})
 const moves = ref<OrganisePlan | null>(null)
 const exports = ref<ExportJob[]>([])
 const planIDs = ref<number[]>([])
@@ -317,6 +338,14 @@ function pollExport(batch: number, mine: number) {
     <template #body>
       <UAlert v-if="error" color="error" :title="error" />
       <div class="file-fields">
+        <USelect
+          v-if="presetItems.length > 1"
+          v-model="preset"
+          data-export-preset
+          :items="presetItems"
+          :disabled="busy"
+          :aria-label="t('files.preset')"
+        />
         <USelect v-model="operation" :items="options" :disabled="busy" :aria-label="t('files.operation')" />
         <template v-if="operation === 'rename'"
           ><UInput v-model="name" :disabled="busy" :aria-label="t('files.name')" :placeholder="t('files.name')"

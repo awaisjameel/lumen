@@ -9,7 +9,16 @@ import { usePreferences } from '../shared/preferences'
 import {
   Accent,
   Density,
+  FocusRing,
+  Motion,
+  PrefCategory,
+  RENDER_SIDE_STANDARD,
+  StartView,
   Theme,
+  ThumbFit,
+  ViewerBackground,
+  ViewerOpen,
+  ViewerWheel,
   TEXT_SCALE_MIN,
   TEXT_SCALE_MAX,
   TEXT_SCALE_DEFAULT,
@@ -21,6 +30,8 @@ import {
 } from '../bridge'
 import type * as Bridge from '../bridge'
 import { useLibrary } from '../library/store'
+import { question } from '../shared/confirm'
+import { defaultPreferences } from '../shared/preferences'
 import { t } from '../shared/i18n'
 import SettingsView from './SettingsView.vue'
 
@@ -42,6 +53,12 @@ vi.mock('../bridge', async (importOriginal) => ({
     exportXMPNow: vi.fn<() => Promise<Bridge.XMPExport>>(),
     setPreferences: vi.fn<(prefs: Bridge.Preferences) => Promise<Bridge.Preferences>>(),
     thumbCacheBytes: vi.fn<() => Promise<number>>(),
+    viewingCacheBytes: vi.fn<() => Promise<number>>(),
+    clearViewingCache: vi.fn<() => Promise<number>>(),
+    resetPreferences: vi.fn<typeof Bridge.engine.resetPreferences>(),
+    preferences: vi.fn<typeof Bridge.engine.preferences>(),
+    settings: vi.fn<typeof Bridge.engine.settings>(),
+    timeline: vi.fn<typeof Bridge.engine.timeline>(),
     about: vi.fn<() => Promise<Bridge.About>>().mockResolvedValue({
       version: '0.9.0',
       dataDir: 'C:/Lumen',
@@ -68,6 +85,11 @@ beforeEach(() => {
   vi.mocked(engine.setCPUThreads).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.exportXMPNow).mockReset().mockResolvedValue({ written: 0, unchanged: 0, skipped: 0 })
   vi.mocked(engine.thumbCacheBytes).mockReset().mockResolvedValue(0)
+  vi.mocked(engine.viewingCacheBytes).mockReset().mockResolvedValue(0)
+  vi.mocked(engine.clearViewingCache).mockReset().mockResolvedValue(0)
+  vi.mocked(engine.resetPreferences).mockReset().mockResolvedValue()
+  vi.mocked(engine.timeline).mockReset().mockResolvedValue([])
+  question.value = null
 })
 afterEach(() => vi.useRealTimers())
 
@@ -673,7 +695,7 @@ it('filters by descriptions and categories and recovers from a search with no ma
     const reset = wrapper.findAll('button').find((button) => button.text() === t('settings.clearSearch'))
     if (!reset) throw new Error('missing clear search action')
     await reset.trigger('click')
-    expect(wrapper.findAll('[data-category]')).toHaveLength(8)
+    expect(wrapper.findAll('[data-category]')).toHaveLength(11)
     expect(
       wrapper.get('input[type="search"]').element instanceof HTMLInputElement &&
         wrapper.get<HTMLInputElement>('input[type="search"]').element.value,
@@ -725,6 +747,165 @@ it('retains vertical arrow selection and focus in the theme radio group', async 
     await flushPromises()
     expect(usePreferences().prefs.theme).toBe(Theme.ThemeSystem)
     expect(document.activeElement).toBe(group.get('[aria-checked="true"]').element)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+function radio(wrapper: ReturnType<typeof mountInApp>, hook: string, index: number) {
+  const choice = wrapper.get(hook).findAll('[role="radio"]').at(index)
+  if (!choice) throw new Error(`missing choice ${index} of ${hook}`)
+  return choice
+}
+
+it('applies motion, the viewer background and the focus ring at once and saves them', async () => {
+  setActivePinia(createPinia())
+  const prefs = usePreferences()
+  const wrapper = mountSettings()
+  const root = document.documentElement
+  try {
+    await flushPromises()
+    expect(root.dataset.motion).toBe('full') // the test system does not ask for less
+    await radio(wrapper, '[data-appearance="motion"]', 1).trigger('click')
+    await radio(wrapper, '[data-appearance="viewerBackground"]', 1).trigger('click')
+    await radio(wrapper, '[data-accessibility="focusRing"]', 1).trigger('click')
+    await flushPromises()
+    expect([root.dataset.motion, root.dataset.viewerBg, root.dataset.focus]).toEqual(['reduced', 'black', 'strong'])
+    expect(prefs.prefs).toMatchObject({
+      motion: Motion.MotionReduced,
+      viewerBackground: ViewerBackground.ViewerBackgroundBlack,
+      focusRing: FocusRing.FocusStrong,
+    })
+    expect(engine.setPreferences).toHaveBeenLastCalledWith(
+      expect.objectContaining({ motion: Motion.MotionReduced, focusRing: FocusRing.FocusStrong }),
+    )
+    // "Full" holds even where Windows asks for less: the attribute says so.
+    await radio(wrapper, '[data-appearance="motion"]', 2).trigger('click')
+    await flushPromises()
+    expect(root.dataset.motion).toBe('full')
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('saves how photos open, what the wheel does, animations and the viewing copy quality', async () => {
+  setActivePinia(createPinia())
+  const prefs = usePreferences()
+  const wrapper = mountSettings()
+  try {
+    await flushPromises()
+    await radio(wrapper, '[data-viewing="open"]', 1).trigger('click')
+    await radio(wrapper, '[data-viewing="wheel"]', 1).trigger('click')
+    await radio(wrapper, '[data-viewing="renderSide"]', 0).trigger('click')
+    await wrapper.get('[data-viewing="animations"]').trigger('click')
+    await wrapper.get('[data-video="loop"]').trigger('click')
+    await wrapper.get('[data-video="subtitles"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-video="language"]').setValue(' EN ')
+    await wrapper.get('[data-video="language"]').trigger('change')
+    await flushPromises()
+    expect(prefs.viewer).toMatchObject({
+      open: ViewerOpen.ViewerOpenActual,
+      wheel: ViewerWheel.ViewerWheelNavigate,
+      renderSide: RENDER_SIDE_STANDARD,
+      stillAnimations: true,
+      videoLoop: true,
+      subtitles: true,
+      subtitleLanguage: 'EN',
+      loop: false, // the slideshow's loop is its own setting now
+    })
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('hides thumbnail badges and shows whole pictures through the page, not through each tile', async () => {
+  setActivePinia(createPinia())
+  const prefs = usePreferences()
+  const wrapper = mountSettings()
+  const root = document.documentElement
+  try {
+    await flushPromises()
+    await radio(wrapper, '[data-library="thumbFit"]', 1).trigger('click')
+    await wrapper.get('[data-library="badge-favourite"]').trigger('click')
+    await wrapper.get('[data-library="badge-duration"]').trigger('click')
+    await flushPromises()
+    expect(prefs.prefs).toMatchObject({
+      thumbFit: ThumbFit.ThumbContain,
+      hideFavouriteBadge: true,
+      hideVideoBadge: false,
+      hideDurationBadge: true,
+    })
+    expect(root.dataset.thumbFit).toBe('contain')
+    expect(root.hasAttribute('data-hide-favourite')).toBe(true)
+    expect(root.hasAttribute('data-hide-video')).toBe(false)
+    expect(root.hasAttribute('data-hide-duration')).toBe(true)
+    expect(prefs.prefs.startView).toBe(StartView.StartLibrary)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('resets one section after asking, and reads engine settings again for a section that has them', async () => {
+  setActivePinia(createPinia())
+  const prefs = usePreferences()
+  const lib = useLibrary()
+  const wrapper = mountSettings()
+  const reset = (id: string) => wrapper.get(`[data-category="${id}"] [data-reset-section]`)
+  try {
+    await flushPromises()
+    await prefs.set({ theme: Theme.ThemeDark })
+    vi.mocked(engine.preferences).mockResolvedValue(defaultPreferences())
+
+    await reset('appearance').trigger('click')
+    expect(question.value?.title).toBe(t('settings.resetSectionTitle', { section: t('settings.appearance') }))
+    question.value?.answer(false)
+    await flushPromises()
+    expect(engine.resetPreferences).not.toHaveBeenCalled()
+    expect(prefs.prefs.theme).toBe(Theme.ThemeDark)
+
+    await reset('appearance').trigger('click')
+    question.value?.answer(true)
+    await flushPromises()
+    expect(engine.resetPreferences).toHaveBeenCalledExactlyOnceWith([PrefCategory.PrefAppearance])
+    expect(prefs.prefs.theme).toBe(Theme.ThemeSystem)
+    expect(engine.settings).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-category="appearance"]').text()).toContain(
+      t('settings.resetDone', { section: t('settings.appearance') }),
+    )
+
+    lib.settings.pauseBusy = false
+    vi.mocked(engine.settings).mockResolvedValue({ ...lib.settings, pauseBusy: true })
+    await reset('indexing').trigger('click')
+    question.value?.answer(true)
+    await flushPromises()
+    expect(engine.resetPreferences).toHaveBeenLastCalledWith([PrefCategory.PrefIndexing])
+    expect(lib.settings.pauseBusy).toBe(true)
+    // Privacy, the presets and About have nothing of their own to reset.
+    for (const id of ['privacy', 'presets', 'about'])
+      expect(wrapper.find(`[data-category="${id}"] [data-reset-section]`).exists()).toBe(false)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('counts the viewing copies apart from thumbnails and clears only them', async () => {
+  setActivePinia(createPinia())
+  vi.mocked(engine.viewingCacheBytes)
+    .mockResolvedValueOnce(3 * 1024 * 1024)
+    .mockResolvedValue(0)
+  vi.mocked(engine.clearViewingCache).mockResolvedValue(3 * 1024 * 1024)
+  const wrapper = mountSettings()
+  try {
+    await flushPromises()
+    const rowOf = () => wrapper.get(`[data-pref="${t('settings.viewingCache')}"]`)
+    expect(rowOf().text()).toContain('3')
+    await wrapper.get('[data-viewing-cache-clear]').trigger('click')
+    await flushPromises()
+    expect(engine.clearViewingCache).toHaveBeenCalledOnce()
+    expect(engine.setThumbCacheMB).not.toHaveBeenCalled()
+    expect(rowOf().text()).toContain('Freed')
+    expect(wrapper.get('[data-viewing-cache-clear]').attributes('disabled')).toBeDefined()
   } finally {
     wrapper.unmount()
   }

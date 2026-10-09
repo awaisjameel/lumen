@@ -186,6 +186,14 @@ export function Events(): $CancellablePromise<core$0.Event[] | null> {
 }
 
 /**
+ * ExportCustomisation asks where to save the interface preferences, then
+ * writes them there. It returns the file's name, "" if the user cancelled.
+ */
+export function ExportCustomisation(): $CancellablePromise<string> {
+    return $Call.ByID(2303409805);
+}
+
+/**
  * ExportJobs exposes visible per-file outcomes and bounded recent history.
  */
 export function ExportJobs(batch: number): $CancellablePromise<core$0.ExportJob[] | null> {
@@ -320,6 +328,16 @@ export function Progress(): $CancellablePromise<core$0.Progress> {
 }
 
 /**
+ * ReadCustomisation asks for a customisation file and reads it, changing
+ * nothing: it returns the preferences the file holds, held to what the UI can
+ * apply, and which of them differ from the library's, for the user to review.
+ * They are applied with SetPreferences. The name is "" if the user cancelled.
+ */
+export function ReadCustomisation(): $CancellablePromise<core$0.CustomisationPreview> {
+    return $Call.ByID(4058699851);
+}
+
+/**
  * RemoveBlock restores the current view of a blocked item.
  */
 export function RemoveBlock(id: number): $CancellablePromise<void> {
@@ -353,6 +371,16 @@ export function Rescan(): $CancellablePromise<void> {
  */
 export function ResetBlockPIN(pin: string): $CancellablePromise<void> {
     return $Call.ByID(2236387432, pin);
+}
+
+/**
+ * ResetPreferences puts the settings of the given categories back to their
+ * defaults. It never touches the library's folders, photos, tags, albums,
+ * people, the PIN or the blocks, and leaves alone the settings that decide
+ * what the library holds or writes: videos, reading text, and XMP sidecars.
+ */
+export function ResetPreferences(categories: core$0.PrefCategory[] | null): $CancellablePromise<void> {
+    return $Call.ByID(2425948946, categories);
 }
 
 /**
@@ -457,6 +485,16 @@ export function SetEventPinned(id: number, pinned: boolean): $CancellablePromise
  */
 export function SetFavourite(id: number, fav: boolean): $CancellablePromise<void> {
     return $Call.ByID(2033754606, id, fav);
+}
+
+/**
+ * SetFormatExcluded makes indexing leave a photo format out, or take it in
+ * again. Left out, its files are no longer added or read again; the photos
+ * the library already holds stay, with everything known about them. Taken in
+ * again, the folders are checked so that its files are found.
+ */
+export function SetFormatExcluded(family: core$0.Family, excluded: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3226188190, family, excluded);
 }
 
 /**

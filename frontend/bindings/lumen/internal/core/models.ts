@@ -329,6 +329,24 @@ export interface CoveredItem {
 }
 
 /**
+ * CustomisationPreview is a customisation file read and checked, before
+ * anything is applied: the preferences it holds, held to what the UI can
+ * apply, and which of them differ from the library's.
+ */
+export interface CustomisationPreview {
+    /**
+     * Name is the file's name, without its folder; "" if the user chose none.
+     */
+    "name": string;
+    "preferences": Preferences;
+
+    /**
+     * see PreferenceChanges
+     */
+    "changed": string[] | null;
+}
+
+/**
  * DateSource says where an asset's capture date came from, best first.
  */
 export enum DateSource {
@@ -598,6 +616,30 @@ export interface ExportOptions {
 }
 
 /**
+ * ExportPreset is a named set of export choices the user saved. It holds no
+ * destination: where files go is chosen at each export.
+ */
+export interface ExportPreset {
+    "name": string;
+    "format": ExportFormat;
+
+    /**
+     * ExportSideMin..ExportSideMax, the longest edge of a rendered copy
+     */
+    "side": number;
+
+    /**
+     * ExportQualityMin..ExportQualityMax, for JPEG
+     */
+    "quality": number;
+
+    /**
+     * bake the display rotation and flip into a rendered copy
+     */
+    "adjust": boolean;
+}
+
+/**
  * ExportState is where one file of an export stands in its journal.
  */
 export enum ExportState {
@@ -728,6 +770,70 @@ export interface FailureGroup {
 }
 
 /**
+ * Family names one file format, whatever extensions its files carry. Code
+ * that treats a format specially (which decoder reads it, how it ranks among
+ * copies) asks for the family, never for an extension.
+ */
+export enum Family {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The photo families.
+     */
+    FamilyJPEG = "jpeg",
+    FamilyPNG = "png",
+    FamilyGIF = "gif",
+    FamilyWebP = "webp",
+    FamilyBMP = "bmp",
+    FamilyTIFF = "tiff",
+    FamilyHEIF = "heif",
+    FamilyAVIF = "avif",
+
+    /**
+     * JPEG XL
+     */
+    FamilyJXL = "jxl",
+
+    /**
+     * FamilyRAW is a camera's sensor data, whichever maker's: Adobe DNG,
+     * Canon, Nikon, Sony, Fujifilm, Olympus and OM System, Panasonic, Pentax.
+     * Being listed here is not a promise for every camera model; what a file
+     * can do is found by reading it (see media.Decoders and MediaCaps).
+     */
+    FamilyRAW = "raw",
+
+    /**
+     * The video families, by container.
+     *
+     * ISO base media: MP4, M4V and QuickTime
+     */
+    FamilyMP4 = "mp4",
+    FamilyWebM = "webm",
+    FamilyAVI = "avi",
+    FamilyMatroska = "matroska",
+    Family3GP = "3gp",
+
+    /**
+     * ASF, the container of Windows Media
+     */
+    FamilyWMV = "wmv",
+
+    /**
+     * MPEG transport streams: AVCHD, Blu-ray, broadcast recordings
+     */
+    FamilyTransport = "transport",
+
+    /**
+     * MPEG program streams: MPEG-1 and MPEG-2 files, DVD video
+     */
+    FamilyMPEG = "mpeg",
+    FamilyOgg = "ogg",
+};
+
+/**
  * Filter narrows the grid to a subset of the library.
  */
 export enum Filter {
@@ -748,6 +854,22 @@ export enum Filter {
      * disk, blocked ones included (the plan shows them in Trash like any other).
      */
     FilterTrash = "trash",
+};
+
+/**
+ * FocusRing is how strongly keyboard focus is drawn.
+ */
+export enum FocusRing {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The focus rings.
+     */
+    FocusStandard = "standard",
+    FocusStrong = "strong",
 };
 
 /**
@@ -904,6 +1026,23 @@ export interface MediaTrack {
     "title": string;
     "supported": boolean;
 }
+
+/**
+ * Motion is how much the interface moves.
+ */
+export enum Motion {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The motion choices. MotionSystem follows Windows' animation setting.
+     */
+    MotionSystem = "system",
+    MotionReduced = "reduced",
+    MotionFull = "full",
+};
 
 /**
  * OrganiseMove is one file's move, planned or made.
@@ -1109,6 +1248,61 @@ export enum Playback {
 };
 
 /**
+ * PrefCategory is a group of settings the user can put back to their
+ * defaults together. They are the sections the settings screen shows.
+ */
+export enum PrefCategory {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The categories. The first five hold interface preferences (Preferences)
+     * only; PrefIndexing and PrefSearch hold engine settings (Settings) only;
+     * PrefFiles holds one of each.
+     *
+     * theme, accent, density, text size, motion, viewer background
+     */
+    PrefAppearance = "appearance",
+
+    /**
+     * start view, thumbnails, badges, panels
+     */
+    PrefLibrary = "library",
+
+    /**
+     * how photos open, zoom, slideshow, viewing copies
+     */
+    PrefViewing = "viewing",
+
+    /**
+     * playback
+     */
+    PrefVideo = "video",
+
+    /**
+     * focus ring, shortcuts
+     */
+    PrefAccessibility = "accessibility",
+
+    /**
+     * what indexing waits for, threads, cache cap, formats
+     */
+    PrefIndexing = "indexing",
+
+    /**
+     * working on battery, tag confidence
+     */
+    PrefSearch = "search",
+
+    /**
+     * event gap, export presets
+     */
+    PrefFiles = "files",
+};
+
+/**
  * Preferences are how the user likes the interface to look. The library's
  * settings are their one durable owner: the UI keeps only a copy for
  * painting its first frame.
@@ -1139,6 +1333,25 @@ export interface Preferences {
      * InspectorWidthMin..InspectorWidthMax
      */
     "inspectorWidth": number;
+    "motion": Motion;
+    "viewerBackground": ViewerBackground;
+    "startView": StartView;
+    "thumbFit": ThumbFit;
+    "focusRing": FocusRing;
+
+    /**
+     * The badges a thumbnail carries are shown unless hidden here.
+     */
+    "hideFavouriteBadge": boolean;
+    "hideVideoBadge": boolean;
+    "hideDurationBadge": boolean;
+
+    /**
+     * Shortcuts holds the shortcuts the user reassigned, by command id; ""
+     * leaves a command without one. A command not listed keeps its own.
+     */
+    "shortcuts": { [_ in string]?: string } | null;
+    "exportPresets": ExportPreset[] | null;
 }
 
 /**
@@ -1315,6 +1528,13 @@ export interface Settings {
     "pauseFullScreen": boolean;
     "pauseBusy": boolean;
     "idleOnly": boolean;
+
+    /**
+     * ExcludedFormats are the photo formats indexing leaves out: files of
+     * these are not added or read again, and what the library already holds
+     * of them stays.
+     */
+    "excludedFormats": Family[] | null;
 }
 
 /**
@@ -1353,6 +1573,28 @@ export interface Source {
     "path": string;
     "enabled": boolean;
 }
+
+/**
+ * StartView is the screen Lumen opens on.
+ */
+export enum StartView {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The start views.
+     */
+    StartLibrary = "library",
+    StartFavourites = "favourites",
+    StartVideos = "videos",
+    StartPeople = "people",
+    StartThings = "things",
+    StartPlaces = "places",
+    StartEvents = "events",
+    StartAlbums = "albums",
+};
 
 /**
  * Tag is one Thing, with how many visible assets carry it and one to show.
@@ -1450,6 +1692,23 @@ export enum Theme {
 };
 
 /**
+ * ThumbFit is how a thumbnail fills its tile.
+ */
+export enum ThumbFit {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The thumbnail fits: ThumbCover crops to fill the tile, ThumbContain shows
+     * the whole picture.
+     */
+    ThumbCover = "cover",
+    ThumbContain = "contain",
+};
+
+/**
  * TrackKind is which of a video's selectable streams a track is.
  */
 export enum TrackKind {
@@ -1543,6 +1802,46 @@ export interface View {
 }
 
 /**
+ * ViewerBackground is what surrounds a photo in the viewer. Each is dark:
+ * the viewer's controls are light in either theme.
+ */
+export enum ViewerBackground {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The viewer backgrounds.
+     */
+    ViewerBackgroundDark = "dark",
+    ViewerBackgroundBlack = "black",
+    ViewerBackgroundGrey = "grey",
+};
+
+/**
+ * ViewerOpen is how a photo is first shown in the viewer.
+ */
+export enum ViewerOpen {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The ways a photo opens.
+     *
+     * the whole picture, fitted to the window
+     */
+    ViewerOpenFit = "fit",
+
+    /**
+     * one image pixel per screen pixel
+     */
+    ViewerOpenActual = "actual",
+};
+
+/**
  * ViewerPreferences are saved with the library's interface preferences.
  */
 export interface ViewerPreferences {
@@ -1556,7 +1855,50 @@ export interface ViewerPreferences {
     "speed": number;
     "skipSeconds": number;
     "resume": boolean;
+
+    /**
+     * Open and Wheel are how a photo is first shown and what the wheel does.
+     */
+    "open": ViewerOpen;
+    "wheel": ViewerWheel;
+
+    /**
+     * StillAnimations holds an animated image on its first frame until the
+     * user plays it; off, it plays as soon as it is shown.
+     */
+    "stillAnimations": boolean;
+
+    /**
+     * RenderSide is the longest edge asked of a viewing copy:
+     * RenderSideStandard or RenderSideHigh.
+     */
+    "renderSide": number;
+
+    /**
+     * VideoLoop starts each video looping. Subtitles shows a video's text
+     * subtitles from the start: those in SubtitleLanguage if it has them,
+     * else its first.
+     */
+    "videoLoop": boolean;
+    "subtitles": boolean;
+    "subtitleLanguage": string;
 }
+
+/**
+ * ViewerWheel is what the mouse wheel does over a photo.
+ */
+export enum ViewerWheel {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The wheel behaviours. With ViewerWheelNavigate, Ctrl and the wheel zoom.
+     */
+    ViewerWheelZoom = "zoom",
+    ViewerWheelNavigate = "navigate",
+};
 
 /**
  * WaitReason is what indexing gives way to, as the user's settings ask.

@@ -8,7 +8,7 @@ Every run uses a scratch library (`LUMEN_DATA_DIR`). The suites never open your 
 
 ```bash
 wails3 build                      # the suites test bin\Lumen.exe
-cd e2e && npm install             # once: puppeteer-core
+cd e2e && npm ci                  # once: the locked puppeteer-core dependencies
 node run.mjs                      # every suite, then a summary
 node run.mjs viewer formats       # only these
 node run.mjs --list               # what there is
@@ -36,6 +36,7 @@ Needs: Node (as `package.json` says), Python with Pillow, and `deps/` from `scri
 | `file-tools` | The File tools dialog and its menu at every width, by keyboard, and inside a full-screen video | `media` |
 | `branding` | The Lumen mark on every surface in both themes, and the favicon | one photo |
 | `formats` | Camera RAW of every family, JPEG XL, animated PNG, multi-page TIFF, MPEG/TS/Ogg/ASF video, from indexing to the viewer | `formats` |
+| `customise` | Changes every preference in Settings and sees it take effect (page, grid, viewer) and survive a restart; reassigns a shortcut and uses it; turns a photo format off and on; holds an animation still; clears the viewing copies; saves an export preset; resets a section and everything | base library + three files of its own |
 | `showcase` | The component showcase of a development run. Only when named: it starts `wails3 dev`, so it needs the build toolchain in the environment | base library |
 
 ## Fixtures

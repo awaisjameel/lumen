@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,6 +83,13 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"SKIP_SECONDS_MAX":          core.SkipSecondsMax,
 		"PLAYBACK_SPEED_MIN":        core.PlaybackSpeedMin,
 		"PLAYBACK_SPEED_MAX":        core.PlaybackSpeedMax,
+		"RENDER_SIDE_STANDARD":      core.RenderSideStandard,
+		"RENDER_SIDE_HIGH":          core.RenderSideHigh,
+		"EXPORT_QUALITY_MIN":        core.ExportQualityMin,
+		"EXPORT_QUALITY_MAX":        core.ExportQualityMax,
+		"EXPORT_QUALITY_DEFAULT":    core.ExportQualityDefault,
+		"MAX_EXPORT_PRESETS":        core.MaxExportPresets,
+		"MAX_SHORTCUTS":             core.MaxShortcuts,
 	} {
 		if got := constant(name); got != want {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)
@@ -141,6 +149,31 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		t.Errorf("bridge OrganiseReason = %v, engine has %v", reasons, wantReasons)
 	}
 
+	// The lists the settings offer, in the engine's order.
+	names := func(list any) []string {
+		var out []string
+		v := reflect.ValueOf(list)
+		for i := range v.Len() {
+			out = append(out, v.Index(i).String())
+		}
+		return out
+	}
+	for name, want := range map[string][]string{
+		"EXCLUDABLE_FAMILIES": names(core.ExcludableFamilies()),
+		"START_VIEWS":         names(core.StartViews()),
+		"PREF_CATEGORIES":     names(core.PrefCategories()),
+	} {
+		if got := quoted(`(?s)export const ` + name + ` = members\(\w+, \[(.*?)\]\)`); !slices.Equal(got, want) {
+			t.Errorf("bridge %s = %v, engine has %v", name, got, want)
+		}
+	}
+	// What a viewing copy and an export may be asked for are the renderer's bounds.
+	if core.RenderSideHigh != media.RenderSide || core.ExportSideMax != media.RenderSide ||
+		core.ExportSideMin != media.RenderSideMin {
+		t.Errorf("core's render and export sides (%d, %d..%d) are not the renderer's (%d..%d)",
+			core.RenderSideHigh, core.ExportSideMin, core.ExportSideMax, media.RenderSideMin, media.RenderSide)
+	}
+
 	for _, event := range []string{EventProgress, EventLibraryChanged, EventOrganiseProgress} {
 		if !regexp.MustCompile(`'` + regexp.QuoteMeta(event) + `' satisfies keyof Events.CustomEvents`).MatchString(bridge) {
 			t.Errorf("the bridge does not listen for %q", event)
@@ -157,7 +190,17 @@ func TestViewingFallbackMatchesTheEngineDefaults(t *testing.T) {
 	if len(block) != 2 {
 		t.Fatal("missing viewing fallback")
 	}
-	jsonData := regexp.MustCompile(`(\w+):`).ReplaceAll(block[1], []byte(`"$1":`))
+	// Enum members and mirrored constants are written by name in the fallback.
+	text := string(block[1])
+	for name, value := range map[string]string{
+		"ViewerOpen.ViewerOpenFit":    strconv.Quote(string(core.ViewerOpenFit)),
+		"ViewerWheel.ViewerWheelZoom": strconv.Quote(string(core.ViewerWheelZoom)),
+		"RENDER_SIDE_HIGH":            strconv.Itoa(core.RenderSideHigh),
+		"''":                          `""`,
+	} {
+		text = strings.ReplaceAll(text, name, value)
+	}
+	jsonData := regexp.MustCompile(`(\w+):`).ReplaceAll([]byte(text), []byte(`"$1":`))
 	jsonData = regexp.MustCompile(`,\s*\}`).ReplaceAll(jsonData, []byte("}"))
 	var got core.ViewerPreferences
 	if err := json.Unmarshal(jsonData, &got); err != nil {

@@ -58,6 +58,8 @@ const codeText: Record<ErrorCode, MessageKey> = {
   [ErrorCode.DestinationTaken]: 'organise.reason.taken',
   [ErrorCode.SourceChanged]: 'organise.reason.changed',
   [ErrorCode.Unsupported]: 'error.unsupported',
+  [ErrorCode.PresetInvalid]: 'error.presetInvalid',
+  [ErrorCode.PresetNewer]: 'error.presetNewer',
   [ErrorCode.SigninFailed]: 'error.signinFailed',
   [ErrorCode.SigninUnavailable]: 'error.signinUnavailable',
 }

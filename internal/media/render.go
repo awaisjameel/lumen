@@ -379,3 +379,57 @@ func (c *Cache) trimRenders(ctx context.Context, dir string, incoming int64) err
 	}
 	return nil
 }
+
+// RenderBytes is how much disk the viewing copies take now. They are
+// disposable: each is made again from its original when next asked for.
+func (c *Cache) RenderBytes() (int64, error) {
+	entries, err := os.ReadDir(filepath.Join(c.Dir, "render"))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, entry := range entries {
+		if fi, err := entry.Info(); err == nil { // one removed meanwhile counts for nothing
+			total += fi.Size()
+		}
+	}
+	return total, nil
+}
+
+// ClearRenders deletes every viewing copy and returns the bytes freed. It
+// takes the renderer's turn, so no copy is being written meanwhile. Originals,
+// thumbnails and the library are outside this folder and are not touched.
+func (c *Cache) ClearRenders(ctx context.Context) (int64, error) {
+	select {
+	case c.rendering <- struct{}{}:
+		defer func() { <-c.rendering }()
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+	dir := filepath.Join(c.Dir, "render")
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var freed int64
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return freed, err
+		}
+		fi, err := entry.Info()
+		if err != nil || entry.IsDir() {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
+			return freed, err
+		}
+		freed += fi.Size()
+	}
+	return freed, nil
+}

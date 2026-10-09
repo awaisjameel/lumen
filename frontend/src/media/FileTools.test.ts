@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { reactive } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import { mountInApp } from '../shared/testing'
 import { engine, ExportFormat, ExportState, OrganiseReason } from '../bridge'
 import type * as Bridge from '../bridge'
@@ -22,6 +23,7 @@ vi.mock('../bridge', async (original) => ({
 vi.mock('../shared/confirm', () => ({ confirm: vi.fn() }))
 
 beforeEach(() => {
+  setActivePinia(createPinia()) // the dialog reads the saved export presets
   vi.mocked(engine.exportJobs).mockReset().mockResolvedValue([])
   vi.mocked(engine.planExport).mockReset().mockResolvedValue([])
   vi.mocked(engine.runExport).mockReset().mockResolvedValue([])

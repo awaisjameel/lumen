@@ -12,7 +12,7 @@ import { AlbumKind, engine, Filter, TILE_SIZE_MAX, TILE_SIZE_MIN } from '../brid
 import type { GridItem } from '../bridge'
 import { icons } from '../design/icons'
 import type { IconName } from '../design/icons'
-import { dispatchKey, runCommand, useCommands } from '../shared/commands'
+import { capsOf, dispatchKey, runCommand, useCommands } from '../shared/commands'
 import { logError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { useLiveReload } from '../shared/liveReload'
@@ -439,8 +439,8 @@ useCommands([
 
 async function onKey(e: KeyboardEvent) {
   if (e.defaultPrevented || e.isComposing || shortcutsSuspended()) return
-  if (e.ctrlKey || e.altKey || e.metaKey) return // leave shortcuts like Ctrl+F alone
   if (dispatchKey(e, 'grid')) return
+  if (e.ctrlKey || e.altKey || e.metaKey) return // leave shortcuts like Ctrl+F alone
   const sel = lib.selected
   const dir = arrows[e.key]
   if (dir) {
@@ -476,7 +476,10 @@ watch(
   () => lib.viewer,
   (now, before) => {
     if (!now && before && lib.itemAt(before)) {
-      lib.selected = before
+      // A selection of several is the user's and stays; the one photo the
+      // grid's keys act on moves with the viewer, and is shown as selected.
+      if (lib.selectedIDs.size > 1) lib.selected = before
+      else void lib.selectItems(before, false, false)
       scrollIntoView(before)
       scroller.value?.focus()
     }
@@ -614,7 +617,7 @@ const searchNotes = computed(() => {
             </template>
           </UPopover>
           <IconButton
-            :kbds="['I']"
+            :kbds="capsOf('view.details')"
             :icon="icons.inspector"
             :label="t('library.info')"
             :tip="t(lib.showDetails ? 'library.hideInfo' : 'library.showInfo')"

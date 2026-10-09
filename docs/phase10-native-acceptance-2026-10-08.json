@@ -1,0 +1,232 @@
+{
+  "suite": "customise",
+  "exe": "bin/Lumen.exe",
+  "checks": [
+    {
+      "name": "Settings shows every section of the plan",
+      "pass": true,
+      "detail": "appearance,library,viewing,video,indexing,search,files,accessibility,privacy,presets,about"
+    },
+    {
+      "name": "searching for \"shortcut\" leaves only the sections that mention shortcuts",
+      "pass": true,
+      "detail": "accessibility,presets"
+    },
+    {
+      "name": "Reduced motion holds every transition still",
+      "pass": true,
+      "detail": "data-motion=reduced transition=1e-05s"
+    },
+    {
+      "name": "Full motion lets transitions run",
+      "pass": true,
+      "detail": "2s"
+    },
+    {
+      "name": "motion, viewer background and focus ring are saved in the library",
+      "pass": true,
+      "detail": "{\"motion\":\"full\",\"bg\":\"black\",\"focus\":\"strong\"}"
+    },
+    {
+      "name": "the strong focus ring is drawn thicker on the focused control",
+      "pass": true,
+      "detail": "{\"width\":\"2.4px\",\"focus\":\"strong\",\"tag\":\"BUTTON\"}"
+    },
+    {
+      "name": "the viewer is drawn on the black background chosen",
+      "pass": true,
+      "detail": "rgb(0, 0, 0)"
+    },
+    {
+      "name": "thumbnails show the whole picture once that is chosen",
+      "pass": true,
+      "detail": "{\"fit\":\"contain\",\"badge\":\"none\"}"
+    },
+    {
+      "name": "the favourite badge is hidden on favourites, which stay favourites",
+      "pass": true,
+      "detail": "{\"fit\":\"contain\",\"badge\":\"none\"}"
+    },
+    {
+      "name": "hiding the badge changed no favourite",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "the thumbnail choices go back as they were set",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Lumen opens on the screen chosen",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "every preference set so far survived the restart",
+      "pass": true,
+      "detail": "{\"start\":\"albums\",\"motion\":\"full\",\"bg\":\"black\",\"focus\":\"strong\"}"
+    },
+    {
+      "name": "the restored preferences are applied to the page again",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "a key pressed in the editor becomes the action’s shortcut",
+      "pass": true,
+      "detail": "{\"viewer.rotate\":\"R\"}"
+    },
+    {
+      "name": "keys another viewer action answers to are refused, with whose they are",
+      "pass": true,
+      "detail": "F already belongs to “Favourite”. Change that one first, or choose other keys."
+    },
+    {
+      "name": "Close keeps Escape and offers no change",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "the new shortcut runs its action in the viewer",
+      "pass": true,
+      "detail": "0 -> 1"
+    },
+    {
+      "name": "Escape still closes the viewer",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "the shortcut reference opens with its own key",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Reset all shortcuts clears every change",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "how photos open and what the wheel does are saved",
+      "pass": true,
+      "detail": "{\"filmstrip\":false,\"autoHide\":false,\"slideshowSeconds\":5,\"loop\":false,\"autoplay\":true,\"volume\":1,\"muted\":false,\"speed\":1,\"skipSeconds\":10,\"resume\":false,\"open\":\"actual\",\"wheel\":\"navigate\",\"stillAnimations\":false,\"renderSide\":4096,\"videoLoop\":false,\"subtitles\":false,\"subtitleLanguage\":\"\"}"
+    },
+    {
+      "name": "a photo opens at its actual size",
+      "pass": true,
+      "detail": "100%"
+    },
+    {
+      "name": "the wheel moves to the next photo instead of zooming",
+      "pass": true,
+      "detail": "/media/thumb/596/1024?v=3 -> /media/thumb/594/1024?v=1 at 100% (Monday, 3 May 2021 at 10:45)"
+    },
+    {
+      "name": "the viewing choices go back as they were set",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "the PNG, JPEG and GIF of a new folder are indexed",
+      "pass": true,
+      "detail": "597 -> 600"
+    },
+    {
+      "name": "turning PNG off in Settings is saved",
+      "pass": true,
+      "detail": "[\"png\"]"
+    },
+    {
+      "name": "with PNG off a new PNG is not added and the one in the library stays",
+      "pass": true,
+      "detail": "600 -> 600"
+    },
+    {
+      "name": "turning PNG on again finds the file left out",
+      "pass": true,
+      "detail": "600 -> 601"
+    },
+    {
+      "name": "no format is left off",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "holding animations is saved",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "an animated GIF waits on a still copy of its first frame",
+      "pass": true,
+      "detail": "/media/render/602/4096?v=5623b5861fda1517b7034f1c49cc389498bf89fe8a5f5969557cfba3077eb702"
+    },
+    {
+      "name": "that still copy is counted in the viewing cache",
+      "pass": true,
+      "detail": "12765 bytes"
+    },
+    {
+      "name": "Play animation shows the original, which animates",
+      "pass": true,
+      "detail": "/media/original/602"
+    },
+    {
+      "name": "clearing the viewing copies empties only that cache",
+      "pass": true,
+      "detail": "viewing 0, thumbnails 26989696 -> 26989696"
+    },
+    {
+      "name": "the photo is still in the library after clearing",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "an export preset is saved with a format, size and quality, and no folder",
+      "pass": true,
+      "detail": "[{\"name\":\"Web 2K\",\"format\":\"jpeg\",\"side\":4096,\"quality\":92,\"adjust\":true}]"
+    },
+    {
+      "name": "resetting Appearance restores it and leaves the other sections",
+      "pass": true,
+      "detail": "{\"motion\":\"system\",\"bg\":\"dark\",\"focus\":\"strong\",\"presets\":1}"
+    },
+    {
+      "name": "the page follows the reset at once",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Reset all settings restores every preference",
+      "pass": true,
+      "detail": "{\"viewer\":{\"filmstrip\":false,\"autoHide\":false,\"slideshowSeconds\":5,\"loop\":false,\"autoplay\":true,\"volume\":1,\"muted\":false,\"speed\":1,\"skipSeconds\":10,\"resume\":false,\"open\":\"fit\",\"wheel\":\"zoom\",\"stillAnimations\":false,\"renderSide\":4096,\"videoLoop\":false,\"subtitles\":false,\"subtitleLanguage\":\"\"},\"theme\":"
+    },
+    {
+      "name": "Reset all settings restores the engine settings it names",
+      "pass": true,
+      "detail": "{\"videos\":false,\"aiOnBattery\":false,\"tagConfidence\":0.02,\"eventGapHours\":12,\"thumbCacheMB\":2048,\"ocr\":false,\"xmp\":false,\"cpuThreads\":10,\"maxCPUThreads\":20,\"defaultCPUThreads\":10,\"pauseFullScreen\":true,\"pauseBusy\":true,\"idleOnly\":false,\"excludedFormats\":null}"
+    },
+    {
+      "name": "a reset leaves videos, text reading, XMP and the folders as they were",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "a reset leaves the library’s photos",
+      "pass": true,
+      "detail": "601 -> 601"
+    },
+    {
+      "name": "no uncaught frontend errors",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "no request left the PC",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "errors": []
+}

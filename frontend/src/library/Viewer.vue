@@ -10,7 +10,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import { engine, isCancelled, videosAvailable } from '../bridge'
 import type { AssetDetail, GridItem } from '../bridge'
 import { icons } from '../design/icons'
-import { dispatchKey, runCommand, useCommands } from '../shared/commands'
+import { capsOf, dispatchKey, runCommand, useCommands } from '../shared/commands'
 import { errorText, reportError } from '../shared/errors'
 import FeatureState from '../shared/FeatureState.vue'
 import { dateTime } from '../shared/format'
@@ -232,8 +232,13 @@ async function adjust(rotation: number, flip: boolean) {
 // picker closing its menu on Escape) stops it before it reaches the viewer.
 function onKey(e: KeyboardEvent) {
   activity()
-  if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return
-  if (!layer.owns()) return
+  if (e.defaultPrevented || !layer.owns()) return
+  // A chord with Ctrl or Alt is only ever a shortcut the user gave a viewer
+  // command: nothing else here answers to one.
+  if (e.ctrlKey || e.altKey || e.metaKey) {
+    if (!isTyping(e)) dispatchKey(e, 'viewer')
+    return
+  }
   // Escape belongs to the browser while the player is fullscreen.
   if (e.key === 'Escape' && document.fullscreenElement) return
   if (e.key === 'Tab') {
@@ -250,13 +255,13 @@ function onKey(e: KeyboardEvent) {
   // Playback controls keep their own arrow keys.
   const slider = e.target instanceof Element && e.target.closest('[role="slider"], [role="separator"]')
   if ((ownsArrows(e) || slider) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
-  // These viewer shortcuts ignored Shift before the command registry did the matching.
+  if (dispatchKey(e, 'viewer')) return
+  // These viewer shortcuts ignored Shift before the command registry did the
+  // matching: they still do, unless the user gave the shifted key to another.
   if (e.shiftKey && (/^[fi]$/i.test(e.key) || ['Escape', 'ArrowLeft', 'ArrowRight'].includes(e.key))) {
     const plain = new KeyboardEvent('keydown', { key: e.key.toLowerCase() })
     if (dispatchKey(plain, 'viewer')) e.preventDefault()
-    return
   }
-  dispatchKey(e, 'viewer')
 }
 
 useCommands([
@@ -540,7 +545,7 @@ onBeforeUnmount(() => {
             v-if="actions.favourite"
             class="viewer-control"
             :label="t(item?.f ? 'details.unfavourite' : 'details.favourite')"
-            :kbds="['F']"
+            :kbds="capsOf('viewer.favourite')"
             :aria-pressed="!!item?.f"
             variant="ghost"
             @click="runCommand('viewer.favourite')"
@@ -561,7 +566,7 @@ onBeforeUnmount(() => {
             :icon="icons.info"
             :label="t('library.info')"
             :tip="t(lib.showDetails ? 'library.hideInfo' : 'library.showInfo')"
-            :kbds="['I']"
+            :kbds="capsOf('viewer.details')"
             :aria-pressed="lib.showDetails"
             variant="ghost"
             @click="runCommand('viewer.details')"
@@ -602,7 +607,12 @@ onBeforeUnmount(() => {
                 :height="item.h"
                 :detail="detail"
                 :linked="comparing && linked ? geometry : undefined"
+                :open="viewing.open"
+                :wheel="viewing.wheel"
+                :side="viewing.renderSide"
+                :still="viewing.stillAnimations"
                 @change="geometry = $event"
+                @step="go"
               />
               <FeatureState
                 v-if="!item.t && !detail?.caps.original"
@@ -622,6 +632,8 @@ onBeforeUnmount(() => {
             :height="comparisonItem.h"
             :detail="comparison"
             :linked="linked ? geometry : undefined"
+            :side="viewing.renderSide"
+            :still="viewing.stillAnimations"
             @change="geometry = $event"
           />
         </div>
@@ -648,6 +660,15 @@ onBeforeUnmount(() => {
               @click="image.turnPage(1)"
             />
           </template>
+          <UButton
+            v-if="image.animated"
+            :icon="icons[image.playing ? 'pause' : 'play']"
+            :aria-pressed="image.playing"
+            variant="ghost"
+            data-animation
+            @click="image.toggleAnimation()"
+            >{{ t(image.playing ? 'viewer.pauseAnimation' : 'viewer.playAnimation') }}</UButton
+          >
           <IconButton
             :icon="icons['zoom-out']"
             :label="t('viewer.zoomOut')"

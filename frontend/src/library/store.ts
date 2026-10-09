@@ -10,12 +10,14 @@ import {
   isCancelled,
   onLibraryChanged,
   onProgress,
+  PrefCategory,
   startMedia,
   TAG_CONFIDENCE_DEFAULT,
 } from '../bridge'
 import type {
   Changes,
   DayBucket,
+  Family,
   GridItem,
   Progress,
   SearchResults,
@@ -31,6 +33,15 @@ import { latestSave } from '../shared/latestSave'
 import type { LatestSave } from '../shared/latestSave'
 import { deleteFromDisk } from '../trash/actions'
 import { showTrashUndo } from '../trash/undo'
+import { usePreferences } from '../shared/preferences'
+import { turns } from '../shared/turns'
+
+/** The settings sections whose reset changes engine settings (core.PrefCategory), which are then read again. */
+const ENGINE_CATEGORIES: readonly PrefCategory[] = [
+  PrefCategory.PrefIndexing,
+  PrefCategory.PrefSearch,
+  PrefCategory.PrefFiles,
+]
 
 /** The single group search results live in (they have no days). */
 export const RESULTS = 'results'
@@ -84,6 +95,7 @@ export const useLibrary = defineStore('library', () => {
     pauseFullScreen: true,
     pauseBusy: true,
     idleOnly: false,
+    excludedFormats: [],
   })
   /** Why a page action in Settings failed (adding a folder, exporting sidecars). */
   const settingsError = ref('')
@@ -91,6 +103,12 @@ export const useLibrary = defineStore('library', () => {
   const settingErrors = ref<Partial<Record<keyof Settings, string>>>({})
   let confidenceSave: LatestSave<number> | null = null
   const settingFailed = (key: keyof Settings) => (e: unknown) => (settingErrors.value[key] = errorText(e))
+  // Each setting's save queue remembers the last value saved, to roll back
+  // to: reloadSettings forgets them all once the library holds other values.
+  const settingQueues: { forget: () => void; flush: () => Promise<void> }[] = []
+  // A reset has the settings to itself: a change made meanwhile waits and
+  // is applied to what the reset left.
+  const resets = turns()
 
   /**
    * A save for one setting: it shows the new value at once, saves the newest
@@ -103,7 +121,9 @@ export const useLibrary = defineStore('library', () => {
     saved?: () => unknown,
   ): (value: Settings[K]) => Promise<void> {
     let queue: LatestSave<Settings[K]> | null = null
-    return (value) => {
+    settingQueues.push({ forget: () => (queue = null), flush: () => queue?.flush() ?? Promise.resolve() })
+    return async (value) => {
+      while (resets.pending) await resets.pending
       queue ??= latestSave(save, settings.value[key], {
         saved,
         rollback: (last) => (settings.value[key] = last),
@@ -141,8 +161,61 @@ export const useLibrary = defineStore('library', () => {
     settingErrors.value.tagConfidence = ''
   }
 
-  function saveTagConfidence(value: number) {
+  async function saveTagConfidence(value: number) {
+    while (resets.pending) await resets.pending
     return confidenceQueue()(value)
+  }
+
+  // Each format's exclusion is saved in turn, so two changed quickly end as
+  // the user left them. The formats are separate choices: one that fails is
+  // said even when a later one is saved, and the newest to finish shows what
+  // the library holds.
+  let formatSaves = Promise.resolve()
+  let storedFormats: Family[] | null = null
+  let formatRevision = 0
+  /** Makes indexing leave a photo format out, or take it in again. */
+  async function saveFormatExcluded(family: Family, excluded: boolean): Promise<void> {
+    while (resets.pending) await resets.pending
+    storedFormats ??= [...settings.value.excludedFormats]
+    const revision = ++formatRevision
+    settingErrors.value.excludedFormats = ''
+    const others = settings.value.excludedFormats.filter((f) => f !== family)
+    settings.value.excludedFormats = excluded ? [...others, family] : others
+    formatSaves = formatSaves.then(async () => {
+      try {
+        await engine.setFormatExcluded(family, excluded)
+        const others = (storedFormats ?? []).filter((f) => f !== family)
+        storedFormats = excluded ? [...others, family] : others
+      } catch (e) {
+        settingFailed('excludedFormats')(e)
+      }
+      if (revision === formatRevision) settings.value.excludedFormats = [...(storedFormats ?? [])]
+    })
+    return formatSaves
+  }
+
+  /** Reads the settings again as the library holds them (after a reset changed them there). */
+  async function reloadSettings(): Promise<void> {
+    const set = await engine.settings()
+    for (const queue of settingQueues) queue.forget()
+    confidenceSave = null
+    storedFormats = null
+    settingErrors.value = {}
+    settings.value = set
+    await refresh() // the tag confidence and the event gap decide what the views hold
+  }
+
+  /** A reset follows pending saves; later edits wait for the reset and its refreshed values. */
+  function resetPreferences(categories: readonly PrefCategory[]): Promise<void> {
+    return resets.take(async () => {
+      await Promise.all([...settingQueues.map((queue) => queue.flush()), confidenceSave?.flush(), formatSaves])
+      try {
+        await usePreferences().reset(categories)
+      } finally {
+        // Also after a refusal: a reset may have changed part of what it names.
+        if (categories.some((category) => ENGINE_CATEGORIES.includes(category))) await reloadSettings()
+      }
+    })
   }
   const progress = shallowRef<Progress | null>(null) // replaced whole by each event
 
@@ -763,6 +836,8 @@ export const useLibrary = defineStore('library', () => {
     settingsError,
     settingErrors,
     saveVideos,
+    saveFormatExcluded,
+    resetPreferences,
     saveAIOnBattery,
     savePauseFullScreen,
     savePauseBusy,

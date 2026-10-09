@@ -4,24 +4,31 @@ import {
   Accent,
   Density,
   engine,
+  FocusRing,
   INSPECTOR_WIDTH_DEFAULT,
+  Motion,
   SIDEBAR_WIDTH_DEFAULT,
+  StartView,
   TEXT_SCALE_DEFAULT,
   Theme,
+  ThumbFit,
   TILE_SIZE_DEFAULT,
   TILE_SIZE_MAX,
   TILE_SIZE_MIN,
+  ViewerBackground,
 } from '../bridge'
-import type { LegacyPreferences, Preferences } from '../bridge'
-import { applyAppearance, cachedAppearance } from '../design/appearance'
+import type { ExportPreset, LegacyPreferences, PrefCategory, Preferences } from '../bridge'
+import { applyAppearance, applyPresentation, cachedAppearance } from '../design/appearance'
+import { setShortcutOverrides } from './commands'
 import { reportError } from './errors'
 import { latestSave } from './latestSave'
 import type { LatestSave } from './latestSave'
+import { turns } from './turns'
 import { viewerDefaults } from './viewing'
 import type { ViewerPreferences } from '../bridge'
 
 /** What a library starts with (core.DefaultPreferences). */
-function defaults(): Preferences {
+export function defaultPreferences(): Preferences {
   return {
     viewer: viewerDefaults(),
     theme: Theme.ThemeSystem,
@@ -32,6 +39,16 @@ function defaults(): Preferences {
     sidebarCollapsed: false,
     sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
     inspectorWidth: INSPECTOR_WIDTH_DEFAULT,
+    motion: Motion.MotionSystem,
+    viewerBackground: ViewerBackground.ViewerBackgroundDark,
+    startView: StartView.StartLibrary,
+    thumbFit: ThumbFit.ThumbCover,
+    focusRing: FocusRing.FocusStandard,
+    hideFavouriteBadge: false,
+    hideVideoBadge: false,
+    hideDurationBadge: false,
+    shortcuts: {},
+    exportPresets: [],
   }
 }
 
@@ -72,16 +89,24 @@ export const usePreferences = defineStore('preferences', () => {
   // Until the engine answers, the first frame uses the last appearance
   // applied on this PC over the defaults, so the theme does not flash; on
   // the first start after an older Lumen, what that one had chosen.
-  const prefs = shallowRef<Preferences>({ ...defaults(), ...legacyChoices(), ...cachedAppearance() })
+  const prefs = shallowRef<Preferences>({ ...defaultPreferences(), ...legacyChoices(), ...cachedAppearance() })
   const loaded = ref(false)
   const saving = ref(false)
-  applyAppearance(prefs.value)
+  apply(prefs.value)
+
+  /** Makes the page, and the shortcuts, what p says. */
+  function apply(p: Preferences) {
+    applyAppearance(p)
+    applyPresentation(p)
+    setShortcutOverrides(p.shortcuts)
+  }
 
   function show(p: Preferences) {
     prefs.value = p
-    applyAppearance(p)
+    apply(p)
   }
 
+  let saveFailed = false
   function saver(initial: Preferences): LatestSave<Preferences> {
     let stored = initial
     return latestSave<Preferences>(
@@ -90,16 +115,25 @@ export const usePreferences = defineStore('preferences', () => {
       },
       initial,
       {
-        saved: () => show(stored),
+        saved: () => {
+          saveFailed = false
+          show(stored)
+        },
         // A failed save shows the last values the library holds again.
         rollback: () => show(stored),
-        failed: reportError,
+        failed: (e) => {
+          saveFailed = true
+          reportError(e)
+        },
       },
     )
   }
   let save = saver(prefs.value)
   let pending = 0
   let loading: Promise<void> | null = null
+  // A reset has the preferences to itself: an edit made meanwhile waits and
+  // is applied to what the reset left.
+  const resets = turns()
 
   /** Reads the library's preferences, first offering it an older Lumen's choices. */
   function load(): Promise<void> {
@@ -118,35 +152,73 @@ export const usePreferences = defineStore('preferences', () => {
   /**
    * Changes preferences: shown at once, then saved. Rapid changes (a slider)
    * save one at a time and end with the newest; a failure rolls back to
-   * what the library holds and says why.
+   * what the library holds and says why. The patch is made from the
+   * preferences as they are when it is applied, and it resolves to whether
+   * the library now holds it.
    */
-  async function set(patch: Partial<Preferences>): Promise<void> {
+  async function change(patch: (now: Preferences) => Partial<Preferences>): Promise<boolean> {
     pending++
     saving.value = true
     try {
       // A startup edit must preserve the library's other choices rather
       // than saving the first-paint cache as a whole preference set.
       if (!loaded.value) await load()
-      show({ ...prefs.value, ...patch })
+      while (resets.pending) await resets.pending
+      show({ ...prefs.value, ...patch(prefs.value) })
       await save(prefs.value)
+      return !saveFailed
     } catch (e) {
       reportError(e)
+      return false
     } finally {
       if (--pending === 0) saving.value = false
     }
+  }
+
+  function set(patch: Partial<Preferences>): Promise<boolean> {
+    return change(() => patch)
   }
 
   /** The viewing and playback choices; the fallback holds only until the library answers. */
   const viewer = computed(() => prefs.value.viewer ?? viewerDefaults())
 
   async function setViewer(patch: Partial<ViewerPreferences>): Promise<void> {
-    try {
-      if (!loaded.value) await load()
-      await set({ viewer: { ...viewer.value, ...patch } })
-    } catch (e) {
-      reportError(e)
-    }
+    await change(() => ({ viewer: { ...viewer.value, ...patch } }))
   }
 
-  return { prefs, viewer, loaded, saving, load, set, setViewer }
+  /** Reassigns a command's shortcut ("" leaves it without one), or gives it back its own (undefined). */
+  function setShortcut(id: string, keys: string | undefined): Promise<boolean> {
+    return change((now) => {
+      const others = Object.entries(now.shortcuts).filter(([command]) => command !== id)
+      return { shortcuts: Object.fromEntries(keys === undefined ? others : [...others, [id, keys]]) }
+    })
+  }
+
+  /** Replaces the saved export presets. */
+  function setExportPresets(exportPresets: ExportPreset[]): Promise<boolean> {
+    return set({ exportPresets })
+  }
+
+  /**
+   * Puts whole categories of settings back to their defaults in the library,
+   * then shows the preferences as it now holds them. Changes still on their
+   * way are saved first, so the reset is the last word. It throws what the
+   * engine refused, for the caller to explain beside its button.
+   */
+  function reset(categories: readonly PrefCategory[]): Promise<void> {
+    return resets.take(async () => {
+      if (!loaded.value) await load()
+      await save.flush()
+      try {
+        await engine.resetPreferences([...categories])
+      } finally {
+        // Also after a refusal: a reset may have changed part of what it names.
+        const p = await engine.preferences()
+        save = saver(p)
+        show(p)
+      }
+    })
+  }
+
+  return { prefs, viewer, loaded, saving, load, set, setViewer, setShortcut, setExportPresets, reset }
 })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import UApp from '@nuxt/ui/components/App.vue'
 import { defineAsyncComponent, onMounted, ref } from 'vue'
-import { RouterView } from 'vue-router'
+import { RouterView, useRouter } from 'vue-router'
 import CrashNotice from './about/CrashNotice.vue'
 import AppNotifications from './app/AppNotifications.vue'
 import AppOverlays from './app/AppOverlays.vue'
@@ -10,6 +10,7 @@ import { useLibrary } from './library/store'
 import { errorText, logError } from './shared/errors'
 import FeatureState from './shared/FeatureState.vue'
 import { t } from './shared/i18n'
+import { StartView } from './bridge'
 import { usePreferences } from './shared/preferences'
 import { useFullscreenPortal } from './shared/overlay'
 
@@ -20,10 +21,26 @@ const lib = useLibrary()
 const prefs = usePreferences()
 const portal = useFullscreenPortal()
 const failed = ref('')
+const router = useRouter()
+// Whether the user has gone anywhere yet: the start view only ever replaces
+// the screen Lumen opened on.
+let navigated = false
+const stopCounting = router.afterEach((_to, from) => {
+  if (from.matched.length) navigated = true
+})
+
+/** Opens on the screen the user chose, if Lumen is still where it started. */
+async function openStartView() {
+  stopCounting()
+  const view = prefs.prefs.startView
+  if (navigated || view === StartView.StartLibrary || router.currentRoute.value.name !== 'library') return
+  if (router.hasRoute(view)) await router.replace({ name: view })
+}
+
 onMounted(() => {
   // The interface's look is not worth holding the library back for: without
   // it the last appearance applied (or the defaults) stays.
-  void prefs.load().catch(logError)
+  void prefs.load().then(openStartView).catch(logError)
   lib.init().catch((e: unknown) => (failed.value = errorText(e)))
 })
 </script>

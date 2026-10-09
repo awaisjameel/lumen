@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,9 @@ import (
 type Options struct {
 	Videos   bool     // videos are opt-in (off by default)
 	SkipDirs []string // e.g. Lumen's own data folder
+	// Excluded are the formats the user turned off: their files are not added
+	// or read again, and those the library already holds are kept as they are.
+	Excluded []core.Family
 }
 
 // Result summarises one scan.
@@ -201,11 +205,16 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 		if notTransportStream(path) {
 			return nil // e.g. a TypeScript module (.mts), which a library leaves forgotten
 		}
+		key := core.Fold(path)
+		if slices.Contains(opt.Excluded, core.FamilyOf(path)) {
+			// Still on disk, so not gone: the library keeps what it knew of it.
+			delete(known, key)
+			return nil
+		}
 		res.Seen++
 		if s.OnProgress != nil && res.Seen%500 == 0 {
 			s.OnProgress(res.Seen)
 		}
-		key := core.Fold(path)
 		prev, ok := known[key]
 		delete(known, key)
 		if ok && prev.Size == info.Size() && prev.MTime == info.ModTime().UnixNano() {

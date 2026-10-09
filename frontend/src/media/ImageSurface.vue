@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { engine, isCancelled, originalUrl, RENDER_SIDE, renderUrl, THUMB_LARGE, thumbUrl } from '../bridge'
+import {
+  engine,
+  isCancelled,
+  originalUrl,
+  RENDER_SIDE,
+  renderUrl,
+  THUMB_LARGE,
+  thumbUrl,
+  ViewerOpen,
+  ViewerWheel,
+} from '../bridge'
 import type { AssetDetail, RenderInfo } from '../bridge'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
@@ -8,15 +18,32 @@ import { observeResize } from '../shared/observeResize'
 import { constrain, fitScale, zoomAt } from './viewport'
 import type { ViewGeometry, Viewport } from './viewport'
 
-const props = defineProps<{
-  id: number
-  thumb: number
-  width: number
-  height: number
-  detail: AssetDetail | null
-  linked?: ViewGeometry
-}>()
-const emit = defineEmits<{ change: [value: ViewGeometry] }>()
+const props = withDefaults(
+  defineProps<{
+    id: number
+    thumb: number
+    width: number
+    height: number
+    detail: AssetDetail | null
+    linked?: ViewGeometry
+    /** How the picture is first shown: fitted, or at its actual size (the viewing preference). */
+    open?: ViewerOpen
+    /** What the wheel does: zoom, or step to the next picture (Ctrl and the wheel then zoom). */
+    wheel?: ViewerWheel
+    /** The longest edge asked of a viewing copy. */
+    side?: number
+    /** Hold an animated image on its first frame until it is played. */
+    still?: boolean
+  }>(),
+  {
+    linked: undefined,
+    open: ViewerOpen.ViewerOpenFit,
+    wheel: ViewerWheel.ViewerWheelZoom,
+    side: RENDER_SIDE,
+    still: false,
+  },
+)
+const emit = defineEmits<{ change: [value: ViewGeometry]; step: [dir: 1 | -1] }>()
 const surface = ref<HTMLElement | null>(null)
 const viewport = ref<Viewport>({
   width: 1,
@@ -27,7 +54,16 @@ const viewport = ref<Viewport>({
   x: 0,
   y: 0,
 })
-const fitting = ref(true)
+const fitting = ref(props.open !== ViewerOpen.ViewerOpenActual)
+// Opened at its actual size, the picture stays so (through the window's
+// first measure and the viewing copy's arrival) until the user zooms or pans.
+let openActual = !fitting.value
+// Whether the file animates is only known by reading it. With animations
+// held still, the original waits for that answer; a still one then shows as
+// ever, and an animated one shows its first frame until it is played.
+const inspected = ref(!props.still)
+const animated = ref(false)
+const playing = ref(false)
 const loadedSource = ref('')
 const info = ref<RenderInfo | null>(null)
 const originalFailed = ref(false)
@@ -39,15 +75,22 @@ const pages = ref(1)
 // The details are asked for after the picture is shown, and until they
 // arrive may still be the last picture's.
 const detail = computed(() => (props.detail?.id === props.id ? props.detail : null))
-const rendered = computed(() => (info.value ? renderUrl(props.id, info.value.revision, info.value.page) : undefined))
+const rendered = computed(() =>
+  info.value ? renderUrl(props.id, info.value.revision, info.value.page, props.side) : undefined,
+)
 // The WebView decodes an original no larger than a render would be; a
 // bigger one is shown through the bounded render instead.
 const original = computed(() =>
-  !originalFailed.value && detail.value?.caps.original && props.width * props.height <= RENDER_SIDE * RENDER_SIDE
+  !originalFailed.value &&
+  detail.value?.caps.original &&
+  props.width * props.height <= RENDER_SIDE * RENDER_SIDE &&
+  inspected.value &&
+  (!animated.value || playing.value)
     ? originalUrl(props.id)
     : undefined,
 )
-const full = computed(() => rendered.value ?? original.value)
+// Only the original animates: while it plays it is shown, not the still copy.
+const full = computed(() => (playing.value && original.value ? original.value : (rendered.value ?? original.value)))
 const ready = computed(() => !!full.value && loadedSource.value === full.value)
 const scale = computed(() => Math.round(viewport.value.scale * 100))
 const placed = computed(
@@ -80,20 +123,31 @@ function set(v: Viewport) {
   })
 }
 function fit() {
+  openActual = false
   fitting.value = true
   set({ ...viewport.value, scale: fitScale(viewport.value), x: 0, y: 0 })
 }
 function actual() {
+  openActual = false
   fitting.value = false
   set(zoomAt(viewport.value, pixelScale()))
+}
+/** Places the picture again after its size or the window's changed. */
+function place() {
+  if (fitting.value) set({ ...viewport.value, scale: fitScale(viewport.value), x: 0, y: 0 })
+  else if (openActual) set(zoomAt({ ...viewport.value, x: 0, y: 0 }, pixelScale()))
+  else set(viewport.value)
 }
 function pixelScale() {
   return info.value ? info.value.width / Math.max(1, detail.value?.width ?? props.width) : 1
 }
 async function renderCopy(current: number) {
   try {
-    const result = await engine.render(props.id, abort?.signal, page.value)
-    if (request === current) info.value = result
+    const result = await engine.render(props.id, abort?.signal, page.value, props.side)
+    if (request === current) {
+      info.value = result
+      if (openActual) place() // one image pixel is now one of the copy's
+    }
   } catch (e) {
     if (request === current && !isCancelled(e)) failed.value = errorText(e)
   }
@@ -105,6 +159,20 @@ async function countPages(current: number) {
   } catch (e) {
     if (!isCancelled(e)) logError(e) // the first page is still shown
   }
+}
+async function checkAnimation(current: number) {
+  try {
+    const inspection = await engine.inspect(props.id, abort?.signal)
+    if (request !== current) return
+    animated.value = inspection.pages > 1
+  } catch (e) {
+    if (isCancelled(e)) return
+    logError(e) // unknown: shown as a still picture is
+  }
+  if (request === current) inspected.value = true
+}
+function toggleAnimation() {
+  playing.value = !playing.value
 }
 function turnPage(by: number) {
   const next = Math.min(pages.value - 1, Math.max(0, page.value + by))
@@ -124,11 +192,20 @@ function loadFailed() {
   } else failed.value = t('viewer.renderFailed')
 }
 function zoom(factor: number, x?: number, y?: number) {
+  openActual = false
   fitting.value = false
   set(zoomAt(viewport.value, viewport.value.scale * factor, x, y))
 }
-function wheel(e: WheelEvent) {
+let lastStep = 0
+function onWheel(e: WheelEvent) {
   e.preventDefault()
+  if (props.wheel === ViewerWheel.ViewerWheelNavigate && !e.ctrlKey) {
+    // One notch is one picture: a free-spinning wheel must not race through the library.
+    if (!e.deltaY || e.timeStamp - lastStep < 200) return
+    lastStep = e.timeStamp
+    emit('step', e.deltaY > 0 ? 1 : -1)
+    return
+  }
   const bounds = surface.value?.getBoundingClientRect()
   if (bounds)
     zoom(Math.exp(-Math.max(-100, Math.min(100, e.deltaY)) * 0.005), e.clientX - bounds.left, e.clientY - bounds.top)
@@ -150,6 +227,7 @@ function pointerMove(e: PointerEvent) {
     if (oldDistance > 0 && bounds)
       zoom(distance / oldDistance, (e.clientX + other.x) / 2 - bounds.left, (e.clientY + other.y) / 2 - bounds.top)
   } else {
+    openActual = false
     set({
       ...viewport.value,
       x: viewport.value.x + e.clientX - previous.x,
@@ -166,6 +244,7 @@ function doubleClick(e: MouseEvent) {
     return
   }
   const bounds = surface.value?.getBoundingClientRect()
+  openActual = false
   fitting.value = false
   if (bounds) set(zoomAt(viewport.value, pixelScale(), e.clientX - bounds.left, e.clientY - bounds.top))
 }
@@ -180,6 +259,7 @@ watch(
       Math.abs(value.y * viewport.value.imageHeight - viewport.value.y) < 0.000001
     )
       return
+    openActual = false
     fitting.value = false
     viewport.value = constrain({
       ...viewport.value,
@@ -204,9 +284,11 @@ watch(
     const width = detail.value?.width ?? props.width
     const height = detail.value?.height ?? props.height
     viewport.value = { ...viewport.value, imageWidth: rotated ? height : width, imageHeight: rotated ? width : height }
-    if (fitting.value) fit()
-    else set(viewport.value)
-    if (!detail.value || detail.value.video || original.value) return
+    place()
+    if (!detail.value || detail.value.video) return
+    if (!inspected.value && detail.value.caps.original && !detail.value.caps.paged) await checkAnimation(current)
+    else inspected.value = true
+    if (request !== current || original.value) return
     if (detail.value.caps.paged) void countPages(current)
     await renderCopy(current)
   },
@@ -217,8 +299,7 @@ onMounted(() => {
   stopResize = observeResize(surface.value ? [surface.value] : [], () => {
     if (!surface.value) return
     viewport.value = { ...viewport.value, width: surface.value.clientWidth, height: surface.value.clientHeight }
-    if (fitting.value) fit()
-    else set(viewport.value)
+    place()
   })
 })
 onBeforeUnmount(() => {
@@ -227,7 +308,7 @@ onBeforeUnmount(() => {
   stopResize?.()
   pointers.clear()
 })
-defineExpose({ fit, actual, zoom, scale, page, pages, turnPage })
+defineExpose({ fit, actual, zoom, scale, page, pages, turnPage, animated, playing, toggleAnimation })
 </script>
 
 <template>
@@ -235,7 +316,7 @@ defineExpose({ fit, actual, zoom, scale, page, pages, turnPage })
     ref="surface"
     class="image-surface"
     :aria-label="t('viewer.image')"
-    @wheel="wheel"
+    @wheel="onWheel"
     @pointerdown="pointerDown"
     @pointermove="pointerMove"
     @pointerup="pointerEnd"

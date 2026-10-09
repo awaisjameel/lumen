@@ -45,6 +45,27 @@ export interface Command {
 
 const registered = shallowRef<readonly Command[]>([])
 
+// The shortcuts the user reassigned, by command id ("" leaves a command
+// without one). The preferences store owns them and hands them over
+// whenever they change; a command not listed keeps its own keys.
+const overrides = shallowRef<Readonly<Record<string, string>>>({})
+
+/** Replaces the reassigned shortcuts (the preferences store calls this). */
+export function setShortcutOverrides(shortcuts: Readonly<Record<string, string>>): void {
+  overrides.value = { ...shortcuts }
+}
+
+/** The shortcut a command answers to now: the user's, or else its own. undefined if it has none. */
+export function keysOf(c: Pick<Command, 'id' | 'keys'>): string | undefined {
+  const own = overrides.value[c.id]
+  return own === undefined ? c.keys : own || undefined
+}
+
+/** A command's other keys, which go with its own shortcut: reassigning it drops them. */
+export function altKeysOf(c: Pick<Command, 'id' | 'altKeys'>): readonly string[] {
+  return overrides.value[c.id] === undefined ? (c.altKeys ?? []) : []
+}
+
 /** Every registered command, in registration order. */
 export const commands = computed(() => registered.value)
 
@@ -122,6 +143,9 @@ interface Chord {
   alt: boolean
 }
 
+// The space bar types " ", which a shortcut cannot show: it is written "Space".
+const keyName = (key: string): string => (key === ' ' ? 'Space' : key)
+
 function parseKeys(keys: string): Chord {
   const parts = keys.split('+')
   return {
@@ -137,17 +161,73 @@ export function keyCaps(keys: string): string[] {
   return keys.split('+')
 }
 
+/** The caps of a registered command's shortcut in force, for a tooltip; undefined if it has none. */
+export function capsOf(id: string): string[] | undefined {
+  const c = commandById(id)
+  const keys = c ? keysOf(c) : undefined
+  return keys ? keyCaps(keys) : undefined
+}
+
 function matches(e: KeyboardEvent, keys: string): boolean {
   const chord = parseKeys(keys)
   // A character's Shift is part of the character ("?"), so only named keys
   // and letters compare it.
   const shiftMatters = chord.key.length > 1 || /[a-z0-9]/.test(chord.key)
   return (
-    e.key.toLowerCase() === chord.key &&
+    keyName(e.key).toLowerCase() === chord.key &&
     (e.ctrlKey || e.metaKey) === chord.ctrl &&
     e.altKey === chord.alt &&
     (!shiftMatters || e.shiftKey === chord.shift)
   )
+}
+
+function matchesKeys(e: KeyboardEvent, keys: string | undefined): boolean {
+  return keys !== undefined && matches(e, keys)
+}
+
+// Keys that only modify another, which are no shortcut by themselves.
+const MODIFIERS: readonly string[] = ['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'OS']
+// Keys never assigned (core.ValidShortcut): they leave a dialog, the viewer
+// or a field whatever else is set; "+" joins a shortcut's parts.
+const RESERVED: readonly string[] = ['escape', 'tab', '+']
+
+/**
+ * The shortcut a key press spells, as it is stored and shown ("Ctrl+Shift+K"):
+ * "" while only modifiers are down, null for a key that cannot be assigned.
+ */
+export function chordOf(e: KeyboardEvent): string | null {
+  if (MODIFIERS.includes(e.key)) return ''
+  const name = keyName(e.key)
+  if (RESERVED.includes(name.toLowerCase()) || /\s/.test(name) || name.length > 12) return null
+  // A character already says whether Shift was down ("?"); a letter, a digit
+  // and a named key do not.
+  const shiftMatters = name.length > 1 || /[a-z0-9]/i.test(name)
+  const keys = [
+    e.ctrlKey || e.metaKey ? 'Ctrl' : '',
+    e.shiftKey && shiftMatters ? 'Shift' : '',
+    e.altKey ? 'Alt' : '',
+    name.length === 1 ? name.toUpperCase() : name,
+  ]
+    .filter(Boolean)
+    .join('+')
+  return keys === 'Alt+F4' ? null : keys
+}
+
+/** Whether two shortcuts are the same keys, however their letters are cased. */
+export function sameKeys(a: string, b: string): boolean {
+  const x = parseKeys(a)
+  const y = parseKeys(b)
+  return x.key === y.key && x.ctrl === y.ctrl && x.shift === y.shift && x.alt === y.alt
+}
+
+/**
+ * Whether two zones hear the same key presses: the same zone, or either is
+ * the whole page. The grid and the viewer never do (one is behind the other).
+ */
+export function zonesOverlap(a: string | undefined, b: string | undefined): boolean {
+  const x = a ?? 'global'
+  const y = b ?? 'global'
+  return x === y || x === 'global' || y === 'global'
 }
 
 /**
@@ -159,8 +239,7 @@ export function dispatchKey(e: KeyboardEvent, zone: string): boolean {
   if (e.defaultPrevented || e.isComposing) return false
   const c = registered.value.find(
     (cmd) =>
-      (cmd.zone ?? 'global') === zone &&
-      ((cmd.keys !== undefined && matches(e, cmd.keys)) || (cmd.altKeys?.some((k) => matches(e, k)) ?? false)),
+      (cmd.zone ?? 'global') === zone && (matchesKeys(e, keysOf(cmd)) || altKeysOf(cmd).some((k) => matches(e, k))),
   )
   if (!c || !isEnabled(c)) return false
   e.preventDefault()

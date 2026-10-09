@@ -89,7 +89,7 @@ def ui_packages() -> list[dict[str, str]]:
 def icon_set() -> tuple[str, str]:
     """The Lucide collection the UI's icons come from: its package version and its licence."""
     if not ICON_PACKAGE.is_file():
-        raise SystemExit(f"notices: {ICON_PACKAGE} is missing; run npm install in frontend/")
+        raise SystemExit(f"notices: {ICON_PACKAGE} is missing; run npm ci in frontend/")
     if not ICON_LICENCE.is_file():
         raise SystemExit(f"notices: {ICON_LICENCE} is missing")
     version: str = json.loads(ICON_PACKAGE.read_text(encoding="utf-8"))["version"]

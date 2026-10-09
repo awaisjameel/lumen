@@ -5,7 +5,7 @@
 import UKbd from '@nuxt/ui/components/Kbd.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import { computed } from 'vue'
-import { commandGroups, commands, keyCaps } from '../shared/commands'
+import { commandGroups, commands, keyCaps, keysOf } from '../shared/commands'
 import { t } from '../shared/i18n'
 
 const open = defineModel<boolean>('open', { required: true })
@@ -15,9 +15,10 @@ const groups = computed(() =>
     .map((g) => ({
       id: g,
       label: t(`commands.group.${g}`),
-      items: commands.value.flatMap((c) =>
-        c.group === g && c.keys ? [{ id: c.id, title: c.title(), caps: keyCaps(c.keys) }] : [],
-      ),
+      items: commands.value.flatMap((c) => {
+        const keys = keysOf(c)
+        return c.group === g && keys ? [{ id: c.id, title: c.title(), caps: keyCaps(keys) }] : []
+      }),
     }))
     .filter((g) => g.items.length),
 )

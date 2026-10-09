@@ -28,7 +28,7 @@ Brand assets and their regeneration workflow are documented in [the branding gui
 - **Natural-language search** from the search box (Ctrl+F): results best first, cut relative to the best match so a query matching nothing returns nothing; an in-memory int8 index answers in milliseconds
 - **Things**: about 180 built-in labels, the broad kind of each photo (People, Screenshots, Documents…), labels users add ("Eiffel Tower", found across the library at once), tags users add or remove on any photo (their edits always win), a confidence slider
 - AI work waits while on battery (a setting allows it), and pauses with the rest
-- Indexing gives way to the user's programs: Lumen runs below normal priority, its stages share half the CPU's threads between them (Settings → Background work lets the user give it fewer or more, at once), FFmpeg decodes with two threads (long videos are sampled by seeking to each frame), and the GPU, which also draws the screen, rests a third of the time. A playing video still converts at normal priority
+- Indexing gives way to the user's programs: Lumen runs below normal priority, its stages share half the CPU's threads between them (Settings → Indexing and performance lets the user give it fewer or more, at once), FFmpeg decodes with two threads (long videos are sampled by seeking to each frame), and the GPU, which also draws the screen, rests a third of the time. A playing video still converts at normal priority
 
 **Phase 3 (people)** is working:
 
@@ -96,7 +96,15 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 - **More video containers**: MPG/MPEG, TS, OGV and ASF, converted as they play. A TypeScript source named `.ts` is told from a transport stream by its first packets.
 - The tested camera matrix, measurements, decisions and limits: [Phase 9 record](docs/phase9-formats-2026-10-07.md).
 
-**Next development is planned:** expanded customisation, individual/bulk
+**Phase 10 (customisation and preference UX)** is implemented locally:
+
+- **More to choose**: motion, the viewer's background, the screen Lumen opens on, how thumbnails fill their squares and which badges they carry, how photos open and what the wheel does, held animations, viewing copy quality, video looping and subtitles from the start, a stronger focus ring.
+- **Keyboard shortcuts** can be reassigned, with collision checks; Escape and Tab keep their jobs.
+- **Photo formats** can be left out of indexing without losing what the library already holds; viewing copies have their own size and Clear button.
+- **Export presets**, a Reset for each settings section and for all, and **customisation files** that carry the interface preferences between libraries with a preview before anything is applied. A file holds no folder, history, PIN or block and cannot turn on a feature that writes files.
+- What each preference is, its default, range, owner and limits: [Phase 10 record](docs/phase10-customisation-2026-10-08.md).
+
+**Next development is planned:** individual/bulk
 lossless image compression, and automatic update checking with background
 preparation and a user-approved restart. The updater's limited network exception and
 recovery design are in [the automatic update plan](docs/automatic-updates-plan-2026-10-04.md).
@@ -138,7 +146,7 @@ Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), what
 | Python   | Ruff             | Ruff                                                                                                      | `ruff.toml`                                                                        |
 | Shell    |                  | ShellCheck                                                                                                |                                                                                    |
 
-The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm install`). npm enforces a seven-day release-age window through `min-release-age=7` in `frontend/.npmrc`; engine checks reject unsupported Node/npm versions. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line. How code is written (errors, context, SQLite, logging, the Go-to-TypeScript contract, Pinia and Vue, tests) is set out in [AUDIT_CONVENTIONS.md](AUDIT_CONVENTIONS.md).
+The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm ci`). npm enforces a seven-day release-age window through `min-release-age=7` in `frontend/.npmrc`; engine checks reject unsupported Node/npm versions. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line. How code is written (errors, context, SQLite, logging, the Go-to-TypeScript contract, Pinia and Vue, tests) is set out in [AUDIT_CONVENTIONS.md](AUDIT_CONVENTIONS.md).
 
 Editors do the same on save: `.editorconfig` sets line endings and indentation, and `.vscode/settings.json` runs these formatters and linters from the pinned copies (install the recommended extensions).
 

@@ -26,7 +26,8 @@ tooling; this file covers how code is written.
   details and file tools) is built as
   `docs/phase8-implementation-2026-10-05.md` records. Phase 9 (camera RAW
   and broader formats) is built as `docs/phase9-formats-2026-10-07.md`
-  records. Phase 6 (the installer, politeness controls, crash reports and
+  records. Phase 10 (customisation and preference UX) is built as
+  `docs/phase10-customisation-2026-10-08.md` records. Phase 6 (the installer, politeness controls, crash reports and
   diagnostics, onboarding and empty states, the performance pass) is built
   as `docs/phase6-design-2026-10-03.md` sets out; its decisions are not
   reopened except by a later explicit product-owner decision. Lumen currently
@@ -157,9 +158,17 @@ tooling; this file covers how code is written.
     state is never shown by colour, shadow or motion alone, so reduced
     motion and forced colours lose nothing.
 - **One owner each**
-  - Appearance and layout preferences: `shared/preferences.ts`, saved in the
-    library's settings through the bridge (`latestSave` ordering). Browser
-    storage holds only the derived first-paint cache.
+  - Interface preferences (appearance, layout, viewing, playback, shortcuts,
+    export presets): `shared/preferences.ts`, saved in the library's settings
+    through the bridge (`latestSave` ordering). Browser storage holds only
+    the derived first-paint cache. A new preference is a field of
+    `core.Preferences` (or `core.ViewerPreferences`) with a default, a rule
+    in `Normalised` and a reset category (`Preferences.Reset`); one that
+    changes how the page is drawn becomes an attribute on the root
+    (`design/appearance.ts`), which the tokens read.
+  - Shortcuts: a command declares its own keys; the user's are an overlay
+    read through `keysOf`. A command worth a shortcut is listed in
+    `shared/shortcuts.ts`, which a test holds to what the views declare.
   - Notifications: `notify()` in `shared/notify.ts`, shown as toasts by the
     shell. No component draws its own notice bar.
   - Overlays: Nuxt UI's modal, slideover, menu and popover (focus trap,

@@ -25,6 +25,10 @@ export interface ImageControls {
   page: number
   pages: number
   turnPage: (by: number) => void
+  /** An animated image held on its first frame (the animation preference), and whether it is playing now. */
+  animated: boolean
+  playing: boolean
+  toggleAnimation: () => void
 }
 
 export function fitScale(v: Viewport): number {

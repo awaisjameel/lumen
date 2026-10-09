@@ -64,6 +64,9 @@ const (
 	CodeSourceChanged       ErrorCode = "source_changed"       // the file changed after the preview
 	CodeUnsupported         ErrorCode = "unsupported"          // nothing here can read or write that format
 
+	CodePresetInvalid ErrorCode = "preset_invalid" // not a customisation file Lumen wrote
+	CodePresetNewer   ErrorCode = "preset_newer"   // a customisation file from a later Lumen
+
 	CodeSigninFailed ErrorCode = "signin_failed"      // the Windows sign-in was cancelled, or wrong
 	CodeNoSignin     ErrorCode = "signin_unavailable" // this PC has no way to check a Windows sign-in
 )
@@ -122,6 +125,8 @@ var errorCodes = []struct {
 	{fileops.ErrExists, CodeDestinationTaken},
 	{fileops.ErrSourceChanged, CodeSourceChanged},
 	{media.ErrUnsupported, CodeUnsupported},
+	{ErrPresetInvalid, CodePresetInvalid},
+	{ErrPresetNewer, CodePresetNewer},
 	{signin.ErrNotVerified, CodeSigninFailed},
 	{signin.ErrUnavailable, CodeNoSignin},
 }

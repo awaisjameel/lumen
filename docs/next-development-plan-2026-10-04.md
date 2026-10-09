@@ -2,9 +2,10 @@
 
 Date: 4 October 2026. Status: Phase 7 is implemented (see
 [the Phase 7 record](phase7-design-2026-10-04.md)) and so is Phase 8 (see
-[the Phase 8 record](phase8-implementation-2026-10-05.md)) and Phase 9 (see
-[the Phase 9 record](phase9-formats-2026-10-07.md)); Phases 10–12 are
-planned and not started.
+[the Phase 8 record](phase8-implementation-2026-10-05.md)), Phase 9 (see
+[the Phase 9 record](phase9-formats-2026-10-07.md)) and Phase 10 (see
+[the Phase 10 record](phase10-customisation-2026-10-08.md)); Phases 11 and
+12 are planned and not started.
 
 This plan covers the product owner's four requests: rebuild the complete
 frontend with the latest stable Nuxt UI, expand viewing and file tools,
@@ -315,6 +316,8 @@ metadata and use a tested SDR rendering fallback until native HDR output
 is verified; do not label tone-mapped output as original HDR.
 
 ## 5. Phase 10 — Customisation and preference UX
+
+Implemented locally on 8 October 2026. See the [implementation and verification record](phase10-customisation-2026-10-08.md) for each preference's default, range, owner and effect, the decisions taken, what was not offered and why, and the limits that remain. The scope below remains the design reference.
 
 Define persistence contracts in 7A and add preferences alongside the
 features that use them. Phase 10 completes their settings experience and

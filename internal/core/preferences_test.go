@@ -19,7 +19,10 @@ func TestNormalisedPreferencesReplaceWhatTheUICannotApply(t *testing.T) {
 
 func TestNormalisedPreferencesKeepValidChoices(t *testing.T) {
 	p := Preferences{Theme: ThemeDark, Accent: AccentRose, Density: DensityCompact, TextScale: 110,
-		TileSize: 200, SidebarWidth: 300, InspectorWidth: 400}
+		TileSize: 200, SidebarWidth: 300, InspectorWidth: 400, Motion: MotionReduced,
+		ViewerBackground: ViewerBackgroundGrey, StartView: StartPeople, ThumbFit: ThumbContain, FocusRing: FocusStrong,
+		HideVideoBadge: true, Shortcuts: map[string]string{"viewer.zoomIn": "Z"},
+		ExportPresets: []ExportPreset{{Name: "Web", Format: ExportJPEG, Side: 2048, Quality: 80}}}
 	viewer := DefaultViewerPreferences()
 	p.Viewer = &viewer
 	if got := p.Normalised(); !reflect.DeepEqual(got, p) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -18,11 +19,21 @@ func (s *Store) Preferences(ctx context.Context) (core.Preferences, error) {
 	// either side of a save while its cache entries are being replaced.
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
+	return s.preferences(ctx)
+}
+
+// preferences reads the preferences. The caller holds settingsMu.
+func (s *Store) preferences(ctx context.Context) (core.Preferences, error) {
 	p := core.DefaultPreferences()
 	for key, to := range map[string]*string{
-		core.SettingUITheme:   (*string)(&p.Theme),
-		core.SettingUIAccent:  (*string)(&p.Accent),
-		core.SettingUIDensity: (*string)(&p.Density),
+		core.SettingUITheme:            (*string)(&p.Theme),
+		core.SettingUIAccent:           (*string)(&p.Accent),
+		core.SettingUIDensity:          (*string)(&p.Density),
+		core.SettingUIMotion:           (*string)(&p.Motion),
+		core.SettingUIViewerBackground: (*string)(&p.ViewerBackground),
+		core.SettingUIStartView:        (*string)(&p.StartView),
+		core.SettingUIThumbFit:         (*string)(&p.ThumbFit),
+		core.SettingUIFocusRing:        (*string)(&p.FocusRing),
 	} {
 		v, ok, err := s.setting(ctx, key)
 		if err != nil {
@@ -44,11 +55,18 @@ func (s *Store) Preferences(ctx context.Context) (core.Preferences, error) {
 		}
 		*to = n
 	}
-	collapsed, err := s.Bool(ctx, core.SettingUISidebarCollapsed, false)
-	if err != nil {
-		return core.Preferences{}, err
+	for key, to := range map[string]*bool{
+		core.SettingUISidebarCollapsed: &p.SidebarCollapsed,
+		core.SettingUIHideFavourite:    &p.HideFavouriteBadge,
+		core.SettingUIHideVideo:        &p.HideVideoBadge,
+		core.SettingUIHideDuration:     &p.HideDurationBadge,
+	} {
+		on, err := s.Bool(ctx, key, false)
+		if err != nil {
+			return core.Preferences{}, err
+		}
+		*to = on
 	}
-	p.SidebarCollapsed = collapsed
 	viewer, ok, err := s.setting(ctx, core.SettingUIViewer)
 	if err != nil {
 		return core.Preferences{}, err
@@ -57,6 +75,30 @@ func (s *Store) Preferences(ctx context.Context) (core.Preferences, error) {
 		if err := json.Unmarshal([]byte(viewer), &p.Viewer); err != nil {
 			return core.Preferences{}, err
 		}
+		// Before videos had a loop of their own they started as the slideshow's
+		// was set: a library saved then keeps that until the user chooses.
+		var stored map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(viewer), &stored); err == nil && p.Viewer != nil {
+			if _, chosen := stored["videoLoop"]; !chosen {
+				p.Viewer.VideoLoop = p.Viewer.Loop
+			}
+		}
+	}
+	// A list this Lumen cannot read (a newer one wrote it) is as if never
+	// set, like any other unreadable setting.
+	shortcuts, ok, err := s.setting(ctx, core.SettingUIShortcuts)
+	if err != nil {
+		return core.Preferences{}, err
+	}
+	if ok && json.Unmarshal([]byte(shortcuts), &p.Shortcuts) != nil {
+		p.Shortcuts = nil
+	}
+	presets, ok, err := s.setting(ctx, core.SettingUIExportPresets)
+	if err != nil {
+		return core.Preferences{}, err
+	}
+	if ok && json.Unmarshal([]byte(presets), &p.ExportPresets) != nil {
+		p.ExportPresets = nil
 	}
 	return p.Normalised(), nil
 }
@@ -64,14 +106,48 @@ func (s *Store) Preferences(ctx context.Context) (core.Preferences, error) {
 // SetPreferences stores every interface preference at once, normalised, and
 // returns what was stored: a save is all of one request's values or none.
 func (s *Store) SetPreferences(ctx context.Context, p core.Preferences) (core.Preferences, error) {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+	return s.setPreferences(ctx, p)
+}
+
+// setPreferences stores the preferences. The caller holds settingsMu.
+func (s *Store) setPreferences(ctx context.Context, p core.Preferences) (core.Preferences, error) {
 	p = p.Normalised()
-	viewer, err := json.Marshal(p.Viewer)
+	set := preferenceSettings(p)
+	for _, part := range []struct {
+		key   string
+		value any
+	}{
+		{core.SettingUIViewer, p.Viewer},
+		{core.SettingUIShortcuts, p.Shortcuts},
+		{core.SettingUIExportPresets, p.ExportPresets},
+	} {
+		data, err := json.Marshal(part.value)
+		if err != nil {
+			return core.Preferences{}, err
+		}
+		set = append(set, setting{part.key, string(data)})
+	}
+	return p, s.writeSettings(ctx, set)
+}
+
+// ResetPreferences puts the interface preferences of the given categories
+// back to their defaults, in one save, and returns the preferences
+// afterwards. The other categories keep what they hold.
+func (s *Store) ResetPreferences(ctx context.Context, categories []core.PrefCategory) (core.Preferences, error) {
+	// The lock covers the read and the write: a save racing the reset is
+	// either reset with the rest or written after it, never half of each.
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+	p, err := s.preferences(ctx)
 	if err != nil {
 		return core.Preferences{}, err
 	}
-	s.settingsMu.Lock()
-	defer s.settingsMu.Unlock()
-	return p, s.writeSettings(ctx, append(preferenceSettings(p), setting{core.SettingUIViewer, string(viewer)}))
+	for _, c := range categories {
+		p = p.Reset(c)
+	}
+	return s.setPreferences(ctx, p)
 }
 
 // MigrateLegacyPreferences offers this library the choices an older Lumen
@@ -121,9 +197,11 @@ func (s *Store) migrateLegacyPreferences(ctx context.Context, legacy core.Legacy
 type setting struct{ key, value string }
 
 func preferenceSettings(p core.Preferences) []setting {
-	collapsed := "0"
-	if p.SidebarCollapsed {
-		collapsed = "1"
+	flag := func(on bool) string {
+		if on {
+			return "1"
+		}
+		return "0"
 	}
 	return []setting{
 		{core.SettingUITheme, string(p.Theme)},
@@ -131,10 +209,73 @@ func preferenceSettings(p core.Preferences) []setting {
 		{core.SettingUIDensity, string(p.Density)},
 		{core.SettingUITextScale, strconv.Itoa(p.TextScale)},
 		{core.SettingUITileSize, strconv.Itoa(p.TileSize)},
-		{core.SettingUISidebarCollapsed, collapsed},
+		{core.SettingUISidebarCollapsed, flag(p.SidebarCollapsed)},
 		{core.SettingUISidebarWidth, strconv.Itoa(p.SidebarWidth)},
 		{core.SettingUIInspectorWidth, strconv.Itoa(p.InspectorWidth)},
+		{core.SettingUIMotion, string(p.Motion)},
+		{core.SettingUIViewerBackground, string(p.ViewerBackground)},
+		{core.SettingUIStartView, string(p.StartView)},
+		{core.SettingUIThumbFit, string(p.ThumbFit)},
+		{core.SettingUIFocusRing, string(p.FocusRing)},
+		{core.SettingUIHideFavourite, flag(p.HideFavouriteBadge)},
+		{core.SettingUIHideVideo, flag(p.HideVideoBadge)},
+		{core.SettingUIHideDuration, flag(p.HideDurationBadge)},
 	}
+}
+
+// ExcludedFormats is the photo formats indexing leaves out.
+func (s *Store) ExcludedFormats(ctx context.Context) ([]core.Family, error) {
+	v, _, err := s.setting(ctx, core.SettingFormatsExcluded)
+	if err != nil {
+		return nil, err
+	}
+	var list []core.Family
+	for name := range strings.SplitSeq(v, ",") {
+		list = append(list, core.Family(name))
+	}
+	return core.NormalisedFamilies(list), nil
+}
+
+// SetFormatExcluded makes indexing leave one format out, or take it in again,
+// and reports whether that changed anything.
+func (s *Store) SetFormatExcluded(ctx context.Context, family core.Family, excluded bool) (bool, error) {
+	return s.changeExcludedFormats(ctx, func(list []core.Family) []core.Family {
+		if excluded {
+			return append(list, family)
+		}
+		return slices.DeleteFunc(list, func(f core.Family) bool { return f == family })
+	})
+}
+
+// ClearExcludedFormats takes every format in again, and reports whether any
+// had been left out.
+func (s *Store) ClearExcludedFormats(ctx context.Context) (bool, error) {
+	return s.changeExcludedFormats(ctx, func([]core.Family) []core.Family { return nil })
+}
+
+// changeExcludedFormats stores what change makes of the excluded formats,
+// held to those that can be, and reports whether they differ. The settings
+// lock covers the read and the write, so concurrent choices of different
+// formats cannot overwrite one another.
+func (s *Store) changeExcludedFormats(ctx context.Context, change func([]core.Family) []core.Family) (bool, error) {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+	before, err := s.ExcludedFormats(ctx)
+	if err != nil {
+		return false, err
+	}
+	after := core.NormalisedFamilies(change(slices.Clone(before)))
+	if slices.Equal(before, after) {
+		return false, nil
+	}
+	names := make([]string, len(after))
+	for i, f := range after {
+		names[i] = string(f)
+	}
+	if err := s.writeSettings(ctx, []setting{{core.SettingFormatsExcluded, strings.Join(names, ",")}}); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // writeSettings stores several settings in one statement, then updates the

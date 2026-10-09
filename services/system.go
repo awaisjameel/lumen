@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -90,14 +89,11 @@ func (s *SystemService) OpenLogFolder(ctx context.Context) error {
 // library. It returns where it was saved, "" if the user cancelled.
 func (s *SystemService) SaveProblemReport(ctx context.Context) (string, error) {
 	name := fmt.Sprintf("Lumen problem report %s.zip", s.now().Format("2006-01-02"))
-	path, err := application.Get().Dialog.SaveFile().
+	path, err := chosen(application.Get().Dialog.SaveFile().
 		SetFilename(name).
 		AddFilter("Zip file", "*.zip").
-		PromptForSingleSelection()
-	if (err != nil && err.Error() == dialogCancelled) || (err == nil && path == "") {
-		return "", nil
-	}
-	if err != nil {
+		PromptForSingleSelection())
+	if err != nil || path == "" {
 		return "", err
 	}
 	if err := s.writeProblemReport(ctx, path); err != nil {
@@ -113,25 +109,10 @@ func (s *SystemService) writeProblemReport(ctx context.Context, path string) err
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".lumen-report-*.zip")
+	err = publishFile(ctx, path, ".lumen-report-*.zip", func(f *os.File) error {
+		return s.reports.WriteReport(ctx, f, diag.Report{About: about, Logs: []string{s.paths.OldLog, s.paths.Log}})
+	})
 	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(f.Name()) }() // only the temporary file this call created
-	err = s.reports.WriteReport(ctx, f, diag.Report{About: about, Logs: []string{s.paths.OldLog, s.paths.Log}})
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return fmt.Errorf("write problem report: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := os.Rename(f.Name(), path); err != nil {
 		return fmt.Errorf("save problem report: %w", err)
 	}
 	return nil
