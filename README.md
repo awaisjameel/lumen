@@ -61,9 +61,9 @@ Brand assets and their regeneration workflow are documented in [the branding gui
 
 Design and decisions for the last part of Phase 5 are in [docs/phase5-design-2026-10-01.md](docs/phase5-design-2026-10-01.md); the original blocking scope is in [the blocking note](docs/blocking-phase5-2026-09-30.md).
 
-**Phase 6 (polish and ship v1) is working; the beta (0.9.0) is next:**
+**Phase 6 (polish and ship v1) is working; the current beta is 0.11.0:**
 
-- **Installer** (`task package`): `bin\Lumen-0.9.0-x64-setup.exe` (872 MB, about a minute to install) installs Lumen per user, in `%LOCALAPPDATA%\Programs\Lumen`, with no administrator prompt. It carries the runtime folder (DLLs, FFmpeg, models) and Microsoft's standalone WebView2 runtime, which it installs only on a PC without one, so installing never needs the internet. It refuses to replace or remove a running Lumen. The uninstaller removes only what Setup put there, and asks whether to remove the library too (no by default; a silent uninstall keeps it). The installer and Lumen.exe are signed when a certificate is configured; there is none yet.
+- **Installer** (`task package`): `bin\Lumen-0.11.0-x64-setup.exe` (839 MiB) installs Lumen per user, in `%LOCALAPPDATA%\Programs\Lumen`, with no administrator prompt. It carries the runtime folder (DLLs, FFmpeg, models) and Microsoft's standalone WebView2 runtime, which it installs only on a PC without one, so installing never needs the internet. It refuses to replace or remove a running Lumen. The uninstaller removes only what Setup put there, and asks whether to remove the library too (no by default; a silent uninstall keeps it). The installer and Lumen.exe are signed when a certificate is configured; there is none yet. Current installed acceptance limits are recorded [here](docs/beta-package-acceptance-2026-10-10.md).
 - **No network, still**: Lumen never checks for updates. Settings → About Lumen shows the version and the releases page, which opens in the browser only when clicked.
 - **Politeness**: besides the manual pause and waiting for mains power, indexing waits while a game, full-screen video or presentation is in front, and while other programs keep the processor above 70 % for 30 seconds (until they fall to 50 %). Both are on by default. Advanced: index only while the user is away (no input for 5 minutes). Lumen's own work never counts as "other programs": the process and everything it starts share one Windows job, whose processor time is measured. The sidebar status says why indexing waits.
 - **Crash reports and diagnostics, local only**: a crash's account from the Go runtime is kept in `crashes\` beside the library, and the next start says Lumen closed unexpectedly. A panic in a call from the UI is kept as a report and the app runs on. The UI's own failures reach `lumen.log`, rate-limited, and an unexpected one tells the user. Settings → About Lumen opens the log folder and saves a problem report (the log, crash reports and a description of the PC and library, no photos), which the user may choose to share.
@@ -112,13 +112,23 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 - Supported inputs, measurements, verification and limits: [Phase 11 record](docs/phase11-compression-2026-10-09.md). Optional same-format replacement and Undo (11E) remain deferred.
 - Sources above 16 megapixels are skipped for now, and history keeps the newest 100 runs: [Phase 11 audit](docs/phase11-audit-2026-10-10.md), which corrects the record where they differ.
 
-**Next development is planned:** automatic update checking with background
-preparation and a user-approved restart. The updater's limited network exception and
+**Phase 12A (updater trust and activation foundations) has started:** an
+isolated TUF client experiment and the whole-runtime activation contracts are
+recorded in [the 12A record](docs/phase12a-updater-2026-10-10.md). The application
+still has no updater and makes no off-device request.
+
+The planned update flow combines automatic checks, background preparation
+and a user-approved restart. The updater's limited network exception and
 recovery design are in [the automatic update plan](docs/automatic-updates-plan-2026-10-04.md).
 The phased scope, architecture,
 migration rules and acceptance gates are in
 [the next development plan](docs/next-development-plan-2026-10-04.md).
-Phase 12 has not started.
+12A remains in progress; update checks, downloads and activation are not implemented.
+
+The rebuilt 0.11.0 installer passed extracted-payload and native workflow
+checks. Installed acceptance remains open because Windows Sandbox's Application
+Control policy refused the unsigned package:
+[packaged beta acceptance](docs/beta-package-acceptance-2026-10-10.md).
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
@@ -153,12 +163,12 @@ Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), what
 
 `scripts/lint.sh` runs the static checks and frontend regression tests and fails if any does; `scripts/lint.sh --fix` first applies every automatic fix. Each tool is pinned and configured in the repository:
 
-| Code     | Formatting       | Linting                                                                                                   | Config                                                                             |
-| -------- | ---------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Go       | gofmt, goimports | golangci-lint 2.14 (vet, staticcheck, errcheck, gosec, errorlint, revive and more), deadcode, govulncheck | `.golangci.yml`                                                                    |
+| Code     | Formatting       | Linting                                                                                                                                                       | Config                                                                             |
+| -------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Go       | gofmt, goimports | golangci-lint 2.14 (vet, staticcheck, errcheck, gosec, errorlint, revive and more), deadcode, govulncheck                                                     | `.golangci.yml`                                                                    |
 | Frontend | Prettier 3.9     | ESLint 10 with typescript-eslint (strict, type-aware) and eslint-plugin-vue, plus `vue-tsc`; import boundaries between `design`, `shared`, features and `app` | `frontend/eslint.config.js`, `frontend/.prettierrc.json`, `frontend/tsconfig.json` |
-| Python   | Ruff             | Ruff                                                                                                      | `ruff.toml`                                                                        |
-| Shell    |                  | ShellCheck                                                                                                |                                                                                    |
+| Python   | Ruff             | Ruff                                                                                                                                                          | `ruff.toml`                                                                        |
+| Shell    |                  | ShellCheck                                                                                                                                                    |                                                                                    |
 
 The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm ci`). npm enforces a seven-day release-age window through `min-release-age=7` in `frontend/.npmrc`; engine checks reject unsupported Node/npm versions. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line. How code is written (errors, context, SQLite, logging, the Go-to-TypeScript contract, Pinia and Vue, tests) is set out in [AUDIT_CONVENTIONS.md](AUDIT_CONVENTIONS.md).
 

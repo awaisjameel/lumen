@@ -1,6 +1,8 @@
 # Lumen: automatic update plan
 
-Date: 4 October 2026. Status: planned; implementation has not started.
+Date: 4 October 2026. Status: Phase 12A foundations have started (see
+[the 10 October record](phase12a-updater-2026-10-10.md)); production update
+checking, downloads and activation are not implemented.
 Roadmap: Phase 12, with packaging and trust contracts established in 7A.
 
 The owner requested automatic discovery of new versions, an **Update**
