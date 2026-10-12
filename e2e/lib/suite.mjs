@@ -20,7 +20,10 @@ export const version = () =>
 
 // Each suite has its own port, so a suite never attaches to another's app.
 export const SUITES = {
-  onboarding: { port: 9401, about: 'an empty library opens the Welcome screen and adds nothing by itself' },
+  onboarding: {
+    port: 9401,
+    about: 'an empty library opens the Welcome screen and adds nothing by itself',
+  },
   tour: {
     port: 9402,
     about: 'every screen at four window widths: no sideways overflow, no errors, no request off the PC',
@@ -29,15 +32,30 @@ export const SUITES = {
     port: 9403,
     about: 'themes, command palette, keyboard, Escape, narrow windows, video playback, PIN-locked blocks',
   },
-  collections: { port: 9404, about: 'albums, smart albums, Trash and Undo, custom Things, About' },
-  organise: { port: 9405, about: 'organise on disk: preview, move, Undo, on two isolated files' },
+  collections: {
+    port: 9404,
+    about: 'albums, smart albums, Trash and Undo, custom Things, About',
+  },
+  organise: {
+    port: 9405,
+    about: 'organise on disk: preview, move, Undo, on two isolated files',
+  },
   viewer: {
     port: 9406,
     about: 'viewer zoom, rotate, compare, slideshow; selection and batch; export; rename; tracks and subtitles',
   },
-  'file-tools': { port: 9407, about: 'the File tools dialog and its menu, windowed and in full screen' },
-  branding: { port: 9408, about: 'the Lumen mark on every surface, in both themes' },
-  formats: { port: 9409, about: 'camera RAW, JPEG XL, animated PNG, multi-page TIFF and the older video containers' },
+  'file-tools': {
+    port: 9407,
+    about: 'the File tools dialog and its menu, windowed and in full screen',
+  },
+  branding: {
+    port: 9408,
+    about: 'the Lumen mark on every surface, in both themes',
+  },
+  formats: {
+    port: 9409,
+    about: 'camera RAW, JPEG XL, animated PNG, multi-page TIFF and the older video containers',
+  },
   customise: {
     port: 9411,
     about: 'every preference where it takes effect, shortcuts, format exclusion, viewing cache, presets, reset',
@@ -46,7 +64,16 @@ export const SUITES = {
     port: 9412,
     about: 'verified lossless copies, partial bulk outcomes, restart, JPEG XL restoration and local presets',
   },
-  showcase: { port: 9410, about: 'the component showcase of a development run (starts wails3 dev)', optIn: true },
+  updates: {
+    port: 9413,
+    about:
+      'offline defaults, updater capabilities, settings privacy, disabled public delivery and narrow-window layout',
+  },
+  showcase: {
+    port: 9410,
+    about: 'the component showcase of a development run (starts wails3 dev)',
+    optIn: true,
+  },
 }
 export const BASE_PORT = 9400
 export const PERF_PORT = 9420
@@ -104,5 +131,19 @@ export function suite(name) {
     console.log(`\n${name}: ${checks.length - failed.length}/${checks.length} passed`)
     if (failed.length || !checks.length) process.exitCode = 1
   }
-  return { name, exe: EXE, port: entry.port, run, out, checks, errors, check, must, guard, watch, appErrors, finish }
+  return {
+    name,
+    exe: EXE,
+    port: entry.port,
+    run,
+    out,
+    checks,
+    errors,
+    check,
+    must,
+    guard,
+    watch,
+    appErrors,
+    finish,
+  }
 }

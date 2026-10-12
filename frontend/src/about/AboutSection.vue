@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Settings → About Lumen: the version and where new ones are published, the
 // log and a problem report the user may choose to share, the licences, and
-// the credit GeoNames' licence asks for. Lumen itself never goes online:
-// the links open in the user's browser.
+// the credit GeoNames' licence asks for. These links open in the user's browser;
+// the separate update coordinator owns explicitly authorised network requests.
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import { onMounted, ref } from 'vue'

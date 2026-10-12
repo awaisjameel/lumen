@@ -233,5 +233,23 @@ export const usePreferences = defineStore('preferences', () => {
     })
   }
 
-  return { prefs, viewer, loaded, saving, load, set, setViewer, setShortcut, setExportPresets, setCompression, reset }
+  /** Saves the latest pending preferences before the application restarts. */
+  async function flush(): Promise<void> {
+    await save.flush()
+  }
+
+  return {
+    prefs,
+    viewer,
+    loaded,
+    saving,
+    load,
+    set,
+    setViewer,
+    setShortcut,
+    setExportPresets,
+    setCompression,
+    reset,
+    flush,
+  }
 })

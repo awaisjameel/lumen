@@ -11,6 +11,7 @@ import {
   PeopleService,
   SearchService,
   SystemService,
+  UpdateService,
 } from '../../bindings/lumen/services'
 import {
   Accent,
@@ -49,6 +50,8 @@ import {
   ViewerOpen,
   ViewerWheel,
   WaitReason,
+  UpdateChannel,
+  UpdatePhase,
 } from '../../bindings/lumen/internal/core'
 import type {
   About,
@@ -104,10 +107,14 @@ import type {
   Tag,
   TrashSelection as RawTrashSelection,
   UIError,
+  UpdateStatus,
+  UpdatePolicy,
   View,
 } from '../../bindings/lumen/internal/core'
 
 export {
+  UpdateChannel,
+  UpdatePhase,
   Accent,
   AlbumKind,
   BatchAction,
@@ -146,6 +153,8 @@ export {
   WaitReason,
 }
 export type {
+  UpdateStatus,
+  UpdatePolicy,
   About,
   Album,
   BatchOutcome,
@@ -369,6 +378,12 @@ export type ThumbSize = typeof THUMB_SMALL | typeof THUMB_LARGE
  * (services.ErrorCode). Other failures carry only a message.
  */
 export const ErrorCode = {
+  UpdateUnavailable: 'update_unavailable',
+  UpdateBusy: 'update_busy',
+  UpdateInvalid: 'update_invalid',
+  UpdateState: 'update_state',
+  UpdateSpace: 'update_space',
+  UpdatePublisher: 'update_publisher',
   NotFound: 'not_found',
   NoAI: 'no_ai',
   InvalidName: 'invalid_name',
@@ -467,6 +482,15 @@ function queueBlockSession(action: () => Promise<void>): Promise<void> {
 }
 
 export const engine = {
+  updateStatus: (): Promise<UpdateStatus> => UpdateService.Status(),
+  setUpdatePolicy: (p: UpdatePolicy): Promise<void> => UpdateService.SetPolicy(p),
+  checkUpdates: (): Promise<void> => UpdateService.Check(),
+  downloadUpdate: (): Promise<void> => UpdateService.Download(),
+  cancelUpdate: (): Promise<void> => UpdateService.Cancel(),
+  discardUpdate: (): Promise<void> => UpdateService.Discard(),
+  dismissUpdate: (): Promise<void> => UpdateService.Dismiss(),
+  restartUpdate: (): Promise<void> => UpdateService.Restart(),
+  updateHealth: (): Promise<void> => UpdateService.Health(),
   compressionAvailable: (): Promise<boolean> => CompressionService.Available(),
   planCompression: (
     inputs: CompressionInput[],
@@ -724,6 +748,12 @@ export function logUIError(e: UIError): void {
 const EVENT_PROGRESS = 'index:progress' satisfies keyof Events.CustomEvents
 const EVENT_LIBRARY_CHANGED = 'library:changed' satisfies keyof Events.CustomEvents
 const EVENT_ORGANISE_PROGRESS = 'organise:progress' satisfies keyof Events.CustomEvents
+const EVENT_UPDATE_STATUS = 'update:status' satisfies keyof Events.CustomEvents
+
+/** Fires for each ordered installation update snapshot. */
+export function onUpdateStatus(cb: (s: UpdateStatus) => void): () => void {
+  return Events.On(EVENT_UPDATE_STATUS, (e) => cb(e.data))
+}
 
 /** Fires whenever indexing progress changes. Returns an unsubscribe function. */
 export function onProgress(cb: (p: Progress) => void): () => void {

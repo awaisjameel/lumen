@@ -1889,6 +1889,88 @@ export interface UIError {
 }
 
 /**
+ * UpdateChannel is authenticated release policy, independent of the library.
+ */
+export enum UpdateChannel {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The supported release channels.
+     */
+    UpdateStable = "stable",
+    UpdatePreview = "preview",
+};
+
+/**
+ * UpdateOffer exposes signed release text as plain text, never remote HTML.
+ */
+export interface UpdateOffer {
+    "version": string;
+    "notes": string;
+    "downloadBytes": number;
+    "expandedBytes": number;
+}
+
+/**
+ * UpdatePhase describes what the installation coordinator has actually done.
+ */
+export enum UpdatePhase {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * Update phases are persisted before their corresponding side effects.
+     */
+    UpdateIdle = "idle",
+    UpdateChecking = "checking",
+    UpdateAvailable = "available",
+    UpdateDownloading = "downloading",
+    UpdateVerifying = "verifying",
+    UpdateStaging = "staging",
+    UpdateReady = "ready",
+    UpdateQuiescing = "quiescing",
+    UpdateApplying = "applying",
+    UpdateAwaitingHealth = "awaiting-health",
+    UpdateComplete = "complete",
+    UpdateRecovering = "recovering",
+    UpdateFailed = "failed",
+    UpdateCancelled = "cancelled",
+};
+
+/**
+ * UpdatePolicy belongs to the installation, never a portable appearance preset.
+ */
+export interface UpdatePolicy {
+    "automatic": boolean;
+    "channel": UpdateChannel;
+    "deferBattery": boolean;
+    "bandwidthKB": number;
+}
+
+/**
+ * UpdateStatus is a generation-tagged installation snapshot.
+ */
+export interface UpdateStatus {
+    "generation": number;
+    "policy": UpdatePolicy;
+    "phase": UpdatePhase;
+    "installedVersion": string;
+    "configured": boolean;
+    "managed": boolean;
+    "coordinator": boolean;
+    "lastCheck": number;
+    "offer": UpdateOffer;
+    "bytes": number;
+    "error": string;
+    "dismissed": string;
+}
+
+/**
  * Video is what the details panel and the player need to know about a video.
  */
 export interface Video {

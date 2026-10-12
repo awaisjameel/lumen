@@ -7,6 +7,60 @@
 type Message = string | (Partial<Record<Intl.LDMLPluralRule, string>> & { other: string })
 
 const en = {
+  'update.title': 'Application updates',
+  'update.completed': 'Lumen {version} is running with this library.',
+  'update.loading': 'Reading update status...',
+  'update.privacy':
+    'Photos and AI stay offline. Only enabled or explicitly requested update checks and downloads contact release hosts, which receive your IP address and a minimal updater user-agent. Windows signature checks may contact certificate services. No library data is sent.',
+  'update.automatic': 'Enable automatic update checks',
+  'update.automaticHint':
+    'Off by default. Checks at startup and daily while Lumen is running. Downloads and restarts always require your action.',
+  'update.channel': 'Release channel',
+  'update.battery': 'Defer automatic checks on battery',
+  'update.batteryHint':
+    'Wait for mains power before scheduled discovery. Metered or unknown connection costs also defer automatic checks; Check now remains available.',
+  'update.bandwidth': 'Download limit (KiB/s)',
+  'update.bandwidthHint': '0 uses the available bandwidth. Set a whole number up to 102400 before starting a download.',
+  'update.channelHint': 'Stable is the default. Preview releases may contain unfinished changes.',
+  'update.channel.stable': 'Stable',
+  'update.channel.preview': 'Preview',
+  'update.check': 'Check now',
+  'update.download': 'Download update',
+  'update.downloadHint':
+    'This downloads a complete runtime, including models. It may use a large amount of data on a metered or mobile connection. Continue with this requested download?',
+  'update.discard': 'Discard prepared update',
+  'update.restart': 'Restart now',
+  'update.restartHint':
+    'Save pending settings, let active work reach a safe checkpoint, then restart Lumen with this library. Other open libraries must be closed first.',
+  'update.later': 'Later',
+  'update.lastCheck': 'Last check: {date}',
+  'update.offer':
+    'Lumen {version}: download {download}, expanded runtime {expanded}. Extra space is needed for the library backup and recovery.',
+  'update.notice': 'Lumen {version} is available. Review it in Application updates.',
+  'update.downloadProgress': 'Update download progress',
+  'update.unavailable':
+    'Trusted in-app delivery is not configured for this build or installation. New versions can be installed over this one using the offline installer.',
+  'update.busy': 'Another update operation is running. Wait for it to finish.',
+  'update.invalid': 'Update metadata or files could not be verified. The installed version is unchanged.',
+  'update.stateError': 'This update is not ready for that action. Review its current status.',
+  'update.space': 'There is not enough disk space for the update and recovery files.',
+  'update.publisher': 'Windows could not verify the approved, timestamped update publisher. The update was refused.',
+  'update.interrupted': 'Preparation was interrupted. Retry the download or discard it.',
+  'update.failed': 'The update could not finish. Check your connection and try again.',
+  'update.phase.idle': 'No update is prepared.',
+  'update.phase.checking': 'Checking authenticated releases...',
+  'update.phase.available': 'Update available',
+  'update.phase.downloading': 'Downloading your requested update...',
+  'update.phase.verifying': 'Verifying the complete runtime and publisher...',
+  'update.phase.staging': 'Preparing the complete runtime...',
+  'update.phase.ready': 'Update ready - restart Lumen to finish',
+  'update.phase.quiescing': 'Waiting for active work to stop safely...',
+  'update.phase.applying': 'Activating the prepared runtime...',
+  'update.phase.awaiting-health': 'Checking the new application...',
+  'update.phase.complete': 'Update completed',
+  'update.phase.recovering': 'Recovering the previous release...',
+  'update.phase.failed': 'Update failed',
+  'update.phase.cancelled': 'Update cancelled',
   'compression.action': 'Compress losslessly…',
   'compression.title': 'Compression',
   'compression.hint':
@@ -680,7 +734,7 @@ const en = {
   'settings.theme.dark': 'Dark',
   'settings.privacy': 'Privacy',
   'settings.privacyText':
-    'Lumen works entirely on this computer. It makes no network connections and collects no data.',
+    'Photos, search and AI stay on this computer. Updates are the only network feature, enabled or requested explicitly. No library data or telemetry is sent.',
 
   'about.title': 'About Lumen',
   'about.loading': 'Reading Lumen’s details…',
@@ -690,8 +744,7 @@ const en = {
   'about.licencesHint': 'Read the licences and acknowledgements bundled with Lumen.',
   'about.geonames': 'GeoNames',
   'about.version': 'Version {version}',
-  'about.updates':
-    'Lumen never looks for new versions itself: it makes no network connections. New versions are published at',
+  'about.updates': 'Use Application updates for configured trusted delivery. Offline installers are published at',
   'about.openLogs': 'Open log folder',
   'about.saveReport': 'Save a problem report…',
   'about.saving': 'Saving…',

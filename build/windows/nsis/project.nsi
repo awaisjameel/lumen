@@ -80,7 +80,7 @@ ShowUninstDetails show
 !define MUI_UNICON "..\icon.ico"
 !define MUI_ABORTWARNING
 
-!define MUI_WELCOMEPAGE_TEXT "Lumen organises your photos and videos with AI that runs on this PC. Nothing is uploaded, and Lumen never connects to the internet.$\r$\n$\r$\nSetup installs Lumen for you alone; it needs no administrator rights.$\r$\n$\r$\nClick Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "Lumen organises your photos and videos with AI that runs on this PC. Nothing is uploaded. Update checking is off until you enable it or ask for a check.$\r$\n$\r$\nSetup is offline and installs Lumen for you alone; it needs no administrator rights.$\r$\n$\r$\nClick Next to continue."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -225,6 +225,18 @@ Section "Lumen"
     !insertmacro wails.setShellContext
     Call LumenClosed
 
+    ${If} ${FileExists} "$INSTDIR\lumen-update.exe"
+        ExecWait '"$INSTDIR\lumen-update.exe" --prepare-install "$INSTDIR"' $0
+        ${If} $0 != 0
+            SetErrorLevel 2
+            Abort "Close every Lumen library before installing."
+        ${EndIf}
+        ExecWait '"$INSTDIR\lumen-update.exe" --remove-generations "$INSTDIR"' $0
+        ${If} $0 != 0
+            Abort "Lumen's owned runtime generations could not be removed safely."
+        ${EndIf}
+    ${EndIf}
+
     SetOutPath $INSTDIR
     Call RemoveRuntime
     !insertmacro wails.files
@@ -237,6 +249,10 @@ Section "Lumen"
     !insertmacro LUMEN_RUNTIME_FILES
     FileClose $R9
     File "${LUMEN_NOTICES}"
+    ExecWait '"$INSTDIR\lumen-update.exe" --bootstrap "$INSTDIR"' $0
+    ${If} $0 != 0
+        Abort "Lumen's installation could not be initialised. Run Setup again."
+    ${EndIf}
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     !insertmacro wails.writeUninstaller
@@ -287,11 +303,28 @@ FunctionEnd
 Section "uninstall"
     !insertmacro wails.setShellContext
     Call un.LumenClosed
+    ${If} ${FileExists} "$INSTDIR\lumen-update.exe"
+        ExecWait '"$INSTDIR\lumen-update.exe" --prepare-install "$INSTDIR"' $0
+        ${If} $0 != 0
+            SetErrorLevel 2
+            Abort "Close every Lumen library before uninstalling."
+        ${EndIf}
+        ExecWait '"$INSTDIR\lumen-update.exe" --remove-generations "$INSTDIR"' $0
+        ${If} $0 != 0
+            Abort "Lumen's runtime generations could not be removed safely."
+        ${EndIf}
+    ${EndIf}
     Call un.RemoveRuntime
 
     # Only what Setup put there: a folder chosen by hand may hold other files.
     Delete "$INSTDIR\${PRODUCT_EXECUTABLE}"
     Delete "$INSTDIR\THIRD_PARTY_NOTICES.txt"
+    Delete "$INSTDIR\.lumen-install.json"
+    Delete "$INSTDIR\.lumen-active.json"
+    Delete "$INSTDIR\.lumen-installing"
+    Delete "$INSTDIR\.lumen-activating.json"
+    Delete "$INSTDIR\.lumen-process-lock"
+    RMDir "$INSTDIR\runtime"
     Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
     Delete "$DESKTOP\${INFO_PRODUCTNAME}.lnk"
 

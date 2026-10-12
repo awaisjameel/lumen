@@ -16,6 +16,12 @@ import { notify } from './notify'
 
 // Failures the engine names (ErrorCode) read in the UI's own words.
 const codeText: Record<ErrorCode, MessageKey> = {
+  [ErrorCode.UpdateUnavailable]: 'update.unavailable',
+  [ErrorCode.UpdateBusy]: 'update.busy',
+  [ErrorCode.UpdateInvalid]: 'update.invalid',
+  [ErrorCode.UpdateState]: 'update.stateError',
+  [ErrorCode.UpdateSpace]: 'update.space',
+  [ErrorCode.UpdatePublisher]: 'update.publisher',
   [ErrorCode.CompressionBusy]: 'error.compressionBusy',
   [ErrorCode.CompressionState]: 'error.compressionState',
   [ErrorCode.CompressionPlan]: 'error.compressionPlan',

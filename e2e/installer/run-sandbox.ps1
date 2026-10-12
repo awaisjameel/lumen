@@ -21,11 +21,16 @@ foreach ($name in @($installer, $previous)) {
     New-Item -ItemType HardLink -Path (Join-Path $inputs $name) -Target (Join-Path $bin $name) | Out-Null
 }
 $runtime = Join-Path $root 'deps\runtime'
+$packaged = Join-Path $bin 'update-package'
+$versioned = Test-Path -LiteralPath (Join-Path $packaged '.lumen-active.json')
+if ($versioned) { $runtime = $packaged }
 $files = @(Get-ChildItem -LiteralPath $runtime -File -Recurse | ForEach-Object {
     @{ path = $_.FullName.Substring($runtime.Length + 1); sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
 })
 $files += @('Lumen.exe', 'THIRD_PARTY_NOTICES.txt') | ForEach-Object {
-    @{ path = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $bin $_) -Algorithm SHA256).Hash }
+    $source = $_
+    if ($versioned -and $_ -eq 'Lumen.exe') { $source = 'Lumen-launcher.exe' }
+    @{ path = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $bin $source) -Algorithm SHA256).Hash }
 }
 $manifest = @{ version = $version; installer = $installer; previousVersion = $PreviousVersion; previousInstaller = $previous; files = $files }
 [System.IO.File]::WriteAllText((Join-Path $inputs 'expected.json'), ($manifest | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
