@@ -86,11 +86,8 @@ func DetectInstallation(executable string) (Installation, error) {
 		return install, ErrInvalid
 	}
 	rel, err := filepath.Rel(filepath.Join(root, "runtime"), executable)
-	if err != nil || strings.HasPrefix(rel, "..") || filepath.Base(executable) != "lumen-app.exe" {
+	if err != nil || strings.HasPrefix(rel, "..") || filepath.Base(executable) != appName {
 		return install, ErrUnavailable
-	}
-	if err := noLinks(root); err != nil {
-		return install, err
 	}
 	return install, nil
 }

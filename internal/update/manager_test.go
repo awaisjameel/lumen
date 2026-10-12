@@ -77,7 +77,7 @@ func TestGenerationStagingRejectsUnexpectedAndChangedFiles(t *testing.T) {
 }
 
 func TestInventoryRefusesWindowsAliasesTraversalAndFileParents(t *testing.T) {
-	for _, name := range []string{"../outside", "/absolute", "C:/absolute", "models\\file", "models/file:stream", "CON", "aux.txt", "models/NUL", "COM1.jpg", "LPT9", "file.", "folder /file", "file\nname"} {
+	for _, name := range []string{"../outside", "/absolute", "C:/absolute", "models\\file", "models/file:stream", "CON", "aux.txt", "models/NUL", "COM1.jpg", "LPT9", "COM¹", "lpt².txt", "CON .txt", "file.", "folder /file", "file\nname"} {
 		t.Run(name, func(t *testing.T) {
 			if safePath(name) {
 				t.Fatalf("unsafe path accepted: %q", name)
@@ -193,7 +193,7 @@ func managerFixture(t *testing.T) *Manager {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := &Manager{ctx: ctx, stop: stop, owner: lease, dir: dir, install: Installation{Format: 1, ID: "fixture", Root: root}, schema: 31, verify: VerifyPublisher, state: journal{Format: 1, Status: core.UpdateStatus{Configured: true, Managed: true, InstalledVersion: "0.11.0", Phase: core.UpdateIdle, Policy: core.UpdatePolicy{Channel: core.UpdateStable}}}}
+	m := &Manager{ctx: ctx, stop: stop, owner: lease, dir: dir, install: Installation{Format: 1, ID: "fixture", Root: root}, schema: 31, verify: VerifyPublisher, safe: automaticSafe, state: journal{Format: 1, Status: core.UpdateStatus{Configured: true, Managed: true, InstalledVersion: "0.11.0", Phase: core.UpdateIdle, Policy: core.UpdatePolicy{Channel: core.UpdateStable}}}}
 	t.Cleanup(func() {
 		if err := m.Close(); err != nil {
 			t.Error(err)

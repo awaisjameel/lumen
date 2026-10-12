@@ -16,14 +16,17 @@ func init() { application.RegisterEvent[core.UpdateStatus](EventUpdateStatus) }
 
 // UpdateService is the typed UI boundary; the coordinator owns operation lifetimes.
 type UpdateService struct {
-	manager *update.Manager
-	dataDir string
-	health  func(context.Context) error
+	manager      *update.Manager
+	dataDir      string
+	health       func(context.Context) error
+	capabilities func() update.Capabilities
 }
 
-// NewUpdateService shares the installation coordinator with the application lifecycle.
-func NewUpdateService(manager *update.Manager, dataDir string, health func(context.Context) error) *UpdateService {
-	return &UpdateService{manager: manager, dataDir: dataDir, health: health}
+// NewUpdateService shares the installation coordinator with the application
+// lifecycle. health gates a first launch after an update; capabilities is
+// what this runtime can do on this PC, which an update must keep.
+func NewUpdateService(manager *update.Manager, dataDir string, health func(context.Context) error, capabilities func() update.Capabilities) *UpdateService {
+	return &UpdateService{manager: manager, dataDir: dataDir, health: health, capabilities: capabilities}
 }
 
 // ServiceStartup starts check-only discovery.
@@ -60,7 +63,7 @@ func (s *UpdateService) Dismiss(ctx context.Context) error { return s.manager.Di
 
 // Restart requires a ready candidate and a freshly authenticated release.
 func (s *UpdateService) Restart(ctx context.Context) error {
-	if err := s.manager.RequestRestart(ctx, s.dataDir); err != nil {
+	if err := s.manager.RequestRestart(ctx, s.dataDir, s.capabilities()); err != nil {
 		return err
 	}
 	application.Get().Quit()

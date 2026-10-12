@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,11 +20,12 @@ import (
 type Transport struct {
 	client  *http.Client
 	origins map[string]bool
+	stall   time.Duration // how long a download may deliver nothing before it is given up
 }
 
 // NewTransport never accepts credentials, insecure TLS or unrestricted redirects.
 func NewTransport(origins []string) (*Transport, error) {
-	t := &Transport{origins: make(map[string]bool)}
+	t := &Transport{origins: make(map[string]bool), stall: time.Minute}
 	for _, origin := range origins {
 		u, err := url.Parse(origin)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
@@ -31,7 +33,16 @@ func NewTransport(origins []string) (*Transport, error) {
 		}
 		t.origins[u.Scheme+"://"+strings.ToLower(u.Host)] = true
 	}
-	t.client = &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	// Every request also carries its caller's deadline; these bound the parts
+	// of one that a silent server could otherwise hold open.
+	standard, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	transport := standard.Clone()
+	transport.TLSHandshakeTimeout = 15 * time.Second
+	transport.ResponseHeaderTimeout = 30 * time.Second
+	t.client = &http.Client{Transport: transport, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return ErrInvalid
 		}
@@ -93,13 +104,25 @@ func (f scopedFetcher) DownloadFile(address string, limit int64, _ time.Duration
 	return data, err
 }
 
+var errStalled = errors.New("the update download stopped arriving")
+
 // Download streams a bounded authenticated archive; retries start from zero.
 func (t *Transport) Download(ctx context.Context, c Candidate, name string, bandwidthKB int, progress func(int64)) error {
 	if c.Length <= 0 || c.Length > maxPayload || !validHash(c.SHA256) {
 		return ErrInvalid
 	}
+	// A connection that goes quiet is a failure to report, not a wait for
+	// the hour the whole download is allowed. Only reads are timed: the
+	// pauses of a bandwidth limit are Lumen's own.
+	ctx, stall := context.WithCancelCause(ctx)
+	defer stall(nil)
+	idle := time.AfterFunc(t.stall, func() { stall(errStalled) })
+	defer idle.Stop()
 	res, err := t.get(ctx, c.URL)
 	if err != nil {
+		if errors.Is(context.Cause(ctx), errStalled) {
+			return errStalled
+		}
 		return err
 	}
 	defer func() { _ = res.Body.Close() }()
@@ -120,7 +143,9 @@ func (t *Transport) Download(ctx context.Context, c Candidate, name string, band
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		idle.Reset(t.stall)
 		n, readErr := r.Read(buffer)
+		idle.Stop()
 		if n > 0 {
 			size += int64(n)
 			if size > c.Length {
@@ -150,6 +175,9 @@ func (t *Transport) Download(ctx context.Context, c Candidate, name string, band
 			break
 		}
 		if readErr != nil {
+			if errors.Is(context.Cause(ctx), errStalled) {
+				return errStalled
+			}
 			return readErr
 		}
 	}

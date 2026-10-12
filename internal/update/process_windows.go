@@ -3,6 +3,8 @@ package update
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,17 +32,9 @@ func cleanEnvironment(dataDir string) []string {
 	return env
 }
 
-func startHelper(ctx context.Context, helper, root, token string) error {
-	var install Installation
-	if err := readJSON(filepath.Join(root, ".lumen-install.json"), &install); err != nil {
-		return err
-	}
-	dir, err := StateDirectory(install)
-	if err != nil {
-		return err
-	}
+func startHelper(ctx context.Context, helper, root, dir, id string) error {
 	// The independently bounded helper must survive the parent application's exit.
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), helper, "--apply", root, token)
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), helper, "--apply", root, id)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	cmd.Env = cleanEnvironment("")
 	if err := cmd.Start(); err != nil {
@@ -50,10 +44,8 @@ func startHelper(ctx context.Context, helper, root, token string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	for {
-		var ready struct {
-			Token string `json:"token"`
-		}
-		if err := readJSON(filepath.Join(dir, "helper-ready-"+token+".json"), &ready); err == nil && ready.Token == token {
+		var ready token
+		if err := readJSON(filepath.Join(dir, "helper-ready-"+id+".json"), &ready); err == nil && ready.Token == id {
 			return nil
 		}
 		select {
@@ -64,18 +56,22 @@ func startHelper(ctx context.Context, helper, root, token string) error {
 	}
 }
 
+// launchHealth starts the selected generation's first, transaction-bound
+// launch and waits for its health commit. An application that stops without
+// committing is recovered from; the error tells Apply to reopen the previous one.
 func launchHealth(ctx context.Context, root, dir string, a Activation) error {
-	active, err := LoadActive(ctx, root)
-	if err != nil {
-		return err
+	completed := func() bool {
+		var state Activation
+		return readJSON(filepath.Join(dir, activationFile), &state) == nil && state.Token == a.Token && state.Phase == core.UpdateComplete
 	}
 	// The application bounds its own health bootstrap and must outlive this helper.
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), filepath.Join(root, "runtime", active.Generation, "lumen-app.exe"), "--update-health", a.Token)
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), filepath.Join(generationDir(root, a.candidateGeneration()), appName), "--update-health", a.Token)
+	// No HideWindow here: Windows would apply it to the application's first
+	// window, and the updated Lumen would open invisibly.
 	cmd.Dir = filepath.Dir(cmd.Path)
 	cmd.Env = cleanEnvironment(a.DataDir)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
-		return Recover(ctx, root)
+		return errors.Join(err, Recover(ctx, root))
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -88,23 +84,32 @@ func launchHealth(ctx context.Context, root, dir string, a Activation) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
-			return ErrState
+			// Still running, and holding the lease recovery needs: the next
+			// launch recovers once it has gone.
+			return fmt.Errorf("the updated application did not report its health: %w", ErrState)
 		case <-ticker.C:
-			var state Activation
-			if err := readJSON(filepath.Join(dir, "activation.json"), &state); err == nil && state.Token == a.Token && state.Phase == core.UpdateComplete {
+			if completed() {
 				return nil
 			}
 		case <-done:
-			var state Activation
-			if err := readJSON(filepath.Join(dir, "activation.json"), &state); err == nil && state.Phase == core.UpdateComplete {
+			if completed() {
 				return nil
 			}
-			if err := Recover(ctx, root); err != nil {
-				return err
-			}
-			return Launch(ctx, root, a.DataDir, nil)
+			return errors.Join(fmt.Errorf("the updated application failed its health check: %w", ErrState), Recover(ctx, root))
 		}
 	}
+}
+
+// relaunch reopens Lumen through its stable launcher and lets go of it: the
+// application must outlive the helper that started it.
+func relaunch(ctx context.Context, root, dataDir string) error {
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), filepath.Join(root, launcherName))
+	cmd.Dir = root
+	cmd.Env = cleanEnvironment(dataDir)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }
 
 func restoreLibrary(ctx context.Context, root string, a Activation) error {
@@ -112,7 +117,7 @@ func restoreLibrary(ctx context.Context, root string, a Activation) error {
 	if err != nil {
 		return err
 	}
-	exe := filepath.Join(root, "runtime", a.Previous.Generation, "lumen-app.exe")
+	exe := filepath.Join(generationDir(root, a.Previous.Generation), appName)
 	if err := VerifyPublisher(ctx, exe, config.PublisherPins); err != nil {
 		return err
 	}
@@ -120,6 +125,14 @@ func restoreLibrary(ctx context.Context, root string, a Activation) error {
 	cmd.Env = cleanEnvironment(a.DataDir)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	return cmd.Run()
+}
+
+// register records the selected version where Windows lists installed
+// programs. Failing to is logged, never fatal: the selection is already durable.
+func register(root, version string) {
+	if err := updateRegistration(root, version); err != nil {
+		slog.Warn("record the installed version for Windows", "err", err)
+	}
 }
 
 func updateRegistration(root, version string) error {
@@ -138,9 +151,12 @@ func updateRegistration(root, version string) error {
 	return key.SetStringValue("DisplayVersion", version)
 }
 
-// Launch validates one coherent generation and holds a shared runtime lease.
+// Launch validates one coherent generation and holds a shared runtime lease
+// for as long as the application it starts runs. An application that started
+// and then failed is reported as its *exec.ExitError.
 func Launch(ctx context.Context, root, dataDir string, args []string) error {
-	if dataDir != "" && !filepath.IsAbs(dataDir) {
+	// No argument is approved for relaunch yet; none reaches replaceable code.
+	if len(args) != 0 || (dataDir != "" && !filepath.IsAbs(dataDir)) {
 		return ErrInvalid
 	}
 	lease, err := AcquireLease(ctx, root, false)
@@ -148,25 +164,25 @@ func Launch(ctx context.Context, root, dataDir string, args []string) error {
 		return err
 	}
 	defer func() { _ = lease.Close() }()
-	if _, err := os.Stat(filepath.Join(root, ".lumen-installing")); !errors.Is(err, os.ErrNotExist) {
-		return ErrState
+	for _, barrier := range []string{installingFile, barrierFile} {
+		if _, err := os.Stat(filepath.Join(root, barrier)); !errors.Is(err, os.ErrNotExist) {
+			return ErrState
+		}
 	}
-	if _, err := os.Stat(filepath.Join(root, ".lumen-activating.json")); !errors.Is(err, os.ErrNotExist) {
-		return ErrState
-	}
-	active, err := LoadActive(ctx, root)
+	active, err := readActive(root)
 	if err != nil {
 		return err
 	}
 	if active.Pending != "" {
 		return ErrState
 	}
-	exe := filepath.Join(root, "runtime", active.Generation, "lumen-app.exe")
-	// Authenticode was verified during the requested install/activation. Normal
-	// offline launches verify inventory bytes without contacting certificate services.
-	if len(args) != 0 {
-		return ErrInvalid
+	// Bytes and the publisher were proven when this generation was installed
+	// or activated. An ordinary, possibly offline launch confirms the folder
+	// is still that whole generation without reading a gigabyte of models.
+	if err := VerifyLayout(ctx, generationDir(root, active.Generation), active.Release); err != nil {
+		return err
 	}
+	exe := filepath.Join(generationDir(root, active.Generation), appName)
 	cmd := exec.CommandContext(ctx, exe)
 	cmd.Env = cleanEnvironment(dataDir)
 	cmd.Dir = filepath.Dir(exe)

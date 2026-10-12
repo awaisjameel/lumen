@@ -5,6 +5,20 @@ import type { UpdatePolicy, UpdateStatus } from '../bridge'
 import { errorText } from '../shared/errors'
 import { usePreferences } from '../shared/preferences'
 
+// Work the user can stop, and work that only has to be waited for.
+const CANCELLABLE: readonly UpdatePhase[] = [
+  UpdatePhase.UpdateChecking,
+  UpdatePhase.UpdateDownloading,
+  UpdatePhase.UpdateVerifying,
+  UpdatePhase.UpdateStaging,
+]
+const COMMITTING: readonly UpdatePhase[] = [
+  UpdatePhase.UpdateQuiescing,
+  UpdatePhase.UpdateApplying,
+  UpdatePhase.UpdateAwaitingHealth,
+  UpdatePhase.UpdateRecovering,
+]
+
 /** Installation snapshots outlive Settings and never switch with the library. */
 export const useUpdates = defineStore('updates', () => {
   const status = shallowRef<UpdateStatus | null>(null)
@@ -16,19 +30,10 @@ export const useUpdates = defineStore('updates', () => {
   let saves = Promise.resolve()
   let queuedSaves = 0
 
+  /** A check or a download the user may cancel is running. */
+  const cancellable = computed(() => !!status.value && CANCELLABLE.includes(status.value.phase))
   const busy = computed(
-    () =>
-      pending.value ||
-      (!!status.value &&
-        [
-          UpdatePhase.UpdateChecking,
-          UpdatePhase.UpdateDownloading,
-          UpdatePhase.UpdateVerifying,
-          UpdatePhase.UpdateStaging,
-          UpdatePhase.UpdateQuiescing,
-          UpdatePhase.UpdateApplying,
-          UpdatePhase.UpdateAwaitingHealth,
-        ].includes(status.value.phase)),
+    () => pending.value || cancellable.value || (!!status.value && COMMITTING.includes(status.value.phase)),
   )
 
   function accept(next: UpdateStatus) {
@@ -91,9 +96,11 @@ export const useUpdates = defineStore('updates', () => {
     })
   }
 
-  async function cancel() {
+  // Cancelling and dismissing answer to what is on screen now: neither waits
+  // behind the operation it is about.
+  async function aside(action: () => Promise<void>) {
     try {
-      await engine.cancelUpdate()
+      await action()
     } catch (e) {
       error.value = errorText(e)
     }
@@ -103,14 +110,15 @@ export const useUpdates = defineStore('updates', () => {
     status,
     error,
     busy,
+    cancellable,
     saving,
     start,
     setPolicy,
     restart,
     check: () => run(engine.checkUpdates),
     download: () => run(engine.downloadUpdate),
-    cancel,
     discard: () => run(engine.discardUpdate),
-    dismiss: () => run(engine.dismissUpdate),
+    cancel: () => aside(engine.cancelUpdate),
+    dismiss: () => aside(engine.dismissUpdate),
   }
 })

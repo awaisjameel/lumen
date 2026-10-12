@@ -22,6 +22,20 @@ var (
 	ErrPublisher   = errors.New("update publisher verification failed")
 )
 
+// Capabilities are the abilities of a runtime that depend on the PC as well
+// as on its files. An update must keep the ones the previous release had; it
+// is not refused for one this PC never offered.
+type Capabilities struct {
+	Search bool `json:"search"` // the search and Things models loaded
+	People bool `json:"people"` // the face models loaded
+	Video  bool `json:"video"`  // the loopback video server is listening
+}
+
+// Covers reports whether nothing the baseline could do has been lost.
+func (c Capabilities) Covers(baseline Capabilities) bool {
+	return (c.Search || !baseline.Search) && (c.People || !baseline.People) && (c.Video || !baseline.Video)
+}
+
 // File binds one regular runtime file to authenticated bytes.
 type File struct {
 	Path   string `json:"path"`
@@ -77,11 +91,14 @@ func safePath(s string) bool {
 		if part == "." || part == ".." || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
 			return false
 		}
-		base := strings.ToUpper(strings.SplitN(part, ".", 2)[0])
-		if base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" || base == "CONIN$" || base == "CONOUT$" {
+		// Windows reads a device name through any extension and trailing
+		// spaces, and counts the superscript digits as port numbers too.
+		base := []rune(strings.ToUpper(strings.TrimRight(strings.SplitN(part, ".", 2)[0], " ")))
+		switch name := string(base); name {
+		case "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$":
 			return false
 		}
-		if len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && strings.ContainsRune("123456789¹²³", rune(base[3])) {
+		if len(base) == 4 && (string(base[:3]) == "COM" || string(base[:3]) == "LPT") && strings.ContainsRune("123456789¹²³", base[3]) {
 			return false
 		}
 	}

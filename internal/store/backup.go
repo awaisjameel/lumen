@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/mattn/go-sqlite3"
 )
@@ -57,24 +56,21 @@ func (s *Store) Backup(ctx context.Context, name string) error {
 			if err != nil {
 				return err
 			}
+			// In steps, so that a cancelled backup stops; without a pause
+			// between them, because nothing else is waiting for the library
+			// when one is taken.
 			for {
 				if err := ctx.Err(); err != nil {
 					_ = backup.Finish()
 					return err
 				}
-				done, err := backup.Step(256)
+				done, err := backup.Step(4096)
 				if err != nil {
 					_ = backup.Finish()
 					return err
 				}
 				if done {
 					return backup.Finish()
-				}
-				select {
-				case <-ctx.Done():
-					_ = backup.Finish()
-					return ctx.Err()
-				case <-time.After(time.Millisecond):
 				}
 			}
 		})

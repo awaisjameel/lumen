@@ -61,6 +61,11 @@ try {
 
   // The stable launcher clears development overrides. Observe only the exact
   // scratch executable to close its child, never another Lumen on the machine.
+  // An activation whose helper died leaves its launch barrier behind. The
+  // launcher must lift it (no helper holds the lock) instead of refusing every
+  // launch until the next Setup.
+  const barrier = join(installation, '.lumen-activating.json')
+  writeFileSync(barrier, JSON.stringify({ token: 'ab'.repeat(16) }))
   const env = { ...process.env, LUMEN_DATA_DIR: join(run, 'launcher-data') }
   delete env.LUMEN_RUNTIME_DIR
   delete env.LUMEN_DEVTOOLS_PORT
@@ -80,6 +85,7 @@ try {
     else await sleep(100)
   }
   check('stable launch path starts the selected complete generation', !!launcherChild && launcher.exitCode === null)
+  check('an abandoned activation no longer closes launches', !existsSync(barrier))
   execFileSync('taskkill.exe', ['/PID', launcherChild], { windowsHide: true, stdio: 'ignore' })
   launcherChild = undefined
   for (let i = 0; i < 100 && launcher.exitCode === null; i++) await sleep(100)

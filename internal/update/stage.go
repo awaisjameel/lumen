@@ -19,9 +19,6 @@ func Stage(ctx context.Context, archive, destination string, r Release) error {
 	if _, err := r.validate(); err != nil {
 		return err
 	}
-	if err := noLinks(filepath.Dir(destination)); err != nil {
-		return err
-	}
 	if err := os.Mkdir(destination, 0o700); err != nil {
 		return err
 	}
@@ -54,7 +51,9 @@ func Stage(ctx context.Context, archive, destination string, r Release) error {
 			return err
 		}
 	}
-	return VerifyGeneration(ctx, destination, r)
+	// Every file was hashed as it was written; what is left to prove is that
+	// the folder holds exactly the inventory.
+	return VerifyLayout(ctx, destination, r)
 }
 
 func extract(ctx context.Context, entry *zip.File, name string, expected File) error {
@@ -96,10 +95,23 @@ func (r *contextReader) Read(p []byte) (int, error) {
 
 // VerifyGeneration checks complete inventory, hashes and unsafe filesystem links.
 func VerifyGeneration(ctx context.Context, dir string, r Release) error {
+	return verify(ctx, dir, r, true)
+}
+
+// VerifyLayout checks that dir holds exactly the inventory's files at their
+// sizes, with no links, without reading them: what an ordinary launch can
+// afford. It tells a mixed or truncated generation from a whole one; bytes
+// are proven by VerifyGeneration before a generation
+// is first selected and before it is selected again in recovery.
+func VerifyLayout(ctx context.Context, dir string, r Release) error {
+	return verify(ctx, dir, r, false)
+}
+
+func verify(ctx context.Context, dir string, r Release, hashes bool) error {
 	if _, err := r.validate(); err != nil {
 		return err
 	}
-	if err := noLinks(dir); err != nil {
+	if err := linked(dir); err != nil {
 		return err
 	}
 	root, err := os.OpenRoot(dir)
@@ -118,7 +130,9 @@ func VerifyGeneration(ctx context.Context, dir string, r Release) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := noLinks(name); err != nil {
+		// The walk reaches a folder before what it holds, so each entry
+		// answers for itself alone.
+		if err := linked(name); err != nil {
 			return err
 		}
 		if entry.IsDir() {
@@ -134,6 +148,16 @@ func VerifyGeneration(ctx context.Context, dir string, r Release) error {
 			return ErrInvalid
 		}
 		delete(want, key)
+		if !hashes {
+			fi, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if fi.Size() != expected.Size {
+				return fmt.Errorf("runtime inventory mismatch: %w", ErrInvalid)
+			}
+			return nil
+		}
 		f, err := root.Open(rel)
 		if err != nil {
 			return err

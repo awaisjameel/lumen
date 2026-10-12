@@ -77,7 +77,8 @@ A scratch library's SQLite file cannot be edited with the `sqlite3` CLI: its ind
 - `internal/index`: the background pipeline. Stages (metadata, thumbnail, embedding, faces, OCR, XMP export) hand work on through the durable `asset_jobs` queue in SQLite, not channels, so work survives a crash. Changing what a stage produces means bumping that stage's version constant, which re-runs only that stage. Politeness (battery, full screen, busy PC, idle) and the CPU budget live here.
 - `internal/ai` never imports `store`. Models load only while there is work and take turns on one GPU lock (DirectML, CPU fallback).
 - `internal/fileops`: every change to files in the user's folders (Recycle Bin, journalled moves, sidecars). Originals are never modified or permanently deleted.
-- `services/`: thin Wails services (Library, Search, People, Media, System): argument checks, error codes, calls into `internal/*`.
+- `internal/update`: installation policy, authenticated discovery and delivery, staging, activation and recovery. It never imports `store` and writes no SQL; `main.go` takes the library backup and runs the first-launch health gate. Its only network use is the opt-in updater, and `release-config.json` is empty until release engineering supplies trust, so a checkout makes no request. `cmd/lumen-launcher` (installed as the stable `Lumen.exe`) and `cmd/lumen-update` are built with `CGO_ENABLED=0` and depend on nothing in a replaceable runtime generation.
+- `services/`: thin Wails services (Library, Search, People, Media, System, Update): argument checks, error codes, calls into `internal/*`.
 
 ### Cross-cutting rules that are easy to break
 

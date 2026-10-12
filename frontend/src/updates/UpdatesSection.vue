@@ -6,9 +6,10 @@ import URadioGroup from '@nuxt/ui/components/RadioGroup.vue'
 import UProgress from '@nuxt/ui/components/Progress.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, onMounted } from 'vue'
-import { UpdateChannel, UpdatePhase } from '../bridge'
+import { UpdateChannel, UpdateFailure, UpdatePhase } from '../bridge'
 import PrefRow from '../shared/PrefRow.vue'
-import { t } from '../shared/i18n'
+import { LOCALE, t } from '../shared/i18n'
+import type { MessageKey } from '../shared/i18n'
 import { bytes } from '../shared/format'
 import { confirm } from '../shared/confirm'
 import { useUpdates } from './store'
@@ -39,24 +40,23 @@ const phaseText = computed(() =>
     ? t(`update.phase.${updates.status.phase}`)
     : t('update.loading'),
 )
+// What the last operation left behind, in the engine's own terms (core.UpdateFailure).
+const failureText: Record<UpdateFailure, MessageKey | null> = {
+  [UpdateFailure.$zero]: null,
+  [UpdateFailure.UpdateFailureFailed]: 'update.failed',
+  [UpdateFailure.UpdateFailureInterrupted]: 'update.interrupted',
+  [UpdateFailure.UpdateFailureInvalid]: 'update.invalid',
+  [UpdateFailure.UpdateFailurePublisher]: 'update.publisher',
+  [UpdateFailure.UpdateFailureSpace]: 'update.space',
+  [UpdateFailure.UpdateFailureObserver]: null, // not a failure: said once, neutrally, below
+}
 const persistedError = computed(() => {
-  switch (updates.status?.error) {
-    case 'update_interrupted':
-      return t('update.interrupted')
-    case 'update_invalid':
-      return t('update.invalid')
-    case 'update_publisher':
-      return t('update.publisher')
-    case 'update_space':
-      return t('update.space')
-    case 'update_busy':
-      return t('update.busy')
-    case 'update_failed':
-      return t('update.failed')
-    default:
-      return ''
-  }
+  const key = updates.status ? failureText[updates.status.error] : null
+  return key ? t(key) : ''
 })
+const observing = computed(() => !!updates.status?.managed && !updates.status.coordinator)
+// A real moment, in the PC's own time zone (photo dates are the camera's clock instead).
+const whenFmt = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium', timeStyle: 'short' })
 </script>
 
 <template>
@@ -67,6 +67,7 @@ const persistedError = computed(() => {
       :description="t('update.unavailable')"
       color="neutral"
     />
+    <UAlert v-else-if="observing" :description="t('update.observer')" color="neutral" />
     <PrefRow :label="t('update.automatic')" :description="t('update.automaticHint')">
       <template #default="{ labelledBy, describedBy }">
         <USwitch
@@ -121,7 +122,7 @@ const persistedError = computed(() => {
     </PrefRow>
     <p v-if="updates.status" role="status">{{ phaseText }}</p>
     <p v-if="updates.status?.lastCheck" class="text-muted">
-      {{ t('update.lastCheck', { date: new Date(updates.status.lastCheck * 1000).toLocaleString() }) }}
+      {{ t('update.lastCheck', { date: whenFmt.format(updates.status.lastCheck * 1000) }) }}
     </p>
     <template v-if="offered && updates.status">
       <p>
@@ -156,7 +157,7 @@ const persistedError = computed(() => {
       <UButton v-if="ready" :disabled="!updates.status?.coordinator" variant="outline" @click="updates.dismiss">{{
         t('update.later')
       }}</UButton>
-      <UButton v-if="updates.busy && !ready && updates.status?.coordinator" variant="outline" @click="updates.cancel">{{
+      <UButton v-if="updates.cancellable && updates.status?.coordinator" variant="outline" @click="updates.cancel">{{
         t('common.cancel')
       }}</UButton>
       <UButton

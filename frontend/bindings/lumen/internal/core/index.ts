@@ -35,6 +35,7 @@ export {
     ThumbFit,
     TrackKind,
     UpdateChannel,
+    UpdateFailure,
     UpdatePhase,
     ViewerBackground,
     ViewerOpen,

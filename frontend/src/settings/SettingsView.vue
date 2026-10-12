@@ -275,14 +275,6 @@ async function resetSection(category: PrefCategory, section: string) {
 }
 const query = ref('')
 const category = ref('')
-const route = useRoute()
-watch(
-  () => route.query.section,
-  (section) => {
-    if (typeof section === 'string' && categories.some((item) => item.id === section)) category.value = section
-  },
-  { immediate: false },
-)
 
 function clearSearch() {
   query.value = ''
@@ -300,11 +292,18 @@ const categories = [
   { id: 'accessibility', label: 'settings.category.accessibility' },
   { id: 'privacy', label: 'settings.privacy' },
   { id: 'presets', label: 'settings.category.presets' },
-  { id: 'about', label: 'about.title' },
   { id: 'updates', label: 'update.title' },
+  { id: 'about', label: 'about.title' },
 ] as const
-if (typeof route.query.section === 'string' && categories.some((item) => item.id === route.query.section))
-  category.value = route.query.section
+// A notice elsewhere can open Settings at one category (?section=updates).
+const route = useRoute()
+watch(
+  () => route.query.section,
+  (section) => {
+    if (typeof section === 'string' && categories.some((item) => item.id === section)) category.value = section
+  },
+  { immediate: true },
+)
 function matches(...texts: string[]) {
   const needle = query.value.trim().toLocaleLowerCase()
   return !needle || texts.some((text) => text.toLocaleLowerCase().includes(needle))

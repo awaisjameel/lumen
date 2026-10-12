@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
-import { engine, onUpdateStatus, UpdateChannel, UpdatePhase } from '../bridge'
+import { engine, onUpdateStatus, UpdateChannel, UpdateFailure, UpdatePhase } from '../bridge'
 import type * as Bridge from '../bridge'
 import { useUpdates } from './store'
 
@@ -32,7 +32,7 @@ function snapshot(generation = 1): Bridge.UpdateStatus {
     lastCheck: 0,
     offer: { version: '', notes: '', downloadBytes: 0, expandedBytes: 0 },
     bytes: 0,
-    error: '',
+    error: UpdateFailure.$zero,
     dismissed: '',
   }
 }
@@ -44,6 +44,7 @@ beforeEach(() => {
   vi.mocked(engine.setUpdatePolicy).mockResolvedValue()
   vi.mocked(engine.checkUpdates).mockResolvedValue()
   vi.mocked(engine.cancelUpdate).mockResolvedValue()
+  vi.mocked(engine.dismissUpdate).mockResolvedValue()
 })
 
 it('subscribes once and ignores a late snapshot older than an event', async () => {
@@ -93,4 +94,32 @@ it('orders policy patches and keeps the unsaved channel after a failed save', as
   expect(engine.setUpdatePolicy).toHaveBeenNthCalledWith(2, { ...snapshot().policy, automatic: true })
   expect(store.status?.policy.channel).toBe(UpdateChannel.UpdateStable)
   expect(store.saving).toBe(false)
+})
+
+it('dismisses a notice while a download request is still waiting', async () => {
+  const store = useUpdates()
+  await store.start()
+  let resolve: (() => void) | undefined
+  vi.mocked(engine.downloadUpdate).mockReturnValue(
+    new Promise((done) => {
+      resolve = done
+    }),
+  )
+  const downloading = store.download()
+  await store.dismiss()
+  expect(engine.dismissUpdate).toHaveBeenCalledOnce()
+  resolve?.()
+  await downloading
+})
+
+it('offers Cancel for a check or a download, and not while the restart commits', async () => {
+  const store = useUpdates()
+  await store.start()
+  const callback = vi.mocked(onUpdateStatus).mock.calls[0]?.[0]
+  callback?.({ ...snapshot(2), phase: UpdatePhase.UpdateDownloading })
+  expect([store.busy, store.cancellable]).toEqual([true, true])
+  callback?.({ ...snapshot(3), phase: UpdatePhase.UpdateQuiescing })
+  expect([store.busy, store.cancellable]).toEqual([true, false])
+  callback?.({ ...snapshot(4), phase: UpdatePhase.UpdateReady })
+  expect([store.busy, store.cancellable]).toEqual([false, false])
 })

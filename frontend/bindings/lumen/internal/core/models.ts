@@ -1905,6 +1905,49 @@ export enum UpdateChannel {
 };
 
 /**
+ * UpdateFailure names why the last update operation stopped, for the UI to
+ * explain in its own words. The zero value means nothing failed.
+ */
+export enum UpdateFailure {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The failures a status can carry.
+     *
+     * a check, download or activation did not finish
+     */
+    UpdateFailureFailed = "failed",
+
+    /**
+     * Lumen closed while preparing the update
+     */
+    UpdateFailureInterrupted = "interrupted",
+
+    /**
+     * metadata or files could not be verified
+     */
+    UpdateFailureInvalid = "invalid",
+
+    /**
+     * Windows did not confirm the approved publisher
+     */
+    UpdateFailurePublisher = "publisher",
+
+    /**
+     * not enough room to stage and recover
+     */
+    UpdateFailureSpace = "space",
+
+    /**
+     * another Lumen window coordinates this installation
+     */
+    UpdateFailureObserver = "observer",
+};
+
+/**
  * UpdateOffer exposes signed release text as plain text, never remote HTML.
  */
 export interface UpdateOffer {
@@ -1966,7 +2009,7 @@ export interface UpdateStatus {
     "lastCheck": number;
     "offer": UpdateOffer;
     "bytes": number;
-    "error": string;
+    "error": UpdateFailure;
     "dismissed": string;
 }
 

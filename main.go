@@ -90,38 +90,13 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
-	install, installErr := update.DetectInstallation(executable)
-	if installErr == nil {
-		if err := update.CheckSelected(install.Root, executable, version); err != nil {
-			return err
-		}
+	// An installed Lumen runs only as the generation its installation selects,
+	// and holds the installation's runtime lease until everything has stopped.
+	admission, err := update.Admit(context.Background(), executable, version, paths.DataDir, os.Args[1:])
+	if err != nil {
+		return err
 	}
-	if installErr == nil && update.HealthToken(os.Args[1:]) == "" {
-		if _, err := os.Stat(filepath.Join(install.Root, ".lumen-activating.json")); !errors.Is(err, os.ErrNotExist) {
-			return update.ErrState
-		}
-	}
-	var runtimeLease *update.Lease
-	if installErr == nil {
-		leaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		runtimeLease, err = update.AcquireLease(leaseCtx, install.Root, false)
-		cancel()
-		if err != nil {
-			return err
-		}
-		defer func() { result = errors.Join(result, runtimeLease.Close()) }()
-	} else if !errors.Is(installErr, update.ErrUnavailable) {
-		return installErr
-	}
-	healthToken := update.HealthToken(os.Args[1:])
-	if healthToken != "" {
-		if installErr != nil {
-			return installErr
-		}
-		if _, err := update.ValidateHealth(context.Background(), install, healthToken, paths.DataDir, version); err != nil {
-			return err
-		}
-	}
+	defer func() { result = errors.Join(result, admission.Close()) }()
 	reports := diag.New(paths.DataDir, version)
 
 	// The application comes first: a second copy of Lumen must hand over to
@@ -174,17 +149,21 @@ func run() (result error) {
 		_ = st.Close()
 		return err
 	}
-	if healthToken != "" {
-		a, healthErr := update.ValidateHealth(context.Background(), install, healthToken, paths.DataDir, version)
-		if healthErr != nil || schema != a.Candidate.Release.WriteSchema {
-			_ = st.Close()
-			return fmt.Errorf("updated schema does not match authenticated policy: %w", update.ErrInvalid)
-		}
-	}
-	updater, err := update.Open(context.Background(), executable, version, schema, func(s core.UpdateStatus) { app.Event.Emit(services.EventUpdateStatus, s) })
-	if err != nil {
+	if admission.Health != nil && schema != admission.Health.Candidate.Release.WriteSchema {
 		_ = st.Close()
-		return err
+		return fmt.Errorf("updated schema does not match authenticated policy: %w", update.ErrInvalid)
+	}
+	announce := func(s core.UpdateStatus) { app.Event.Emit(services.EventUpdateStatus, s) }
+	updater, err := update.Open(context.Background(), executable, version, schema, announce)
+	if err != nil {
+		if admission.Health != nil {
+			_ = st.Close()
+			return err
+		}
+		// Browsing never depends on the updater: without its state Lumen
+		// runs as a build that takes no part in updates, and says so.
+		slog.Error("updates unavailable", "err", err)
+		updater = update.Inert(context.Background(), version, announce)
 	}
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -209,7 +188,7 @@ func run() (result error) {
 	var healthMu sync.Mutex
 	healthDone := false
 	var releaseWrites func() error
-	if healthToken != "" {
+	if admission.Health != nil {
 		if releaseWrites, err = st.HoldWrites(context.Background()); err != nil {
 			return err
 		}
@@ -243,19 +222,32 @@ func run() (result error) {
 	lib.BootstrapReady(healthReady)
 	compression := services.NewCompressionService(st, lib, paths)
 	compression.BootstrapReady(healthReady)
-	health := func(ctx context.Context) error {
+	// What this runtime can do on this PC: the baseline an update must keep,
+	// and what its first launch is held to.
+	capabilities := func() update.Capabilities {
+		return update.Capabilities{Search: models.SearchErr == nil, People: models.PeopleErr == nil, Video: stream != nil}
+	}
+	health := func(ctx context.Context) (err error) {
 		healthMu.Lock()
 		defer healthMu.Unlock()
 		if healthDone {
 			return nil
 		}
+		// A release that fails its first launch has nothing more to do: the
+		// helper recovers the previous one as soon as this process has gone.
+		defer func() {
+			if err != nil {
+				slog.Error("update health check failed", "err", err)
+				go app.Quit()
+			}
+		}()
 		if err := st.Integrity(ctx); err != nil {
 			return err
 		}
-		if models.SearchErr != nil || models.PeopleErr != nil || stream == nil || paths.FFmpeg() == "" || paths.Raw() == "" || paths.JXL() == "" {
+		if !capabilities().Covers(admission.Health.Baseline) || paths.FFmpeg() == "" || paths.Raw() == "" || paths.JXL() == "" {
 			return fmt.Errorf("required update runtime capability unavailable: %w", update.ErrInvalid)
 		}
-		if err := update.AcknowledgeHealth(ctx, install.Root, healthToken); err != nil {
+		if err := update.AcknowledgeHealth(ctx, admission.Install.Root, admission.Health.Token); err != nil {
 			return err
 		}
 		if err := releaseWrites(); err != nil {
@@ -264,13 +256,16 @@ func run() (result error) {
 		releaseWrites = nil
 		healthDone = true
 		close(healthReady)
+		if err := updater.Completed(ctx); err != nil {
+			slog.Warn("record the completed update", "err", err)
+		}
 		return nil
 	}
 	for _, svc := range []application.Service{
 		service(&background{ix: ix, search: models.Search, cache: cache, stream: stream, ready: healthReady}, application.ServiceOptions{}),
 		service(lib, application.ServiceOptions{}),
 		service(compression, application.ServiceOptions{}),
-		service(services.NewUpdateService(updater, paths.DataDir, health), application.ServiceOptions{}),
+		service(services.NewUpdateService(updater, paths.DataDir, health, capabilities), application.ServiceOptions{}),
 		service(services.NewSystemService(lib, reports, paths, version), application.ServiceOptions{}),
 		service(services.NewSearchService(st, models.Search, models.People != nil, ix), application.ServiceOptions{}),
 		service(services.NewPeopleService(st, models.People), application.ServiceOptions{}),
@@ -293,7 +288,7 @@ func run() (result error) {
 	// the page runs, they are back at normal (see raiseWebView).
 	w.OnWindowEvent(windowevents.Common.WindowRuntimeReady, func(*application.WindowEvent) { go raiseWebView() })
 	window.Store(w)
-	if healthToken != "" {
+	if admission.Health != nil {
 		timer := time.AfterFunc(60*time.Second, func() {
 			healthMu.Lock()
 			done := healthDone

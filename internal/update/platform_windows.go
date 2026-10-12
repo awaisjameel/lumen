@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -35,30 +37,45 @@ func freeSpace(dir string) (uint64, error) {
 
 func windowsBuild() uint32 { return windows.RtlGetVersion().BuildNumber }
 
-func noLinks(name string) error {
-	for p := filepath.Clean(name); ; p = filepath.Dir(p) {
-		fi, err := os.Lstat(p)
-		if err != nil {
+// linked refuses one path that is a symbolic link, junction, mount point or
+// any other reparse point: the updater writes and removes real files only.
+func linked(name string) error {
+	fi, err := os.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+		return ErrInvalid
+	}
+	ptr, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return err
+	}
+	attrs, err := windows.GetFileAttributes(ptr)
+	if err != nil {
+		return err
+	}
+	if attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return ErrInvalid
+	}
+	return nil
+}
+
+// noLinks checks name and every folder between it and anchor, the folder
+// Lumen owns (the installation or its updater state). What lies above the
+// anchor is the user's own choice: a profile or a drive reached through a
+// junction is an ordinary place to install to, and no privilege is crossed.
+func noLinks(anchor, name string) error {
+	rel, err := filepath.Rel(anchor, name)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ErrInvalid
+	}
+	for p := filepath.Clean(name); rel != "."; p, rel = filepath.Dir(p), filepath.Dir(rel) {
+		if err := linked(p); err != nil {
 			return err
-		}
-		if fi.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
-			return ErrInvalid
-		}
-		ptr, err := windows.UTF16PtrFromString(p)
-		if err != nil {
-			return err
-		}
-		attrs, err := windows.GetFileAttributes(ptr)
-		if err != nil {
-			return err
-		}
-		if attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-			return ErrInvalid
-		}
-		if filepath.Dir(p) == p {
-			return nil
 		}
 	}
+	return nil
 }
 
 // Lease prevents activation while any library from this installation is open.
@@ -66,10 +83,13 @@ type Lease struct{ handle windows.Handle }
 
 // AcquireLease shares the process lease for normal launches, exclusively for activation.
 func AcquireLease(ctx context.Context, root string, exclusive bool) (*Lease, error) {
-	if err := noLinks(root); err != nil {
-		return nil, err
-	}
-	p, err := windows.UTF16PtrFromString(filepath.Join(root, ".lumen-process-lock"))
+	return acquire(ctx, root, leaseFile, exclusive)
+}
+
+// acquire opens dir's lock file, waiting while another process holds it in a
+// way that excludes this one.
+func acquire(ctx context.Context, dir, name string, exclusive bool) (*Lease, error) {
+	p, err := windows.UTF16PtrFromString(filepath.Join(dir, name))
 	if err != nil {
 		return nil, err
 	}
@@ -78,12 +98,14 @@ func AcquireLease(ctx context.Context, root string, exclusive bool) (*Lease, err
 		access, share = windows.GENERIC_READ|windows.GENERIC_WRITE, 0
 	}
 	for {
+		// Opening the reparse point itself means a link planted at the lock's
+		// name is never followed.
 		h, err := windows.CreateFile(p, access, share, nil, windows.OPEN_ALWAYS, windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 		if err == nil {
 			return &Lease{handle: h}, nil
 		}
 		if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
-			return nil, fmt.Errorf("acquire runtime lease: %w", err)
+			return nil, fmt.Errorf("acquire %s: %w", name, err)
 		}
 		select {
 		case <-ctx.Done():
@@ -133,4 +155,16 @@ func waitParent(ctx context.Context, pid uint32, identity uint64) error {
 			return err
 		}
 	}
+}
+
+// onBattery reports whether the PC is running on its battery. Desktops, and
+// any failure to tell, count as mains power (as indexing's politeness does).
+func onBattery() bool {
+	// SYSTEM_POWER_STATUS: ACLineStatus is 0 on battery, 1 on mains, 255 unknown.
+	var status struct {
+		ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag byte
+		BatteryLifeTime, BatteryFullLifeTime                            uint32
+	}
+	ok, _, _ := windows.NewLazySystemDLL("kernel32.dll").NewProc("GetSystemPowerStatus").Call(uintptr(unsafe.Pointer(&status)))
+	return ok != 0 && status.ACLineStatus == 0
 }

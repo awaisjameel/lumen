@@ -30,6 +30,20 @@ const (
 	UpdateCancelled      UpdatePhase = "cancelled"
 )
 
+// UpdateFailure names why the last update operation stopped, for the UI to
+// explain in its own words. The zero value means nothing failed.
+type UpdateFailure string
+
+// The failures a status can carry.
+const (
+	UpdateFailureFailed      UpdateFailure = "failed"      // a check, download or activation did not finish
+	UpdateFailureInterrupted UpdateFailure = "interrupted" // Lumen closed while preparing the update
+	UpdateFailureInvalid     UpdateFailure = "invalid"     // metadata or files could not be verified
+	UpdateFailurePublisher   UpdateFailure = "publisher"   // Windows did not confirm the approved publisher
+	UpdateFailureSpace       UpdateFailure = "space"       // not enough room to stage and recover
+	UpdateFailureObserver    UpdateFailure = "observer"    // another Lumen window coordinates this installation
+)
+
 // UpdatePolicy belongs to the installation, never a portable appearance preset.
 type UpdatePolicy struct {
 	Automatic    bool          `json:"automatic"`
@@ -48,16 +62,16 @@ type UpdateOffer struct {
 
 // UpdateStatus is a generation-tagged installation snapshot.
 type UpdateStatus struct {
-	Generation       uint64       `json:"generation"`
-	Policy           UpdatePolicy `json:"policy"`
-	Phase            UpdatePhase  `json:"phase"`
-	InstalledVersion string       `json:"installedVersion"`
-	Configured       bool         `json:"configured"`
-	Managed          bool         `json:"managed"`
-	Coordinator      bool         `json:"coordinator"`
-	LastCheck        int64        `json:"lastCheck"`
-	Offer            UpdateOffer  `json:"offer"`
-	Bytes            int64        `json:"bytes"`
-	Error            string       `json:"error"`
-	Dismissed        string       `json:"dismissed"`
+	Generation       uint64        `json:"generation"`
+	Policy           UpdatePolicy  `json:"policy"`
+	Phase            UpdatePhase   `json:"phase"`
+	InstalledVersion string        `json:"installedVersion"`
+	Configured       bool          `json:"configured"`
+	Managed          bool          `json:"managed"`
+	Coordinator      bool          `json:"coordinator"`
+	LastCheck        int64         `json:"lastCheck"`
+	Offer            UpdateOffer   `json:"offer"`
+	Bytes            int64         `json:"bytes"`
+	Error            UpdateFailure `json:"error"`
+	Dismissed        string        `json:"dismissed"`
 }

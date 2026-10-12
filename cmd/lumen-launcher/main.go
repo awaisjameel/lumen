@@ -3,8 +3,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -21,6 +23,12 @@ func main() {
 		if err == nil {
 			err = update.Launch(context.Background(), root, os.Getenv("LUMEN_DATA_DIR"), os.Args[1:])
 		}
+	}
+	// The application ran and ended badly: that is its own failure, which it
+	// has reported itself, not an installation that needs repair.
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		os.Exit(exit.ExitCode())
 	}
 	if err != nil {
 		update.ShowFailure(err)

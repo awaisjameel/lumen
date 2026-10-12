@@ -12,7 +12,8 @@ func ProtectSecrets(dir string) error {
 	if !filepath.IsAbs(dir) {
 		return ErrInvalid
 	}
-	if err := noLinks(dir); err != nil {
+	// Signing keys are the one place where every folder up to the drive counts.
+	if err := noLinks(filepath.VolumeName(dir)+string(filepath.Separator), dir); err != nil {
 		return err
 	}
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()

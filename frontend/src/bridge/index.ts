@@ -51,6 +51,7 @@ import {
   ViewerWheel,
   WaitReason,
   UpdateChannel,
+  UpdateFailure,
   UpdatePhase,
 } from '../../bindings/lumen/internal/core'
 import type {
@@ -114,6 +115,7 @@ import type {
 
 export {
   UpdateChannel,
+  UpdateFailure,
   UpdatePhase,
   Accent,
   AlbumKind,
