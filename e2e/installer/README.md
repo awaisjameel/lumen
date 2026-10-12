@@ -1,5 +1,18 @@
 # Packaged beta acceptance
 
+The versioned 0.12.0 layout also has a host-safe scratch acceptance script:
+
+```sh
+node e2e/installer/layout.mjs
+```
+
+It creates an isolated Unicode installation under `e2e/.work`, validates
+bootstrap identity, managed/offline capabilities, process leases, stable
+launching (including past the barrier of an activation whose helper died) and
+inventory-only cleanup. It never runs NSIS or writes the host's
+uninstall registration. It does not replace installed upgrade or signed
+activation acceptance.
+
 The package has two independent checks. Neither touches the host's installed
 Lumen or its normal library.
 

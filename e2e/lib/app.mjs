@@ -114,6 +114,7 @@ export const media = service('MediaService')
 export const search = service('SearchService')
 export const people = service('PeopleService')
 export const system = service('SystemService')
+export const updates = service('UpdateService')
 
 /** Lets indexing run whatever else the PC is doing, as a test needs. */
 export async function unthrottle(page) {

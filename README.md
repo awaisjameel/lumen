@@ -112,10 +112,14 @@ Design and decisions for the last part of Phase 5 are in [docs/phase5-design-202
 - Supported inputs, measurements, verification and limits: [Phase 11 record](docs/phase11-compression-2026-10-09.md). Optional same-format replacement and Undo (11E) remain deferred.
 - Sources above 16 megapixels are skipped for now, and history keeps the newest 100 runs: [Phase 11 audit](docs/phase11-audit-2026-10-10.md), which corrects the record where they differ.
 
-**Phase 12A (updater trust and activation foundations) has started:** an
-isolated TUF client experiment and the whole-runtime activation contracts are
-recorded in [the 12A record](docs/phase12a-updater-2026-10-10.md). The application
-still has no updater and makes no off-device request.
+**Phase 12 (application updates) is implemented locally for the 0.12.0 candidate:**
+installation-scoped opt-in checks, requested streaming downloads, authenticated
+staging, a stable launcher/helper, WAL-inclusive backup and a first-launch health
+gate are recorded in [the implementation record](docs/phase12-implementation-2026-10-12.md).
+Production trust configuration is deliberately empty, so this checkout makes no
+off-device update request. The [production signing process](docs/production-signing.md)
+requires a real publisher certificate, quorum trust custody, hosting and signed
+installed-version acceptance before public delivery can be enabled.
 
 The planned update flow combines automatic checks, background preparation
 and a user-approved restart. The updater's limited network exception and
@@ -123,11 +127,12 @@ recovery design are in [the automatic update plan](docs/automatic-updates-plan-2
 The phased scope, architecture,
 migration rules and acceptance gates are in
 [the next development plan](docs/next-development-plan-2026-10-04.md).
-12A remains in progress; update checks, downloads and activation are not implemented.
+Phase 12 public signing/delivery acceptance remains open; local implementation
+and fixture verification do not establish a public release.
 
-The rebuilt 0.11.0 installer passed extracted-payload and native workflow
-checks. Installed acceptance remains open because Windows Sandbox's Application
-Control policy refused the unsigned package:
+The owner accepted beta 0.11.0 on 12 October 2026. The earlier local installer
+record still documents its Sandbox limitation; it is historical evidence,
+separate from that owner acceptance:
 [packaged beta acceptance](docs/beta-package-acceptance-2026-10-10.md).
 
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).

@@ -7,11 +7,13 @@ import * as MediaService from "./mediaservice.js";
 import * as PeopleService from "./peopleservice.js";
 import * as SearchService from "./searchservice.js";
 import * as SystemService from "./systemservice.js";
+import * as UpdateService from "./updateservice.js";
 export {
     CompressionService,
     LibraryService,
     MediaService,
     PeopleService,
     SearchService,
-    SystemService
+    SystemService,
+    UpdateService
 };

@@ -132,11 +132,23 @@ func (s *LibraryService) ServiceStartup(_ context.Context, _ application.Service
 	if done, ok := s.organise.track(); ok {
 		go func() {
 			defer done()
+			if s.bootstrap != nil {
+				select {
+				case <-life.Done():
+					return
+				case <-s.bootstrap:
+				}
+			}
 			s.settleOrganise(life)
 		}()
 	}
 	return nil
 }
+
+// BootstrapReady postpones recovery until the update health commit admits writes.
+//
+//wails:ignore
+func (s *LibraryService) BootstrapReady(ready <-chan struct{}) { s.bootstrap = ready }
 
 // settleOrganise is recoverOrganise for a goroutine, logging what fails. The
 // indexer runs it before its first scan (see NewLibraryService), and

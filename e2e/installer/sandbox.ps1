@@ -45,7 +45,14 @@ function Start-Lumen {
     $env:LUMEN_DEVTOOLS_PORT = "$port"
     $env:LUMEN_AI_ON_BATTERY = '1'
     Remove-Item Env:LUMEN_RUNTIME_DIR -ErrorAction SilentlyContinue
-    $script:app = Start-Process -FilePath (Join-Path $install 'Lumen.exe') -PassThru
+    $executable = Join-Path $install 'Lumen.exe'
+    if (Test-Path -LiteralPath (Join-Path $install '.lumen-active.json')) {
+        $active = Get-Content -Raw -LiteralPath (Join-Path $install '.lumen-active.json') | ConvertFrom-Json
+        $executable = Join-Path $install "runtime\$($active.generation)\lumen-app.exe"
+    }
+    # Drive the installed application directly: the stable launcher deliberately
+    # clears developer ports. Shortcut ownership is verified separately.
+    $script:app = Start-Process -FilePath $executable -WindowStyle Hidden -PassThru
     $readyDeadline = [DateTime]::UtcNow.AddSeconds(90)
     while ([DateTime]::UtcNow -lt $readyDeadline) {
         if ($app.HasExited) { throw "Lumen exited before readiness: $($app.ExitCode)" }

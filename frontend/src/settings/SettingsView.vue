@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import AboutSection from '../about/AboutSection.vue'
+import UpdatesSection from '../updates/UpdatesSection.vue'
 import OcrSetting from './OcrSetting.vue'
 import XmpSetting from './XmpSetting.vue'
 import ViewingSettings from './ViewingSettings.vue'
@@ -290,8 +292,18 @@ const categories = [
   { id: 'accessibility', label: 'settings.category.accessibility' },
   { id: 'privacy', label: 'settings.privacy' },
   { id: 'presets', label: 'settings.category.presets' },
+  { id: 'updates', label: 'update.title' },
   { id: 'about', label: 'about.title' },
 ] as const
+// A notice elsewhere can open Settings at one category (?section=updates).
+const route = useRoute()
+watch(
+  () => route.query.section,
+  (section) => {
+    if (typeof section === 'string' && categories.some((item) => item.id === section)) category.value = section
+  },
+  { immediate: true },
+)
 function matches(...texts: string[]) {
   const needle = query.value.trim().toLocaleLowerCase()
   return !needle || texts.some((text) => text.toLocaleLowerCase().includes(needle))
@@ -359,6 +371,16 @@ function onConfidence(value: number | number[] | undefined) {
 onBeforeUnmount(saveConfidence)
 // Filtering keeps long-running child operations mounted so their busy state and results survive.
 const categoryKeys: Record<string, MessageKey[]> = {
+  updates: [
+    'update.title',
+    'update.automatic',
+    'update.check',
+    'update.channel',
+    'update.restart',
+    'update.privacy',
+    'update.battery',
+    'update.bandwidth',
+  ],
   compression: [
     'compression.title',
     'compression.mode',
@@ -1134,6 +1156,14 @@ const shownCategories = computed(() =>
         >
           <SectionHead :title="t('settings.category.presets')" />
           <CustomisationSettings :query="query" @reset="saveConfidence" />
+        </section>
+        <section
+          v-show="shownCategories.some((item) => item.id === 'updates')"
+          data-category="updates"
+          :aria-label="t('update.title')"
+        >
+          <SectionHead :title="t('update.title')" />
+          <UpdatesSection />
         </section>
         <section
           v-show="shownCategories.some((item) => item.id === 'about')"

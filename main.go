@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -32,6 +33,7 @@ import (
 	"lumen/internal/people"
 	"lumen/internal/search"
 	"lumen/internal/store"
+	"lumen/internal/update"
 	"lumen/services"
 )
 
@@ -44,6 +46,19 @@ var assets embed.FS
 var appIcon []byte
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "--update-restore" {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		a, err := update.RestoreRequest(ctx, os.Args[2], os.Args[3])
+		if err == nil {
+			err = store.RestoreBackup(ctx, a.Backup, filepath.Join(a.DataDir, "library.db"))
+		}
+		cancel()
+		if err != nil {
+			slog.Error("restore update library", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--render-worker" {
 		if err := media.RenderWorker(context.Background(), os.Stdin, os.Stdout); err != nil {
 			os.Exit(1)
@@ -60,7 +75,7 @@ func main() {
 // run wires everything together and blocks until the window closes. The
 // database is closed by a defer on every path that opened it, after the
 // indexer has stopped.
-func run() error {
+func run() (result error) {
 	paths, err := core.DefaultPaths()
 	if err != nil {
 		return err
@@ -71,6 +86,17 @@ func run() error {
 	lowerPriority()
 	index.CountOwnPrograms() // before the window starts WebView2
 	version := diag.Version()
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	// An installed Lumen runs only as the generation its installation selects,
+	// and holds the installation's runtime lease until everything has stopped.
+	admission, err := update.Admit(context.Background(), executable, version, paths.DataDir, os.Args[1:])
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, admission.Close()) }()
 	reports := diag.New(paths.DataDir, version)
 
 	// The application comes first: a second copy of Lumen must hand over to
@@ -118,14 +144,68 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("open library: %w", err)
 	}
-	defer st.Close()
+	schema, err := st.SchemaVersion(context.Background())
+	if err != nil {
+		_ = st.Close()
+		return err
+	}
+	if admission.Health != nil && schema != admission.Health.Candidate.Release.WriteSchema {
+		_ = st.Close()
+		return fmt.Errorf("updated schema does not match authenticated policy: %w", update.ErrInvalid)
+	}
+	announce := func(s core.UpdateStatus) { app.Event.Emit(services.EventUpdateStatus, s) }
+	updater, err := update.Open(context.Background(), executable, version, schema, announce)
+	if err != nil {
+		if admission.Health != nil {
+			_ = st.Close()
+			return err
+		}
+		// Browsing never depends on the updater: without its state Lumen
+		// runs as a build that takes no part in updates, and says so.
+		slog.Error("updates unavailable", "err", err)
+		updater = update.Inert(context.Background(), version, announce)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		a, pending, pendingErr := updater.PendingClose(paths.DataDir)
+		if pendingErr != nil {
+			result = errors.Join(result, pendingErr)
+		}
+		if pending && pendingErr == nil {
+			if backupErr := st.Backup(ctx, a.Backup); backupErr != nil {
+				result = errors.Join(result, backupErr)
+				pending = false
+			}
+		}
+		closeErr := st.Close()
+		result = errors.Join(result, closeErr)
+		if pending && closeErr == nil {
+			result = errors.Join(result, updater.Closed(ctx, a))
+		}
+	}()
+	healthReady := make(chan struct{})
+	var healthMu sync.Mutex
+	healthDone := false
+	var releaseWrites func() error
+	if admission.Health != nil {
+		if releaseWrites, err = st.HoldWrites(context.Background()); err != nil {
+			return err
+		}
+		defer func() {
+			healthMu.Lock()
+			defer healthMu.Unlock()
+			if releaseWrites != nil {
+				result = errors.Join(result, releaseWrites())
+			}
+		}()
+	} else {
+		close(healthReady)
+		healthDone = true
+	}
 
 	decoders := media.Decoders{FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe(), Raw: paths.Raw(), JXL: paths.JXL()}
 	cache := media.NewCache(paths.ThumbDir, decoders)
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
 	cache.Renderer = media.ProcessRenderer{Executable: executable, FFmpeg: paths.FFmpeg(), FFprobe: paths.FFprobe(), Raw: paths.Raw(), JXL: paths.JXL()}
 	// The Blocked screen's lock, shared so that covered photos and videos are
 	// served only while it is open.
@@ -139,10 +219,53 @@ func run() error {
 	ix := index.New(st, paths, cache, models, events)
 
 	lib := services.NewLibraryService(st, ix, gate, cache)
+	lib.BootstrapReady(healthReady)
+	compression := services.NewCompressionService(st, lib, paths)
+	compression.BootstrapReady(healthReady)
+	// What this runtime can do on this PC: the baseline an update must keep,
+	// and what its first launch is held to.
+	capabilities := func() update.Capabilities {
+		return update.Capabilities{Search: models.SearchErr == nil, People: models.PeopleErr == nil, Video: stream != nil}
+	}
+	health := func(ctx context.Context) (err error) {
+		healthMu.Lock()
+		defer healthMu.Unlock()
+		if healthDone {
+			return nil
+		}
+		// A release that fails its first launch has nothing more to do: the
+		// helper recovers the previous one as soon as this process has gone.
+		defer func() {
+			if err != nil {
+				slog.Error("update health check failed", "err", err)
+				go app.Quit()
+			}
+		}()
+		if err := st.Integrity(ctx); err != nil {
+			return err
+		}
+		if !capabilities().Covers(admission.Health.Baseline) || paths.FFmpeg() == "" || paths.Raw() == "" || paths.JXL() == "" {
+			return fmt.Errorf("required update runtime capability unavailable: %w", update.ErrInvalid)
+		}
+		if err := update.AcknowledgeHealth(ctx, admission.Install.Root, admission.Health.Token); err != nil {
+			return err
+		}
+		if err := releaseWrites(); err != nil {
+			return err
+		}
+		releaseWrites = nil
+		healthDone = true
+		close(healthReady)
+		if err := updater.Completed(ctx); err != nil {
+			slog.Warn("record the completed update", "err", err)
+		}
+		return nil
+	}
 	for _, svc := range []application.Service{
-		service(&background{ix: ix, search: models.Search, cache: cache, stream: stream}, application.ServiceOptions{}),
+		service(&background{ix: ix, search: models.Search, cache: cache, stream: stream, ready: healthReady}, application.ServiceOptions{}),
 		service(lib, application.ServiceOptions{}),
-		service(services.NewCompressionService(st, lib, paths), application.ServiceOptions{}),
+		service(compression, application.ServiceOptions{}),
+		service(services.NewUpdateService(updater, paths.DataDir, health, capabilities), application.ServiceOptions{}),
 		service(services.NewSystemService(lib, reports, paths, version), application.ServiceOptions{}),
 		service(services.NewSearchService(st, models.Search, models.People != nil, ix), application.ServiceOptions{}),
 		service(services.NewPeopleService(st, models.People), application.ServiceOptions{}),
@@ -165,6 +288,17 @@ func run() error {
 	// the page runs, they are back at normal (see raiseWebView).
 	w.OnWindowEvent(windowevents.Common.WindowRuntimeReady, func(*application.WindowEvent) { go raiseWebView() })
 	window.Store(w)
+	if admission.Health != nil {
+		timer := time.AfterFunc(60*time.Second, func() {
+			healthMu.Lock()
+			done := healthDone
+			healthMu.Unlock()
+			if !done {
+				app.Quit()
+			}
+		})
+		defer timer.Stop()
+	}
 
 	return app.Run()
 }
@@ -265,6 +399,7 @@ func startAI(paths core.Paths, st *store.Store) index.Models {
 // engine) and the video server once the app is running, and stops them
 // cleanly before the database closes.
 type background struct {
+	ready   <-chan struct{} // update bootstrap health precedes indexing and recovery
 	ix      backgroundIndexer
 	search  *search.Engine // nil without AI
 	cache   backgroundCache
@@ -292,6 +427,22 @@ type backgroundIndexer interface {
 //nolint:unparam // the signature is Wails' service interface
 func (b *background) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
 	ctx, b.cancel = context.WithCancel(context.WithoutCancel(ctx))
+	if b.ready != nil {
+		b.workers.Go(func() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-b.ready:
+				b.start(ctx)
+			}
+		})
+		return nil
+	}
+	b.start(ctx)
+	return nil
+}
+
+func (b *background) start(ctx context.Context) {
 	// Before indexing writes thumbnails: it removes the folder they are
 	// written through.
 	if err := b.cache.SweepTemp(); err != nil {
@@ -309,7 +460,6 @@ func (b *background) ServiceStartup(ctx context.Context, _ application.ServiceOp
 			slog.Warn("tidy thumbnail cache", "err", err)
 		}
 	})
-	return nil
 }
 
 // ServiceShutdown stops it, before the database closes.

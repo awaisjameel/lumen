@@ -1,7 +1,7 @@
 // Verifies an extracted installer and runs native suites on its shipped runtime.
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { createReadStream, existsSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, readdirSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { delimiter, join, relative, resolve } from 'node:path'
 import { ROOT, version } from '../lib/suite.mjs'
 
@@ -25,14 +25,18 @@ function files(dir) {
 }
 const checks = []
 const runtime = join(ROOT, 'deps', 'runtime')
+const packaged = join(ROOT, 'bin', 'update-package')
+const active = existsSync(join(packaged, '.lumen-active.json'))
+  ? JSON.parse(readFileSync(join(packaged, '.lumen-active.json'), 'utf8'))
+  : null
 const expected = [
-  ...files(runtime).map((path) => ({
-    path: relative(runtime, path),
+  ...files(active ? packaged : runtime).map((path) => ({
+    path: relative(active ? packaged : runtime, path),
     source: path,
   })),
   ...['Lumen.exe', 'THIRD_PARTY_NOTICES.txt'].map((path) => ({
     path,
-    source: join(ROOT, 'bin', path),
+    source: join(ROOT, 'bin', active && path === 'Lumen.exe' ? 'Lumen-launcher.exe' : path),
   })),
   {
     path: join('$PLUGINSDIR', 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe'),
@@ -69,7 +73,10 @@ console.log(`Package payload: ${checks.length - failed.length}/${checks.length} 
 if (failed.length) throw new Error(JSON.stringify(failed))
 
 // Remove development overrides and the runtime DLL search path before launch.
-const env = { ...process.env, LUMEN_EXE: join(extracted, 'Lumen.exe') }
+const env = {
+  ...process.env,
+  LUMEN_EXE: active ? join(extracted, 'runtime', active.generation, 'lumen-app.exe') : join(extracted, 'Lumen.exe'),
+}
 delete env.LUMEN_RUNTIME_DIR
 delete env.SECTIONS
 const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path')

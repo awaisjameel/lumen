@@ -25,6 +25,7 @@ var ErrCompressionState = errors.New("the compression run cannot do that now")
 
 // CompressionService exposes the coordinator through generated wire types.
 type CompressionService struct {
+	bootstrap   <-chan struct{} // recovery must not mutate a library before health
 	coordinator *compress.Coordinator
 	library     *LibraryService
 	mu          sync.Mutex // guards admission, cancellation and the worker lifetime
@@ -72,9 +73,25 @@ func NewCompressionService(st *store.Store, library *LibraryService, paths core.
 // still open when, say, a copy's drive is unplugged. Compression then refuses
 // new work until a later attempt settles it (see begin).
 func (s *CompressionService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	if s.bootstrap != nil {
+		s.wg.Go(func() {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-s.bootstrap:
+				s.settle(s.ctx)
+			}
+		})
+		return nil
+	}
 	s.settle(s.ctx)
 	return nil
 }
+
+// BootstrapReady postpones compression recovery until the health gate opens.
+//
+//wails:ignore
+func (s *CompressionService) BootstrapReady(ready <-chan struct{}) { s.bootstrap = ready }
 
 // settle is recover for the indexer's first scan, which has nowhere to report to.
 func (s *CompressionService) settle(ctx context.Context) {

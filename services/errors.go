@@ -11,6 +11,7 @@ import (
 	"lumen/internal/search"
 	"lumen/internal/signin"
 	"lumen/internal/store"
+	"lumen/internal/update"
 )
 
 // ErrorCode names a failure the UI explains in its own words (and can act
@@ -65,13 +66,19 @@ const (
 	CodeSourceChanged       ErrorCode = "source_changed"       // the file changed after the preview
 	CodeUnsupported         ErrorCode = "unsupported"          // nothing here can read or write that format
 
-	CodePresetInvalid    ErrorCode = "preset_invalid" // not a customisation file Lumen wrote
-	CodePresetNewer      ErrorCode = "preset_newer"   // a customisation file from a later Lumen
-	CodeCompressionBusy  ErrorCode = "compression_busy"
-	CodeCompressionState ErrorCode = "compression_state"
-	CodeCompressionPlan  ErrorCode = "compression_plan"
-	CodePreservation     ErrorCode = "preservation"
-	CodeCopySpace        ErrorCode = "copy_space"
+	CodePresetInvalid     ErrorCode = "preset_invalid" // not a customisation file Lumen wrote
+	CodePresetNewer       ErrorCode = "preset_newer"   // a customisation file from a later Lumen
+	CodeCompressionBusy   ErrorCode = "compression_busy"
+	CodeCompressionState  ErrorCode = "compression_state"
+	CodeCompressionPlan   ErrorCode = "compression_plan"
+	CodePreservation      ErrorCode = "preservation"
+	CodeCopySpace         ErrorCode = "copy_space"
+	CodeUpdateUnavailable ErrorCode = "update_unavailable"
+	CodeUpdateBusy        ErrorCode = "update_busy"
+	CodeUpdateInvalid     ErrorCode = "update_invalid"
+	CodeUpdateState       ErrorCode = "update_state"
+	CodeUpdateSpace       ErrorCode = "update_space"
+	CodeUpdatePublisher   ErrorCode = "update_publisher"
 
 	CodeSigninFailed ErrorCode = "signin_failed"      // the Windows sign-in was cancelled, or wrong
 	CodeNoSignin     ErrorCode = "signin_unavailable" // this PC has no way to check a Windows sign-in
@@ -86,6 +93,12 @@ var errorCodes = []struct {
 	err  error
 	code ErrorCode
 }{
+	{update.ErrUnavailable, CodeUpdateUnavailable},
+	{update.ErrBusy, CodeUpdateBusy},
+	{update.ErrInvalid, CodeUpdateInvalid},
+	{update.ErrState, CodeUpdateState},
+	{update.ErrSpace, CodeUpdateSpace},
+	{update.ErrPublisher, CodeUpdatePublisher},
 	{ErrTrashChanged, CodeTrashChanged}, // before not_found: an asset that left the Trash changed it
 	{store.ErrNotFound, CodeNotFound},
 	{ErrNoAI, CodeNoAI},

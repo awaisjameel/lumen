@@ -176,7 +176,7 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 			core.RenderSideHigh, core.ExportSideMin, core.ExportSideMax, media.RenderSideMin, media.RenderSide)
 	}
 
-	for _, event := range []string{EventProgress, EventLibraryChanged, EventOrganiseProgress} {
+	for _, event := range []string{EventProgress, EventLibraryChanged, EventOrganiseProgress, EventUpdateStatus} {
 		if !regexp.MustCompile(`'` + regexp.QuoteMeta(event) + `' satisfies keyof Events.CustomEvents`).MatchString(bridge) {
 			t.Errorf("the bridge does not listen for %q", event)
 		}

@@ -7,8 +7,9 @@ Date: 4 October 2026. Status: Phase 7 is implemented (see
 [the Phase 10 record](phase10-customisation-2026-10-08.md)). Phase 11A–D is
 implemented ([record](phase11-compression-2026-10-09.md),
 [latest audit](phase11-audit-2026-10-10.md)); optional 11E remains deferred.
-Phase 12A has started with isolated trust experiments and activation contracts
-([record](phase12a-updater-2026-10-10.md)); production updates are not implemented.
+Phase 12 has a local application/packaging implementation
+([record](phase12-implementation-2026-10-12.md)); public signing and installed
+update acceptance remain open. The owner accepted beta 0.11.0 on 12 October.
 
 This plan covers the product owner's four requests: rebuild the complete
 frontend with the latest stable Nuxt UI, expand viewing and file tools,

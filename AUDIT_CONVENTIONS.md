@@ -33,8 +33,10 @@ tooling; this file covers how code is written.
   same-format replacement is deferred. Phase 6 (the installer, politeness controls, crash reports and
   diagnostics, onboarding and empty states, the performance pass) is built
   as `docs/phase6-design-2026-10-03.md` sets out; its decisions are not
-  reopened except by a later explicit product-owner decision. Lumen currently
-  makes no network request. The owner's 4 October request authorises the
+  reopened except by a later explicit product-owner decision. Phase 12 is
+  recorded in `docs/phase12-implementation-2026-10-12.md`; public delivery
+  remains disabled until compiled trust/signing policy is provisioned.
+  The owner's 4 October request authorises the
   planned update-only exception in
   [the automatic update plan](docs/automatic-updates-plan-2026-10-04.md):
   opt-in checking and explicitly requested authenticated downloads. Other
@@ -201,7 +203,7 @@ tooling; this file covers how code is written.
 - **Reactivity**
   - Use `shallowRef` for large engine payloads.
   - Watchers and listeners are disposed: `onBeforeUnmount`, or the
-  unsubscribe function `on*` returns.
+    unsubscribe function `on*` returns.
   - `v-for` keys are stable ids, never indexes.
   - Large lists are virtualized (TanStack Virtual).
 - **Tests** are Vitest with `@vue/test-utils`. They mock the bridge with

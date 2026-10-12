@@ -1,5 +1,9 @@
 # Beta 0.11.0: packaged acceptance
 
+Owner update, 12 October 2026: beta 0.11.0 is accepted. The automated results
+and Sandbox limitations below remain the historical account of the 10 October
+run; this owner confirmation does not fabricate additional automated evidence.
+
 Date: 10 October 2026. Source baseline: `main` at
 `2e68787d7cdb6e3025a3328bf948af34403475a7`, including the
 [Phase 11 audit repairs](phase11-audit-2026-10-10.md). The beta guide now names

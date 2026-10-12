@@ -15,6 +15,7 @@ declare module "@wailsio/runtime" {
             "index:progress": core$0.Progress;
             "library:changed": core$0.Changes;
             "organise:progress": core$0.OrganiseProgress;
+            "update:status": core$0.UpdateStatus;
         }
     }
 }
