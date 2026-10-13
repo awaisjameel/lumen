@@ -41,8 +41,8 @@ func TestAssetDetailReadsPathsFromItsMetadataSnapshot(t *testing.T) {
 	id := jobs[0].AssetID
 	_, err = st.SetBlock(ctx, core.BlockFolder, 0, `C:\Photos\privé`, core.BlockPhotos)
 	check(t, err)
-	// The Unicode block calls fold during the metadata read. Commit a rename
-	// and date change there, so the later paths read must keep that snapshot.
+	// Commit a rename and date change during the metadata read, so the later
+	// paths read must keep that snapshot. Visibility no longer calls fold.
 	st.r.SetMaxOpenConns(1)
 	conn, err := st.r.Conn(ctx)
 	check(t, err)
@@ -54,7 +54,7 @@ func TestAssetDetailReadsPathsFromItsMetadataSnapshot(t *testing.T) {
 		if !ok {
 			return errors.New("unexpected SQLite connection")
 		}
-		return sqlite.RegisterFunc("fold", func(v any) (any, error) {
+		return sqlite.RegisterFunc("read_metadata", func(at int64) (int64, error) {
 			changed.Do(func() {
 				changeErr = st.tx(ctx, func(tx *sql.Tx) error {
 					if _, err := tx.ExecContext(ctx, "UPDATE assets SET taken_at = ? WHERE id = ?", before.TakenAt+1, id); err != nil {
@@ -64,9 +64,15 @@ func TestAssetDetailReadsPathsFromItsMetadataSnapshot(t *testing.T) {
 					return err
 				})
 			})
-			return foldSQL(v), changeErr
+			return at, changeErr
 		}, false)
 	}))
+	check(t, errOf(conn.ExecContext(ctx, `PRAGMA query_only = OFF;
+		CREATE TEMP VIEW assets AS SELECT id, kind, ext, read_metadata(taken_at) AS taken_at,
+		date_from, width, height, camera, lat, lon, place_id, favourite, duration_ms,
+		video_codec, audio_codec, thumb_version, display_rotation, display_flip,
+		hidden, trashed_at, missing_since FROM main.assets;
+		PRAGMA query_only = ON;`)))
 	check(t, conn.Close())
 	detail, err := st.AssetDetail(ctx, id, false)
 	check(t, err)

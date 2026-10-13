@@ -56,6 +56,11 @@ func (s *Store) batch(ctx context.Context, ids []int64, condition string, one fu
 			if err := ctx.Err(); err != nil {
 				return err // Cancellation rolls back the entire part.
 			}
+			// An earlier item may now match a block, including a repeated id.
+			// Admission must see the same inputs as the original live predicate.
+			if err := settleBlockedAssets(ctx, tx); err != nil {
+				return err
+			}
 			var ok bool
 			if err := check.QueryRowContext(ctx, id).Scan(&ok); err != nil {
 				return err

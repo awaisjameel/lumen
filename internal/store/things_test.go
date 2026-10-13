@@ -18,6 +18,13 @@ import (
 func downgradeToV18(t *testing.T, st *Store) {
 	t.Helper()
 	ctx := context.Background()
+	// This fixture deliberately removes settlement's schema until the next
+	// Open, so build the old database through the raw pool as migrations do.
+	st.w.execContext = st.w.DB.ExecContext
+	restoreBlockRevisionTriggers(ctx, t, st)
+	for _, table := range []string{"blocked_assets", "blocked_dirty", "blocked_rebuild"} {
+		check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE "+table)))
+	}
 	selectionTriggers, err := queryAll(ctx, st.r, func(r *sql.Rows) (name string, err error) { err = r.Scan(&name); return name, err }, "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'selection_%'")
 	check(t, err)
 	for _, name := range selectionTriggers {
@@ -53,6 +60,41 @@ func downgradeToV18(t *testing.T, st *Store) {
 		CREATE TRIGGER event_name_deleted AFTER DELETE ON event_names BEGIN
 			UPDATE event_revision SET value = value + 1 WHERE id = 1; END;
 		PRAGMA user_version = 18`)))
+}
+
+// restoreBlockRevisionTriggers takes the original definitions from a scratch
+// schema, so downgrade fixtures need not maintain copies of revision SQL.
+func restoreBlockRevisionTriggers(ctx context.Context, t *testing.T, st *Store) {
+	t.Helper()
+	legacy, err := sql.Open(driverName, ":memory:")
+	check(t, err)
+	defer func() { _ = legacy.Close() }()
+	legacy.SetMaxOpenConns(1)
+	names, err := migrationFS.ReadDir("migrations")
+	check(t, err)
+	for _, name := range names {
+		if name.Name() >= "0032" {
+			break
+		}
+		body, err := migrationFS.ReadFile("migrations/" + name.Name())
+		check(t, err)
+		check(t, errOf(legacy.ExecContext(ctx, string(body))))
+	}
+	triggers, err := queryAll(ctx, st.r, func(r *sql.Rows) (name string, err error) { err = r.Scan(&name); return name, err },
+		`SELECT name FROM sqlite_master WHERE type = 'trigger'
+		AND (instr(sql, 'blocked_dirty') > 0 OR instr(sql, 'blocked_rebuild') > 0 OR name LIKE 'blocked_%')`)
+	check(t, err)
+	for _, name := range triggers {
+		var original string
+		err := legacy.QueryRowContext(ctx, "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?", name).Scan(&original)
+		if !errors.Is(err, sql.ErrNoRows) {
+			check(t, err)
+		}
+		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER "+name)))
+		if original != "" {
+			check(t, errOf(st.w.ExecContext(ctx, original)))
+		}
+	}
 }
 
 // thingNamed is the Thing the list shows under name.

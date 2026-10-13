@@ -56,8 +56,8 @@ func foldSQL(v any) any {
 
 // Store is the handle every other package uses.
 type Store struct {
-	w           *sql.DB // single writer connection
-	r           *sql.DB // read-only pool
+	w           *storeWriter // single writer connection, with settlement for standalone writes
+	r           *sql.DB      // read-only pool
 	eventsCache struct {
 		sync.Mutex
 		revision      int64
@@ -96,10 +96,16 @@ func Open(path string) (*Store, error) {
 		w.Close()
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	s := &Store{w: w}
+	s := &Store{}
+	s.w = &storeWriter{DB: w, execContext: s.execContext}
 	if err := s.migrate(context.Background()); err != nil {
 		w.Close()
 		return nil, err
+	}
+	// A migrated library must be backfilled before any reader can browse it.
+	if err := s.tx(context.Background(), func(*sql.Tx) error { return nil }); err != nil {
+		w.Close()
+		return nil, fmt.Errorf("backfill blocked assets: %w", err)
 	}
 
 	r, err := sql.Open(driverName, dsn("&_query_only=1"))
@@ -191,8 +197,8 @@ func (s *Store) read(ctx context.Context, fn func(*sql.Tx) error) error {
 // tx runs fn in a write transaction, committing on success. The deferred
 // rollback also runs if fn panics, so the single writer connection is never
 // left inside a transaction (every later write would wait on it). Before it
-// commits, the transaction settles the event tags of any photos fn changed
-// (see settleDirty), so the tags and the photos never disagree on disk.
+// commits, the transaction settles event tags and then blocked assets, so
+// neither derived set can disagree with the photos on disk.
 func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	return s.runTx(ctx, true, fn)
 }
@@ -211,6 +217,9 @@ func (s *Store) runTx(ctx context.Context, settle bool, fn func(*sql.Tx) error) 
 	if settle {
 		if err := settleDirty(ctx, tx); err != nil {
 			return fmt.Errorf("settle event tags: %w", err)
+		}
+		if err := settleBlockedAssets(ctx, tx); err != nil {
+			return fmt.Errorf("settle blocked assets: %w", err)
 		}
 	}
 	return tx.Commit()
@@ -290,19 +299,22 @@ func baseVisibleOf(alias string) string {
 
 // blockVisible is true when no photo block covers the assets row alias.
 func blockVisible(asset string) string {
-	return "NOT EXISTS (SELECT 1 FROM blocks blk WHERE blk.mode = 'photos' AND " + blockMatch(asset, "blk") + ")"
+	// An empty materialisation is common. Check it once per query so those
+	// libraries need no asset-by-asset primary-key seeks.
+	return "(NOT EXISTS (SELECT 1 FROM blocked_assets) OR NOT EXISTS (SELECT 1 FROM blocked_assets WHERE asset_id = " + asset + ".id))"
 }
 
 // blockMatch is true when the blocks row alias blk covers the assets row alias
 // asset, whatever the block's mode: visibility and the Blocked screen's
-// browser ask the same question with the same SQL. Most blocks are evaluated
-// against current metadata, membership and file paths, so newly indexed media
-// is covered without a second queue; event and face blocks read the members
-// that settling and face saving keep current (migration 0023). Its own
+// browser ask the same question with the same SQL. Settlement evaluates current
+// metadata, membership and file paths before commit, so newly indexed media is
+// covered immediately; event and face blocks read the members that event
+// settling and face saving keep current (migration 0023). Its own
 // aliases (blk_*) never collide with the caller's.
 //
-// The triggers of migrations 0014-0016 and 0023 bump event_revision whenever
-// an input read here changes; keep them in step with this predicate.
+// The revision triggers of migrations 0014-0016 and 0023 name these inputs.
+// Materialisation's dirty triggers begin in migration 0032 and must cover
+// every input read here too.
 func blockMatch(asset, blk string) string {
 	id := asset + ".id"
 	takenDay := "strftime('%Y-%m-%d', " + asset + ".taken_at, 'unixepoch')"
