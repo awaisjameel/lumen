@@ -21,7 +21,10 @@ import (
 )
 
 // MediaService serves pictures to the WebView on the app's own origin, so the
-// grid loads thumbnails like ordinary <img> URLs (no base64, browser-cached):
+// grid loads thumbnails like ordinary <img> URLs (no base64). Nothing is
+// cached between requests: every answer is "no-cache" so a photo blocked after
+// it was shown is refused the next time its URL is asked for, and Wails on
+// Windows drops the conditional headers, so each request is answered in full.
 //
 //	/media/thumb/{id}/{256|1024}?v={thumbVersion}
 //	/media/sprite/{id}?v={thumbVersion}
