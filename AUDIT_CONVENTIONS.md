@@ -102,6 +102,14 @@ tooling; this file covers how code is written.
     `deps/runtime`.
   - Pass gate: `go test -race -count=1 -timeout 900s` on the named packages
     (never `./...`), and `golangci-lint run` reports 0 issues.
+  - Large-library latency is also a gate: `scripts/lint.sh` runs
+    `scripts/bench.sh` after the Go static checks and still runs every later
+    step if it fails. Run it alone for the 100,000-photo store fixture in three
+    block configurations, without the race detector; it sources `scripts/env.sh`
+    and takes one to two minutes on an i7-13700H with a warm toolchain.
+    Budgets live in `internal/store/testdata/library-budgets.txt`. Raise one
+    only by hand, with a reason and at least five repeat measurements in review,
+    applying that file's headroom rule. Do not raise one just to pass a check.
 
 ## Go → TypeScript contract
 

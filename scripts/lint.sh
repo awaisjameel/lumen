@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs static checks for Go, the frontend, the Python model script and these
-# shell scripts, plus frontend regression tests. It runs
-# them all, then fails if any failed, so one run shows every problem.
+# shell scripts, plus frontend regression tests and the large-library benchmark.
+# It runs them all, then fails if any failed, so one run shows every problem.
 #
 #   scripts/lint.sh          check
 #   scripts/lint.sh --fix    first apply every automatic fix, then check
@@ -12,7 +12,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit
 T=deps/tools
-GO=(. ./internal/... ./services/... ./cmd/... ./scripts/branding) # not ./...: build/ holds other platforms' templates
+GO=(. ./internal/... ./services/... ./cmd/... ./scripts/...) # not ./...: build/ holds other platforms' templates
 
 for tool in golangci-lint deadcode govulncheck ruff shellcheck; do
   [ -x "$T/$tool.exe" ] || { echo "missing $T/$tool.exe: run scripts/deps.sh" >&2; exit 2; }
@@ -40,6 +40,7 @@ step() {
 step "go: golangci-lint (gofmt, goimports, vet, staticcheck and more)" "$T/golangci-lint" run "${GO[@]}"
 step "go: deadcode" bash -c "out=\$('$T/deadcode' -test ${GO[*]}) && [ -z \"\$out\" ] || { echo \"\$out\"; false; }"
 step "go: govulncheck" "$T/govulncheck" "${GO[@]}"
+step "store: large-library latency budgets" bash scripts/bench.sh
 step "frontend: vue-tsc, eslint, prettier" npm --prefix frontend run -s check
 step "frontend: regression tests" npm --prefix frontend run -s test
 step "python: ruff" bash -c "'$T/ruff' check --quiet && '$T/ruff' format --check --quiet"

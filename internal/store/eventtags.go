@@ -47,16 +47,25 @@ type eventTagRef struct {
 	createdAt int64
 }
 
-// eventTagRefs returns the name and pin tags of every photo that holds one,
+// eventTagRefs returns the name and pin tags held in the requested window,
+// or the whole timeline when the window is nil,
 // and the block tags of the events whose block leaves their photos showing
 // (label mode). The members of a photo-mode block are all hidden, and the
 // event shows none of them, so they are left out.
-func eventTagRefs(ctx context.Context, tx *sql.Tx) (map[int64][]eventTagRef, error) {
+func eventTagRefs(ctx context.Context, tx *sql.Tx, window *[2]int64) (map[int64][]eventTagRef, error) {
+	from := "event_members m JOIN event_tags t ON t.id = m.tag_id"
+	where := ""
+	var args []any
+	if window != nil {
+		// The window drives the join, even when a tag holds the whole library.
+		from = "assets a CROSS JOIN " + from
+		where = visibleA + " AND a.taken_at >= ? AND a.taken_at <= ? AND m.asset_id = a.id AND "
+		args = []any{window[0], window[1]}
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT m.asset_id, t.id, t.kind, COALESCE(t.name, ''), t.created_at
-		FROM event_members m JOIN event_tags t ON t.id = m.tag_id
-		WHERE t.kind IN ('name', 'pin') OR (t.kind = 'block'
-			AND EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'event' AND b.target_id = t.id AND b.mode = 'label'))
-		ORDER BY t.id`)
+		FROM `+from+` WHERE `+where+`(t.kind IN ('name', 'pin') OR (t.kind = 'block'
+			AND EXISTS (SELECT 1 FROM blocks b WHERE b.kind = 'event' AND b.target_id = t.id AND b.mode = 'label')))
+		ORDER BY t.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -77,10 +86,16 @@ func eventTagRefs(ctx context.Context, tx *sql.Tx) (map[int64][]eventTagRef, err
 // time range, and the ids that bound it where photos share a second. It
 // leads with the plain range so the timeline index can serve it.
 func eventBounds(e *core.Event) (where string, args []any) {
-	return `taken_at >= ? AND taken_at <= ?
-		AND (taken_at > ? OR (taken_at = ? AND id >= ?))
-		AND (taken_at < ? OR (taken_at = ? AND id <= ?))`,
+	return eventBoundsSQL("?", "?", "?", "?"),
 		[]any{e.StartAt, e.EndAt, e.StartAt, e.StartAt, e.FirstID, e.EndAt, e.EndAt, e.LastID}
+}
+
+// eventBoundsSQL shares the edge rule between bound arguments and the cover
+// batch's bound table. Its inputs are SQL expressions, never user values.
+func eventBoundsSQL(start, end, first, last string) string {
+	return "taken_at >= " + start + " AND taken_at <= " + end +
+		" AND (taken_at > " + start + " OR (taken_at = " + start + " AND id >= " + first + "))" +
+		" AND (taken_at < " + end + " OR (taken_at = " + end + " AND id <= " + last + "))"
 }
 
 // eventAssets is the condition for a photo of the base timeline to lie

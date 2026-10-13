@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"math"
 	"slices"
@@ -56,7 +57,7 @@ func (s *Store) Events(ctx context.Context, gapHours int) ([]core.Event, error) 
 			return nil
 		}
 		var err error
-		out, err = groupEvents(ctx, tx, gapHours)
+		out, err = groupEvents(ctx, tx, gapHours, nil)
 		return err
 	})
 	if err != nil {
@@ -70,29 +71,42 @@ func (s *Store) Events(ctx context.Context, gapHours int) ([]core.Event, error) 
 	return append([]core.Event(nil), out...), nil
 }
 
-func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int) ([]core.Event, error) {
+// groupEvents uses the same grouping rules for the timeline and a gap-bounded
+// window. Removing blocked photos only widens gaps, so a base-timeline window
+// also contains complete visible events.
+func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int, window *[2]int64) ([]core.Event, error) {
 	var out []core.Event
+	where := visibleA
+	var args []any
+	if window != nil {
+		where += " AND a.taken_at >= ? AND a.taken_at <= ?"
+		args = []any{window[0], window[1]}
+	}
 	places := map[int64]string{}
 	type namedID struct {
 		id   int64
 		name string
 	}
+	placeQuery := "SELECT id, name FROM places WHERE NOT " + placeBlocked("places.id")
+	if window != nil {
+		placeQuery += " AND id IN (SELECT a.place_id FROM assets a WHERE " + where + ")"
+	}
 	placeRows, err := queryAll(ctx, tx, func(r *sql.Rows) (v namedID, err error) {
 		err = r.Scan(&v.id, &v.name)
 		return v, err
-	}, "SELECT id, name FROM places WHERE NOT "+placeBlocked("places.id")) // a blocked place names no event
+	}, placeQuery, args...) // A blocked place names no event.
 	if err != nil {
 		return nil, err
 	}
 	for _, row := range placeRows {
 		places[row.id] = row.name
 	}
-	tagged, err := eventTagRefs(ctx, tx)
+	tagged, err := eventTagRefs(ctx, tx, window)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT a.id, a.taken_at, a.lat, a.lon, COALESCE(a.place_id, 0),
-		a.thumb_version FROM assets a WHERE `+visibleA+` ORDER BY a.taken_at, a.id`)
+		a.thumb_version FROM assets a WHERE `+where+` ORDER BY a.taken_at, a.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -182,23 +196,43 @@ func refreshEventCovers(ctx context.Context, tx *sql.Tx, events []core.Event) er
 	if len(events) == 0 {
 		return nil
 	}
-	where, _ := (assetFilter{event: &core.Event{}}).where(0)
-	cover, err := tx.PrepareContext(ctx, "SELECT id, thumb_version FROM assets WHERE "+where+
-		" AND thumb_version > 0 ORDER BY taken_at DESC, id DESC LIMIT 1")
+	// One statement seeks each event's newest thumbnail through the timeline
+	// index. This avoids both a query per event and scanning every thumbnail
+	// when most events have one near their end.
+	bounds := make([][4]int64, len(events))
+	for i := range events {
+		event := &events[i]
+		bounds[i] = [4]int64{event.StartAt, event.EndAt, event.FirstID, event.LastID}
+	}
+	list, err := json.Marshal(bounds)
 	if err != nil {
 		return err
 	}
-	defer cover.Close()
-	for i := range events {
-		event := &events[i]
-		_, args := (assetFilter{event: event}).where(0)
-		event.Cover, event.CoverThumb = 0, 0
-		err := cover.QueryRowContext(ctx, args...).Scan(&event.Cover, &event.CoverThumb)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	// OFFSET prevents flattening, so each event's JSON bounds are decoded
+	// once rather than again for every thumbnail candidate.
+	rows, err := tx.QueryContext(ctx, `WITH bounds AS (
+			SELECT key AS position, json_extract(value, '$[0]') AS start_at,
+			json_extract(value, '$[1]') AS end_at, json_extract(value, '$[2]') AS first_id,
+			json_extract(value, '$[3]') AS last_id FROM json_each(?) LIMIT -1 OFFSET 0)
+		SELECT e.position, COALESCE(cover.id, 0), COALESCE(cover.thumb_version, 0)
+		FROM bounds e LEFT JOIN assets cover ON cover.id = (
+			SELECT id FROM assets WHERE `+visible+` AND thumb_version > 0 AND `+
+		eventBoundsSQL("e.start_at", "e.end_at", "e.first_id", "e.last_id")+`
+			ORDER BY taken_at DESC, id DESC LIMIT 1)`, string(list))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var index int
+		var id int64
+		var thumb int
+		if err := rows.Scan(&index, &id, &thumb); err != nil {
 			return err
 		}
+		events[index].Cover, events[index].CoverThumb = id, thumb
 	}
-	return nil
+	return rows.Err()
 }
 
 // eventSplitter decides where one event ends and the next begins, for photos
@@ -252,15 +286,33 @@ func eventName(place string, start, end int64) string {
 // Event returns the current group containing id. Old event links keep working
 // when an earlier asset later joins the group, as long as id remains visible.
 func (s *Store) Event(ctx context.Context, id int64, gapHours int) (core.Event, error) {
+	var event core.Event
+	err := s.read(ctx, func(tx *sql.Tx) error {
+		var err error
+		event, err = eventIn(ctx, tx, id, gapHours)
+		return err
+	})
+	return event, err
+}
+
+// eventIn resolves one event in its caller's snapshot without the list cache.
+// With a long gap and photos shot every day, the window can still span most
+// of the library; that worst case is no worse than the former full regroup.
+func eventIn(ctx context.Context, tx *sql.Tx, id int64, gapHours int) (core.Event, error) {
 	var at int64
-	err := s.r.QueryRowContext(ctx, "SELECT taken_at FROM assets WHERE id = ? AND "+visible, id).Scan(&at)
+	err := tx.QueryRowContext(ctx, "SELECT taken_at FROM assets WHERE id = ? AND "+visible, id).Scan(&at)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return core.Event{}, ErrNotFound
 		}
 		return core.Event{}, err
 	}
-	events, err := s.Events(ctx, gapHours)
+	gapHours = validGap(gapHours)
+	lo, hi, err := newSettler(tx, int64(gapHours)*3600).runAround(ctx, at)
+	if err != nil {
+		return core.Event{}, err
+	}
+	events, err := groupEvents(ctx, tx, gapHours, &[2]int64{lo, hi})
 	if err != nil {
 		return core.Event{}, err
 	}
@@ -288,7 +340,7 @@ func (s *Store) SetEventName(ctx context.Context, id int64, name string, gapHour
 		}
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		event, err := s.Event(ctx, id, gapHours)
+		event, err := eventIn(ctx, tx, id, gapHours)
 		if err != nil {
 			return err
 		}
@@ -321,7 +373,7 @@ func (s *Store) SetEventName(ctx context.Context, id int64, name string, gapHour
 // an event that is pinned already keeps its place among the pins.
 func (s *Store) SetEventPinned(ctx context.Context, id int64, pinned bool, gapHours int) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		event, err := s.Event(ctx, id, gapHours)
+		event, err := eventIn(ctx, tx, id, gapHours)
 		if err != nil {
 			return err
 		}
