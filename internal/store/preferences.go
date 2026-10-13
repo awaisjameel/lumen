@@ -296,8 +296,9 @@ func (s *Store) writeSettings(ctx context.Context, set []setting) error {
 	for _, kv := range set {
 		args = append(args, kv.key, kv.value)
 	}
-	// The settle step of tx is for photos: settings change none.
-	err := s.runTx(ctx, false, func(tx *sql.Tx) error {
+	// A setting can be an input of the block predicate (the tag confidence),
+	// so these writes settle blocked assets like any other.
+	err := s.tx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "INSERT INTO settings (key, value) VALUES "+
 			strings.TrimSuffix(strings.Repeat("(?, ?),", len(set)), ",")+
 			" ON CONFLICT (key) DO UPDATE SET value = excluded.value", args...)
