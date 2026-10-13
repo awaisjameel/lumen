@@ -40,7 +40,7 @@ func (s *Store) eventBlockTarget(ctx context.Context, tx *sql.Tx, eventID int64)
 	if err != nil {
 		return 0, "", err
 	}
-	event, err := s.Event(ctx, eventID, int(gap/3600))
+	event, err := eventIn(ctx, tx, eventID, int(gap/3600))
 	if err != nil {
 		return 0, "", err
 	}
