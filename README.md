@@ -166,7 +166,7 @@ Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), what
 
 ## Code quality
 
-`scripts/lint.sh` runs the static checks and frontend regression tests and fails if any does; `scripts/lint.sh --fix` first applies every automatic fix. Each tool is pinned and configured in the repository:
+`scripts/lint.sh` runs the static checks, frontend regression tests and the large-library latency gate, runs every step, and reports all failures at the end; `scripts/lint.sh --fix` first applies every automatic fix. Each tool is pinned and configured in the repository:
 
 | Code     | Formatting       | Linting                                                                                                                                                       | Config                                                                             |
 | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -179,6 +179,20 @@ The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`)
 
 Editors do the same on save: `.editorconfig` sets line endings and indentation, and `.vscode/settings.json` runs these formatters and linters from the pinned copies (install the recommended extensions).
 
+After the Go static checks, the latency gate seeds 100,000 photos once and times
+store reads and writes with no blocks, a folder block, and a folder, Thing and
+person block. It includes thousands of events and a day with 10,000 imported
+photos. Every P1 finding in the [bottleneck audit](docs/bottleneck-audit-2026-10-13.md)
+was invisible at 3,000 photos; this step keeps the product's acceptance size in
+the regular gate. Run `scripts/bench.sh` alone (it sources `scripts/env.sh`);
+allow one to two minutes on an i7-13700H with a warm toolchain.
+
+The readable ceilings in `internal/store/testdata/library-budgets.txt` catch
+substantial regressions and allow ordinary timing noise. A missing or unused
+budget also fails. Raise a ceiling only by hand, with a reason and at least five
+repeat measurements in review, using the headroom rule in that file. A failing
+run is a reason to investigate, not automatically to raise a budget.
+
 ## Commands
 
 ```sh
@@ -186,7 +200,8 @@ wails3 dev                    # run with hot reload
 wails3 build                  # production build -> bin/Lumen.exe
 source scripts/env.sh         # before go test / vet / run: puts deps/runtime (libvips) on PATH
 go test -race -timeout 900s . ./internal/... ./services/... # wiring, engine and service tests (AI tests use deps/runtime)
-scripts/lint.sh               # every formatter, linter and type check (--fix applies fixes first)
+scripts/lint.sh               # static checks, frontend tests and large-library latency (--fix applies fixes first)
+scripts/bench.sh              # 100,000-photo store latency gate alone (one to two minutes)
 cd frontend && npm run check  # the frontend's alone: vue-tsc, ESLint, Prettier (lint:fix and format fix)
 npm run test                 # Vitest: async store, viewer and settings regressions
 node e2e/run.mjs             # end-to-end suites on bin/Lumen.exe in its WebView2 (after wails3 build)

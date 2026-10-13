@@ -35,8 +35,9 @@ source scripts/env.sh                       # REQUIRED before go test / vet / ru
 go test -race -count=1 -timeout 900s . ./internal/... ./services/...
 go test -race -timeout 900s -run TestTagByNameRefusesABlockedThing ./internal/store   # one test
 
-scripts/lint.sh                             # every formatter, linter, type check and the Vitest run; must stay at zero
+scripts/lint.sh                             # static checks, frontend tests and large-library latency; must stay at zero
 scripts/lint.sh --fix                       # apply automatic fixes first
+scripts/bench.sh                            # large-library latency gate alone (one to two minutes; sources env.sh)
 
 cd frontend
 npm run check                               # vue-tsc, ESLint (zero warnings), Prettier
@@ -50,6 +51,13 @@ SECTIONS=themes,video node e2e/suites/interface.mjs
 
 wails3 generate bindings -f '-tags production' -clean=true -ts -i   # regenerate frontend/bindings
 ```
+
+The latency step follows the Go static checks in `scripts/lint.sh`. It seeds
+100,000 photos once and checks every call in three block configurations against
+`internal/store/testdata/library-budgets.txt`, without the race detector.
+Budgets are ceilings for substantial regressions. Raise one only by hand, with
+a reason and at least five repeat measurements in review; do not update it just
+because a run failed.
 
 - **Name the Go packages, never `./...`**: `build/` holds Wails' mobile templates, which only build on their own platforms. `spikes/` is its own Go module.
 - **Always pass `-timeout`** to `go test`; the race run is slow.

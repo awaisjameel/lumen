@@ -1,0 +1,116 @@
+# Large-library latency ceilings, measured 2026-10-13 on Windows amd64.
+# Intel Core i7-13700H, 20 logical processors, NVMe, Go 1.27.2,
+# CGO_ENABLED=1, CC=clang, no race detector. The fixture holds 100,000 photos.
+# Five samples per figure, each the mean of three warmed calls (-benchtime=3x).
+# One seed is shared across calls and no/folder/folder+tag+person blocks.
+# Ranges below are the minimum and maximum of those five samples in ms/op.
+# Every ceiling is max(5ms, 3 * slowest sample), rounded UP to one significant
+# decimal digit. The 5ms floor keeps small timings from failing on ordinary noise.
+# A ceiling catches substantial regressions; it is not a baseline or a 10% target.
+# Raise a ceiling only by hand in review when an intentional feature/fixture
+# change or repeat measurements on a supported machine justify the cost.
+# Include the reason and at least five samples; investigate regressions first.
+# Do not raise a ceiling simply to make a failing run pass. There is no --update.
+# The gate also rejects a missing or unused budget. Names omit Go's CPU suffix.
+# Table headroom is the extra latency allowed as a percentage of the figure:
+# 100 * (budget / figure - 1).
+# benchmark duration # measured minimum..maximum ms/op
+BenchmarkLargeLibraryStore/none/Things 2s # 312.691..360.104 ms/op
+BenchmarkLargeLibraryStore/none/People 600ms # 169.783..180.847 ms/op
+BenchmarkLargeLibraryStore/none/DayBuckets 200ms # 57.071..59.066 ms/op
+BenchmarkLargeLibraryStore/none/CountVisible 40ms # 10.989..11.447 ms/op
+BenchmarkLargeLibraryStore/none/Events 300ms # 92.509..93.846 ms/op
+BenchmarkLargeLibraryStore/none/Event 5ms # 0.329..0.459 ms/op
+BenchmarkLargeLibraryStore/none/EventRepeated 5ms # 0.237..0.290 ms/op
+BenchmarkLargeLibraryStore/none/SetEventName 5ms # 0.726..0.776 ms/op
+BenchmarkLargeLibraryStore/none/SetEventPinned 7ms # 0.609..2.175 ms/op
+BenchmarkLargeLibraryStore/none/EventsAfterCover 60ms # 15.979..16.991 ms/op
+BenchmarkLargeLibraryStore/none/DayItemsOrdinary 5ms # 0.083..0.107 ms/op
+BenchmarkLargeLibraryStore/none/DayItemsThreeDays 5ms # 0.145..0.161 ms/op
+BenchmarkLargeLibraryStore/none/DayItemsBigDay 50ms # 15.018..15.816 ms/op
+BenchmarkLargeLibraryStore/none/TimelineEvent 5ms # 0.487..0.514 ms/op
+BenchmarkLargeLibraryStore/none/DayItemsEvent 5ms # 0.542..0.593 ms/op
+BenchmarkLargeLibraryStore/none/DayBucketsThing 40ms # 10.927..11.781 ms/op
+BenchmarkLargeLibraryStore/none/DuplicateGroups 900ms # 265.655..270.824 ms/op
+BenchmarkLargeLibraryStore/none/ClusterData 500ms # 136.316..142.801 ms/op
+BenchmarkLargeLibraryStore/none/JobCountsDone 200ms # 39.951..41.206 ms/op
+BenchmarkLargeLibraryStore/none/AssetVisible 5ms # 0.013..0.035 ms/op
+BenchmarkLargeLibraryStore/none/Selection 200ms # 31.130..33.889 ms/op
+BenchmarkLargeLibraryStore/none/UnavailableAssets 40ms # 10.779..11.638 ms/op
+BenchmarkLargeLibraryStore/none/Places 30ms # 7.617..8.190 ms/op
+BenchmarkLargeLibraryStore/none/SaveEmbeddings64 70ms # 18.935..22.330 ms/op
+BenchmarkLargeLibraryStore/none/SaveTags64 70ms # 15.036..22.151 ms/op
+BenchmarkLargeLibraryStore/none/SaveFaces64 8ms # 2.106..2.357 ms/op
+BenchmarkLargeLibraryStore/none/SaveThumbnails64 20ms # 3.291..3.418 ms/op
+BenchmarkLargeLibraryStore/none/QueueOCR 200ms # 61.092..64.923 ms/op
+BenchmarkLargeLibraryStore/none/RebuildBlocks 5ms # 0.062..0.085 ms/op
+BenchmarkLargeLibraryStore/none/JobCountsPending 400ms # 111.303..115.494 ms/op
+BenchmarkLargeLibraryStore/none/CountPending 200ms # 44.985..45.755 ms/op
+BenchmarkLargeLibraryStore/none/PendingJobsKind64 5ms # 0.076..0.136 ms/op
+BenchmarkLargeLibraryStore/none/Ingest128 40ms # 9.767..12.801 ms/op
+BenchmarkLargeLibraryStore/folder/Things 2s # 361.688..457.986 ms/op
+BenchmarkLargeLibraryStore/folder/People 700ms # 174.466..202.321 ms/op
+BenchmarkLargeLibraryStore/folder/DayBuckets 200ms # 64.297..66.592 ms/op
+BenchmarkLargeLibraryStore/folder/CountVisible 60ms # 17.526..17.950 ms/op
+BenchmarkLargeLibraryStore/folder/Events 400ms # 102.010..118.852 ms/op
+BenchmarkLargeLibraryStore/folder/Event 5ms # 0.390..0.420 ms/op
+BenchmarkLargeLibraryStore/folder/EventRepeated 5ms # 0.279..0.327 ms/op
+BenchmarkLargeLibraryStore/folder/SetEventName 5ms # 0.750..0.805 ms/op
+BenchmarkLargeLibraryStore/folder/SetEventPinned 5ms # 0.640..0.678 ms/op
+BenchmarkLargeLibraryStore/folder/EventsAfterCover 60ms # 16.519..17.815 ms/op
+BenchmarkLargeLibraryStore/folder/DayItemsOrdinary 5ms # 0.075..0.099 ms/op
+BenchmarkLargeLibraryStore/folder/DayItemsThreeDays 5ms # 0.154..0.180 ms/op
+BenchmarkLargeLibraryStore/folder/DayItemsBigDay 60ms # 15.475..19.464 ms/op
+BenchmarkLargeLibraryStore/folder/TimelineEvent 5ms # 0.512..0.688 ms/op
+BenchmarkLargeLibraryStore/folder/DayItemsEvent 5ms # 0.554..0.616 ms/op
+BenchmarkLargeLibraryStore/folder/DayBucketsThing 40ms # 11.291..12.217 ms/op
+BenchmarkLargeLibraryStore/folder/DuplicateGroups 900ms # 263.496..282.976 ms/op
+BenchmarkLargeLibraryStore/folder/ClusterData 500ms # 133.838..138.586 ms/op
+BenchmarkLargeLibraryStore/folder/JobCountsDone 200ms # 46.237..48.544 ms/op
+BenchmarkLargeLibraryStore/folder/AssetVisible 5ms # 0.016..0.035 ms/op
+BenchmarkLargeLibraryStore/folder/Selection 200ms # 40.612..42.047 ms/op
+BenchmarkLargeLibraryStore/folder/UnavailableAssets 60ms # 16.810..17.660 ms/op
+BenchmarkLargeLibraryStore/folder/Places 50ms # 15.510..16.100 ms/op
+BenchmarkLargeLibraryStore/folder/SaveEmbeddings64 60ms # 18.196..18.950 ms/op
+BenchmarkLargeLibraryStore/folder/SaveTags64 60ms # 15.501..17.317 ms/op
+BenchmarkLargeLibraryStore/folder/SaveFaces64 7ms # 2.151..2.246 ms/op
+BenchmarkLargeLibraryStore/folder/SaveThumbnails64 20ms # 3.390..3.619 ms/op
+BenchmarkLargeLibraryStore/folder/QueueOCR 200ms # 61.297..63.840 ms/op
+BenchmarkLargeLibraryStore/folder/RebuildBlocks 500ms # 133.151..136.256 ms/op
+BenchmarkLargeLibraryStore/folder/JobCountsPending 400ms # 112.415..117.739 ms/op
+BenchmarkLargeLibraryStore/folder/CountPending 200ms # 57.979..60.753 ms/op
+BenchmarkLargeLibraryStore/folder/PendingJobsKind64 5ms # 0.087..0.118 ms/op
+BenchmarkLargeLibraryStore/folder/Ingest128 60ms # 10.315..17.189 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/Things 2s # 388.231..411.317 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/People 800ms # 221.440..250.335 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DayBuckets 300ms # 66.649..68.115 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/CountVisible 70ms # 20.371..21.539 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/Events 400ms # 103.098..107.207 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/Event 5ms # 0.378..0.707 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/EventRepeated 5ms # 0.274..0.327 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/SetEventName 5ms # 0.699..0.777 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/SetEventPinned 5ms # 0.616..0.656 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/EventsAfterCover 60ms # 16.101..17.655 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DayItemsOrdinary 5ms # 0.073..0.102 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DayItemsThreeDays 5ms # 0.152..0.184 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DayItemsBigDay 50ms # 14.623..15.266 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/TimelineEvent 5ms # 0.501..0.540 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DayItemsEvent 5ms # 0.534..0.619 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DayBucketsThing 30ms # 8.629..8.866 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DuplicateGroups 800ms # 255.199..256.952 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/ClusterData 500ms # 133.781..143.502 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/JobCountsDone 200ms # 47.340..49.950 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/AssetVisible 5ms # 0.017..0.033 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/Selection 200ms # 44.161..47.693 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/UnavailableAssets 80ms # 22.395..23.536 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/Places 70ms # 20.841..21.036 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/SaveEmbeddings64 70ms # 20.807..22.188 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/SaveTags64 70ms # 18.738..20.322 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/SaveFaces64 8ms # 2.215..2.391 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/SaveThumbnails64 20ms # 3.449..3.540 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/QueueOCR 200ms # 60.651..64.863 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/RebuildBlocks 900ms # 284.189..288.096 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/JobCountsPending 400ms # 111.797..114.876 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/CountPending 200ms # 62.317..64.566 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/PendingJobsKind64 5ms # 0.081..0.112 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/Ingest128 40ms # 10.039..11.367 ms/op
