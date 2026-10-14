@@ -81,6 +81,12 @@ tooling; this file covers how code is written.
     Never edit an applied migration, apart from the whitespace already fixed.
   - Visibility goes through `visible`, `labelBlocked` and `blockVisible`.
     A new input to those needs a trigger that bumps `visible_value`.
+  - The whole-library counts (timeline days, Things, people, job progress)
+    are kept in tables by triggers in the transaction that changes them
+    (migration 0037); the query each replaced stays as its recount and its
+    test's reference. A new input to one needs its trigger, and a statement
+    that can change the visibility of an unbounded number of assets calls
+    `markKeptCountsForChange` first, so they are recounted once instead.
   - Names and paths compare with `fold()` and `foldKey`, never `NOCASE`.
 - **Logging** uses `log/slog`. Messages are lower case and say what failed
   ("tidy thumbnail cache"), and the error goes in the `"err"` key. Never log
