@@ -204,7 +204,27 @@ func prepareAddAI(ctx context.Context, tx *sql.Tx) (*sql.Stmt, error) {
 // Embeddings calls fn for every stored embedding made by model. vec is only
 // valid during the call.
 func (s *Store) Embeddings(ctx context.Context, model string, fn func(id int64, vec []int8, scale float32)) error {
-	rows, err := s.r.QueryContext(ctx, "SELECT asset_id, scale, vec FROM embeddings WHERE model = ?", model)
+	return s.LoadEmbeddings(ctx, model, nil, fn)
+}
+
+// LoadEmbeddings calls prepare with the matching count before visiting vectors.
+// Both reads share a snapshot, so indexing during reservation cannot change it.
+// A nil prepare skips the count. vec is only valid during fn.
+func (s *Store) LoadEmbeddings(ctx context.Context, model string, prepare func(int), fn func(id int64, vec []int8, scale float32)) error {
+	return s.read(ctx, func(tx *sql.Tx) error {
+		if prepare != nil {
+			var n int
+			if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM embeddings WHERE model = ?", model).Scan(&n); err != nil {
+				return err
+			}
+			prepare(n)
+		}
+		return visitEmbeddings(ctx, tx, model, fn)
+	})
+}
+
+func visitEmbeddings(ctx context.Context, tx *sql.Tx, model string, fn func(id int64, vec []int8, scale float32)) error {
+	rows, err := tx.QueryContext(ctx, "SELECT asset_id, scale, vec FROM embeddings WHERE model = ?", model)
 	if err != nil {
 		return err
 	}

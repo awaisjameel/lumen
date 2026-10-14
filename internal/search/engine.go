@@ -240,7 +240,7 @@ func (e *Engine) load(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("sync things: %w", err)
 	}
-	if err := e.store.Embeddings(ctx, e.model.Version, e.index.Put); err != nil {
+	if err := e.store.LoadEmbeddings(ctx, e.model.Version, e.index.reserve, e.index.Put); err != nil {
 		return fmt.Errorf("load embeddings: %w", err)
 	}
 	if err := e.video.load(func(add func(asset, at int64, q []int8, scale float32)) error {

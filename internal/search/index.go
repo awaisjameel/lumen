@@ -26,6 +26,23 @@ type Index struct {
 // NewIndex returns an empty index for vectors of dim values.
 func NewIndex(dim int) *Index { return &Index{dim: dim, pos: map[int64]int{}} }
 
+// reserve sizes a startup load once, retaining vectors from an interrupted load.
+func (x *Index) reserve(n int) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	n = max(n, len(x.ids))
+	x.ids = slices.Grow(x.ids, n-len(x.ids))
+	x.scales = slices.Grow(x.scales, n-len(x.scales))
+	x.vecs = slices.Grow(x.vecs, n*x.dim-len(x.vecs))
+	if n > len(x.pos) {
+		pos := make(map[int64]int, n)
+		for id, i := range x.pos {
+			pos[id] = i
+		}
+		x.pos = pos
+	}
+}
+
 // Quantize maps a vector to int8 with one scale: v ≈ q * scale. A vector
 // that is not finite quantizes to zero, which matches nothing.
 func Quantize(v []float32) (q []int8, scale float32) {
