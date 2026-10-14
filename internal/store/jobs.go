@@ -100,6 +100,15 @@ func settle(ctx context.Context, tx *sql.Tx, where string, args ...any) error {
 // metadata reads, so they re-run when it changes.
 var afterMetadata = []core.Stage{core.StageThumbnail, core.StageEmbedding, core.StageFaces, core.StageOCR}
 
+const terminalOutcomes = "('error', 'skipped')"
+
+var countedJobsFrom = ` FROM asset_jobs j JOIN assets a ON a.id = j.asset_id WHERE ` + visibleA + ` AND j.status IN `
+
+var recountJobCountsSQL = `DELETE FROM job_counts;
+	INSERT INTO job_counts(stage, kind, status, n)
+	SELECT j.stage, j.kind, 'pending', count(*)` + countedJobsFrom + unfinished + ` GROUP BY j.stage, j.kind
+	UNION ALL SELECT '', '', j.status, count(DISTINCT j.asset_id)` + countedJobsFrom + terminalOutcomes + ` GROUP BY j.status;`
+
 // MaxAttempts is how many times in a row a job may fail before it is left
 // failed until its stage's version changes.
 const MaxAttempts = 3
@@ -602,15 +611,11 @@ type QueueCounts struct {
 // assets keep being indexed, but their jobs must not appear in the UI's
 // progress counts.
 func (s *Store) JobCounts(ctx context.Context) (QueueCounts, error) {
-	rows, err := s.r.QueryContext(ctx, `SELECT j.stage, j.kind, j.status, count(*) FROM asset_jobs j
-		JOIN assets a ON a.id = j.asset_id
-		WHERE j.status IN ('pending', 'waiting') AND `+visibleA+`
-		GROUP BY j.stage, j.kind, j.status
-		UNION ALL
-		SELECT '', '', j.status, count(DISTINCT j.asset_id) FROM asset_jobs j
-		JOIN assets a ON a.id = j.asset_id
-		WHERE j.status IN ('error', 'skipped') AND `+visibleA+`
-		GROUP BY j.status`)
+	return jobCounts(ctx, s.r)
+}
+
+func jobCounts(ctx context.Context, db querier) (QueueCounts, error) {
+	rows, err := db.QueryContext(ctx, "SELECT stage, kind, status, n FROM job_counts WHERE n > 0")
 	if err != nil {
 		return QueueCounts{}, err
 	}

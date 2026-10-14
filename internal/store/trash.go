@@ -45,15 +45,25 @@ func setTrashed(ctx context.Context, tx *sql.Tx, ids []int64, trash bool) error 
 	}
 	// Trashing needs a file on disk (present); a restore only needs the row,
 	// so an asset whose file was recycled can leave the Trash too.
-	exists, update, args := "1", "UPDATE assets SET trashed_at = NULL WHERE id IN (SELECT value FROM json_each(?)) AND trashed_at IS NOT NULL",
+	exists, change, update, args := "1", "trashed_at IS NOT NULL", "UPDATE assets SET trashed_at = NULL WHERE id IN (SELECT value FROM json_each(?)) AND trashed_at IS NOT NULL",
 		[]any{string(list)}
 	if trash {
 		exists = present
+		change = "trashed_at IS NULL AND " + present
 		update = "UPDATE assets SET trashed_at = ? WHERE id IN (SELECT value FROM json_each(?)) AND trashed_at IS NULL AND " + present
 		args = []any{time.Now().Unix(), string(list)}
 	}
 	if err := requireAll(ctx, tx, exists, string(list)); err != nil {
 		return err
+	}
+	if int64(len(ids)) >= keptCountsLimit(ctx) {
+		var changed int64
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM assets WHERE "+change+" AND id IN (SELECT value FROM json_each(?))", string(list)).Scan(&changed); err != nil {
+			return err
+		}
+		if err := markKeptCountsForChange(ctx, tx, changed); err != nil {
+			return err
+		}
 	}
 	_, err = tx.ExecContext(ctx, update, args...)
 	return err
@@ -81,6 +91,13 @@ func requireAll(ctx context.Context, q querier, condition, list string) error {
 // Recycle Bin it returns to the Trash, not the library.
 func (s *Store) RestoreAllTrash(ctx context.Context) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
+		var changed int64
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM assets WHERE "+trashed).Scan(&changed); err != nil {
+			return err
+		}
+		if err := markKeptCountsForChange(ctx, tx, changed); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, "UPDATE assets SET trashed_at = NULL WHERE "+trashed)
 		return err
 	})

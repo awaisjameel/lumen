@@ -132,9 +132,9 @@ func TestUpgradeBackfillsJobKinds(t *testing.T) {
 	photo, video := item(src.ID, `C:\Media\a.jpg`, "a"), item(src.ID, `C:\Media\b.mp4`, "b")
 	video.Kind = core.KindVideo
 	check(t, errOf(st.Ingest(ctx, []IngestItem{photo, video})))
+	downgradeToV18(t, st)
 	check(t, errOf(st.w.ExecContext(ctx, "DROP INDEX asset_jobs_pending_kind")))
 	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE asset_jobs DROP COLUMN kind")))
-	downgradeToV18(t, st)
 	check(t, errOf(st.w.ExecContext(ctx, "PRAGMA user_version = 16")))
 	check(t, st.Close())
 	st, err = Open(path)

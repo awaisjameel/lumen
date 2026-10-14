@@ -963,8 +963,8 @@ func (ix *Indexer) flushFSChanges() {
 
 // reportLoop emits index:progress when it changes and library:changed at most
 // once a second, so the UI stays live without being flooded. While nothing
-// changes it does not touch the database. Counting jobs takes a while in a
-// big library, so it spends at most a fifth of the time doing it.
+// changes it does not touch the database. Progress reads the kept counts, and
+// reporting still spends at most a fifth of the time.
 func (ix *Indexer) reportLoop(ctx context.Context) {
 	wait := time.Second
 	wasIdle := false

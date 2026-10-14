@@ -107,7 +107,7 @@ func Open(path string) (*Store, error) {
 	// A migrated library must be backfilled before any reader can browse it.
 	if err := s.tx(context.Background(), func(*sql.Tx) error { return nil }); err != nil {
 		w.Close()
-		return nil, fmt.Errorf("backfill blocked assets: %w", err)
+		return nil, fmt.Errorf("backfill derived tables: %w", err)
 	}
 
 	r, err := sql.Open(driverName, dsn("&_query_only=1"))
@@ -229,8 +229,8 @@ func (s *Store) read(ctx context.Context, fn func(*sql.Tx) error) error {
 // tx runs fn in a write transaction, committing on success. The deferred
 // rollback also runs if fn panics, so the single writer connection is never
 // left inside a transaction (every later write would wait on it). Before it
-// commits, the transaction settles event tags and then blocked assets, so
-// neither derived set can disagree with the photos on disk.
+// commits, the transaction settles event tags, blocked assets and counts, so
+// the derived sets and kept counts agree with the photos on disk.
 func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	return s.runTx(ctx, true, fn)
 }
@@ -252,6 +252,9 @@ func (s *Store) runTx(ctx context.Context, settle bool, fn func(*sql.Tx) error) 
 		}
 		if err := settleBlockedAssets(ctx, tx); err != nil {
 			return fmt.Errorf("settle blocked assets: %w", err)
+		}
+		if err := settleKeptCounts(ctx, tx); err != nil {
+			return fmt.Errorf("settle kept counts: %w", err)
 		}
 	}
 	return tx.Commit()
