@@ -578,6 +578,13 @@ func TestTheOCRQueueIsReadFromItsOwnIndex(t *testing.T) {
 	}
 }
 
+func TestQueueingTheWholeLibraryForTextStartsFromTheTwoTags(t *testing.T) {
+	plan := queryPlan(t, openTest(t), "SELECT a.id FROM assets a WHERE "+ocrEligibleAll("a"))
+	if !strings.Contains(plan, "asset_tags_by_tag") || slices.Contains(strings.Split(plan, "\n"), "SCAN a") {
+		t.Fatalf("the whole library's eligible photos are not found from the two tags:\n%s", plan)
+	}
+}
+
 // seedOCRLibrary adds n photos, every earlier stage done, of which eligible
 // carry the Screenshots tag, wait for OCR and (every other one of them, so
 // half) already have read text. It is written in SQL: Ingest is for scans.

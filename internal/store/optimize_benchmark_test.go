@@ -2,15 +2,18 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
-// BenchmarkIdleOptimize measures the first analysis and a subsequent small change.
-// Every iteration starts with an unanalysed library through the real triggers.
+// BenchmarkIdleOptimize measures the first analysis and a subsequent small
+// change, on exit (Close's PRAGMA optimize on the writer) and at idle
+// (Optimize), both bounded by connectPragmas. Every iteration starts with an
+// unanalysed library through the real triggers.
 func BenchmarkIdleOptimize(b *testing.B) {
-	for _, mode := range []string{"default", "bounded_writer", "bounded_separate"} {
+	for _, mode := range []string{"close", "idle"} {
 		b.Run(mode, func(b *testing.B) {
 			b.StopTimer()
 			for range b.N {
@@ -38,29 +41,15 @@ func BenchmarkIdleOptimize(b *testing.B) {
 				var readerCount int
 				mustBench(b, st.r.QueryRowContext(b.Context(), "SELECT count(*) FROM files").Scan(&readerCount))
 				optimize := func() error {
-					switch mode {
-					case "default":
+					if mode == "close" {
 						_, err := st.w.DB.ExecContext(b.Context(), "PRAGMA optimize")
 						return err
-					case "bounded_writer":
-						return st.tx(b.Context(), func(tx *sql.Tx) error {
-							_, err := tx.ExecContext(b.Context(), "PRAGMA analysis_limit=1000; PRAGMA optimize=0x10002")
-							return err
-						})
-					default:
-						var seq int
-						var name, file string
-						if err := st.r.QueryRowContext(b.Context(), "PRAGMA database_list").Scan(&seq, &name, &file); err != nil {
-							return err
-						}
-						db, err := sql.Open(driverName, file+"?_busy_timeout=0&_cache_size=-2000")
-						if err != nil {
-							return err
-						}
-						defer func() { _ = db.Close() }()
-						_, err = db.ExecContext(b.Context(), "PRAGMA analysis_limit=1000; PRAGMA optimize=0x10002")
-						return err
 					}
+					completed, err := st.Optimize(b.Context())
+					if err == nil && !completed {
+						err = errors.New("optimisation did not complete")
+					}
+					return err
 				}
 				b.StartTimer()
 				start := time.Now()

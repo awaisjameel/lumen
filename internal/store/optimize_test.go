@@ -34,11 +34,6 @@ func TestOptimizeCreatesStatisticsBeforeTheLibraryCloses(t *testing.T) {
 	if !completed || after == 0 {
 		t.Fatal("optimisation left the open library without statistics")
 	}
-	var limit int
-	check(t, st.w.QueryRowContext(t.Context(), "PRAGMA analysis_limit").Scan(&limit))
-	if limit != 0 {
-		t.Fatalf("maintenance changed the writer analysis limit: %d", limit)
-	}
 }
 
 func TestOptimizeYieldsToAnActiveWriterAndReportsCancellation(t *testing.T) {

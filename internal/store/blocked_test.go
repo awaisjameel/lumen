@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"path/filepath"
 	"slices"
@@ -59,6 +60,26 @@ func TestVisibilityUsesOnlyAPrimaryKeyProbeForPhotoBlocks(t *testing.T) {
 		if !strings.Contains(joined, "SEARCH blocked_assets USING INTEGER PRIMARY KEY") || strings.Contains(where, "FROM blocks") {
 			t.Fatalf("visibility must probe blocked_assets by primary key: %s\n%s", where, joined)
 		}
+	}
+}
+
+// assertUnavailableOracle checks that search leaves out exactly the assets
+// the user cannot browse.
+func assertUnavailableOracle(ctx context.Context, t *testing.T, st *Store) {
+	t.Helper()
+	got, err := st.UnavailableAssets(ctx)
+	check(t, err)
+	want, err := queryAll(ctx, st.r, scanID, "SELECT id FROM assets WHERE NOT ("+visible+")")
+	check(t, err)
+	if len(got) != len(want) || slices.ContainsFunc(want, func(id int64) bool { return !got[id] }) {
+		t.Fatalf("search leaves out %v, want the assets that are not visible: %v", slices.Sorted(maps.Keys(got)), want)
+	}
+}
+
+func TestSearchReadsItsExclusionsWithoutTestingEveryAsset(t *testing.T) {
+	plan := queryPlan(t, openTest(t), unavailableSQL)
+	if !strings.Contains(plan, "COVERING INDEX assets_unavailable") || slices.Contains(strings.Split(plan, "\n"), "SCAN assets") {
+		t.Fatalf("search's exclusions must come from the assets_unavailable index:\n%s", plan)
 	}
 }
 
@@ -286,6 +307,7 @@ func TestMaterialisedBlocksEqualTheOriginalPredicateThroughRandomisedChanges(t *
 						assertBlockedOracle(ctx, t, tx)
 						return nil
 					}))
+					assertUnavailableOracle(ctx, t, st)
 				}
 			}
 		})

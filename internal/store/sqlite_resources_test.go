@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mattn/go-sqlite3"
 )
 
 func TestCheckpointTruncatesTheWALWithoutLosingCommittedData(t *testing.T) {
@@ -143,6 +146,65 @@ func TestTheReadPoolBoundsItsIdleConnectionCaches(t *testing.T) {
 	check(t, st.w.QueryRowContext(ctx, "PRAGMA cache_size").Scan(&size))
 	if size != -32000 {
 		t.Fatalf("writer cache = %d KiB", size)
+	}
+}
+
+func TestEveryConnectionKeepsTemporaryDataInMemoryAndBoundsAnalysis(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	settings := func(name string, db querier) {
+		t.Helper()
+		var store, limit int
+		check(t, db.QueryRowContext(ctx, "PRAGMA temp_store").Scan(&store))
+		check(t, db.QueryRowContext(ctx, "PRAGMA analysis_limit").Scan(&limit))
+		if store != 2 || limit != 1000 {
+			t.Errorf("%s: temp_store = %d, analysis_limit = %d; want 2 (memory) and 1000", name, store, limit)
+		}
+	}
+	settings("writer", st.w)
+	settings("reader", st.r)
+	_, err := st.maintain(ctx, func(db *sql.DB) error {
+		settings("maintenance", db)
+		return nil
+	})
+	check(t, err)
+}
+
+func TestReadersCompileARepeatedQueryOnceAndTheWriterEachTime(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	for _, c := range []struct {
+		name string
+		db   *sql.DB
+		want int
+	}{{"reader", st.r, 1}, {"writer", st.w.DB, 3}} {
+		conn, err := c.db.Conn(ctx)
+		check(t, err)
+		// SQLite asks the authoriser about a statement only while compiling it.
+		compiled := 0
+		authorise := func(authorizer func(int, string, string, string) int) error {
+			return conn.Raw(func(dc any) error {
+				sc, ok := dc.(*sqlite3.SQLiteConn)
+				if !ok {
+					return fmt.Errorf("driver connection is %T", dc)
+				}
+				sc.RegisterAuthorizer(authorizer)
+				return nil
+			})
+		}
+		check(t, authorise(func(op int, _, _, _ string) int {
+			if op == sqlite3.SQLITE_SELECT {
+				compiled++
+			}
+			return sqlite3.SQLITE_OK
+		}))
+		for range 3 {
+			var n int
+			check(t, conn.QueryRowContext(ctx, "SELECT count(*) FROM settings WHERE key <> ?", "").Scan(&n))
+		}
+		check(t, authorise(nil))
+		check(t, conn.Close())
+		if compiled != c.want {
+			t.Errorf("%s compiled a query run three times %d times, want %d", c.name, compiled, c.want)
+		}
 	}
 }
 
