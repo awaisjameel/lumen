@@ -11,6 +11,8 @@ import puppeteer from 'puppeteer-core'
 import { go, lib, sleep, unthrottle, usableGrid, waitIndexed } from '../lib/app.mjs'
 import { E2E, EXE, ROOT } from '../lib/suite.mjs'
 import { finaliseRequest, quantile } from './thumbs-metrics.mjs'
+import { sampleWebviewMemory } from './thumbs-memory.mjs'
+import { checkBlockedThumbnail } from './thumbs-privacy.mjs'
 
 const runFile = promisify(execFile)
 const photos = Number(process.argv[2] ?? 3600)
@@ -37,6 +39,7 @@ const out = {
   machine: { cpu: cpus()[0]?.model, logicalProcessors: cpus().length, windows: release(), node: process.version },
   executableSHA256: createHash('sha256').update(readFileSync(EXE)).digest('hex'),
   measurements: [],
+  webviewMemory: [],
   method: {
     viewport: '1440 x 900 CSS pixels, device scale 1',
     tiles: 'unique grid thumbnail URLs intersecting the scroller, sampled each animation frame',
@@ -50,6 +53,8 @@ const out = {
       'requestAnimationFrame gaps >50 ms; Tracing FireAnimationFrame gaps and long RunTask events cross-check these',
     cache:
       'requestServedFromCache means memory unless fromDiskCache; a raw 304 is network revalidation despite a cached 200 response',
+    webviewMemory:
+      'sum of Windows PrivateMemorySize64 and WorkingSet64 for msedgewebview2.exe descendants of this scratch Lumen PID; working sets can count shared pages more than once',
   },
 }
 const save = () => writeFileSync(join(run, 'report.json'), JSON.stringify(out, null, 2) + '\n')
@@ -327,7 +332,22 @@ async function top() {
   await settle()
 }
 
+async function memory(label) {
+  out.webviewMemory.push({
+    label,
+    at: new Date().toISOString(),
+    ...(await sampleWebviewMemory(proc.pid)),
+  })
+  save()
+}
+
 async function privacy() {
+  // Let the last indexing notifications settle, then show the target afresh.
+  // Three screens take a tile past the grid's overscan, so it is unmounted.
+  await sleep(1500)
+  await top()
+  await scroll(3, 1, true)
+  await settle()
   await top()
   const url = await page.$eval('.scroller .cell img', (img) => img.src)
   const id = Number(/\/thumb\/(\d+)\//.exec(url)[1])
@@ -350,6 +370,16 @@ async function privacy() {
   const detail = await lib(page, 'Asset', id)
   const path = detail.paths[0]
   const folder = path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')))
+  // Remove the tile before blocking, so returning exercises any retained grid image.
+  await scroll(3, 1, true)
+  await settle()
+  await page.waitForFunction(
+    (url) => ![...document.querySelectorAll('.scroller .cell img')].some((img) => img.src === url),
+    {},
+    url,
+  )
+  out.privacySetup = { url, id }
+  save()
   if (!(await lib(page, 'BlockPINConfigured'))) await lib(page, 'CreateBlockPIN', '246810')
   const block = await lib(page, 'SetBlock', 'folder', 0, folder, 'photos')
   await lib(page, 'LockBlocks')
@@ -412,7 +442,17 @@ async function privacy() {
     after,
     forcedHash,
   }
+  await go(page, '/people')
+  await go(page, '/')
+  await top()
+  out.privacy.gridAfterReturn = await page.evaluate(() => ({
+    decodedIDs: [...document.querySelectorAll('.scroller .cell img')]
+      .filter((img) => img.complete && img.naturalWidth)
+      .map((img) => Number(/\/thumb\/(\d+)\//.exec(img.src)?.[1]))
+      .filter(Number.isFinite),
+  }))
   save()
+  checkBlockedThumbnail(out.privacy)
   return block
 }
 
@@ -509,6 +549,7 @@ try {
       }
     })
   })
+  await memory('before-long-scroll')
   await measure('down-ten', async () => {
     const steps = []
     for (let i = 0; i < 10; i++) {
@@ -531,6 +572,9 @@ try {
     const up = await scroll(50, -1, true)
     return { down, up }
   })
+  await memory('after-long-scroll')
+  await sleep(30000)
+  await memory('at-rest-after-long-scroll')
   active = 'fling-control'
   out.flingControl = await page.evaluate(async () => {
     const el = document.querySelector('.scroller')
