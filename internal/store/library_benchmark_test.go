@@ -120,6 +120,13 @@ func largeLibraryCalls(ctx context.Context, b *testing.B, st *Store) {
 		return st.SaveThumbnails(ctx, "bench", []ThumbResult{{AssetID: event.Cover, PHash: &coverHash}})
 	}
 	named, pinned := false, false
+	// Another gap is a grouping no journal describes, so it is the whole
+	// regroup that the first call and an overrun history also pay.
+	gap := core.EventGapDefault
+	otherGap := func() error {
+		gap = 2*core.EventGapDefault + 1 - gap
+		return nil
+	}
 	invalidate := func() error {
 		// A visibility revision must exercise the read after the library changes,
 		// rather than allow a warm revision cache to hide a slow recount.
@@ -168,6 +175,7 @@ func largeLibraryCalls(ctx context.Context, b *testing.B, st *Store) {
 		{"DayBuckets", func() error { return errOf(st.DayBuckets(ctx, core.View{}, core.TagConfidenceDefault)) }, invalidate, nil},
 		{"CountVisible", func() error { return errOf(st.CountVisible(ctx)) }, invalidate, nil},
 		{"Events", func() error { return errOf(st.Events(ctx, core.EventGapDefault)) }, invalidate, nil},
+		{"EventsRegroup", func() error { return errOf(st.Events(ctx, gap)) }, otherGap, nil},
 		{"Event", func() error { return errOf(st.Event(ctx, eventID, core.EventGapDefault)) }, invalidate, nil},
 		{"EventRepeated", func() error { return errOf(st.Event(ctx, eventID, core.EventGapDefault)) }, nil, nil},
 		{"SetEventName", func() error {
@@ -198,6 +206,7 @@ func largeLibraryCalls(ctx context.Context, b *testing.B, st *Store) {
 		}, invalidate, nil},
 		{"DayBucketsThing", func() error { return errOf(st.DayBuckets(ctx, core.View{Tag: 2}, core.TagConfidenceDefault)) }, invalidate, nil},
 		{"DuplicateGroups", func() error { return errOf(st.DuplicateGroups(ctx)) }, changeCover, nil},
+		{"DuplicateGroupsRepeated", func() error { return errOf(st.DuplicateGroups(ctx)) }, nil, nil},
 		{"ClusterData", func() error { _, _, _, err := st.ClusterData(ctx, "bench"); return err }, nil, nil},
 		{"JobCountsDone", func() error { return errOf(st.JobCounts(ctx)) }, nil, nil},
 		{"AssetVisible", func() error { return errOf(st.AssetVisible(ctx, eventID, false)) }, nil, nil},

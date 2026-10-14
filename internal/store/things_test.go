@@ -31,6 +31,10 @@ func downgradeToV18(t *testing.T, st *Store) {
 		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER "+name)))
 	}
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE selection_revision")))
+	for _, trigger := range []string{"duplicate_asset_changed", "duplicate_file_added", "duplicate_file_deleted", "duplicate_file_changed"} {
+		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER "+trigger)))
+	}
+	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE event_revision DROP COLUMN duplicate_value")))
 	for _, column := range []string{"display_rotation", "display_flip", "display_version"} {
 		check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE assets DROP COLUMN "+column)))
 	}

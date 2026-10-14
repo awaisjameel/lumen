@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mattn/go-sqlite3"
 
@@ -56,9 +57,10 @@ func foldSQL(v any) any {
 
 // Store is the handle every other package uses.
 type Store struct {
-	w           *storeWriter // single writer connection, with settlement for standalone writes
-	r           *sql.DB      // read-only pool
-	eventsCache struct {
+	w               *storeWriter // single writer connection, with settlement for standalone writes
+	r               *sql.DB      // read-only pool
+	duplicatesCache duplicateCache
+	eventsCache     struct {
 		sync.Mutex
 		revision      int64
 		coverRevision int64
@@ -71,7 +73,7 @@ type Store struct {
 	// them, and some (the tag confidence) are read on every scroll. settingsMu
 	// orders each write with its cache update, so the cache ends as the
 	// database does whichever of two writes commits last.
-	settings   sync.Map // key -> string
+	settings   sync.Map // key -> string, or nil for a setting that has never been set
 	settingsMu sync.Mutex
 }
 
@@ -113,11 +115,12 @@ func Open(path string) (*Store, error) {
 		w.Close()
 		return nil, fmt.Errorf("open read pool: %w", err)
 	}
-	// Idle connections stay open: each new one re-runs the pragmas and starts
-	// with an empty page cache.
+	// Keep concurrency for browsing alongside the stages, but retain only four
+	// idle caches. Expire them between the indexer's 30-second idle queue polls.
 	readers := max(4, runtime.NumCPU()/2)
 	r.SetMaxOpenConns(readers)
-	r.SetMaxIdleConns(readers)
+	r.SetMaxIdleConns(4)
+	r.SetConnMaxIdleTime(15 * time.Second)
 	s.r = r
 	return s, nil
 }
@@ -129,6 +132,35 @@ func (s *Store) Close() error {
 	}
 	_, _ = s.w.Exec("PRAGMA optimize") //nolint:noctx // best effort while closing
 	return s.w.Close()
+}
+
+// Checkpoint truncates the WAL if no reader or writer currently pins it.
+// Its separate connection never reserves the writer, and its zero busy timeout
+// makes an occupied WAL a harmless no-op instead of waiting for a long reader.
+func (s *Store) Checkpoint(ctx context.Context) (bool, error) {
+	// SQLite names the file its readers hold open, so nothing is created: a
+	// closed store fails here, and Windows keeps an open database in place.
+	// The path is plain, as in Open, so it needs no escaping.
+	var seq int
+	var name, file string
+	if err := s.r.QueryRowContext(ctx, "PRAGMA database_list").Scan(&seq, &name, &file); err != nil {
+		return false, fmt.Errorf("checkpoint WAL: %w", err)
+	}
+	db, err := sql.Open(driverName, file+"?_busy_timeout=0&_cache_size=-2000")
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = db.Close() }()
+	var busy, frames, copied int
+	err = db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &frames, &copied)
+	var se sqlite3.Error
+	if errors.As(err, &se) && se.Code == sqlite3.ErrBusy {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("checkpoint WAL: %w", err)
+	}
+	return busy == 0, nil
 }
 
 // SchemaVersion is the applied migration version, for a local problem report.
@@ -389,18 +421,25 @@ const (
 
 // setting reads a raw setting value; ok is false if it has never been set.
 func (s *Store) setting(ctx context.Context, key string) (v string, ok bool, err error) {
-	if v, ok := s.settings.Load(key); ok {
-		return v.(string), true, nil // only strings are stored
+	if cached, loaded := s.settings.Load(key); loaded {
+		if cached == nil {
+			return "", false, nil
+		}
+		return cached.(string), true, nil // only strings and nil are stored
 	}
 	err = s.r.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+	var value any = v
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
+		value = nil
+	} else if err != nil {
 		return "", false, err
 	}
-	// A write that raced this read has cached the newer value: keep it.
-	cached, _ := s.settings.LoadOrStore(key, v)
+	// A write that raced this read has cached the newer value: keep it, even
+	// when the read's snapshot held no setting. Cache absence, not its default.
+	cached, _ := s.settings.LoadOrStore(key, value)
+	if cached == nil {
+		return "", false, nil
+	}
 	return cached.(string), true, nil
 }
 

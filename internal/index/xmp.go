@@ -24,15 +24,11 @@ import (
 // has it on, and never opens an original: every write goes through fileops,
 // to the sidecar's own path.
 //
-// What marks a photo for export is the store's XMP revision (migration 0027):
-// a counter that moves whenever a tag, a person, a favourite, a file, the tag
-// confidence or a block can have changed what some sidecar should say. A
-// revision rather than a table of dirty photos because blocks and renames
-// reach many photos at once, and a pass that compares hashes is right however
-// the change came about: it works out each photo's packet and writes only
-// those whose hash differs from the one recorded when Lumen last wrote it.
-// The comparison needs no file reads, so a pass over a library where
-// nothing changed costs queries only.
+// Background work is a durable set of asset keys (migration 0035). Each
+// batch carries the marks it read, and records its results and acknowledges
+// those marks together. A change during a write keeps its newer mark, while
+// a crash before the transaction leaves the old work ready to retry.
+// An explicit Export still checks the whole library against the disk.
 //
 // A sidecar is Lumen's only while the store has a record of it (its path and
 // the hash of what was written). Anything else found at the path, and any
@@ -101,6 +97,7 @@ func (x *xmpState) release() { <-x.turn }
 
 // xmpOptions say how a pass runs.
 type xmpOptions struct {
+	dirty bool          // use durable asset marks for background work
 	full  bool          // read each sidecar from the disk and ignore what was left alone
 	held  bool          // wait while indexing is paused
 	batch int           // photos at a time (xmpBatch if 0)
@@ -268,35 +265,36 @@ func (ix *Indexer) joinLifetime(ctx context.Context) (context.Context, func(), e
 // xmpLoop runs the background pass until ctx ends.
 func (ix *Indexer) xmpLoop(ctx context.Context) { ix.runXMP(ctx, defaultXMPTiming) }
 
-// runXMP exports when the setting is on and the revision has moved since the
-// last pass, then waits to be woken or for the next look at the revision.
+// runXMP exports durable pending work while the setting is on, then waits
+// to be woken or for the next poll. Restarting retains unacknowledged work.
 func (ix *Indexer) runXMP(ctx context.Context, tm xmpTiming) {
-	var done store.XMPRevision
-	haveDone := false // the first look after the start always exports: Lumen may have been closed mid-change
 	for ctx.Err() == nil {
 		on, err := ix.store.Bool(ctx, core.SettingXMP, false)
 		if err != nil {
 			ix.xmpFailed(ctx, tm, "read the XMP setting", err)
 			continue
 		}
-		if !on {
-			haveDone = false // turning it on again starts with a full look
-		} else if rev, err := ix.store.XMPRevision(ctx); err != nil {
-			ix.xmpFailed(ctx, tm, "read the XMP revision", err)
-			continue
-		} else if !haveDone || rev != done {
-			// rev was read before the pass, so a change made during it leaves
-			// the revision ahead of done and starts the next pass.
-			res, err := ix.exportXMP(ctx, xmpOptions{held: true})
-			if err != nil {
-				ix.xmpFailed(ctx, tm, "export XMP sidecars", err)
+		if on {
+			if err := ix.markChangedXMPSkips(ctx); err != nil {
+				ix.xmpFailed(ctx, tm, "read changed XMP skips", err)
 				continue
 			}
-			done, haveDone = rev, true
-			if res.Written > 0 {
-				slog.Info("xmp sidecars", "written", res.Written, "unchanged", res.Unchanged, "skipped", res.Skipped)
+			pending, err := ix.store.XMPPending(ctx)
+			if err != nil {
+				ix.xmpFailed(ctx, tm, "read pending XMP work", err)
+				continue
 			}
-			sleep(ctx, tm.cooldown)
+			if pending {
+				res, err := ix.exportXMP(ctx, xmpOptions{held: true, dirty: true})
+				if err != nil {
+					ix.xmpFailed(ctx, tm, "export XMP sidecars", err)
+					continue
+				}
+				if res.Written > 0 {
+					slog.Info("xmp sidecars", "written", res.Written, "unchanged", res.Unchanged, "skipped", res.Skipped)
+				}
+				sleep(ctx, tm.cooldown)
+			}
 		}
 		select {
 		case <-ix.xmp.wakeCh():
@@ -330,6 +328,11 @@ type xmpPass struct {
 // pass stops, with what it did so far, when the setting is turned off or ctx
 // ends; what it had written by then is recorded either way.
 func (ix *Indexer) exportXMP(ctx context.Context, opts xmpOptions) (core.XMPExport, error) {
+	if opts.dirty {
+		if err := ix.markChangedXMPSkips(ctx); err != nil {
+			return core.XMPExport{}, err
+		}
+	}
 	if opts.batch <= 0 {
 		opts.batch = xmpBatch
 	}
@@ -344,6 +347,20 @@ func (ix *Indexer) exportXMP(ctx context.Context, opts xmpOptions) (core.XMPExpo
 		}
 		after = next
 	}
+}
+
+func (ix *Indexer) markChangedXMPSkips(ctx context.Context) error {
+	files, err := ix.store.XMPSkippedFiles(ctx)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for _, f := range files {
+		if sidecarStamp(f.Path) != f.XMPStamp {
+			ids = append(ids, f.AssetID)
+		}
+	}
+	return ix.store.MarkXMPAssets(ctx, ids)
 }
 
 // turn runs fn holding the exporter's turn, after any wait for a pause to lift
@@ -379,20 +396,52 @@ func (p *xmpPass) turn(ctx context.Context, fn func() error) (on bool, err error
 func (p *xmpPass) assets(ctx context.Context, after int64) (next int64, more bool, err error) {
 	var count int
 	on, err := p.turn(ctx, func() error {
-		batch, err := p.ix.store.XMPAssets(ctx, after, p.opts.batch)
+		read := p.ix.store.XMPAssets
+		if p.opts.dirty {
+			read = p.ix.store.XMPDirtyAssets
+		}
+		batch, err := read(ctx, after, p.opts.batch)
 		if err != nil {
 			return fmt.Errorf("read the photos to export: %w", err)
 		}
 		count = len(batch.Assets)
+		if p.opts.dirty {
+			count = len(batch.Pending)
+		}
 		if count == 0 {
 			return nil
 		}
-		next, p.rev = batch.Assets[count-1].ID, batch.Revision
+		p.rev = batch.Revision
+		if p.opts.dirty {
+			next = batch.Pending[count-1].AssetID
+		} else {
+			next = batch.Assets[count-1].ID
+		}
 		for _, a := range batch.Assets {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			p.exportAsset(ctx, a)
+		}
+		if p.opts.dirty {
+			orphans, err := p.ix.store.XMPDirtyOrphans(ctx, batch.Pending)
+			if err != nil {
+				return fmt.Errorf("read changed sidecars left behind: %w", err)
+			}
+			marker := xmp.Marshal(xmp.Doc{})
+			markerHash := fileops.SidecarHash(marker)
+			for _, o := range orphans {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if !p.orphan(ctx, o, marker, markerHash) {
+					return errors.New("clear changed sidecar left behind")
+				}
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			p.changes.Completed = batch.Pending
 		}
 		return nil
 	})
@@ -401,6 +450,9 @@ func (p *xmpPass) assets(ctx context.Context, after int64) (next int64, more boo
 	}
 	if count > 0 {
 		return next, true, nil
+	}
+	if p.opts.dirty {
+		return 0, false, nil
 	}
 	return 0, false, p.orphans(ctx)
 }
@@ -556,18 +608,19 @@ func (p *xmpPass) orphans(ctx context.Context) error {
 	}
 }
 
-func (p *xmpPass) orphan(ctx context.Context, o store.XMPOrphan, marker, markerHash []byte) {
+func (p *xmpPass) orphan(ctx context.Context, o store.XMPOrphan, marker, markerHash []byte) bool {
 	if !bytes.Equal(o.Hash, markerHash) {
 		outcome, err := fileops.ReviseSidecar(ctx, o.Path, marker, o.Hash)
 		if err != nil {
 			p.failed(ctx, "clear xmp sidecar", o.Path, err)
-			return // the record stays, to try again
+			return false // the record and dirty mark stay, to try again
 		}
 		if outcome == fileops.SidecarReplaced {
 			p.res.Written++
 		}
 	}
 	p.changes.Forget = append(p.changes.Forget, o.Path)
+	return true
 }
 
 // sidecarStamp is how the file at path looks: its size and modification time,

@@ -967,6 +967,7 @@ func (ix *Indexer) flushFSChanges() {
 // big library, so it spends at most a fifth of the time doing it.
 func (ix *Indexer) reportLoop(ctx context.Context) {
 	wait := time.Second
+	wasIdle := false
 	visibility, err := ix.store.VisibilityRevision(ctx) // 0 on failure: at worst one extra reload
 	if err != nil && ctx.Err() == nil {
 		slog.Error("read visibility revision", "err", err)
@@ -996,6 +997,21 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 		start := time.Now()
 		p := ix.Progress(ctx)
 		wait = max(time.Second, 4*time.Since(start))
+		ix.mu.Lock()
+		idle := !p.Scanning && len(ix.scanReqs) == 0 && len(ix.pendingFS) == 0 && ix.working.Load() == 0 &&
+			p.Metadata == 0 && p.Thumbnail == 0 && p.Embedding == 0 && p.Faces == 0 && p.Videos == 0 && p.OCR == 0
+		ix.mu.Unlock()
+		if idle && !wasIdle {
+			completed, err := ix.store.Checkpoint(ctx)
+			if err != nil {
+				if ctx.Err() == nil {
+					slog.Debug("checkpoint idle library", "err", err)
+				}
+			} else {
+				slog.Debug("checkpoint idle library", "completed", completed)
+			}
+		}
+		wasIdle = idle
 		if p != ix.last {
 			ix.last = p
 			ix.events.Progress(p)

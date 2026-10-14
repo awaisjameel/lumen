@@ -96,16 +96,18 @@ type Input struct {
 
 // group is a person or a set of unplaced faces while clustering.
 type group struct {
-	sum     []float32
-	n       int
-	faces   []int              // indexes into clustering.faces, unplaced ones only
-	assets  map[facePlace]bool // photos or video frames the group's faces are in
-	persons []int64            // existing people in the group
-	rejects map[int64]bool     // people a face in the group was rejected from
-	named   bool               // holds a confirmed person
-	links   map[int]struct{}   // groups it may merge with
-	version int                // bumped on every change, to spot stale queue entries
-	dead    bool               // merged into another group
+	sum         []float32
+	n           int
+	faces       []int              // indexes into clustering.faces, unplaced ones only
+	assets      map[facePlace]bool // photos or video frames the group's faces are in
+	extraAssets map[facePlace]bool // Keep additions separate so a run never copies the cached asset set.
+	persons     []int64            // existing people in the group
+	rejects     map[int64]bool     // people a face in the group was rejected from
+	named       bool               // holds a confirmed person
+	links       map[int]struct{}   // groups it may merge with
+	version     int                // bumped on every change, to spot stale queue entries
+	dead        bool               // merged into another group
+	shared      bool               // Copy the cached sum and rejections before a merge changes them.
 }
 
 type facePlace struct{ asset, frame int64 }
@@ -163,6 +165,10 @@ func newClustering(faces []store.ClusterFace, people []store.ClusterPerson, reje
 // link connects every unplaced face to its most similar faces (links) and
 // people, and people to each other.
 func (c *clustering) link(ctx context.Context, links map[int64][]int64, p Params) error {
+	return c.linkCached(ctx, links, p, nil, nil)
+}
+
+func (c *clustering) linkCached(ctx context.Context, links map[int64][]int64, p Params, state *clusterState, byPerson map[int64]int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -191,7 +197,11 @@ func (c *clustering) link(ctx context.Context, links map[int64][]int64, p Params
 	// their faces.
 	means := make([][]float32, len(c.groups))
 	for _, i := range placed {
-		means[i] = scaled(c.groups[i].sum, 1/float32(c.groups[i].n))
+		if state == nil {
+			means[i] = scaled(c.groups[i].sum, 1/float32(c.groups[i].n))
+		} else {
+			means[i] = state.people[c.groups[i].persons[0]].mean
+		}
 	}
 	near := make([][]scored, len(loose))
 	parallel.For(ctx, len(loose), runtime.NumCPU(), func(k int) {
@@ -206,6 +216,12 @@ func (c *clustering) link(ctx context.Context, links map[int64][]int64, p Params
 		for _, b := range near[k] {
 			connect(i, b.i)
 		}
+	}
+	if state != nil {
+		for pair := range state.pairs {
+			connect(byPerson[pair.a], byPerson[pair.b])
+		}
+		return ctx.Err()
 	}
 	for a, i := range placed {
 		if a%16 == 0 && ctx.Err() != nil {
@@ -252,7 +268,7 @@ func (c *clustering) merge(ctx context.Context, threshold float32) error {
 		}
 		// Keep the bigger group's maps and fold the smaller one in.
 		keep, gone := e.a, e.b
-		if len(b.assets) > len(a.assets) {
+		if b.assetCount() > a.assetCount() {
 			keep, gone = gone, keep
 		}
 		c.join(keep, gone)
@@ -274,12 +290,17 @@ func (c *clustering) allowed(a, b *group) bool {
 		return false
 	}
 	small, big := a, b
-	if len(small.assets) > len(big.assets) {
+	if small.assetCount() > big.assetCount() {
 		small, big = big, small
 	}
 	for asset := range small.assets {
-		if big.assets[asset] {
-			return false // two faces in one photo
+		if big.hasAsset(asset) {
+			return false
+		}
+	}
+	for asset := range small.extraAssets {
+		if big.hasAsset(asset) {
+			return false
 		}
 	}
 	for _, p := range a.persons {
@@ -298,13 +319,21 @@ func (c *clustering) allowed(a, b *group) bool {
 // join folds group gone into group keep.
 func (c *clustering) join(keep, gone int) {
 	k, g := c.groups[keep], c.groups[gone]
+	if k.shared {
+		k.sum = slices.Clone(k.sum)
+		k.rejects = cloneMap(k.rejects)
+		k.shared = false
+	}
 	add(k.sum, g.sum)
 	k.n += g.n
 	k.faces = append(k.faces, g.faces...)
 	k.persons = append(k.persons, g.persons...)
 	k.named = k.named || g.named
 	for a := range g.assets {
-		k.assets[a] = true
+		k.addAsset(a)
+	}
+	for a := range g.extraAssets {
+		k.addAsset(a)
 	}
 	for p := range g.rejects {
 		k.rejects[p] = true
@@ -319,7 +348,7 @@ func (c *clustering) join(keep, gone int) {
 	}
 	delete(k.links, gone)
 	k.version++
-	g.dead, g.links, g.assets, g.rejects = true, nil, nil, nil
+	g.dead, g.links, g.assets, g.extraAssets, g.rejects = true, nil, nil, nil, nil
 }
 
 // changes turns the final groups into what the store saves.
@@ -433,4 +462,22 @@ func scaled(v []float32, k float32) []float32 {
 		out[i] = x * k
 	}
 	return out
+}
+
+func cloneMap[K comparable, V any](in map[K]V) map[K]V {
+	out := make(map[K]V, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func (g *group) assetCount() int           { return len(g.assets) + len(g.extraAssets) }
+func (g *group) hasAsset(a facePlace) bool { return g.assets[a] || g.extraAssets[a] }
+func (g *group) addAsset(a facePlace) {
+	if g.extraAssets == nil {
+		g.assets[a] = true
+	} else if !g.assets[a] {
+		g.extraAssets[a] = true
+	}
 }

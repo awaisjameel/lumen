@@ -96,10 +96,35 @@ type XMPAsset struct {
 	Faces      []XMPFace // named people, none whose name is blocked
 }
 
+// XMPMark identifies the version of one asset's durable export work.
+// A later change replaces its revision, so acknowledging this mark cannot
+// discard work committed while the sidecars were being written.
+type XMPMark struct {
+	AssetID  int64
+	Revision int64
+}
+
 // XMPBatch is assets read together with the revision they were read at.
 type XMPBatch struct {
 	Assets   []XMPAsset
+	Pending  []XMPMark   // includes deleted assets and photos with nothing to export
 	Revision XMPRevision // at the snapshot the assets come from
+}
+
+// xmpEligible is the full pass's admission rule, shared by targeted reads.
+var xmpEligible = `(
+				(` + visible + ` AND (favourite = 1 OR ` + xmpHasRecord + `
+					OR EXISTS (SELECT 1 FROM asset_tags x WHERE x.asset_id = assets.id AND ` + tagAppliesTo("x", tagConfidenceSQL) + `)
+					OR EXISTS (SELECT 1 FROM faces f JOIN people p ON p.id = f.person_id
+						WHERE f.asset_id = assets.id AND p.name IS NOT NULL AND ` + faceShown + `)))
+				OR (` + present + ` AND ` + xmpHasRecord + `))`
+
+var xmpSelect = `SELECT id, ` + visible + `, kind = 'video', favourite,
+	COALESCE(width, 0), COALESCE(height, 0) FROM assets `
+
+func scanXMPAsset(r *sql.Rows) (a XMPAsset, err error) {
+	err = r.Scan(&a.ID, &a.Exportable, &a.Video, &a.Favourite, &a.Width, &a.Height)
+	return a, err
 }
 
 // XMPAssets returns up to limit assets with an id above after, in id order, that
@@ -119,18 +144,7 @@ func (s *Store) XMPAssets(ctx context.Context, after int64, limit int) (XMPBatch
 			FROM xmp_revision x, event_revision e WHERE x.id = 1 AND e.id = 1`).Scan(&batch.Revision.Content, &batch.Revision.Visible); err != nil {
 			return err
 		}
-		batch.Assets, err = queryAll(ctx, tx, func(r *sql.Rows) (a XMPAsset, err error) {
-			err = r.Scan(&a.ID, &a.Exportable, &a.Video, &a.Favourite, &a.Width, &a.Height)
-			return a, err
-		}, `SELECT id, `+visible+`, kind = 'video', favourite, COALESCE(width, 0), COALESCE(height, 0)
-			FROM assets
-			WHERE id > ?1 AND (
-				(`+visible+` AND (favourite = 1 OR `+xmpHasRecord+`
-					OR EXISTS (SELECT 1 FROM asset_tags x WHERE x.asset_id = assets.id AND `+tagAppliesTo("x", tagConfidenceSQL)+`)
-					OR EXISTS (SELECT 1 FROM faces f JOIN people p ON p.id = f.person_id
-						WHERE f.asset_id = assets.id AND p.name IS NOT NULL AND `+faceShown+`)))
-				OR (`+present+` AND `+xmpHasRecord+`))
-			ORDER BY id LIMIT ?2`, after, limit)
+		batch.Assets, err = queryAll(ctx, tx, scanXMPAsset, xmpSelect+`WHERE id > ?1 AND `+xmpEligible+` ORDER BY id LIMIT ?2`, after, limit)
 		if err != nil || len(batch.Assets) == 0 {
 			return err
 		}
@@ -143,11 +157,105 @@ func (s *Store) XMPAssets(ctx context.Context, after int64, limit int) (XMPBatch
 // nothing to export and no sidecar of Lumen's to bring back to the marker. The
 // exporter re-reads an asset when the revision moved since its batch was read.
 func (s *Store) XMPAsset(ctx context.Context, id int64) (a XMPAsset, ok bool, err error) {
-	batch, err := s.XMPAssets(ctx, id-1, 1)
-	if err != nil || len(batch.Assets) == 0 || batch.Assets[0].ID != id {
-		return XMPAsset{}, false, err
+	err = s.read(ctx, func(tx *sql.Tx) error {
+		list, qerr := queryAll(ctx, tx, scanXMPAsset, xmpSelect+`WHERE id = ? AND `+xmpEligible, id)
+		if qerr != nil || len(list) == 0 {
+			return qerr
+		}
+		if qerr := fillXMPAssets(ctx, tx, list); qerr != nil {
+			return qerr
+		}
+		a, ok = list[0], true
+		return nil
+	})
+	return a, ok, err
+}
+
+// XMPPending reports whether durable background work remains after a restart.
+func (s *Store) XMPPending(ctx context.Context) (bool, error) {
+	var pending bool
+	err := s.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM xmp_dirty)").Scan(&pending)
+	return pending, err
+}
+
+// XMPSkippedFile is a file whose sidecar was left alone on an earlier pass.
+type XMPSkippedFile struct {
+	AssetID int64
+	Path    string
+	XMPStamp
+}
+
+// XMPSkippedFiles reads only remembered skips that still sit beside a file.
+// Their stamps let the exporter notice an external edit without visiting the
+// rest of the library or reading the sidecar's contents.
+func (s *Store) XMPSkippedFiles(ctx context.Context) ([]XMPSkippedFile, error) {
+	return queryAll(ctx, s.r, func(r *sql.Rows) (f XMPSkippedFile, err error) {
+		err = r.Scan(&f.AssetID, &f.Path, &f.Size, &f.MTime)
+		return f, err
+	}, `SELECT f.asset_id, k.path, k.size, k.mtime FROM xmp_skips k
+		CROSS JOIN files f ON `+foldKey("f.path")+` = `+foldKey("substr(k.path, 1, length(k.path) - "+strconv.Itoa(len(XMPSidecarSuffix))+")"))
+}
+
+// MarkXMPAssets queues externally changed skipped sidecars. The setting is
+// checked in the write transaction so disabling export cannot create work.
+func (s *Store) MarkXMPAssets(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
 	}
-	return batch.Assets[0], true, nil
+	list, err := json.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE xmp_revision SET value = value + 1
+			WHERE id = 1 AND (SELECT value FROM settings WHERE key = 'xmp_enabled') = '1'`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO xmp_dirty(asset_id, revision)
+			SELECT value, (SELECT value FROM xmp_revision WHERE id = 1) FROM json_each(?)
+			WHERE (SELECT value FROM settings WHERE key = 'xmp_enabled') = '1'
+			ON CONFLICT(asset_id) DO UPDATE SET revision = excluded.revision`, string(list))
+		return err
+	})
+}
+
+// XMPDirtyAssets reads only marked keys. Pending also carries keys with no
+// current exportable asset, so deleted or empty photos cannot clog the queue.
+func (s *Store) XMPDirtyAssets(ctx context.Context, after int64, limit int) (XMPBatch, error) {
+	var batch XMPBatch
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		if err := tx.QueryRowContext(ctx, `SELECT x.value, e.visible_value
+			FROM xmp_revision x, event_revision e WHERE x.id = 1 AND e.id = 1`).Scan(&batch.Revision.Content, &batch.Revision.Visible); err != nil {
+			return err
+		}
+		batch.Pending, err = queryAll(ctx, tx, func(r *sql.Rows) (m XMPMark, err error) {
+			err = r.Scan(&m.AssetID, &m.Revision)
+			return m, err
+		}, "SELECT asset_id, revision FROM xmp_dirty WHERE asset_id > ? ORDER BY asset_id LIMIT ?", after, limit)
+		if err != nil || len(batch.Pending) == 0 {
+			return err
+		}
+		ids, err := xmpMarkIDs(batch.Pending)
+		if err != nil {
+			return err
+		}
+		batch.Assets, err = queryAll(ctx, tx, scanXMPAsset,
+			xmpSelect+`WHERE id IN (SELECT value FROM json_each(?)) AND `+xmpEligible+` ORDER BY id`, ids)
+		if err != nil || len(batch.Assets) == 0 {
+			return err
+		}
+		return fillXMPAssets(ctx, tx, batch.Assets)
+	})
+	return batch, err
+}
+
+func xmpMarkIDs(marks []XMPMark) (string, error) {
+	ids := make([]int64, len(marks))
+	for i, m := range marks {
+		ids[i] = m.AssetID
+	}
+	data, err := json.Marshal(ids)
+	return string(data), err
 }
 
 // xmpHasRecord is true for an assets row with a sidecar Lumen wrote.
@@ -250,15 +358,16 @@ type XMPSkip struct {
 
 // XMPChanges is what an export batch changes in the store, saved together.
 type XMPChanges struct {
-	Records []XMPRecord // sidecars written, or taken as Lumen's own; replaces any record of the path
-	Forget  []string    // sidecars (paths) Lumen no longer owns
-	Skips   []XMPSkip   // sidecars left alone
-	Unskip  []string    // sidecars (paths) that are no longer left alone
+	Completed []XMPMark   // work completed at its original snapshot revision
+	Records   []XMPRecord // sidecars written, or taken as Lumen's own; replaces any record of the path
+	Forget    []string    // sidecars (paths) Lumen no longer owns
+	Skips     []XMPSkip   // sidecars left alone
+	Unskip    []string    // sidecars (paths) that are no longer left alone
 }
 
 // Empty reports whether there is nothing to save.
 func (c XMPChanges) Empty() bool {
-	return len(c.Records) == 0 && len(c.Forget) == 0 && len(c.Skips) == 0 && len(c.Unskip) == 0
+	return len(c.Completed) == 0 && len(c.Records) == 0 && len(c.Forget) == 0 && len(c.Skips) == 0 && len(c.Unskip) == 0
 }
 
 // SaveXMP saves what an export batch did. A record of an asset deleted
@@ -297,6 +406,17 @@ func (s *Store) SaveXMP(ctx context.Context, c XMPChanges) error {
 				return err
 			}
 		}
+		if len(c.Completed) > 0 {
+			marks, err := json.Marshal(c.Completed)
+			if err != nil {
+				return err
+			}
+			_, err = tx.ExecContext(ctx, `DELETE FROM xmp_dirty WHERE (asset_id, revision) IN
+				(SELECT json_extract(value, '$.AssetID'), json_extract(value, '$.Revision') FROM json_each(?))`, string(marks))
+			if err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }
@@ -325,13 +445,35 @@ type XMPOrphan struct {
 // shown is not listed: its old sidecar is stale but harmless, and is left as
 // it is.
 func (s *Store) XMPOrphans(ctx context.Context, after int64, limit int) ([]XMPOrphan, error) {
+	return s.xmpOrphans(ctx, after, limit, nil)
+}
+
+// XMPDirtyOrphans reads abandoned sidecars only for this batch's marked assets.
+func (s *Store) XMPDirtyOrphans(ctx context.Context, marks []XMPMark) ([]XMPOrphan, error) {
+	if len(marks) == 0 {
+		return nil, nil
+	}
+	return s.xmpOrphans(ctx, 0, -1, marks)
+}
+
+func (s *Store) xmpOrphans(ctx context.Context, after int64, limit int, marks []XMPMark) ([]XMPOrphan, error) {
+	filter := ""
+	args := []any{after, limit}
+	if marks != nil {
+		ids, err := xmpMarkIDs(marks)
+		if err != nil {
+			return nil, err
+		}
+		filter = " AND e.asset_id IN (SELECT value FROM json_each(?3))"
+		args = append(args, ids)
+	}
 	return queryAll(ctx, s.r, func(r *sql.Rows) (o XMPOrphan, err error) {
 		err = r.Scan(&o.Row, &o.Path, &o.Hash)
 		return o, err
 	}, `SELECT e.rowid, e.path, e.hash FROM xmp_exports e
-		WHERE e.rowid > ?1
+		WHERE e.rowid > ?1`+filter+`
 		AND NOT EXISTS (SELECT 1 FROM files f
 			WHERE `+foldKey("f.path")+` = `+foldKey("substr(e.path, 1, length(e.path) - "+strconv.Itoa(len(XMPSidecarSuffix))+")")+`)
 		AND NOT EXISTS (SELECT 1 FROM assets WHERE id = e.asset_id AND `+visible+`)
-		ORDER BY e.rowid LIMIT ?2`, after, limit)
+		ORDER BY e.rowid LIMIT ?2`, args...)
 }

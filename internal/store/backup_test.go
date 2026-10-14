@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -89,5 +91,18 @@ func TestPairedBackupRestorationIsRepeatableBeforeLibraryOpen(t *testing.T) {
 	after, err := restored.Bool(t.Context(), "after-update", false)
 	if err != nil || after {
 		t.Fatal("newer state survived pre-health recovery", err)
+	}
+}
+
+func TestRestoreBackupRefusesABackupThatIsNotThere(t *testing.T) {
+	dir := t.TempDir()
+	backup, destination := filepath.Join(dir, "missing.db"), filepath.Join(dir, "library.db")
+	if err := RestoreBackup(t.Context(), backup, destination); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("restoring a missing backup = %v, want a not-exist error", err)
+	}
+	for _, path := range []string{backup, destination} {
+		if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("%s was created by the refused restore (%v)", filepath.Base(path), err)
+		}
 	}
 }
