@@ -31,16 +31,26 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-// driverName is go-sqlite3 with Lumen's SQL functions on every connection:
-// fold(text) is core.Fold, the case-insensitive key names and paths are
-// compared by (SQLite's own NOCASE and LIKE fold only A-Z), and the collation
-// name_order is core.CompareNames (see byName).
+// driverName is go-sqlite3 with Lumen's SQL functions and connectPragmas on
+// every connection: fold(text) is core.Fold, the case-insensitive key names
+// and paths are compared by (SQLite's own NOCASE and LIKE fold only A-Z), and
+// the collation name_order is core.CompareNames (see byName).
 const driverName = "sqlite3_lumen"
+
+// connectPragmas are the connection settings go-sqlite3 has no DSN option
+// for. Temporary storage stays in memory: a statement journal over 64 KiB (a
+// batch of tag or embedding rows, whose triggers touch many more) otherwise
+// spills to a real file, which on Windows doubled the time of such a save.
+// SQLite analyses at most 1000 rows of each index, so PRAGMA optimize, whether
+// on exit (Close) or at idle (Optimize), takes a bounded time however large
+// the library grows.
+const connectPragmas = "PRAGMA temp_store = MEMORY; PRAGMA analysis_limit = 1000"
 
 func init() {
 	sql.Register(driverName, &sqlite3.SQLiteDriver{
 		ConnectHook: func(c *sqlite3.SQLiteConn) error {
-			return errors.Join(c.RegisterFunc("fold", foldSQL, true), c.RegisterCollation(nameOrder, core.CompareNames))
+			_, err := c.Exec(connectPragmas, nil)
+			return errors.Join(err, c.RegisterFunc("fold", foldSQL, true), c.RegisterCollation(nameOrder, core.CompareNames))
 		},
 	})
 }
@@ -111,7 +121,17 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("backfill derived tables: %w", err)
 	}
 
-	r, err := sql.Open(driverName, dsn("&_query_only=1"))
+	// Each reader keeps its 8 most recently used statements compiled: most
+	// reads are small (a thumbnail's visibility check, a day of the grid), and
+	// compiling one cost as much as running it. Only a single statement run
+	// directly is kept, not one from PrepareContext. The small reads gain all
+	// they can by 8, and a larger cache slowed the largest statements, most
+	// likely because the kept statements hold the connection's small-allocation
+	// memory (lookaside) that those statements would use. The writer has no
+	// cache for that reason: a transaction of its own settles more statements
+	// than 8, so only a cache that slowed a block rebuild by a third would
+	// keep them, and its indexing batches gained nothing.
+	r, err := sql.Open(driverName, dsn("&_query_only=1&_stmt_cache_size=8"))
 	if err != nil {
 		w.Close()
 		return nil, fmt.Errorf("open read pool: %w", err)
@@ -126,7 +146,9 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
-// Close checkpoints and closes both handles.
+// Close refreshes the statistics of the tables the writer used, within the
+// bound connectPragmas sets, and closes both handles; closing the last
+// connection checkpoints the WAL.
 func (s *Store) Close() error {
 	if s.r != nil {
 		s.r.Close()
@@ -155,7 +177,7 @@ func (s *Store) Checkpoint(ctx context.Context) (bool, error) {
 // connection has no query history, so it considers every table.
 func (s *Store) Optimize(ctx context.Context) (bool, error) {
 	completed, err := s.maintain(ctx, func(db *sql.DB) error {
-		_, err := db.ExecContext(ctx, "PRAGMA analysis_limit=1000; PRAGMA optimize=0x10002")
+		_, err := db.ExecContext(ctx, "PRAGMA optimize=0x10002")
 		return err
 	})
 	if err != nil {

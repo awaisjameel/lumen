@@ -24,15 +24,31 @@ import (
 // when the user renames the Thing.
 const ocrKindTags = `SELECT id FROM tags WHERE kind = 'builtin' AND vocab_name IN ('Screenshots', 'Documents')`
 
+// ocrTagged is the condition for the asset_tags row ocr_x to make its photo
+// worth reading: one of ocrKindTags at the user's tag confidence.
+// tagConfidenceSQL, not an argument, so the setting is the one the
+// transaction sees.
+var ocrTagged = "ocr_x.tag_id IN (" + ocrKindTags + ") AND " + tagAppliesTo("ocr_x", tagConfidenceSQL)
+
 // ocrEligible is the condition for the assets row alias to be read: a photo
 // with a file on disk (a hidden, trashed or blocked one too, as every stage
-// does, so it is ready when it comes back) that carries one of ocrKindTags
-// at the user's tag confidence. tagConfidenceSQL, not an argument, so the
-// setting is the one the transaction sees.
+// does, so it is ready when it comes back) that carries a tag ocrTagged
+// counts. It tests the assets one by one, for a few named by id;
+// ocrEligibleAll is the same condition for the whole library.
 func ocrEligible(asset string) string {
-	return asset + ".kind = 'photo' AND " + asset + "." + present + ` AND EXISTS (SELECT 1 FROM asset_tags ocr_x
-		WHERE ocr_x.asset_id = ` + asset + `.id AND ocr_x.tag_id IN (` + ocrKindTags + `)
-		AND ` + tagAppliesTo("ocr_x", tagConfidenceSQL) + `)`
+	return ocrPhoto(asset) + " AND EXISTS (SELECT 1 FROM asset_tags ocr_x WHERE ocr_x.asset_id = " + asset + ".id AND " + ocrTagged + ")"
+}
+
+// ocrEligibleAll is ocrEligible starting from the two tags' index entries
+// (asset_tags_by_tag), a few thousand rows, rather than testing every photo
+// of the library: a tenth of the time at 100,000 photos.
+func ocrEligibleAll(asset string) string {
+	return ocrPhoto(asset) + " AND " + asset + ".id IN (SELECT ocr_x.asset_id FROM asset_tags ocr_x WHERE " + ocrTagged + ")"
+}
+
+// ocrPhoto is the part of ocrEligible that reads only the assets row alias.
+func ocrPhoto(asset string) string {
+	return asset + ".kind = 'photo' AND " + asset + "." + present
 }
 
 // SetOCR turns reading text on or off. Turning it on queues every eligible
@@ -165,6 +181,7 @@ func enqueueOCR(ctx context.Context, tx *sql.Tx, ids []int64) (int64, error) {
 		SELECT a.id, ?1, 'waiting', ?2, a.taken_at, a.kind FROM assets a WHERE `
 	args := []any{core.StageOCR, time.Now().Unix()}
 	settleWhere, settleArgs := "stage = ?", []any{core.StageOCR}
+	eligible := ocrEligibleAll("a")
 	if ids != nil {
 		list, err := json.Marshal(ids)
 		if err != nil {
@@ -174,8 +191,9 @@ func enqueueOCR(ctx context.Context, tx *sql.Tx, ids []int64) (int64, error) {
 		args = append(args, string(list))
 		settleWhere += " AND asset_id IN (SELECT value FROM json_each(?))"
 		settleArgs = append(settleArgs, string(list))
+		eligible = ocrEligible("a")
 	}
-	res, err := tx.ExecContext(ctx, q+ocrEligible("a"), args...)
+	res, err := tx.ExecContext(ctx, q+eligible, args...)
 	if err != nil {
 		return 0, err
 	}

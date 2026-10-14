@@ -17,7 +17,7 @@ var ErrNotFound = errors.New("not found")
 // UnavailableAssets identifies stored vectors that must not compete for search
 // results. Keep their embeddings so restored sources become searchable again.
 func (s *Store) UnavailableAssets(ctx context.Context) (map[int64]bool, error) {
-	ids, err := queryAll(ctx, s.r, scanID, "SELECT id FROM assets WHERE NOT ("+visible+")")
+	ids, err := queryAll(ctx, s.r, scanID, unavailableSQL)
 	if err != nil {
 		return nil, err
 	}
@@ -27,6 +27,12 @@ func (s *Store) UnavailableAssets(ctx context.Context) (map[int64]bool, error) {
 	}
 	return out, nil
 }
+
+// unavailableSQL lists the assets that are not visible: the hidden, trashed
+// or missing ones, from the assets_unavailable partial index (migration 0038,
+// which needs its clause spelled as baseVisibleOf spells it), and the blocked
+// ones. An asset can be both, which UnavailableAssets' map absorbs.
+var unavailableSQL = "SELECT id FROM assets WHERE NOT (" + baseVisibleOf("") + ") UNION ALL SELECT asset_id FROM blocked_assets"
 
 // VisibilityRevision changes whenever which assets are visible can change:
 // assets coming, going, hidden or missing, and blocks or anything a block
