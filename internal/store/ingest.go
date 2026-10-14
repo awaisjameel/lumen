@@ -262,8 +262,17 @@ func markOrphans(ctx context.Context, tx *sql.Tx, assetIDs []int64, now int64) e
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE assets SET missing_since = ?
-		WHERE id IN (SELECT value FROM json_each(?)) AND missing_since IS NULL
-		AND NOT EXISTS (SELECT 1 FROM files WHERE asset_id = assets.id)`, now, string(list))
+	const orphans = `id IN (SELECT value FROM json_each(?)) AND missing_since IS NULL
+		AND NOT EXISTS (SELECT 1 FROM files WHERE asset_id = assets.id)`
+	if int64(len(assetIDs)) >= keptCountsLimit(ctx) {
+		var changed int64
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM assets WHERE "+orphans, string(list)).Scan(&changed); err != nil {
+			return err
+		}
+		if err := markKeptCountsForChange(ctx, tx, changed); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE assets SET missing_since = ? WHERE "+orphans, now, string(list))
 	return err
 }

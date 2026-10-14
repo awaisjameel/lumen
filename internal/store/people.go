@@ -39,19 +39,25 @@ func scanFace(r *sql.Rows) (f core.Face, err error) {
 const clearest = `f.id = (SELECT cover_face FROM people WHERE id = f.person_id) DESC,
 	f.w * a.width * f.h * a.height * f.score DESC`
 
+var countedFacesFrom = ` FROM faces f JOIN assets a ON a.id = f.asset_id WHERE f.person_id IS NOT NULL AND ` + visibleA + ` AND ` + faceShown
+
+var recountPersonCountsSQL = `DELETE FROM person_counts_faces;
+	DELETE FROM person_counts;
+	INSERT INTO person_counts(person_id, count) SELECT id, 0 FROM people;
+	INSERT INTO person_counts_faces(face_id, person_id, asset_id, cover_weight, cover_ready)
+	SELECT f.id, f.person_id, f.asset_id, f.w * a.width * f.h * a.height * f.score, a.thumb_version > 0` + countedFacesFrom + `;
+	UPDATE person_counts SET count = (SELECT count(DISTINCT asset_id) FROM person_counts_faces WHERE person_id = person_counts.person_id);`
+
 // People lists everyone who appears in a visible photo: named people first,
 // then by how many photos they are in.
 func (s *Store) People(ctx context.Context) ([]core.Person, error) {
 	var people []core.Person
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
-		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), count(DISTINCT f.asset_id)
-			FROM people p JOIN faces f ON f.person_id = p.id JOIN assets a ON a.id = f.asset_id AND `+visibleA+`
-			WHERE NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND `+faceShown+`
-			GROUP BY p.id ORDER BY p.name IS NULL, count(DISTINCT f.asset_id) DESC, p.name, p.id`)
+		people, err = peopleKept(ctx, tx)
 		if err != nil {
 			return err
 		}
-		return addCovers(ctx, tx, people)
+		return addKeptCovers(ctx, tx, people)
 	})
 	return people, err
 }
@@ -61,16 +67,15 @@ func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 	var people []core.Person
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
 		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''),
-				(SELECT count(DISTINCT f.asset_id) FROM faces f JOIN assets a ON a.id = f.asset_id
-					WHERE f.person_id = p.id AND `+visibleA+` AND `+faceShown+`)
-			FROM people p WHERE p.id = ? AND NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND NOT `+personCovered("p.id"), id)
+				COALESCE(c.count, 0)
+			FROM people p LEFT JOIN person_counts c ON c.person_id = p.id WHERE p.id = ? AND NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND NOT `+personCovered("p.id"), id)
 		if err != nil {
 			return err
 		}
 		if len(people) == 0 {
 			return ErrNotFound
 		}
-		return addCovers(ctx, tx, people)
+		return addKeptCovers(ctx, tx, people)
 	})
 	if err != nil {
 		return core.Person{}, err
@@ -78,30 +83,47 @@ func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 	return people[0], nil
 }
 
-func scanPerson(r *sql.Rows) (p core.Person, err error) {
-	err = r.Scan(&p.ID, &p.Name, &p.Count)
-	return p, err
+// peopleKept reads the counts in the caller's snapshot; covers use it too.
+func peopleKept(ctx context.Context, tx *sql.Tx) ([]core.Person, error) {
+	return queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), c.count
+		FROM people p JOIN person_counts c ON c.person_id = p.id
+		WHERE c.count > 0 AND NOT `+labelBlocked(core.BlockPerson, "p.id")+`
+		ORDER BY p.name IS NULL, c.count DESC, p.name, p.id`)
 }
 
-// addCovers picks each person's clearest face with a thumbnail to show.
-func addCovers(ctx context.Context, tx *sql.Tx, people []core.Person) error {
-	st, err := tx.PrepareContext(ctx, faceSelect+` WHERE f.person_id = ? AND `+visibleA+` AND `+faceShown+` AND a.thumb_version > 0
-		ORDER BY `+clearest+` LIMIT 1`)
+// addKeptCovers seeks the user's eligible pick or the first ranked candidate.
+// Face details are read live, so names, boxes and thumbnail versions stay current.
+func addKeptCovers(ctx context.Context, tx *sql.Tx, people []core.Person) error {
+	ids := make([]int64, len(people))
+	for i, p := range people {
+		ids[i] = p.ID
+	}
+	list, err := json.Marshal(ids)
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	covers, err := queryAll(ctx, tx, scanFace, faceSelect+` WHERE f.id IN (
+		SELECT COALESCE(
+			(SELECT face_id FROM person_counts_faces WHERE face_id = p.cover_face AND person_id = p.id AND cover_ready = 1),
+			(SELECT face_id FROM person_counts_faces WHERE person_id = p.id AND cover_ready = 1
+				ORDER BY cover_weight DESC, face_id LIMIT 1))
+		FROM people p WHERE p.id IN (SELECT value FROM json_each(?)))`, string(list))
+	if err != nil {
+		return err
+	}
+	byPerson := make(map[int64]core.Face, len(covers))
+	for _, f := range covers {
+		byPerson[f.Person] = f
+	}
 	for i := range people {
-		rows, err := st.QueryContext(ctx, people[i].ID)
-		covers, err := collect(rows, err, scanFace)
-		if err != nil {
-			return err
-		}
-		if len(covers) > 0 {
-			people[i].Cover = covers[0]
-		}
+		people[i].Cover = byPerson[people[i].ID]
 	}
 	return nil
+}
+
+func scanPerson(r *sql.Rows) (p core.Person, err error) {
+	err = r.Scan(&p.ID, &p.Name, &p.Count)
+	return p, err
 }
 
 // PersonFaces returns a person's faces in visible photos with their identity
@@ -184,7 +206,7 @@ func (s *Store) SearchPeople(ctx context.Context, text string, limit int) ([]cor
 		if err != nil {
 			return err
 		}
-		return addCovers(ctx, tx, people)
+		return addKeptCovers(ctx, tx, people)
 	})
 	return people, err
 }

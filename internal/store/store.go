@@ -107,7 +107,7 @@ func Open(path string) (*Store, error) {
 	// A migrated library must be backfilled before any reader can browse it.
 	if err := s.tx(context.Background(), func(*sql.Tx) error { return nil }); err != nil {
 		w.Close()
-		return nil, fmt.Errorf("backfill blocked assets: %w", err)
+		return nil, fmt.Errorf("backfill derived tables: %w", err)
 	}
 
 	r, err := sql.Open(driverName, dsn("&_query_only=1"))
@@ -138,29 +138,55 @@ func (s *Store) Close() error {
 // Its separate connection never reserves the writer, and its zero busy timeout
 // makes an occupied WAL a harmless no-op instead of waiting for a long reader.
 func (s *Store) Checkpoint(ctx context.Context) (bool, error) {
+	var busy int
+	completed, err := s.maintain(ctx, func(db *sql.DB) error {
+		var frames, copied int
+		return db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &frames, &copied)
+	})
+	if err != nil {
+		return false, fmt.Errorf("checkpoint WAL: %w", err)
+	}
+	return completed && busy == 0, nil
+}
+
+// Optimize refreshes bounded planner statistics, as Close does, for a library
+// built in one long session or one whose sessions end in a crash. A fresh
+// connection has no query history, so it considers every table.
+func (s *Store) Optimize(ctx context.Context) (bool, error) {
+	completed, err := s.maintain(ctx, func(db *sql.DB) error {
+		_, err := db.ExecContext(ctx, "PRAGMA analysis_limit=1000; PRAGMA optimize=0x10002")
+		return err
+	})
+	if err != nil {
+		return false, fmt.Errorf("optimise library statistics: %w", err)
+	}
+	return completed, nil
+}
+
+// maintain runs fn on its own connection to the library, so idle maintenance
+// never queues on the writer and readers keep their WAL snapshots. Its zero
+// busy timeout turns a library in use into "not completed" rather than a wait.
+func (s *Store) maintain(ctx context.Context, fn func(*sql.DB) error) (completed bool, err error) {
 	// SQLite names the file its readers hold open, so nothing is created: a
 	// closed store fails here, and Windows keeps an open database in place.
 	// The path is plain, as in Open, so it needs no escaping.
 	var seq int
 	var name, file string
 	if err := s.r.QueryRowContext(ctx, "PRAGMA database_list").Scan(&seq, &name, &file); err != nil {
-		return false, fmt.Errorf("checkpoint WAL: %w", err)
+		return false, err
 	}
 	db, err := sql.Open(driverName, file+"?_busy_timeout=0&_cache_size=-2000")
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = db.Close() }()
-	var busy, frames, copied int
-	err = db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &frames, &copied)
+	db.SetMaxOpenConns(1)
+	err = fn(db)
 	var se sqlite3.Error
 	if errors.As(err, &se) && se.Code == sqlite3.ErrBusy {
 		return false, nil
 	}
-	if err != nil {
-		return false, fmt.Errorf("checkpoint WAL: %w", err)
-	}
-	return busy == 0, nil
+	return err == nil, err
 }
 
 // SchemaVersion is the applied migration version, for a local problem report.
@@ -229,8 +255,8 @@ func (s *Store) read(ctx context.Context, fn func(*sql.Tx) error) error {
 // tx runs fn in a write transaction, committing on success. The deferred
 // rollback also runs if fn panics, so the single writer connection is never
 // left inside a transaction (every later write would wait on it). Before it
-// commits, the transaction settles event tags and then blocked assets, so
-// neither derived set can disagree with the photos on disk.
+// commits, the transaction settles event tags, blocked assets and counts, so
+// the derived sets and kept counts agree with the photos on disk.
 func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	return s.runTx(ctx, true, fn)
 }
@@ -252,6 +278,9 @@ func (s *Store) runTx(ctx context.Context, settle bool, fn func(*sql.Tx) error) 
 		}
 		if err := settleBlockedAssets(ctx, tx); err != nil {
 			return fmt.Errorf("settle blocked assets: %w", err)
+		}
+		if err := settleKeptCounts(ctx, tx); err != nil {
+			return fmt.Errorf("settle kept counts: %w", err)
 		}
 	}
 	return tx.Commit()

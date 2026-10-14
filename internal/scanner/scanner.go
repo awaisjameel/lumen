@@ -45,6 +45,7 @@ type Scanner struct {
 	HashWorkers int
 	OnProgress  func(seen int)      // called now and then while walking
 	OnIngested  func(newAssets int) // called after each committed batch
+	seekPenalty func(context.Context, string) (bool, error)
 }
 
 const ingestBatch = 256
@@ -87,7 +88,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 
 	// Hash workers: I/O bound, a few in parallel.
 	var hw sync.WaitGroup
-	for range max(1, s.HashWorkers) {
+	for range s.hashWorkers(ctx, walkRoot) {
 		hw.Go(func() {
 			for f := range toHash {
 				sum, err := Fingerprint(ctx, f.path, f.size)

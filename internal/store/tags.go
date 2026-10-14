@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -234,22 +235,55 @@ type AssetScore struct {
 func (s *Store) Things(ctx context.Context, minScore float64) ([]core.Tag, error) {
 	var out []core.Tag
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
-		out, err = queryAll(ctx, tx, func(r *sql.Rows) (t core.Tag, err error) {
-			err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Count, &t.Pinned, &t.Original)
-			return t, err
-		}, `SELECT t.id, t.name, t.kind, count(a.id), t.pinned_at IS NOT NULL,
-				CASE WHEN t.vocab_name IS NOT NULL AND t.vocab_name != t.name THEN t.vocab_name ELSE '' END
-			FROM tags t
-			LEFT JOIN asset_tags x ON x.tag_id = t.id AND `+tagApplies+`
-			LEFT JOIN assets a ON a.id = x.asset_id AND `+visibleA+`
-			WHERE t.hidden = 0 AND NOT `+labelBlocked(core.BlockTag, "t.id")+`
-			GROUP BY t.id ORDER BY t.pinned_at IS NOT NULL DESC, t.pinned_at DESC, count(a.id) DESC, t.name`, minScore)
+		out, err = thingsIn(ctx, tx, minScore)
 		if err != nil {
 			return err
 		}
 		return addTagCovers(ctx, tx, out, minScore)
 	})
 	return out, err
+}
+
+// thingsIn chooses the kept counts only for the threshold they describe, in
+// the same snapshot as both the setting and the covers.
+func thingsIn(ctx context.Context, tx *sql.Tx, minScore float64) ([]core.Tag, error) {
+	var threshold float64
+	if err := tx.QueryRowContext(ctx, "SELECT "+tagConfidenceSQL).Scan(&threshold); err != nil {
+		return nil, err
+	}
+	if math.Float64bits(threshold) != math.Float64bits(minScore) {
+		return thingsCounted(ctx, tx, minScore)
+	}
+	return queryAll(ctx, tx, func(r *sql.Rows) (t core.Tag, err error) {
+		err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Count, &t.Pinned, &t.Original)
+		return t, err
+	}, `SELECT t.id, t.name, t.kind, c.n, t.pinned_at IS NOT NULL,
+		CASE WHEN t.vocab_name IS NOT NULL AND t.vocab_name != t.name THEN t.vocab_name ELSE '' END
+		FROM tags t JOIN tag_counts c ON c.tag_id = t.id
+		WHERE t.hidden = 0 AND NOT `+labelBlocked(core.BlockTag, "t.id")+`
+		ORDER BY t.pinned_at IS NOT NULL DESC, t.pinned_at DESC, c.n DESC, t.name`)
+}
+
+// tagCountFrom shares the matching and visibility rules with every count query.
+func tagCountFrom(threshold string) string {
+	return ` FROM tags t LEFT JOIN (SELECT x.tag_id, count(*) AS n
+		FROM assets a CROSS JOIN asset_tags x ON x.asset_id = a.id
+		WHERE ` + visibleA + ` AND ` + tagAppliesTo("x", threshold) + ` GROUP BY x.tag_id) c ON c.tag_id = t.id`
+}
+
+var recountTagCountsSQL = `DELETE FROM tag_counts;
+	INSERT INTO tag_counts(tag_id, n) SELECT t.id, COALESCE(c.n, 0)` + tagCountFrom(tagConfidenceSQL) + `;`
+
+// thingsCounted is the original count query for callers using another threshold.
+func thingsCounted(ctx context.Context, tx *sql.Tx, minScore float64) ([]core.Tag, error) {
+	return queryAll(ctx, tx, func(r *sql.Rows) (t core.Tag, err error) {
+		err = r.Scan(&t.ID, &t.Name, &t.Kind, &t.Count, &t.Pinned, &t.Original)
+		return t, err
+	}, `SELECT t.id, t.name, t.kind, COALESCE(c.n, 0), t.pinned_at IS NOT NULL,
+				CASE WHEN t.vocab_name IS NOT NULL AND t.vocab_name != t.name THEN t.vocab_name ELSE '' END
+			`+tagCountFrom("?")+`
+			WHERE t.hidden = 0 AND NOT `+labelBlocked(core.BlockTag, "t.id")+`
+			ORDER BY t.pinned_at IS NOT NULL DESC, t.pinned_at DESC, COALESCE(c.n, 0) DESC, t.name`, minScore)
 }
 
 // addTagCovers picks each tag's cover: a photo the user tagged, else the

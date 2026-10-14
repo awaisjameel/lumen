@@ -21,6 +21,16 @@ func downgradeToV18(t *testing.T, st *Store) {
 	// This fixture deliberately removes settlement's schema until the next
 	// Open, so build the old database through the raw pool as migrations do.
 	st.w.execContext = st.w.DB.ExecContext
+	// The kept counts (migration 0037) read tables this version lacks, so they
+	// go with their triggers.
+	for _, table := range []string{"day_counts", "tag_counts", "person_counts_faces", "person_counts", "job_counts", "count_rebuild"} {
+		triggers, err := queryAll(ctx, st.r, func(r *sql.Rows) (name string, err error) { err = r.Scan(&name); return name, err }, "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE ? || '_%'", table)
+		check(t, err)
+		for _, name := range triggers {
+			check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER "+name)))
+		}
+		check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE "+table)))
+	}
 	restoreBlockRevisionTriggers(ctx, t, st)
 	for _, table := range []string{"blocked_assets", "blocked_dirty", "blocked_rebuild"} {
 		check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE "+table)))

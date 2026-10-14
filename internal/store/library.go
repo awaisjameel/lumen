@@ -38,10 +38,41 @@ func (s *Store) VisibilityRevision(ctx context.Context) (int64, error) {
 	return revision, err
 }
 
+const calendarDaySQL = "strftime('%Y-%m-%d', taken_at, 'unixepoch')"
+
+var recountDayCountsSQL = `DELETE FROM day_counts;
+	INSERT INTO day_counts(day, total, favourites, videos)
+	SELECT COALESCE(` + calendarDaySQL + `, ''), count(*), sum(favourite = 1), sum(kind = 'video')
+	FROM assets WHERE ` + visible + ` GROUP BY ` + calendarDaySQL + `;`
+
 // DayBuckets counts the view's assets per calendar day, newest day first.
 // The grid builds its entire layout, and the timeline scrubber, from this
 // list. AI tags count from minScore up.
 func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float64) ([]core.DayBucket, error) {
+	if v.Tag == 0 && v.Person == 0 && v.Album == 0 && v.Place == 0 && v.Event == 0 &&
+		(v.Filter == core.FilterAll || v.Filter == core.FilterFavourites || v.Filter == core.FilterVideos) {
+		return keptDayBuckets(ctx, s.r, v.Filter)
+	}
+	return s.dayBucketsCounted(ctx, v, minScore)
+}
+
+func keptDayBuckets(ctx context.Context, db querier, filter core.Filter) ([]core.DayBucket, error) {
+	column := "total"
+	switch filter {
+	case core.FilterFavourites:
+		column = "favourites"
+	case core.FilterVideos:
+		column = "videos"
+	default:
+	}
+	return queryAll(ctx, db, func(r *sql.Rows) (b core.DayBucket, err error) {
+		err = r.Scan(&b.Day, &b.Count)
+		return b, err
+	}, "SELECT NULLIF(day, '') AS day, "+column+" FROM day_counts WHERE "+column+" > 0 ORDER BY day DESC")
+}
+
+// dayBucketsCounted remains the reference for views narrowed beyond a timeline filter.
+func (s *Store) dayBucketsCounted(ctx context.Context, v core.View, minScore float64) ([]core.DayBucket, error) {
 	where, args, err := s.viewSQL(ctx, v, minScore)
 	if err != nil {
 		return nil, err
@@ -49,7 +80,7 @@ func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float64) (
 	return queryAll(ctx, s.r, func(r *sql.Rows) (b core.DayBucket, err error) {
 		err = r.Scan(&b.Day, &b.Count)
 		return b, err
-	}, `SELECT strftime('%Y-%m-%d', taken_at, 'unixepoch') AS day, count(*)
+	}, `SELECT `+calendarDaySQL+` AS day, count(*)
 		FROM assets WHERE `+where+` GROUP BY day ORDER BY day DESC`, args...)
 }
 
@@ -387,8 +418,12 @@ func setFavourite(ctx context.Context, tx *sql.Tx, id int64, fav bool) error {
 
 // CountVisible returns how many assets the grid shows.
 func (s *Store) CountVisible(ctx context.Context) (int, error) {
+	return keptVisibleCount(ctx, s.r)
+}
+
+func keptVisibleCount(ctx context.Context, db querier) (int, error) {
 	var n int
-	err := s.r.QueryRowContext(ctx, "SELECT count(*) FROM assets WHERE "+visible).Scan(&n)
+	err := db.QueryRowContext(ctx, "SELECT COALESCE(sum(total), 0) FROM day_counts").Scan(&n)
 	return n, err
 }
 

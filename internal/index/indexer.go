@@ -46,8 +46,6 @@ const (
 	watchRetryMax = 5 * time.Minute
 	// retryDelay is how long a scan or stage waits after the database failed.
 	retryDelay = 5 * time.Second
-	// hashWorkers fingerprint files in parallel while scanning (I/O bound).
-	hashWorkers = 4
 )
 
 // Models are the AI parts the indexer runs. A nil one (with its error saying
@@ -671,8 +669,7 @@ func (ix *Indexer) pendingScans() int {
 
 func (ix *Indexer) scanLoop(ctx context.Context) {
 	sc := &scanner.Scanner{
-		Store:       ix.store,
-		HashWorkers: hashWorkers,
+		Store: ix.store,
 		OnProgress: func(seen int) {
 			ix.mu.Lock()
 			ix.scanSeen = seen
@@ -963,8 +960,8 @@ func (ix *Indexer) flushFSChanges() {
 
 // reportLoop emits index:progress when it changes and library:changed at most
 // once a second, so the UI stays live without being flooded. While nothing
-// changes it does not touch the database. Counting jobs takes a while in a
-// big library, so it spends at most a fifth of the time doing it.
+// changes it does not touch the database. Progress reads the kept counts, and
+// reporting still spends at most a fifth of the time.
 func (ix *Indexer) reportLoop(ctx context.Context) {
 	wait := time.Second
 	wasIdle := false
@@ -1002,6 +999,15 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 			p.Metadata == 0 && p.Thumbnail == 0 && p.Embedding == 0 && p.Faces == 0 && p.Videos == 0 && p.OCR == 0
 		ix.mu.Unlock()
 		if idle && !wasIdle {
+			started := time.Now()
+			optimised, err := ix.store.Optimize(ctx)
+			if err != nil {
+				if ctx.Err() == nil {
+					slog.Debug("optimise idle library", "err", err)
+				}
+			} else {
+				slog.Debug("optimise idle library", "completed", optimised, "took", time.Since(started))
+			}
 			completed, err := ix.store.Checkpoint(ctx)
 			if err != nil {
 				if ctx.Err() == nil {
