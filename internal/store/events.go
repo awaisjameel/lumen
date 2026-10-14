@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -45,19 +46,8 @@ func (s *Store) Events(ctx context.Context, gapHours int) ([]core.Event, error) 
 	var revision, coverRevision int64
 	var out []core.Event
 	err := s.read(ctx, func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, "SELECT value, cover_value FROM event_revision WHERE id = 1").Scan(&revision, &coverRevision); err != nil {
-			return err
-		}
-		if s.eventsCache.loaded && s.eventsCache.revision == revision && s.eventsCache.gap == gapHours {
-			out = s.eventsCache.items
-			if s.eventsCache.coverRevision != coverRevision {
-				out = append([]core.Event(nil), out...)
-				return refreshEventCovers(ctx, tx, out)
-			}
-			return nil
-		}
 		var err error
-		out, err = groupEvents(ctx, tx, gapHours, nil)
+		out, revision, coverRevision, err = s.eventsIn(ctx, tx, gapHours)
 		return err
 	})
 	if err != nil {
@@ -69,6 +59,199 @@ func (s *Store) Events(ctx context.Context, gapHours int) ([]core.Event, error) 
 	s.eventsCache.loaded = true
 	s.eventsCache.items = out
 	return append([]core.Event(nil), out...), nil
+}
+
+// eventsIn reads the journal and grouping in one snapshot. Its caller holds
+// the list mutex, so an older reader cannot overwrite a newer cached list.
+func (s *Store) eventsIn(ctx context.Context, tx *sql.Tx, gapHours int) (out []core.Event, revision, covers int64, err error) {
+	var full, floor int64
+	if err := tx.QueryRowContext(ctx, `SELECT r.value, r.full_value, r.floor, e.cover_value
+		FROM event_list_revision r CROSS JOIN event_revision e WHERE r.id = 1 AND e.id = 1`).Scan(&revision, &full, &floor, &covers); err != nil {
+		return nil, 0, 0, err
+	}
+	cache := &s.eventsCache
+	fullRegroup := false
+	switch {
+	case !cache.loaded || cache.gap != gapHours || cache.revision < full || cache.revision < floor || cache.revision > revision:
+		out, err = groupEvents(ctx, tx, gapHours, nil)
+		fullRegroup = true
+	case cache.revision != revision:
+		out, err = regroupDirtyEvents(ctx, tx, gapHours, cache.revision, cache.items)
+	default:
+		out = cache.items
+	}
+	if err == nil && !fullRegroup && cache.coverRevision != covers {
+		// A cover may have changed outside the regrouped windows. Copy before
+		// refreshing so a failed read cannot partially change the cache.
+		out = append([]core.Event(nil), out...)
+		// Pruning retains at least 4033 cover revisions, up to 4096 between batches.
+		if cache.coverRevision < covers-4033 || cache.coverRevision > covers {
+			err = refreshEventCovers(ctx, tx, out)
+		} else {
+			err = refreshDirtyEventCovers(ctx, tx, out, cache.coverRevision)
+		}
+	}
+	return out, revision, covers, err
+}
+
+func refreshDirtyEventCovers(ctx context.Context, tx *sql.Tx, events []core.Event, revision int64) error {
+	times, err := queryAll(ctx, tx, scanID, "SELECT at FROM event_list_cover_dirty WHERE revision > ? ORDER BY at", revision)
+	if err != nil {
+		return err
+	}
+	var changed []core.Event
+	var positions []int
+	for i, event := range events {
+		first := sort.Search(len(times), func(i int) bool { return times[i] >= event.StartAt })
+		if first < len(times) && times[first] <= event.EndAt {
+			changed = append(changed, event)
+			positions = append(positions, i)
+		}
+	}
+	if err := refreshEventCovers(ctx, tx, changed); err != nil {
+		return err
+	}
+	for i, position := range positions {
+		events[position].Cover = changed[i].Cover
+		events[position].CoverThumb = changed[i].CoverThumb
+	}
+	return nil
+}
+
+// regroupDirtyEvents expands through both the old events and the new runs.
+// Deleting a bridge can split an old event beyond the run reached from its
+// former date; adding a bridge can join runs beyond the old event's edges.
+func regroupDirtyEvents(ctx context.Context, tx *sql.Tx, gapHours int, revision int64, cached []core.Event) ([]core.Event, error) {
+	times, err := queryAll(ctx, tx, scanID, "SELECT at FROM event_list_dirty WHERE revision > ? ORDER BY at", revision)
+	if err != nil {
+		return nil, err
+	}
+	chronological := append([]core.Event(nil), cached...)
+	slices.SortFunc(chronological, func(a, b core.Event) int {
+		if order := cmp.Compare(a.StartAt, b.StartAt); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.FirstID, b.FirstID)
+	})
+	st := newSettler(tx, int64(gapHours)*3600)
+	var windows [][2]int64
+	for _, at := range times {
+		if n := len(windows); n > 0 && at <= windows[n-1][1] {
+			continue
+		}
+		lo, hi := at, at
+		for {
+			before := [2]int64{lo, hi}
+			// All events sharing a second must be included, regardless of id or
+			// location, because the range query includes that whole second.
+			first := sort.Search(len(chronological), func(i int) bool { return chronological[i].EndAt >= lo })
+			for i := first; i < len(chronological) && chronological[i].StartAt <= hi; i++ {
+				lo = min(lo, chronological[i].StartAt)
+				hi = max(hi, chronological[i].EndAt)
+			}
+			left, _, err := st.runAround(ctx, lo)
+			if err != nil {
+				return nil, err
+			}
+			_, right, err := st.runAround(ctx, hi)
+			if err != nil {
+				return nil, err
+			}
+			lo, hi = left, right
+			if before == [2]int64{lo, hi} {
+				break
+			}
+		}
+		if n := len(windows); n > 0 && lo <= windows[n-1][1] {
+			windows[n-1][1] = max(windows[n-1][1], hi)
+		} else {
+			windows = append(windows, [2]int64{lo, hi})
+		}
+	}
+	var retained, changed []core.Event
+	for _, event := range cached {
+		i := sort.Search(len(windows), func(i int) bool { return windows[i][1] >= event.StartAt })
+		if i == len(windows) || windows[i][0] > event.EndAt {
+			retained = append(retained, event)
+		}
+	}
+	for _, window := range windows {
+		events, err := groupEvents(ctx, tx, gapHours, &window)
+		if err != nil {
+			return nil, err
+		}
+		changed = append(changed, events...)
+	}
+	return orderSplicedEvents(ctx, tx, retained, changed)
+}
+
+// orderSplicedEvents restores the full grouper's pin order without reading
+// every photo's tags. Retained events already have the right relative order;
+// binary insertion only looks up pins encountered around changed events.
+func orderSplicedEvents(ctx context.Context, tx *sql.Tx, retained, changed []core.Event) ([]core.Event, error) {
+	pins := make(map[int64]int64)
+	pinOf := func(event core.Event) (int64, error) {
+		if !event.Pinned {
+			return 0, nil
+		}
+		if pin, found := pins[event.ID]; found {
+			return pin, nil
+		}
+		pin, err := eventPin(ctx, tx, event)
+		if err == nil {
+			pins[event.ID] = pin
+		}
+		return pin, err
+	}
+	for _, event := range changed {
+		if _, err := pinOf(event); err != nil {
+			return nil, err
+		}
+	}
+	compare := func(a, b core.Event, aPin, bPin int64) int {
+		if order := cmp.Compare(bPin, aPin); order != 0 {
+			return order
+		}
+		if order := cmp.Compare(b.StartAt, a.StartAt); order != 0 {
+			return order
+		}
+		return cmp.Compare(b.FirstID, a.FirstID)
+	}
+	slices.SortFunc(changed, func(a, b core.Event) int {
+		return compare(a, b, pins[a.ID], pins[b.ID])
+	})
+	insertions := make(map[int][]core.Event)
+	for _, event := range changed {
+		lo, hi := 0, len(retained)
+		for lo < hi {
+			mid := lo + (hi-lo)/2
+			pin, err := pinOf(retained[mid])
+			if err != nil {
+				return nil, err
+			}
+			if compare(event, retained[mid], pins[event.ID], pin) < 0 {
+				hi = mid
+			} else {
+				lo = mid + 1
+			}
+		}
+		insertions[lo] = append(insertions[lo], event)
+	}
+	out := make([]core.Event, 0, len(retained)+len(changed))
+	for i, event := range retained {
+		out = append(out, insertions[i]...)
+		out = append(out, event)
+	}
+	return append(out, insertions[len(retained)]...), nil
+}
+
+func eventPin(ctx context.Context, tx *sql.Tx, event core.Event) (int64, error) {
+	bounds, args := eventBounds(&event)
+	var pin int64
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(t.created_at), 0)
+		FROM event_members m JOIN event_tags t ON t.id = m.tag_id AND t.kind = 'pin'
+		WHERE m.asset_id IN (SELECT id FROM assets WHERE `+visible+` AND `+bounds+`)`, args...).Scan(&pin)
+	return pin, err
 }
 
 // groupEvents uses the same grouping rules for the timeline and a gap-bounded
