@@ -46,8 +46,6 @@ const (
 	watchRetryMax = 5 * time.Minute
 	// retryDelay is how long a scan or stage waits after the database failed.
 	retryDelay = 5 * time.Second
-	// hashWorkers fingerprint files in parallel while scanning (I/O bound).
-	hashWorkers = 4
 )
 
 // Models are the AI parts the indexer runs. A nil one (with its error saying
@@ -671,8 +669,7 @@ func (ix *Indexer) pendingScans() int {
 
 func (ix *Indexer) scanLoop(ctx context.Context) {
 	sc := &scanner.Scanner{
-		Store:       ix.store,
-		HashWorkers: hashWorkers,
+		Store: ix.store,
 		OnProgress: func(seen int) {
 			ix.mu.Lock()
 			ix.scanSeen = seen
