@@ -14,15 +14,16 @@ import (
 	"lumen/internal/store"
 )
 
-// BenchmarkColdPhotoScanWorkers reads each supplied corpus once. The caller
-// prepares copies with uncached writes; this benchmark never empties the cache.
+// BenchmarkColdPhotoScanWorkers reads each supplied corpus once. It never
+// empties the file cache, so e2e/perf/cold_scan_copies.py writes the copies
+// with uncached writes, one folder per worker count and sample.
 func BenchmarkColdPhotoScanWorkers(b *testing.B) {
 	if b.N != 1 {
 		b.Fatal("cold scans require -benchtime=1x, with five unused copies per worker count")
 	}
 	root := os.Getenv("LUMEN_COLD_SCAN_BENCH_ROOT")
 	if root == "" {
-		b.Fatal("LUMEN_COLD_SCAN_BENCH_ROOT must name unused copies of a real corpus")
+		b.Fatal("LUMEN_COLD_SCAN_BENCH_ROOT must name unused copies of a real corpus (e2e/perf/cold_scan_copies.py)")
 	}
 	b.StopTimer()
 	for sample := 1; sample <= 5; sample++ {
