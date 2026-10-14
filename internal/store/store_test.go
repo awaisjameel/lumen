@@ -619,3 +619,99 @@ func item(sourceID int64, path, content string) IngestItem {
 		TakenAt: 1_700_000_000, DateFrom: core.DateFromFile,
 	}
 }
+
+func TestAnUnsetSettingIsCachedWithoutChangingEachCallersDefault(t *testing.T) {
+	st := openTest(t)
+	value, err := st.Float(t.Context(), core.SettingTagConfidence, 0.3)
+	check(t, err)
+	if value != 0.3 {
+		t.Fatalf("unset confidence = %v", value)
+	}
+	check(t, st.r.Close())
+	value, err = st.Float(t.Context(), core.SettingTagConfidence, 0.7)
+	check(t, err)
+	if value != 0.7 {
+		t.Fatalf("cached absence lost the caller's default: %v", value)
+	}
+	check(t, st.SetFloat(t.Context(), core.SettingTagConfidence, 0.9))
+	value, err = st.Float(t.Context(), core.SettingTagConfidence, 0.7)
+	check(t, err)
+	if value != 0.9 {
+		t.Fatalf("a write did not replace cached absence: %v", value)
+	}
+}
+
+func TestASettingReadKeepsAWriteThatRacesItsSnapshot(t *testing.T) {
+	for _, exists := range []bool{false, true} {
+		t.Run(strconv.FormatBool(exists), func(t *testing.T) {
+			st, ctx := openTest(t), t.Context()
+			const key = "racing-setting"
+			if exists {
+				check(t, st.setSetting(ctx, key, "before"))
+				st.settings.Delete(key)
+			}
+			st.r.SetMaxOpenConns(1)
+			conn, err := st.r.Conn(ctx)
+			check(t, err)
+			defer func() { _ = conn.Close() }()
+			var writes int
+			check(t, conn.Raw(func(raw any) error {
+				sqlite, ok := raw.(*sqlite3.SQLiteConn)
+				if !ok {
+					return errors.New("unexpected SQLite connection")
+				}
+				return sqlite.RegisterFunc("setting_probe", func(value string) (string, error) {
+					writes++
+					return value, st.setSetting(ctx, key, "after")
+				}, false)
+			}))
+			view := `CREATE TEMP VIEW settings AS SELECT key, setting_probe(value) AS value FROM main.settings`
+			if !exists {
+				// The unmatched row performs the write while the missing key's old snapshot is read.
+				view = `CREATE TEMP VIEW settings AS SELECT key, value FROM main.settings UNION ALL SELECT setting_probe('unmatched-setting'), ''`
+			}
+			check(t, errOf(conn.ExecContext(ctx, "PRAGMA query_only = OFF; "+view+"; PRAGMA query_only = ON;")))
+			check(t, conn.Close())
+			value, ok, err := st.setting(ctx, key)
+			check(t, err)
+			if writes != 1 || !ok || value != "after" {
+				t.Fatalf("racing write lost: value=%q ok=%v writes=%d", value, ok, writes)
+			}
+			value, ok, err = st.setting(ctx, key)
+			check(t, err)
+			if !ok || value != "after" || writes != 1 {
+				t.Fatalf("cached write lost: %q, %v, reads=%d", value, ok, writes)
+			}
+		})
+	}
+}
+
+func TestAFailedSettingReadIsNotCachedAsAbsence(t *testing.T) {
+	st := openTest(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, _, err := st.setting(ctx, "unread")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled read = %v", err)
+	}
+	if _, loaded := st.settings.Load("unread"); loaded {
+		t.Fatal("failed read was cached")
+	}
+	value, ok, err := st.setting(t.Context(), "unread")
+	check(t, err)
+	if ok || value != "" {
+		t.Fatalf("unset retry = %q, %v", value, ok)
+	}
+	check(t, st.r.Close())
+	_, ok, err = st.setting(t.Context(), "unread")
+	check(t, err)
+	if ok {
+		t.Fatal("absence became a value")
+	}
+	check(t, st.setSetting(t.Context(), "unread", "value"))
+	value, ok, err = st.setting(t.Context(), "unread")
+	check(t, err)
+	if !ok || value != "value" {
+		t.Fatalf("retry lost the written value: %q, %v", value, ok)
+	}
+}

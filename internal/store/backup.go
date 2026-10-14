@@ -134,6 +134,11 @@ func RestoreBackup(ctx context.Context, backup, destination string) error {
 	if !filepath.IsAbs(backup) || !filepath.IsAbs(destination) || backup == destination {
 		return errors.New("invalid library recovery path")
 	}
+	// The driver drops "mode=ro" from a plain path, so opening a backup that
+	// is not there would create it, empty, and restore that.
+	if _, err := os.Stat(backup); err != nil {
+		return err
+	}
 	source, err := sql.Open(driverName, backup+"?mode=ro&_query_only=1")
 	if err != nil {
 		return err

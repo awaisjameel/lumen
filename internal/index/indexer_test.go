@@ -513,3 +513,104 @@ func TestWorkRegisteredBeforeTheFirstScanRunsBeforeAnyScanStarts(t *testing.T) {
 		t.Fatal("a scan started before the registered work finished")
 	}
 }
+
+type checkpointEvents struct {
+	progress chan core.Progress
+	changed  chan struct{}
+}
+
+func (ev *checkpointEvents) Progress(p core.Progress)    { ev.progress <- p }
+func (ev *checkpointEvents) LibraryChanged(core.Changes) { ev.changed <- struct{}{} }
+
+func TestReportLoopCheckpointsOncePerIdleTransition(t *testing.T) {
+	paths := core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ev := &checkpointEvents{progress: make(chan core.Progress, 16), changed: make(chan struct{}, 16)}
+	ix := quiet(New(st, paths, nil, Models{}, ev))
+	ix.changes.Store(changedAssets)
+	done := make(chan struct{})
+	go func() { ix.reportLoop(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	walSize := func() int64 {
+		info, err := os.Stat(paths.DBPath + "-wal")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Size()
+	}
+	waitReport := func() {
+		select {
+		case <-ev.changed:
+		case <-time.After(10 * time.Second):
+			t.Fatal("library report did not arrive")
+		}
+	}
+	if err := st.SetBool(ctx, "idle-checkpoint-first", true); err != nil {
+		t.Fatal(err)
+	}
+	waitReport()
+	if walSize() != 0 {
+		t.Fatal("the initial idle state did not checkpoint")
+	}
+	if err := st.SetBool(ctx, "idle-checkpoint-second", true); err != nil {
+		t.Fatal(err)
+	}
+	ix.markChanged(core.Changes{Assets: true})
+	waitReport()
+	if walSize() == 0 {
+		t.Fatal("unchanged idle state repeated the checkpoint")
+	}
+	ix.setWorking(workMetadata, true)
+	working := false
+	for !working {
+		select {
+		case p := <-ev.progress:
+			working = p.Working.Metadata
+		case <-time.After(10 * time.Second):
+			t.Fatal("active stage was not reported")
+		}
+	}
+	if walSize() == 0 {
+		t.Fatal("active work was checkpointed")
+	}
+	ix.setWorking(workMetadata, false)
+	eventually(t, "the next idle transition", func() bool { return walSize() == 0 })
+}
+
+func TestReportLoopLogsCheckpointFailureAtDebugAndKeepsReporting(t *testing.T) {
+	paths := core.PathsIn(t.TempDir())
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(paths.DBPath); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	ev := &fakeEvents{}
+	ix := quiet(New(st, paths, nil, Models{}, ev))
+	ix.stale.Store(true)
+	ix.changes.Store(changedAssets)
+	ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+	defer cancel()
+	ix.reportLoop(ctx)
+	if !strings.Contains(logs.String(), `level=DEBUG msg="checkpoint idle library"`) ||
+		!strings.Contains(logs.String(), "checkpoint WAL") {
+		t.Fatalf("checkpoint failure was not logged at debug: %s", logs.String())
+	}
+	if ev.changed.Load() != 1 {
+		t.Fatal("checkpoint failure stopped library reporting")
+	}
+}
