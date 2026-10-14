@@ -999,6 +999,15 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 			p.Metadata == 0 && p.Thumbnail == 0 && p.Embedding == 0 && p.Faces == 0 && p.Videos == 0 && p.OCR == 0
 		ix.mu.Unlock()
 		if idle && !wasIdle {
+			started := time.Now()
+			optimised, err := ix.store.Optimize(ctx)
+			if err != nil {
+				if ctx.Err() == nil {
+					slog.Debug("optimise idle library", "err", err)
+				}
+			} else {
+				slog.Debug("optimise idle library", "completed", optimised, "took", time.Since(started))
+			}
 			completed, err := ix.store.Checkpoint(ctx)
 			if err != nil {
 				if ctx.Err() == nil {
