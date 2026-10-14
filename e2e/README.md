@@ -69,6 +69,17 @@ python e2e/perf/raw_matrix.py     # lumen-raw on every sample: time, peak memory
 python e2e/perf/compression.py    # pinned encoder time, peak private commit and sizes on generated fixtures
 ```
 
+Three Go benchmarks measure what chose the scanner's worker count and the search index's loading, and run only when named. Scans read a folder of real photos; use your own, never one holding documents:
+
+```bash
+LUMEN_SCAN_BENCH_ROOT="<photos>" go test -run '^$' -bench '^BenchmarkPhotoScanWorkers$' -benchtime=5x -timeout 1800s ./internal/scanner
+python e2e/perf/cold_scan_copies.py "<photos>"   # 25 uncached copies in .work/cold-scan; each run reads them once
+LUMEN_COLD_SCAN_BENCH_ROOT="$PWD/e2e/.work/cold-scan" go test -run '^$' -bench '^BenchmarkColdPhotoScanWorkers$' -benchtime=1x -timeout 1800s ./internal/scanner
+LUMEN_SEARCH_BENCH_DIR="$PWD/e2e/.work/search-bench" go test -run '^$' -bench '^Benchmark(SearchStartupLoad|EmbeddingStartupComparison)$' -benchtime=1x -timeout 1800s ./internal/search
+```
+
+The search benchmarks build 100,000- and 300,000-vector libraries; `LUMEN_SEARCH_BENCH_DIR` keeps them between runs (about 600 MB), and without it each run builds them again.
+
 ## Performance
 
 Not part of `run.mjs`: the figures need a quiet PC on mains power, and take minutes.
