@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -86,4 +87,93 @@ func TestFoldNameIsFold(t *testing.T) {
 	if null.Valid {
 		t.Errorf("foldName(NULL) = %q, want NULL", null.String)
 	}
+}
+
+// Every list of names sorts as the user reads (core.CompareNames), where
+// bytes put "Émile" after "Zoë" and "Album 10" before "Album 2" (and NOCASE,
+// which albums used, folds only A-Z). The counts all tie, so only the names
+// order each list.
+func TestNameListsSortAsTheUserReads(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	want := []string{"Album 2", "Album 10", "Émile", "Zoë"}
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	var items []IngestItem
+	for i := range want {
+		items = append(items, item(src.ID, `C:\Photos\`+string(rune('a'+i))+".jpg", string(rune('a'+i))))
+	}
+	check(t, errOf(st.Ingest(ctx, items)))
+	jobs, err := st.PendingJobs(ctx, core.StageMetadata, nil, len(want))
+	check(t, err)
+	ids := make([]int64, len(jobs))
+	for i, job := range jobs {
+		ids[i] = job.AssetID
+	}
+	var faces []DetectedFace
+	for i := range want {
+		faces = append(faces, face(0.05+0.25*float32(i), i))
+	}
+	check(t, st.SaveFaces(ctx, "f", "f", []FaceResult{{AssetID: ids[0], Faces: faces}}))
+	detected := facesOf(t, st, ids[0])
+	for i := len(want) - 1; i >= 0; i-- {
+		name := want[i]
+		check(t, errOf(st.CreateAlbum(ctx, name, core.AlbumManual, core.AlbumRule{}, nil)))
+		tag, err := st.CreateTag(ctx, name, core.TagManual, nil)
+		check(t, err)
+		check(t, errOf(st.TagAssets(ctx, ids, tag)))
+		check(t, errOf(st.NameFaces(ctx, []int64{detected[i].ID}, name)))
+		// Each place holds one photo.
+		res, err := st.w.ExecContext(ctx, "INSERT INTO places(name, region, country, lat, lon) VALUES (?, '', '', 0, 0)", name)
+		check(t, err)
+		place, err := res.LastInsertId()
+		check(t, err)
+		check(t, errOf(st.w.ExecContext(ctx, "UPDATE assets SET place_id = ? WHERE id = ?", place, ids[i])))
+	}
+
+	albums, err := st.Albums(ctx, core.TagConfidenceDefault)
+	check(t, err)
+	people, err := st.People(ctx)
+	check(t, err)
+	things, err := st.Things(ctx, core.TagConfidenceDefault)
+	check(t, err)
+	counted, err := st.Things(ctx, core.TagConfidenceDefault/2) // counted live, not kept
+	check(t, err)
+	places, err := st.Places(ctx)
+	check(t, err)
+	tags, err := st.AssetTags(ctx, ids[0], core.TagConfidenceDefault)
+	check(t, err)
+	for _, list := range []struct {
+		name string
+		got  []string
+	}{
+		{"albums", namesOf(albums, func(a core.Album) string { return a.Name })},
+		{"people", namesOf(people, func(p core.Person) string { return p.Name })},
+		{"Things", namesOf(things, func(t core.Tag) string { return t.Name })},
+		{"Things at another confidence", namesOf(counted, func(t core.Tag) string { return t.Name })},
+		{"places", namesOf(places, func(p core.Place) string { return p.Name })},
+		{"a photo's tags", namesOf(tags, func(t core.AssetTag) string { return t.Name })},
+	} {
+		if !slices.Equal(list.got, want) {
+			t.Errorf("%s: %q, want %q", list.name, list.got, want)
+		}
+	}
+
+	// Suggestions put names starting with the text first, then shorter
+	// names; names alike in both are in name order.
+	for _, name := range []string{"Flan", "Élan"} {
+		check(t, errOf(st.CreateTag(ctx, name, core.TagManual, nil)))
+	}
+	suggested, err := st.SearchTags(ctx, "lan", 5)
+	check(t, err)
+	if got := namesOf(suggested, func(t core.Tag) string { return t.Name }); !slices.Equal(got, []string{"Élan", "Flan"}) {
+		t.Errorf("suggestions for lan: %q, want [Élan Flan]", got)
+	}
+}
+
+func namesOf[T any](list []T, name func(T) string) []string {
+	names := make([]string, len(list))
+	for i, v := range list {
+		names[i] = name(v)
+	}
+	return names
 }

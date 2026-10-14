@@ -195,7 +195,7 @@ func (s *Store) Albums(ctx context.Context, minScore float64) ([]core.Album, err
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
 		albums, err = queryAll(ctx, tx, scanAlbum, `SELECT id, name, kind, COALESCE(rule_json, '{}') FROM albums
 			WHERE NOT `+labelBlocked(core.BlockAlbum, "albums.id")+`
-			ORDER BY name COLLATE NOCASE`)
+			ORDER BY `+byName("name"))
 		if err != nil {
 			return err
 		}

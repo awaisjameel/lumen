@@ -17,7 +17,7 @@ func peopleCountedReference(ctx context.Context, tx *sql.Tx) ([]core.Person, err
 	people, err := queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), count(DISTINCT f.asset_id)
 		FROM people p JOIN faces f ON f.person_id = p.id JOIN assets a ON a.id = f.asset_id AND `+visibleA+`
 		WHERE NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND `+faceShown+`
-		GROUP BY p.id ORDER BY p.name IS NULL, count(DISTINCT f.asset_id) DESC, p.name, p.id`)
+		GROUP BY p.id ORDER BY p.name IS NULL, count(DISTINCT f.asset_id) DESC, `+byName("p.name")+`, p.id`)
 	if err != nil {
 		return nil, err
 	}
