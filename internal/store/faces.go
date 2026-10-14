@@ -245,18 +245,85 @@ func clusterData(ctx context.Context, q querier, model string) ([]ClusterFace, [
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	people, rejections, err := clusterCorrections(ctx, q)
+	return faces, people, rejections, err
+}
+
+func clusterCorrections(ctx context.Context, q querier) ([]ClusterPerson, []Rejection, error) {
 	people, err := queryAll(ctx, q, func(r *sql.Rows) (p ClusterPerson, err error) {
 		err = r.Scan(&p.ID, &p.Confirmed)
 		return p, err
 	}, "SELECT id, name IS NOT NULL OR "+labelBlocked(core.BlockPerson, "people.id")+" FROM people ORDER BY id")
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	rejections, err := queryAll(ctx, q, func(r *sql.Rows) (x Rejection, err error) {
 		err = r.Scan(&x.Face, &x.Person)
 		return x, err
 	}, "SELECT face_id, person_id FROM face_rejections")
-	return faces, people, rejections, err
+	return people, rejections, err
+}
+
+// ClusterCursor identifies the snapshot retained by a clustering engine.
+// A zero cursor, a model change or lost history requests the full reference.
+type ClusterCursor struct {
+	Model    string
+	Revision int64
+	Valid    bool
+}
+
+// ClusterSnapshot carries either every face or only faces changed since Cursor.
+// People and rejections are always read together with the faces.
+type ClusterSnapshot struct {
+	Cursor     ClusterCursor
+	Full       bool
+	Faces      []ClusterFace
+	Removed    []int64
+	People     []ClusterPerson
+	Rejections []Rejection
+}
+
+// ClusterSince reads changes from one snapshot. Blocks still permit recognition;
+// their confirmation of a person is read even when no vector has changed.
+func (s *Store) ClusterSince(ctx context.Context, model string, cursor ClusterCursor) (ClusterSnapshot, error) {
+	var out ClusterSnapshot
+	err := s.read(ctx, func(tx *sql.Tx) error {
+		var revision, reset int64
+		if err := tx.QueryRowContext(ctx, "SELECT value, reset_value FROM cluster_revision WHERE id = 1").Scan(&revision, &reset); err != nil {
+			return err
+		}
+		out.Cursor = ClusterCursor{Model: model, Revision: revision, Valid: true}
+		out.Full = !cursor.Valid || cursor.Model != model || cursor.Revision < reset || cursor.Revision > revision
+		var err error
+		if out.Full {
+			out.Faces, out.People, out.Rejections, err = clusterData(ctx, tx, model)
+			return err
+		}
+		// Keep the journal range outermost: face-ID ordering otherwise invites
+		// a scan of every face instead of seeks for the changed ones.
+		out.Faces, err = queryAll(ctx, tx, func(r *sql.Rows) (f ClusterFace, err error) {
+			var vec []byte
+			err = r.Scan(&f.ID, &f.AssetID, &f.Frame, &f.Person, &f.ByUser, &f.Sharpness, &f.Yaw, &vec)
+			f.Vec = bytesFloat32(vec)
+			return f, err
+		}, `SELECT f.id, f.asset_id, f.at_ms, COALESCE(f.person_id, 0), COALESCE(f.assigned_by = 'user', 0), f.sharpness, f.yaw, f.vec
+			FROM cluster_faces d INDEXED BY cluster_faces_by_revision CROSS JOIN faces f CROSS JOIN assets a
+			WHERE f.id = d.face_id AND a.id = f.asset_id AND d.revision > ? AND f.model = ? AND `+baseVisibleA+` ORDER BY f.id`, cursor.Revision, model)
+		if err != nil {
+			return err
+		}
+		out.Removed, err = queryAll(ctx, tx, func(r *sql.Rows) (id int64, err error) {
+			err = r.Scan(&id)
+			return id, err
+		}, `SELECT d.face_id FROM cluster_faces d INDEXED BY cluster_faces_by_revision LEFT JOIN faces f ON f.id = d.face_id LEFT JOIN assets a ON a.id = f.asset_id
+			WHERE d.revision > ? AND (f.id IS NULL OR f.model <> ? OR NOT (`+baseVisibleA+`)) ORDER BY d.face_id`, cursor.Revision, model)
+		if err != nil {
+			return err
+		}
+		out.People, out.Rejections, err = clusterCorrections(ctx, tx)
+		return err
+	})
+	return out, err
 }
 
 // ClusterChanges is what one clustering run decided.

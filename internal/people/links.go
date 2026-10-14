@@ -57,8 +57,53 @@ func (l *Linker) Update(ctx context.Context, faces []store.ClusterFace) (map[int
 			isLoose[f.ID] = true
 		}
 	}
+	invalid := map[int64]bool{}
+	for id := range l.vecOf {
+		if !current[id] {
+			invalid[id] = true
+		}
+	}
+	out, err := l.updateLoose(ctx, loose, isLoose, invalid)
+	if err == nil {
+		l.vecOf = prints
+	}
+	return out, err
+}
+
+// updateChanged preserves the reference's retained links without fingerprinting
+// placed faces again. Full snapshots still go through Update.
+func (l *Linker) updateChanged(ctx context.Context, loose, changed []store.ClusterFace, removed []int64) (map[int64][]int64, error) {
+	invalid := map[int64]bool{}
+	for _, id := range removed {
+		invalid[id] = true
+	}
+	prints := map[int64]uint64{}
+	for _, f := range changed {
+		fp := fingerprint(f.Vec)
+		prints[f.ID] = fp
+		if old, seen := l.vecOf[f.ID]; seen && old != fp {
+			invalid[f.ID] = true
+		}
+	}
+	isLoose := make(map[int64]bool, len(loose))
+	for _, f := range loose {
+		isLoose[f.ID] = true
+	}
+	out, err := l.updateLoose(ctx, loose, isLoose, invalid)
+	if err == nil {
+		for _, id := range removed {
+			delete(l.vecOf, id)
+		}
+		for id, fp := range prints {
+			l.vecOf[id] = fp
+		}
+	}
+	return out, err
+}
+
+func (l *Linker) updateLoose(ctx context.Context, loose []store.ClusterFace, isLoose, invalid map[int64]bool) (map[int64][]int64, error) {
 	for id, ns := range l.near {
-		if !isLoose[id] || !current[id] || slices.ContainsFunc(ns, func(n near) bool { return !current[n.id] }) {
+		if !isLoose[id] || invalid[id] || slices.ContainsFunc(ns, func(n near) bool { return invalid[n.id] }) {
 			delete(l.near, id) // placed, changed, or lost a neighbour: compared afresh below
 		}
 	}
@@ -97,7 +142,6 @@ func (l *Linker) Update(ctx context.Context, faces []store.ClusterFace) (map[int
 	for k, i := range fresh {
 		l.near[loose[i].ID] = lists[k]
 	}
-	l.vecOf = prints
 	for k, i := range fresh {
 		id := loose[i].ID
 		for _, b := range back[k] {
