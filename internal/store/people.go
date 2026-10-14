@@ -88,7 +88,7 @@ func peopleKept(ctx context.Context, tx *sql.Tx) ([]core.Person, error) {
 	return queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), c.count
 		FROM people p JOIN person_counts c ON c.person_id = p.id
 		WHERE c.count > 0 AND NOT `+labelBlocked(core.BlockPerson, "p.id")+`
-		ORDER BY p.name IS NULL, c.count DESC, p.name, p.id`)
+		ORDER BY p.name IS NULL, c.count DESC, `+byName("p.name")+`, p.id`)
 }
 
 // addKeptCovers seeks the user's eligible pick or the first ranked candidate.

@@ -52,7 +52,7 @@ var foldName = foldKey("name")
 // user types.
 var (
 	nameMatch = "instr(" + foldName + ", ?1) > 0"
-	nameFirst = "instr(" + foldName + ", ?1) = 1 DESC, length(name), name"
+	nameFirst = "instr(" + foldName + ", ?1) = 1 DESC, length(name), " + byName("name")
 )
 
 // SearchNames finds candidate names, including blocked labels, in one snapshot.

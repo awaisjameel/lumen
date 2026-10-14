@@ -91,7 +91,7 @@ A scratch library's SQLite file cannot be edited with the `sqlite3` CLI: its ind
 ### Cross-cutting rules that are easy to break
 
 - **Visibility (blocking).** One rule feeds grids, search, counts, covers, media URLs and the video server: the store's `visible`, `labelBlocked` and `blockVisible`. A new input to them needs a trigger that bumps `visible_value`, and the kept counts (migration 0037: days, Things, people, job progress) must follow it too. Blocked media is served only while `services.BlockGate` is open.
-- **Names and paths** compare with `core.Fold` / SQL `fold()` / `foldKey`, never `NOCASE`. The SQLite driver is the custom `sqlite3_lumen`.
+- **Names and paths** compare with `core.Fold` / SQL `fold()` / `foldKey`, never `NOCASE`, and lists of names sort with `byName` (`core.CompareNames`: accents with their letters, numbers by value), never by bytes. The SQLite driver is the custom `sqlite3_lumen`.
 - **Dates** are "wall-clock seconds": the camera's clock time encoded as UTC (`core.WallClock`). The UI formats everything in UTC.
 - **Formats.** An extension is recognised in exactly one place, `internal/core/formats.go`. Code asks for a format's `core.Family`, never compares extensions; which decoder reads a family is `internal/media`'s choice.
 - **Videos** stream from `services.Streamer` on 127.0.0.1 (random secret path, Host check), because Wails on Windows buffers a whole response before handing it to WebView2.

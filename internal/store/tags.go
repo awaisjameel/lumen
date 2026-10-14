@@ -261,7 +261,7 @@ func thingsIn(ctx context.Context, tx *sql.Tx, minScore float64) ([]core.Tag, er
 		CASE WHEN t.vocab_name IS NOT NULL AND t.vocab_name != t.name THEN t.vocab_name ELSE '' END
 		FROM tags t JOIN tag_counts c ON c.tag_id = t.id
 		WHERE t.hidden = 0 AND NOT `+labelBlocked(core.BlockTag, "t.id")+`
-		ORDER BY t.pinned_at IS NOT NULL DESC, t.pinned_at DESC, c.n DESC, t.name`)
+		ORDER BY t.pinned_at IS NOT NULL DESC, t.pinned_at DESC, c.n DESC, `+byName("t.name"))
 }
 
 // tagCountFrom shares the matching and visibility rules with every count query.
@@ -283,7 +283,7 @@ func thingsCounted(ctx context.Context, tx *sql.Tx, minScore float64) ([]core.Ta
 				CASE WHEN t.vocab_name IS NOT NULL AND t.vocab_name != t.name THEN t.vocab_name ELSE '' END
 			`+tagCountFrom("?")+`
 			WHERE t.hidden = 0 AND NOT `+labelBlocked(core.BlockTag, "t.id")+`
-			ORDER BY t.pinned_at IS NOT NULL DESC, t.pinned_at DESC, COALESCE(c.n, 0) DESC, t.name`, minScore)
+			ORDER BY t.pinned_at IS NOT NULL DESC, t.pinned_at DESC, COALESCE(c.n, 0) DESC, `+byName("t.name"), minScore)
 }
 
 // addTagCovers picks each tag's cover: a photo the user tagged, else the
@@ -477,7 +477,7 @@ func (s *Store) AssetTags(ctx context.Context, assetID int64, minScore float64) 
 		FROM asset_tags x JOIN tags t ON t.id = x.tag_id
 		WHERE x.asset_id = ? AND EXISTS (SELECT 1 FROM assets WHERE id = x.asset_id AND `+visible+`)
 		AND `+tagApplies+` AND NOT `+labelBlocked(core.BlockTag, "t.id")+`
-		ORDER BY x.source = 'user' DESC, x.score DESC, t.name`, assetID, minScore)
+		ORDER BY x.source = 'user' DESC, x.score DESC, `+byName("t.name"), assetID, minScore)
 }
 
 // TagAsset puts a tag on an asset as the user's own choice (this also

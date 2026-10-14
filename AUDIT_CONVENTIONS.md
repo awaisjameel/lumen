@@ -87,7 +87,10 @@ tooling; this file covers how code is written.
     test's reference. A new input to one needs its trigger, and a statement
     that can change the visibility of an unbounded number of assets calls
     `markKeptCountsForChange` first, so they are recounted once instead.
-  - Names and paths compare with `fold()` and `foldKey`, never `NOCASE`.
+  - Names and paths compare with `fold()` and `foldKey`, never `NOCASE`. A
+    list of names the user reads sorts by `byName` (the collation
+    `name_order`, `core.CompareNames`), never by bytes or `NOCASE`; only
+    queries name the collation, never the schema.
 - **Logging** uses `log/slog`. Messages are lower case and say what failed
   ("tidy thumbnail cache"), and the error goes in the `"err"` key. Never log
   a PIN, a hash of one, or a file's contents. Background failures are logged.

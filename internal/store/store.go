@@ -33,13 +33,14 @@ var migrationFS embed.FS
 
 // driverName is go-sqlite3 with Lumen's SQL functions on every connection:
 // fold(text) is core.Fold, the case-insensitive key names and paths are
-// compared by (SQLite's own NOCASE and LIKE fold only A-Z).
+// compared by (SQLite's own NOCASE and LIKE fold only A-Z), and the collation
+// name_order is core.CompareNames (see byName).
 const driverName = "sqlite3_lumen"
 
 func init() {
 	sql.Register(driverName, &sqlite3.SQLiteDriver{
 		ConnectHook: func(c *sqlite3.SQLiteConn) error {
-			return c.RegisterFunc("fold", foldSQL, true)
+			return errors.Join(c.RegisterFunc("fold", foldSQL, true), c.RegisterCollation(nameOrder, core.CompareNames))
 		},
 	})
 }
@@ -434,6 +435,17 @@ var tagConfidenceSQL = "COALESCE((SELECT CAST(value AS REAL) FROM settings WHERE
 // files_path_fold (migration 0018): queries must use it exactly for SQLite
 // to use that index.
 var foldPath = foldKey("path")
+
+// nameOrder is the collation byName sorts by.
+const nameOrder = "name_order"
+
+// byName is the ORDER BY term that sorts a column of names as the user reads
+// them (core.CompareNames; SQLite's own order is by bytes, and NOCASE folds
+// only A-Z). Only queries name the collation, never the schema, so a tool that
+// opens the library still needs only fold().
+func byName(expr string) string {
+	return expr + " COLLATE " + nameOrder
+}
 
 // foldKey is the SQL for core.Fold(expr). fold() is a call into Go for every
 // row, so ASCII text (a byte per character) and NULL use SQLite's lower(),

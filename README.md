@@ -235,7 +235,7 @@ Handy environment variables:
 
 ```text
 main.go              wiring: paths, logging, store, AI, indexer, services, window
-internal/core        domain types, paths, the wall-clock date convention, case folding
+internal/core        domain types, paths, the wall-clock date convention, case folding, name order
 internal/store       SQLite schema (migrations/), all queries, job queue, tags, embeddings
 internal/scanner     folder walk, hashing, Windows folder watcher
 internal/media       EXIF, filename dates, thumbnails and their cache, perceptual hash

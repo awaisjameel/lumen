@@ -94,7 +94,7 @@ func (s *Store) Places(ctx context.Context) ([]core.Place, error) {
 			WHERE NOT `+placeBlocked("p.id")+`
 			GROUP BY p.id) g
 		LEFT JOIN assets c ON c.id = g.cover
-		ORDER BY g.n DESC, g.name`)
+		ORDER BY g.n DESC, `+byName("g.name")+`, g.id`)
 }
 
 // Place returns a visible city, or ErrNotFound for an unknown or empty one.
