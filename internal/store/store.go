@@ -56,9 +56,10 @@ func foldSQL(v any) any {
 
 // Store is the handle every other package uses.
 type Store struct {
-	w           *storeWriter // single writer connection, with settlement for standalone writes
-	r           *sql.DB      // read-only pool
-	eventsCache struct {
+	w               *storeWriter // single writer connection, with settlement for standalone writes
+	r               *sql.DB      // read-only pool
+	duplicatesCache duplicateCache
+	eventsCache     struct {
 		sync.Mutex
 		revision      int64
 		coverRevision int64

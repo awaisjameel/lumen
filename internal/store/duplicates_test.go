@@ -125,6 +125,28 @@ func TestLinkNearFindsEveryNearPair(t *testing.T) {
 	}
 }
 
+func TestLinkNearVisitsEachNearPairOnce(t *testing.T) {
+	photos := randomPhotos(200)
+	hashes := make([]uint64, len(photos))
+	for i, p := range photos {
+		hashes[i] = p.hash
+	}
+	type pair struct{ a, b int }
+	visits := map[pair]int{}
+	check(t, linkNear(t.Context(), hashes, func(a, b int) { visits[pair{min(a, b), max(a, b)}]++ }))
+	for i := range hashes {
+		for j := i + 1; j < len(hashes); j++ {
+			want := 0
+			if bits.OnesCount64(hashes[i]^hashes[j]) <= nearBits {
+				want = 1
+			}
+			if got := visits[pair{i, j}]; got != want {
+				t.Fatalf("pair %d,%d visited %d times, want %d", i, j, got, want)
+			}
+		}
+	}
+}
+
 func BenchmarkGroupDuplicates(b *testing.B) {
 	photos := randomPhotos(300_000)
 	for b.Loop() {
