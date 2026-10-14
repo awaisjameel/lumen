@@ -307,3 +307,7 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **No updates in the app** (decided 3 October 2026): the plan left auto-update open, as opt-in. Lumen makes no network request at all; Settings shows the releases page.
 - **Installed per user** (decided 3 October 2026), not in Program Files: the library is per user already, and installing or updating needs no administrator.
 - **The installer carries the WebView2 runtime** (decided 3 October 2026, about 200 MB in it) rather than Wails' downloading bootstrapper, so installing needs no internet either.
+
+## Licence
+
+Lumen is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) (SPDX `PolyForm-Noncommercial-1.0.0`): free for any noncommercial purpose, including personal use and use by charities, schools and public bodies, but not for commercial use. Its source is available, but it is not an open-source licence. The components it ships keep their own licences, listed in `THIRD_PARTY_NOTICES.txt`.
