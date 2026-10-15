@@ -3,7 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"math"
 	"time"
+	"unsafe"
 
 	"lumen/internal/core"
 )
@@ -230,15 +233,17 @@ func visitEmbeddings(ctx context.Context, tx *sql.Tx, model string, fn func(id i
 	}
 	defer rows.Close()
 	var raw sql.RawBytes
-	var vec []int8
+	var id int64
+	var scale float64 // Scanning the driver's float64 avoids a string round trip for each float32.
 	for rows.Next() {
-		var id int64
-		var scale float32
 		if err := rows.Scan(&id, &scale, &raw); err != nil {
 			return err
 		}
-		vec = bytesInt8(vec[:0], raw)
-		fn(id, vec, scale)
+		if math.Abs(scale) > math.MaxFloat32 {
+			return fmt.Errorf("embedding of asset %d: scale %g overflows float32", id, scale)
+		}
+		vec := unsafe.Slice((*int8)(unsafe.Pointer(unsafe.SliceData(raw))), len(raw)) // Byte and int8 layouts match, and fn only borrows the row.
+		fn(id, vec, float32(scale))
 	}
 	return rows.Err()
 }

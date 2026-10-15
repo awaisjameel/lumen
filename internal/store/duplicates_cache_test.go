@@ -278,7 +278,7 @@ func TestDuplicateGroupingCollapsesThousandsOfIdenticalHashes(t *testing.T) {
 	for i := range photos {
 		photos[i].Width, photos[i].Height = 10000+i, 10000
 	}
-	groups, err := groupDuplicates(ctx, photos)
+	groups, err := groupCandidates(ctx, photos)
 	check(t, err)
 	if len(groups) != 1 || len(groups[0].Items) != len(photos) {
 		t.Fatalf("got %d groups, want one with %d photos", len(groups), len(photos))
@@ -291,7 +291,7 @@ func TestDuplicateGroupingRetainsEveryShapeOfAnIdenticalHash(t *testing.T) {
 	photos[1].Width, photos[1].Height = 100, 100
 	photos[2].Width, photos[2].Height, photos[2].hash = 200, 100, 3
 	photos[3].Width, photos[3].Height, photos[3].Ext = 200, 100, ".arw"
-	groups, err := groupDuplicates(t.Context(), photos)
+	groups, err := groupCandidates(t.Context(), photos)
 	check(t, err)
 	if len(groups) != 1 || len(groups[0].Items) != 2 || groups[0].Items[0].ID != 1 || groups[0].Items[1].ID != 3 {
 		t.Fatalf("got %+v, want the two wide JPEG photos", groups)
@@ -313,7 +313,7 @@ func TestDuplicateGroupingPreservesThePreviousAlgorithmOnRandomisedPhotos(t *tes
 				photos[i].hash = uint64(r.IntN(8))
 			}
 		}
-		groups, err := groupDuplicates(t.Context(), photos)
+		groups, err := groupCandidates(t.Context(), photos)
 		check(t, err)
 		want, err := referenceGroupDuplicates(t.Context(), photos)
 		check(t, err)

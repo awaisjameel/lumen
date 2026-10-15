@@ -21,7 +21,7 @@ func BenchmarkDuplicateIdenticalHashes(b *testing.B) {
 	photos := identicalDuplicatePhotos(6000)
 	b.ReportAllocs()
 	for b.Loop() {
-		groups, err := groupDuplicates(b.Context(), photos)
+		groups, err := groupCandidates(b.Context(), photos)
 		mustBench(b, err)
 		if len(groups) != 1 || len(groups[0].Items) != len(photos) {
 			b.Fatalf("got %d groups, want one with %d photos", len(groups), len(photos))
@@ -33,7 +33,7 @@ func BenchmarkDuplicateOrdinaryHashes(b *testing.B) {
 	photos := randomPhotos(100000)
 	b.ReportAllocs()
 	for b.Loop() {
-		mustBench(b, errOf(groupDuplicates(b.Context(), photos)))
+		mustBench(b, errOf(groupCandidates(b.Context(), photos)))
 	}
 }
 

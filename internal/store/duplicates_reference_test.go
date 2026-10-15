@@ -8,6 +8,31 @@ import (
 	"lumen/internal/core"
 )
 
+// duplicateCandidate is a grouping input with its display metadata, so tests
+// can compare whole groups, ordering included.
+type duplicateCandidate struct {
+	core.DuplicateItem
+	copies int
+	hash   uint64
+	hashed bool
+}
+
+func (c duplicateCandidate) key() duplicateKey {
+	return duplicateKey{id: c.ID, width: c.Width, height: c.Height, ext: c.Ext, hash: c.hash, copies: c.copies > 1, hashed: c.hashed}
+}
+
+func groupCandidates(ctx context.Context, candidates []duplicateCandidate) ([]core.DuplicateGroup, error) {
+	keys := make([]duplicateKey, len(candidates))
+	for i, c := range candidates {
+		keys[i] = c.key()
+	}
+	groups, err := groupDuplicates(ctx, keys, func(i int) core.DuplicateItem { return candidates[i].DuplicateItem })
+	if err == nil {
+		sortDuplicateGroups(groups)
+	}
+	return groups, err
+}
+
 // The previous grouping and bucketing algorithm is an independent oracle for
 // preserving connected groups while reducing the number of comparisons.
 func referenceGroupDuplicates(ctx context.Context, candidates []duplicateCandidate) ([]core.DuplicateGroup, error) {
@@ -45,7 +70,7 @@ func referenceGroupDuplicates(ctx context.Context, candidates []duplicateCandida
 		// A camera's RAW file and the JPEG it saved beside it are a negative
 		// and its print, not two copies: they are never offered as similar,
 		// which would suggest removing one. RAW files still group together.
-		if sameShape(photos[a].DuplicateItem, photos[b].DuplicateItem) && isRaw(photos[a].Ext) == isRaw(photos[b].Ext) {
+		if sameShape(photos[a].key(), photos[b].key()) && isRaw(photos[a].Ext) == isRaw(photos[b].Ext) {
 			join(a, b)
 		}
 	}); err != nil {

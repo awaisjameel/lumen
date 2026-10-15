@@ -13,6 +13,8 @@
 # keeping the job counts adds a trigger to every queued job (about 35
 # microseconds a photo), so its ceilings were raised by the rule below from
 # those samples.
+# LoadEmbeddings was added on 2026-10-15, with one 768-byte embedding for every
+# photo in the seed.
 # Every ceiling is max(5ms, 3 * slowest sample), rounded UP to one significant
 # decimal digit. The 5ms floor keeps small timings from failing on ordinary noise.
 # A ceiling catches substantial regressions; it is not a baseline or a 10% target.
@@ -43,6 +45,7 @@ BenchmarkLargeLibraryStore/none/DayItemsEvent 5ms # 0.542..0.593 ms/op
 BenchmarkLargeLibraryStore/none/DayBucketsThing 40ms # 10.927..11.781 ms/op
 BenchmarkLargeLibraryStore/none/DuplicateGroups 900ms # 265.655..270.824 ms/op
 BenchmarkLargeLibraryStore/none/DuplicateGroupsRepeated 5ms # 0.030..0.076 ms/op
+BenchmarkLargeLibraryStore/none/LoadEmbeddings 2000ms # 223.573..378.575 ms/op
 BenchmarkLargeLibraryStore/none/ClusterData 500ms # 136.316..142.801 ms/op
 BenchmarkLargeLibraryStore/none/JobCountsDone 5ms # 0.018..0.041 ms/op
 BenchmarkLargeLibraryStore/none/AssetVisible 5ms # 0.013..0.035 ms/op
@@ -78,6 +81,7 @@ BenchmarkLargeLibraryStore/folder/DayItemsEvent 5ms # 0.554..0.616 ms/op
 BenchmarkLargeLibraryStore/folder/DayBucketsThing 40ms # 11.291..12.217 ms/op
 BenchmarkLargeLibraryStore/folder/DuplicateGroups 900ms # 263.496..282.976 ms/op
 BenchmarkLargeLibraryStore/folder/DuplicateGroupsRepeated 5ms # 0.021..0.063 ms/op
+BenchmarkLargeLibraryStore/folder/LoadEmbeddings 2000ms # 208.423..346.581 ms/op
 BenchmarkLargeLibraryStore/folder/ClusterData 500ms # 133.838..138.586 ms/op
 BenchmarkLargeLibraryStore/folder/JobCountsDone 5ms # 0.017..0.037 ms/op
 BenchmarkLargeLibraryStore/folder/AssetVisible 5ms # 0.016..0.035 ms/op
@@ -113,6 +117,7 @@ BenchmarkLargeLibraryStore/folder_tag_person/DayItemsEvent 5ms # 0.534..0.619 ms
 BenchmarkLargeLibraryStore/folder_tag_person/DayBucketsThing 30ms # 8.629..8.866 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/DuplicateGroups 800ms # 255.199..256.952 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/DuplicateGroupsRepeated 5ms # 0.025..0.038 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/LoadEmbeddings 900ms # 184.672..291.590 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/ClusterData 500ms # 133.781..143.502 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/JobCountsDone 5ms # 0.016..0.035 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/AssetVisible 5ms # 0.017..0.033 ms/op
