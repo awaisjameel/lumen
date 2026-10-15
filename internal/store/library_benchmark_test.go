@@ -57,6 +57,8 @@ func BenchmarkLargeLibraryStore(b *testing.B) {
 			`INSERT INTO faces(asset_id, x, y, w, h, score, sharpness, yaw, model, vec, person_id, assigned_by)
 			SELECT id, 0.1, 0.1, 0.2, 0.2, 0.9, 20, 0, 'bench', zeroblob(512), 1+(id/5)%500, 'auto'
 			FROM assets WHERE id%5<3`,
+			`INSERT INTO embeddings(asset_id, model, scale, vec)
+			SELECT id, 'bench', 0.003125, zeroblob(768) FROM assets`,
 			`INSERT INTO settings(key, value) VALUES ('ocr_enabled', '1')`,
 			`PRAGMA optimize = 0x10002`,
 		} {
@@ -207,6 +209,9 @@ func largeLibraryCalls(ctx context.Context, b *testing.B, st *Store) {
 		{"DayBucketsThing", func() error { return errOf(st.DayBuckets(ctx, core.View{Tag: 2}, core.TagConfidenceDefault)) }, invalidate, nil},
 		{"DuplicateGroups", func() error { return errOf(st.DuplicateGroups(ctx)) }, changeCover, nil},
 		{"DuplicateGroupsRepeated", func() error { return errOf(st.DuplicateGroups(ctx)) }, nil, nil},
+		{"LoadEmbeddings", func() error {
+			return st.LoadEmbeddings(ctx, "bench", func(int) {}, func(_ int64, _ []int8, _ float32) {})
+		}, nil, nil},
 		{"ClusterData", func() error { _, _, _, err := st.ClusterData(ctx, "bench"); return err }, nil, nil},
 		{"JobCountsDone", func() error { return errOf(st.JobCounts(ctx)) }, nil, nil},
 		{"AssetVisible", func() error { return errOf(st.AssetVisible(ctx, eventID, false)) }, nil, nil},
@@ -278,6 +283,7 @@ func assertLargeLibrarySeed(ctx context.Context, b *testing.B, st *Store) {
 		{"jobs", "SELECT count(*) FROM asset_jobs WHERE status = 'done'", 4 * largeLibrarySize},
 		{"tags", "SELECT count(*) FROM asset_tags", 8 * largeLibrarySize},
 		{"tag coverage", "SELECT count(DISTINCT tag_id) FROM asset_tags", 180},
+		{"embeddings", "SELECT count(*) FROM embeddings WHERE model = 'bench' AND length(vec) = 768", largeLibrarySize},
 		{"faces", "SELECT count(*) FROM faces", 3 * largeLibrarySize / 5},
 		{"people coverage", "SELECT count(DISTINCT person_id) FROM faces", 500},
 		{"places", "SELECT count(DISTINCT place_id) FROM assets", 200},

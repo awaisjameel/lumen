@@ -22,11 +22,19 @@ const nearBits = 6
 // each of the 28 byte pairs finds every such pair without comparing all photos.
 const hashBytes = 8
 
-type duplicateCandidate struct {
-	core.DuplicateItem
-	copies int
-	hash   uint64
-	hashed bool // a photo with a thumbnail pHash and known dimensions
+// duplicateKey is what grouping needs of a candidate. Most candidates never
+// form a group, so their display metadata is read only once groups are known.
+type duplicateKey struct {
+	id            int64
+	width, height int
+	ext           string
+	hash          uint64
+	copies        bool // more than one file holds these bytes
+	hashed        bool // a photo with a thumbnail pHash and known dimensions
+}
+
+func (k duplicateKey) item() core.DuplicateItem {
+	return core.DuplicateItem{ID: k.id, Width: k.width, Height: k.height, Ext: k.ext}
 }
 
 type duplicateRevision struct {
@@ -83,35 +91,57 @@ func cloneDuplicateGroups(groups []core.DuplicateGroup) []core.DuplicateGroup {
 }
 
 func duplicateGroups(ctx context.Context, tx *sql.Tx) ([]core.DuplicateGroup, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT a.id, COALESCE(a.phash, 0), COALESCE(a.width, 0), COALESCE(a.height, 0),
-		a.thumb_version, a.taken_at, a.ext, a.camera IS NOT NULL, a.date_from = ?, a.lat IS NOT NULL AND a.lon IS NOT NULL, a.added_at,
-		a.kind = ? AND a.phash IS NOT NULL AND a.thumb_version > 0 AND a.width > 0 AND a.height > 0 AS hashed,
-		count(*) AS copies
+	// Most candidates never form a group. Read their display metadata only
+	// after grouping, while this transaction still holds the same snapshot.
+	rows, err := tx.QueryContext(ctx, `SELECT a.id, COALESCE(a.phash, 0), COALESCE(a.width, 0), COALESCE(a.height, 0), a.ext,
+		(count(*) > 1) | CASE WHEN a.kind = ? AND a.phash IS NOT NULL AND a.thumb_version > 0
+			AND a.width > 0 AND a.height > 0 THEN 2 ELSE 0 END AS flags
 		FROM assets a JOIN files f ON f.asset_id = a.id
-		WHERE `+visibleA+` GROUP BY a.id HAVING copies > 1 OR hashed`, core.DateFromEXIF, core.KindPhoto)
-	candidates, err := collect(rows, err, func(r *sql.Rows) (c duplicateCandidate, err error) {
-		var hash int64 // SQLite integers are signed; the bits are what matter
-		err = r.Scan(&c.ID, &hash, &c.Width, &c.Height, &c.Thumb, &c.TakenAt, &c.Ext, &c.Camera, &c.ExifDate, &c.GPS, &c.AddedAt,
-			&c.hashed, &c.copies)
-		c.hash, c.Paths, c.Mtimes = uint64(hash), []string{}, []int64{}
-		return c, err
-	})
+		WHERE `+visibleA+` GROUP BY a.id HAVING flags != 0`, core.KindPhoto)
+	candidates, err := scanDuplicateCandidates(ctx, rows, err)
 	if err != nil {
 		return nil, err
 	}
-	groups, err := groupDuplicates(ctx, candidates)
+	groups, err := groupDuplicates(ctx, candidates, func(i int) core.DuplicateItem { return candidates[i].item() })
 	if err != nil {
 		return nil, err
 	}
 	if err := duplicatePaths(ctx, tx, groups); err != nil {
 		return nil, err
 	}
-	markBest(groups) // after the paths: the rule reads each item's files
+	sortDuplicateGroups(groups) // after the paths, which also read the dates the order uses
+	markBest(groups)            // after the paths: the rule reads each item's files
 	return groups, nil
 }
 
-// duplicatePaths fills in each grouped asset's file paths, their modified
-// times (in Unix seconds, one per path) and file size.
+// scanDuplicateCandidates reuses the scan destinations and reads SQLite integers
+// directly, avoiding decimal conversion for every dimension.
+func scanDuplicateCandidates(ctx context.Context, rows *sql.Rows, err error) ([]duplicateKey, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	candidates := []duplicateKey{}
+	var c duplicateKey
+	var hash, width, height, flags int64
+	for rows.Next() {
+		if len(candidates)%1024 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		if err := rows.Scan(&c.id, &hash, &width, &height, &c.ext, &flags); err != nil {
+			return nil, err
+		}
+		c.hash, c.width, c.height = uint64(hash), int(width), int(height)
+		c.copies, c.hashed = flags&1 != 0, flags&2 != 0
+		candidates = append(candidates, c)
+	}
+	return candidates, rows.Err()
+}
+
+// duplicatePaths fills in display metadata and file copies only for grouped
+// assets. Modified times are Unix seconds, one per path.
 func duplicatePaths(ctx context.Context, tx *sql.Tx, groups []core.DuplicateGroup) error {
 	ids := []int64{}
 	for _, g := range groups {
@@ -126,31 +156,32 @@ func duplicatePaths(ctx context.Context, tx *sql.Tx, groups []core.DuplicateGrou
 	if err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT asset_id, path, size, mtime FROM files
-		WHERE asset_id IN (SELECT value FROM json_each(?)) ORDER BY asset_id, path`, string(list))
+	rows, err := tx.QueryContext(ctx, `SELECT f.asset_id, f.path, f.size, f.mtime,
+		a.thumb_version, a.taken_at, a.ext, a.camera IS NOT NULL, a.date_from = ?,
+		a.lat IS NOT NULL AND a.lon IS NOT NULL, a.added_at
+		FROM files f JOIN assets a ON a.id = f.asset_id
+		WHERE f.asset_id IN (SELECT value FROM json_each(?)) ORDER BY f.asset_id, f.path`, core.DateFromEXIF, string(list))
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	type copies struct {
-		paths  []string
-		mtimes []int64
-		size   int64
-	}
-	files := make(map[int64]*copies, len(ids))
+	files := make(map[int64]*core.DuplicateItem, len(ids))
 	for rows.Next() {
 		var id, size, mtime int64
 		var path string
-		if err := rows.Scan(&id, &path, &size, &mtime); err != nil {
+		var item core.DuplicateItem
+		if err := rows.Scan(&id, &path, &size, &mtime, &item.Thumb, &item.TakenAt, &item.Ext,
+			&item.Camera, &item.ExifDate, &item.GPS, &item.AddedAt); err != nil {
 			return err
 		}
 		c := files[id]
 		if c == nil {
-			c = &copies{size: size}
+			item.Size = size
+			c = &item
 			files[id] = c
 		}
-		c.paths = append(c.paths, path)
-		c.mtimes = append(c.mtimes, mtime/int64(time.Second)) // the column holds nanoseconds
+		c.Paths = append(c.Paths, path)
+		c.Mtimes = append(c.Mtimes, mtime/int64(time.Second)) // the column holds nanoseconds
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -159,32 +190,37 @@ func duplicatePaths(ctx context.Context, tx *sql.Tx, groups []core.DuplicateGrou
 		for i := range groups[g].Items {
 			it := &groups[g].Items[i]
 			if c := files[it.ID]; c != nil {
-				it.Paths, it.Mtimes, it.Size = c.paths, c.mtimes, c.size
+				it.Paths, it.Mtimes, it.Size = c.Paths, c.Mtimes, c.Size
+				it.Thumb, it.TakenAt, it.Ext = c.Thumb, c.TakenAt, c.Ext
+				it.Camera, it.ExifDate, it.GPS, it.AddedAt = c.Camera, c.ExifDate, c.GPS, c.AddedAt
 			}
 		}
 	}
 	return nil
 }
 
-func groupDuplicates(ctx context.Context, candidates []duplicateCandidate) ([]core.DuplicateGroup, error) {
+// groupDuplicates groups candidates, unordered; item gives the wire item for
+// candidate i.
+func groupDuplicates(ctx context.Context, candidates []duplicateKey, item func(int) core.DuplicateItem) ([]core.DuplicateGroup, error) {
 	groups := []core.DuplicateGroup{}
 	hashed := 0
-	for _, c := range candidates {
-		if c.copies > 1 {
-			groups = append(groups, core.DuplicateGroup{Kind: core.DuplicateExact, Items: []core.DuplicateItem{c.DuplicateItem}})
+	for i, c := range candidates {
+		if c.copies {
+			groups = append(groups, core.DuplicateGroup{Kind: core.DuplicateExact, Items: []core.DuplicateItem{item(i)}})
 		}
 		if c.hashed {
 			hashed++
 		}
 	}
-	// Most libraries have a thumbnail for every candidate. Reuse that slice
-	// instead of copying all the metadata merely to filter a few exact groups.
 	photos := candidates
+	indices := []int(nil)
 	if hashed != len(candidates) {
-		photos = make([]duplicateCandidate, 0, hashed)
-		for _, c := range candidates {
+		photos = make([]duplicateKey, 0, hashed)
+		indices = make([]int, 0, hashed)
+		for i, c := range candidates {
 			if c.hashed {
 				photos = append(photos, c)
+				indices = append(indices, i)
 			}
 		}
 	}
@@ -212,14 +248,24 @@ func groupDuplicates(ctx context.Context, candidates []duplicateCandidate) ([]co
 		size[find(i)]++
 	}
 	clusters := make(map[int][]core.DuplicateItem)
-	for i, p := range photos {
+	for i := range photos {
 		if root := find(i); size[root] > 1 {
-			clusters[root] = append(clusters[root], p.DuplicateItem)
+			index := i
+			if indices != nil {
+				index = indices[i]
+			}
+			clusters[root] = append(clusters[root], item(index))
 		}
 	}
 	for _, items := range clusters {
-		slices.SortFunc(items, newestFirst)
 		groups = append(groups, core.DuplicateGroup{Kind: core.DuplicateSimilar, Items: items})
+	}
+	return groups, nil
+}
+
+func sortDuplicateGroups(groups []core.DuplicateGroup) {
+	for _, g := range groups {
+		slices.SortFunc(g.Items, newestFirst)
 	}
 	slices.SortFunc(groups, func(a, b core.DuplicateGroup) int {
 		if a.Kind != b.Kind {
@@ -230,12 +276,11 @@ func groupDuplicates(ctx context.Context, candidates []duplicateCandidate) ([]co
 		}
 		return newestFirst(a.Items[0], b.Items[0])
 	})
-	return groups, nil
 }
 
 // linkDuplicatePhotos pairs each distinct hash once. Equal hashes retain all
 // their shapes, so a wide crop cannot hide a near match to a narrower one.
-func linkDuplicatePhotos(ctx context.Context, photos []duplicateCandidate, join func(int, int)) error {
+func linkDuplicatePhotos(ctx context.Context, photos []duplicateKey, join func(int, int)) error {
 	type shapes struct{ normal, raw []int }
 	type heads struct{ normal, raw int }
 	hashes := make([]uint64, 0, len(photos))
@@ -256,7 +301,7 @@ func linkDuplicatePhotos(ctx context.Context, photos []duplicateCandidate, join 
 			lists = append(lists, heads{-1, -1})
 		}
 		// A RAW file and its JPEG remain separate suggestions for review.
-		if isRaw(p.Ext) {
+		if isRaw(p.ext) {
 			next[i], lists[h].raw = lists[h].raw, i
 		} else {
 			next[i], lists[h].normal = lists[h].normal, i
@@ -277,7 +322,7 @@ func linkDuplicatePhotos(ctx context.Context, photos []duplicateCandidate, join 
 		members[h] = shapes{ordered[start:middle:middle], ordered[middle:len(ordered):len(ordered)]}
 	}
 	ratio := func(a, b int) int {
-		return cmp.Compare(int64(photos[a].Width)*int64(photos[b].Height), int64(photos[b].Width)*int64(photos[a].Height))
+		return cmp.Compare(int64(photos[a].width)*int64(photos[b].height), int64(photos[b].width)*int64(photos[a].height))
 	}
 	for _, m := range members {
 		for _, ids := range [][]int{m.normal, m.raw} {
@@ -285,7 +330,7 @@ func linkDuplicatePhotos(ctx context.Context, photos []duplicateCandidate, join 
 			// Adjacent compatible ratios connect exactly the same components as
 			// every compatible pair, even when similarity is not transitive.
 			for i := 1; i < len(ids); i++ {
-				if sameShape(photos[ids[i-1]].DuplicateItem, photos[ids[i]].DuplicateItem) {
+				if sameShape(photos[ids[i-1]], photos[ids[i]]) {
 					join(ids[i-1], ids[i])
 				}
 			}
@@ -293,7 +338,7 @@ func linkDuplicatePhotos(ctx context.Context, photos []duplicateCandidate, join 
 	}
 	linkShapes := func(a, b []int) {
 		for x, y := 0, 0; x < len(a) && y < len(b); {
-			if sameShape(photos[a[x]].DuplicateItem, photos[b[y]].DuplicateItem) {
+			if sameShape(photos[a[x]], photos[b[y]]) {
 				join(a[x], b[y])
 			}
 			// The smaller ratio cannot match a later ratio if it missed this one.
@@ -385,7 +430,7 @@ func firstHashBytePair(difference uint64, p, q int) bool {
 
 // sameShape compares aspect ratios (without division): hashes alone can match
 // unrelated panoramas and crops.
-func sameShape(a, b core.DuplicateItem) bool {
-	left, right := int64(a.Width)*int64(b.Height), int64(a.Height)*int64(b.Width)
+func sameShape(a, b duplicateKey) bool {
+	left, right := int64(a.width)*int64(b.height), int64(a.height)*int64(b.width)
 	return left*100 >= right*95 && right*100 >= left*95
 }

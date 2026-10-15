@@ -98,14 +98,42 @@ compression run's jobs, a table too small for keyset paging to matter.
 - **A larger page size** would need a `VACUUM` of every library for little
   gain.
 
+## Second round: large reads
+
+Medians of three interleaved rounds of ten calls on a quiet machine (gate
+seed, no blocks), against the first round's code.
+
+**The duplicates rebuild reads less for photos that never group.** Grouping
+needs only an asset's id, pHash, dimensions, extension and two flags (several
+files; a usable thumbnail hash), now packed into one integer. The display
+fields (thumbnail version, dates, camera, GPS) are read with the file paths,
+only for the assets that ended up in a group, in the same read transaction.
+The rebuild went from 301 to 214 ms (−29%) and allocates 54 MB instead of
+147 MB. What remains is mostly SQLite stepping the joined rows; `linkNear`
+is about a tenth.
+
+**Loading embeddings no longer converts or copies each row.** The scale is
+scanned as SQLite's own float64 (database/sql converted a float32 through a
+string), and the vector is passed to the callback as a view of the driver's
+bytes instead of a copy; callers already had to copy it to keep it. Loading
+100,000 embeddings went from 260 to 185 ms (−29%). The gate now seeds one
+embedding per photo and measures `LoadEmbeddings`.
+
+**Measured and not done: one selection revision per transaction.** A batch
+of tags for 64 photos bumped `selection_revision` 1,536 times. A one-row
+marker, settled once before commit, removed all but one of those writes, but
+they were only 6% of the triggers' work (counted in SQLite VM steps); the
+kept-count triggers of migration 0037 are most of it. `SaveTags64` was
+unchanged (13.4 against 13.9 ms), so the extra table and settlement step
+were not worth adding.
+
 ## Left for later
 
-- Large reads are bound by Go, not SQLite: the duplicates rebuild takes 53 ms
-  in SQLite and 253 ms with its rows converted, and loading every embedding
-  88 and 157 ms. Fewer, packed columns would help the Duplicates screen.
-- The 13 triggers on `asset_tags` are half the time of a tag save, with no
-  single one dominating. Bumping the selection revision once at settlement,
-  as blocked assets are settled, would recover part of it.
+- The kept tag counts' triggers (migration 0037) are most of a tag save's
+  trigger work: each evaluates the tag confidence setting and the asset's
+  visibility for every row. Marking dirty tags and recounting them at
+  settlement, as blocked assets are settled, would be the next step for
+  tag saves.
 - Ingest prepares its statements per batch (about 0.9 ms of a 128-photo
   batch). Keeping them prepared on the writer would save that, but kept
   statements may slow its large ones, as the cache did; a larger lookaside,
