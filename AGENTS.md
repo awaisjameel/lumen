@@ -130,4 +130,8 @@ Import direction, enforced by ESLint: `bridge` ← `design` ← `shared` ← fea
 
 ## Git Rules:
 
-- Never add claude, codex, or any AI assistant as co-author or Mention claude, codex or any AI assistant anywhere (Commit messages, pull requests, issues, comments, etc.).
+- Never add claude, codex, or any AI assistant as co-author or Mention claude, codex or any AI assistant anywhere(Commit messages, pull requests, issues, comments, etc.).
+
+## Skills:
+
+- Use relevent skills when needed from ./skills/\*
