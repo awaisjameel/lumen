@@ -134,3 +134,15 @@ BenchmarkLargeLibraryStore/folder_tag_person/JobCountsPending 5ms # 0.029..0.090
 BenchmarkLargeLibraryStore/folder_tag_person/CountPending 200ms # 62.317..64.566 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/PendingJobsKind64 5ms # 0.139..0.304 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/Ingest128 200ms # 21.834..33.792 ms/op
+# Redesign engine additions, 2026-10-16: five repeats, three warmed calls each.
+# Counts reads days, person counts and the kept Trash total, never asset rows.
+# The same ceiling rule above applies; existing budgets are unchanged.
+BenchmarkLargeLibraryStore/none/Counts 5ms # 0.359..0.418 ms/op
+BenchmarkLargeLibraryStore/none/DayBucketsPhotos 20ms # 2.151..3.357 ms/op
+BenchmarkLargeLibraryStore/none/DayItemsPhotos 5ms # 0.044..0.063 ms/op
+BenchmarkLargeLibraryStore/folder/Counts 5ms # 0.417..0.576 ms/op
+BenchmarkLargeLibraryStore/folder/DayBucketsPhotos 10ms # 2.170..3.037 ms/op
+BenchmarkLargeLibraryStore/folder/DayItemsPhotos 5ms # 0.053..0.146 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/Counts 5ms # 0.347..0.391 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DayBucketsPhotos 8ms # 2.011..2.441 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DayItemsPhotos 5ms # 0.047..0.082 ms/op

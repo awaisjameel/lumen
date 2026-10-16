@@ -200,7 +200,7 @@ func TestEventLookupKeepsTheSnapshotThatReadItsAnchor(t *testing.T) {
 	}))
 	check(t, errOf(conn.ExecContext(ctx, `PRAGMA query_only = OFF;
 		CREATE TEMP VIEW assets AS SELECT id, read_event_time(taken_at) AS taken_at,
-		lat, lon, place_id, thumb_version, hidden, trashed_at, missing_since FROM main.assets;
+		lat, lon, place_id, thumb_version, kind, hidden, trashed_at, missing_since FROM main.assets;
 		PRAGMA query_only = ON;`)))
 	check(t, conn.Close())
 	got, err := st.Event(ctx, a, 12)
@@ -227,7 +227,7 @@ func TestEventNamePinAndBlockUseTheWritersOwnTimeline(t *testing.T) {
 			check(t, err)
 			check(t, errOf(conn.ExecContext(ctx, fmt.Sprintf(`CREATE TEMP VIEW assets AS SELECT id,
 				CASE WHEN id = %d THEN %d ELSE taken_at END AS taken_at,
-				lat, lon, place_id, thumb_version, hidden, trashed_at, missing_since FROM main.assets`, b, at(0)))))
+				lat, lon, place_id, thumb_version, kind, hidden, trashed_at, missing_since FROM main.assets`, b, at(0)))))
 			check(t, conn.Close())
 			switch operation {
 			case "name":

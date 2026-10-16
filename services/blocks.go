@@ -219,14 +219,42 @@ func (s *LibraryService) SetBlockMode(ctx context.Context, blockID int64, mode c
 
 // RemoveBlock restores the current view of a blocked item.
 func (s *LibraryService) RemoveBlock(ctx context.Context, id int64) error {
+	_, err := s.Unblock(ctx, id)
+	return err
+}
+
+// Unblock removes a rule while unlocked and returns a single-use Undo receipt.
+// The receipt differs from the row ID: SQLite may reuse that ID for another
+// rule before an old toast disappears. A stale toast must not undo that rule.
+func (s *LibraryService) Unblock(ctx context.Context, id int64) (int64, error) {
 	s.blocked.Lock()
 	defer s.blocked.Unlock()
 	if !s.unlockedNow() {
-		return ErrBlockLocked
+		return 0, ErrBlockLocked
 	}
-	if err := s.store.RemoveBlock(ctx, id); err != nil {
+	receipt, err := s.store.RemoveBlockForUndo(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	s.blocked.removedSerial++
+	s.blocked.removed, s.blocked.removedToken, s.blocked.removedAt = receipt, s.blocked.removedSerial, s.now()
+	s.viewsChanged()
+	return s.blocked.removedToken, nil
+}
+
+// UndoUnblock re-blocks the most recently removed rule during the same short
+// Undo window as UndoBlock. It works after relocking because it only hides;
+// the persisted face/event anchor and scope are never supplied by the client.
+func (s *LibraryService) UndoUnblock(ctx context.Context, receipt int64) error {
+	s.blocked.Lock()
+	defer s.blocked.Unlock()
+	if receipt == 0 || receipt != s.blocked.removedToken || s.now().Sub(s.blocked.removedAt) > blockUndoWindow {
+		return ErrBlockUndoExpired
+	}
+	if err := s.store.RestoreRemovedBlock(ctx, s.blocked.removed); err != nil {
 		return err
 	}
+	s.blocked.removed, s.blocked.removedToken = nil, 0
 	s.viewsChanged()
 	return nil
 }

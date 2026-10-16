@@ -71,7 +71,7 @@ func TestAssetDetailReadsPathsFromItsMetadataSnapshot(t *testing.T) {
 		CREATE TEMP VIEW assets AS SELECT id, kind, ext, read_metadata(taken_at) AS taken_at,
 		date_from, width, height, camera, lat, lon, place_id, favourite, duration_ms,
 		video_codec, audio_codec, thumb_version, display_rotation, display_flip,
-		hidden, trashed_at, missing_since FROM main.assets;
+		hidden, trashed_at, missing_since, original_taken_at, original_date_from, location_corrected, original_lat, original_lon FROM main.assets;
 		PRAGMA query_only = ON;`)))
 	check(t, conn.Close())
 	detail, err := st.AssetDetail(ctx, id, false)

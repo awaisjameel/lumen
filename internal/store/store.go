@@ -190,6 +190,15 @@ func (s *Store) Optimize(ctx context.Context) (bool, error) {
 // never queues on the writer and readers keep their WAL snapshots. Its zero
 // busy timeout turns a library in use into "not completed" rather than a wait.
 func (s *Store) maintain(ctx context.Context, fn func(*sql.DB) error) (completed bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	// A leased writer already means maintenance should yield. Check before
+	// borrowing a reader or opening SQLite: either can be slow under load,
+	// even though the later SQLite busy wait is zero.
+	if s.w.Stats().InUse != 0 {
+		return false, nil
+	}
 	// SQLite names the file its readers hold open, so nothing is created: a
 	// closed store fails here, and Windows keeps an open database in place.
 	// The path is plain, as in Open, so it needs no escaping.

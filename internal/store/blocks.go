@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -201,6 +202,97 @@ func (s *Store) SetBlockMode(ctx context.Context, blockID int64, mode core.Block
 // RemoveBlock restores an item's ordinary visibility without touching media.
 func (s *Store) RemoveBlock(ctx context.Context, id int64) error {
 	return affected(s.w.ExecContext(ctx, "DELETE FROM blocks WHERE id = ?", id))
+}
+
+// BlockRemoval is an opaque receipt for an unblocked rule. Keeping the resolved
+// target matters: event and face targets are durable anchors, not live IDs.
+type BlockRemoval struct {
+	block     core.Block
+	createdAt int64
+	members   []removedEventMember
+	face      *removedFaceBlock
+}
+
+// RemoveBlockForUndo removes a rule and captures its exact persisted target in
+// the same transaction. Only the service keeps the receipt; clients cannot
+// manufacture an anchor or restore an arbitrary rule through it.
+func (s *Store) RemoveBlockForUndo(ctx context.Context, id int64) (*BlockRemoval, error) {
+	r := &BlockRemoval{}
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		b := &r.block
+		err := tx.QueryRowContext(ctx, `SELECT id, kind, COALESCE(target_id, 0), COALESCE(path, ''), mode, name, created_at
+			FROM blocks WHERE id = ?`, id).Scan(&b.ID, &b.Kind, &b.TargetID, &b.Path, &b.Mode, &b.Name, &r.createdAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		switch b.Kind {
+		case core.BlockEvent:
+			r.members, err = queryAll(ctx, tx, func(rows *sql.Rows) (m removedEventMember, err error) {
+				err = rows.Scan(&m.ID, &m.TakenAt, &m.Lat, &m.Lon, &m.Moved)
+				return m, err
+			}, `SELECT a.id, a.taken_at, a.lat, a.lon, m.moved
+				FROM event_members m JOIN assets a ON a.id = m.asset_id WHERE m.tag_id = ?`, b.TargetID)
+		case core.BlockFace:
+			r.face, err = captureFaceBlock(ctx, tx, b.TargetID)
+		default:
+		}
+		if err != nil {
+			return err
+		}
+		return affected(tx.ExecContext(ctx, "DELETE FROM blocks WHERE id = ?", id))
+	})
+	return r, err
+}
+
+// RestoreRemovedBlock re-blocks the captured target. A rule made since removal
+// is retained as it is; Undo must never weaken a newer block's scope.
+func (s *Store) RestoreRemovedBlock(ctx context.Context, r *BlockRemoval) error {
+	if r == nil {
+		return ErrNotFound
+	}
+	b := r.block
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		switch b.Kind {
+		case core.BlockEvent:
+			result, err := tx.ExecContext(ctx, "INSERT INTO event_tags(kind, created_at) VALUES ('block', ?)", r.createdAt)
+			if err != nil {
+				return err
+			}
+			b.TargetID, err = result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			members, err := json.Marshal(r.members)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO event_members(tag_id, asset_id, moved)
+				SELECT ?, a.id, json_extract(j.value, '$.moved') OR NOT
+				(a.taken_at IS json_extract(j.value, '$.takenAt') AND a.lat IS json_extract(j.value, '$.lat')
+				 AND a.lon IS json_extract(j.value, '$.lon'))
+				FROM json_each(?) j JOIN assets a ON a.id = json_extract(j.value, '$.id')`, b.TargetID, string(members)); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO event_dirty(at)
+				SELECT a.taken_at FROM json_each(?1) j JOIN assets a ON a.id = json_extract(j.value, '$.id')
+				UNION SELECT json_extract(value, '$.takenAt') FROM json_each(?1)`, string(members)); err != nil {
+				return err
+			}
+		case core.BlockFace:
+			var err error
+			b.TargetID, err = restoreFaceBlock(ctx, tx, r.face)
+			if err != nil {
+				return err
+			}
+		default:
+		}
+		_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO blocks(kind, target_id, path, mode, name, created_at)
+			VALUES (?, NULLIF(?, 0), NULLIF(?, ''), ?, ?, ?)`, b.Kind, b.TargetID, b.Path, b.Mode, b.Name, r.createdAt)
+		return err
+	})
 }
 
 // IsBlocked checks whether a named view target has been removed from browsing.

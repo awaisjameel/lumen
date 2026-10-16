@@ -250,6 +250,7 @@ type DateSource string
 
 // Where a date can come from.
 const (
+	DateFromUser     DateSource = "user" // a local correction; the metadata original is kept
 	DateFromEXIF     DateSource = "exif"
 	DateFromFilename DateSource = "filename"
 	DateFromFile     DateSource = "file" // the file's modified time
@@ -270,11 +271,22 @@ const (
 	SpriteRows = 4
 )
 
+// SourceAvailability is the last background check of a source's root.
+type SourceAvailability string
+
+// Source states are kept in memory; an unchecked source is not a missing one.
+const (
+	SourceChecking    SourceAvailability = "checking"
+	SourceAvailable   SourceAvailability = "available"
+	SourceUnavailable SourceAvailability = "unavailable"
+)
+
 // Source is a folder the user asked Lumen to watch.
 type Source struct {
-	ID      int64  `json:"id"`
-	Path    string `json:"path"`
-	Enabled bool   `json:"enabled"`
+	ID           int64              `json:"id"`
+	Path         string             `json:"path"`
+	Enabled      bool               `json:"enabled"`
+	Availability SourceAvailability `json:"availability,omitempty"`
 }
 
 // BlockKind is the kind of item excluded from browsing.
@@ -372,6 +384,7 @@ type Filter string
 // The grid filters.
 const (
 	FilterAll        Filter = ""
+	FilterPhotos     Filter = "photos"
 	FilterFavourites Filter = "favourites"
 	FilterVideos     Filter = "videos"
 	// FilterTrash is the app-level Trash: trashed assets that are still on
@@ -392,17 +405,19 @@ type View struct {
 
 // Event is a consecutive run of visible media, separated by time or distance.
 type Event struct {
-	ID         int64  `json:"id"` // oldest asset in the run
-	Name       string `json:"name"`
-	StartAt    int64  `json:"startAt"`
-	EndAt      int64  `json:"endAt"`
-	Count      int    `json:"count"`
-	Cover      int64  `json:"cover"`
-	CoverThumb int    `json:"coverThumb"`
-	PlaceID    int64  `json:"placeId"`
-	Pinned     bool   `json:"pinned"` // the user pinned it: it sorts first
-	FirstID    int64  `json:"-"`      // boundary among equal timestamps; engine only
-	LastID     int64  `json:"-"`
+	ID           int64  `json:"id"` // oldest asset in the run
+	Name         string `json:"name"`
+	NameOverride string `json:"nameOverride,omitempty"` // empty when the date/place title is automatic
+	StartAt      int64  `json:"startAt"`
+	EndAt        int64  `json:"endAt"`
+	Count        int    `json:"count"`
+	Videos       int    `json:"videos,omitempty"` // included in Count
+	Cover        int64  `json:"cover"`
+	CoverThumb   int    `json:"coverThumb"`
+	PlaceID      int64  `json:"placeId"`
+	Pinned       bool   `json:"pinned"` // the user pinned it: it sorts first
+	FirstID      int64  `json:"-"`      // boundary among equal timestamps; engine only
+	LastID       int64  `json:"-"`
 }
 
 // Place is a city near one or more visible GPS-tagged assets.
@@ -588,23 +603,27 @@ type DayItems struct {
 
 // AssetDetail is everything the details panel shows.
 type AssetDetail struct {
-	Adjustment *DisplayAdjustment `json:"adjustment,omitempty"`
-	ID         int64              `json:"id"`
-	Kind       Kind               `json:"kind"`
-	TakenAt    int64              `json:"takenAt"` // wall-clock seconds, see WallClock
-	DateFrom   DateSource         `json:"dateFrom"`
-	Width      int                `json:"width"`
-	Height     int                `json:"height"`
-	Camera     string             `json:"camera"`
-	Lat        *float64           `json:"lat"`
-	Lon        *float64           `json:"lon"`
-	PlaceID    int64              `json:"placeId"` // resolved nearby city; 0 if unknown
-	Favourite  bool               `json:"favourite"`
-	Paths      []string           `json:"paths"`
-	Size       int64              `json:"size"`
-	Ext        string             `json:"ext"`
-	Caps       MediaCaps          `json:"caps"`  // what can be done with it (see CapsOf)
-	Video      *Video             `json:"video"` // nil for photos
+	// OriginalDate and OriginalLocation are present only while corrected.
+	// They follow the latest metadata read, so restoring never revives stale metadata.
+	OriginalDate     *OriginalDate      `json:"originalDate,omitempty"`
+	OriginalLocation *OriginalLocation  `json:"originalLocation,omitempty"`
+	Adjustment       *DisplayAdjustment `json:"adjustment,omitempty"`
+	ID               int64              `json:"id"`
+	Kind             Kind               `json:"kind"`
+	TakenAt          int64              `json:"takenAt"` // wall-clock seconds, see WallClock
+	DateFrom         DateSource         `json:"dateFrom"`
+	Width            int                `json:"width"`
+	Height           int                `json:"height"`
+	Camera           string             `json:"camera"`
+	Lat              *float64           `json:"lat"`
+	Lon              *float64           `json:"lon"`
+	PlaceID          int64              `json:"placeId"` // resolved nearby city; 0 if unknown
+	Favourite        bool               `json:"favourite"`
+	Paths            []string           `json:"paths"`
+	Size             int64              `json:"size"`
+	Ext              string             `json:"ext"`
+	Caps             MediaCaps          `json:"caps"`  // what can be done with it (see CapsOf)
+	Video            *Video             `json:"video"` // nil for photos
 }
 
 // Video is what the details panel and the player need to know about a video.
@@ -758,10 +777,11 @@ func FailReasonOf(msg string) FailReason {
 // so each view reloads only for what it shows. While the AI works through a
 // big library, tags and people change for hours after the timeline settles.
 type Changes struct {
-	Assets bool `json:"assets"` // assets came, went, were blocked or unblocked, or their dates or sizes changed
-	Thumbs bool `json:"thumbs"` // only thumbnails (and the perceptual hashes made with them) changed
-	Tags   bool `json:"tags"`   // the AI tagged assets
-	People bool `json:"people"` // faces were found or grouped into people
+	Sources bool `json:"sources,omitempty"` // source availability or the source list changed
+	Assets  bool `json:"assets"`            // assets came, went, were blocked or unblocked, or their dates or sizes changed
+	Thumbs  bool `json:"thumbs"`            // only thumbnails (and the perceptual hashes made with them) changed
+	Tags    bool `json:"tags"`              // the AI tagged assets
+	People  bool `json:"people"`            // faces were found or grouped into people
 }
 
 // AI is the state of the on-device models.

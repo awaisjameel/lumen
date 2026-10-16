@@ -65,6 +65,28 @@ func TestOptimizeYieldsToAnActiveWriterAndReportsCancellation(t *testing.T) {
 	t.Logf("busy optimisation and retry=%s; SQLite busy wait is zero", time.Since(started))
 }
 
+func TestOptimizeYieldsToTheWriterWithoutWaitingForAReader(t *testing.T) {
+	st := openTest(t)
+	st.r.SetMaxOpenConns(1)
+	reader, err := st.r.Conn(t.Context())
+	check(t, err)
+	defer reader.Close()
+	writer, err := st.w.BeginTx(t.Context(), nil)
+	check(t, err)
+	defer func() { _ = writer.Rollback() }()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	completed, err := st.Optimize(ctx)
+	check(t, err)
+	if completed {
+		t.Fatal("maintenance ran while the writer was active")
+	}
+	cancel()
+	if _, err := st.Optimize(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("busy maintenance lost cancellation: %v", err)
+	}
+}
+
 func TestOptimizeKeepsReaderSnapshotsAndTheLiteralLibraryPath(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "literal # % folder")
 	check(t, os.Mkdir(root, 0o750))

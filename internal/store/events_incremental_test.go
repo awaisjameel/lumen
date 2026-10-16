@@ -199,7 +199,7 @@ func TestIncrementalEventListsReadOnlyChangedWindows(t *testing.T) {
 				check(t, errOf(conn.ExecContext(ctx, `PRAGMA query_only = OFF;
 				CREATE TEMP VIEW assets AS SELECT id, taken_at, lat, lon, place_id,
 				read_changed_thumb(id, thumb_version) AS thumb_version,
-				hidden, trashed_at, missing_since FROM main.assets;
+				kind, hidden, trashed_at, missing_since FROM main.assets;
 				PRAGMA query_only = ON;`)))
 				check(t, conn.Close())
 				got, err := st.Events(ctx, 12)

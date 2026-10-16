@@ -327,6 +327,19 @@ func (s *Store) RequeueVersions(ctx context.Context, versions map[core.Stage]Sta
 	return total, err
 }
 
+// Metadata date rules read the underlying metadata even while a correction is
+// active. Both effective and retained values therefore use exactly one rule.
+const metadataTakenAtSQL = `CASE WHEN ?1 != 0 THEN ?1
+	WHEN COALESCE(original_date_from, date_from) = 'exif' AND ?15 != '' THEN
+		CASE WHEN ?12 != 0 AND ?15 = 'file' AND ?12 < ?14 THEN ?12 ELSE ?14 END
+	WHEN ?12 != 0 AND COALESCE(original_date_from, date_from) = 'file'
+		AND ?12 < COALESCE(original_taken_at, taken_at) THEN ?12
+	ELSE COALESCE(original_taken_at, taken_at) END`
+
+const metadataDateFromSQL = `CASE WHEN ?1 != 0 THEN 'exif'
+	WHEN COALESCE(original_date_from, date_from) = 'exif' AND ?15 != '' THEN ?15
+	ELSE COALESCE(original_date_from, date_from) END`
+
 // SaveMetadata stores a batch of metadata results and closes their jobs,
 // recording the version that produced them.
 func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataResult) error {
@@ -353,14 +366,18 @@ func (s *Store) SaveMetadata(ctx context.Context, version string, rs []MetadataR
 		// the file system's when it is older (copies are newer), but never a
 		// date in the file's name.
 		upd, err := tx.PrepareContext(ctx, `UPDATE assets SET
-				taken_at = CASE WHEN ?1 != 0 THEN ?1
-					WHEN date_from = 'exif' AND ?15 != '' THEN
-						CASE WHEN ?12 != 0 AND ?15 = 'file' AND ?12 < ?14 THEN ?12 ELSE ?14 END
-					WHEN ?12 != 0 AND date_from = 'file' AND ?12 < taken_at THEN ?12 ELSE taken_at END,
-				date_from = CASE WHEN ?1 != 0 THEN 'exif'
-					WHEN date_from = 'exif' AND ?15 != '' THEN ?15 ELSE date_from END,
+				taken_at = CASE WHEN date_from = 'user' THEN taken_at ELSE `+metadataTakenAtSQL+` END,
+				date_from = CASE WHEN date_from = 'user' THEN date_from ELSE `+metadataDateFromSQL+` END,
+				original_taken_at = CASE WHEN date_from = 'user' THEN `+metadataTakenAtSQL+` END,
+				original_date_from = CASE WHEN date_from = 'user' THEN `+metadataDateFromSQL+` END,
 				width = NULLIF(?2, 0), height = NULLIF(?3, 0), orientation = ?4,
-				camera = NULLIF(?5, ''), lat = ?6, lon = ?7, place_id = ?13, place_checked = 1,
+				camera = NULLIF(?5, ''),
+				lat = CASE WHEN location_corrected = 1 THEN lat ELSE ?6 END,
+				lon = CASE WHEN location_corrected = 1 THEN lon ELSE ?7 END,
+				place_id = CASE WHEN location_corrected = 1 THEN place_id ELSE ?13 END,
+				original_lat = CASE WHEN location_corrected = 1 THEN ?6 END,
+				original_lon = CASE WHEN location_corrected = 1 THEN ?7 END,
+				original_place_id = CASE WHEN location_corrected = 1 THEN ?13 END, place_checked = 1,
 				duration_ms = NULLIF(?8, 0), video_codec = NULLIF(?9, ''), audio_codec = NULLIF(?10, '')
 			WHERE id = ?11`)
 		if err != nil {
@@ -438,7 +455,7 @@ func metadataDateGuesses(ctx context.Context, tx *sql.Tx, rs []MetadataResult) (
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT a.id, f.path, f.mtime
 		FROM json_each(?) ids CROSS JOIN assets a ON a.id = ids.value
-		JOIN files f ON f.asset_id = a.id WHERE a.date_from = 'exif' ORDER BY f.id`, string(list))
+		JOIN files f ON f.asset_id = a.id WHERE COALESCE(a.original_date_from, a.date_from) = 'exif' ORDER BY f.id`, string(list))
 	if err != nil {
 		return nil, err
 	}

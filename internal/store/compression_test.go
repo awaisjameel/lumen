@@ -59,6 +59,8 @@ func TestRelatedCompressionOutputsRetainExplicitAnnotationsAndFaceCorrections(t 
 	check(t, err)
 	check(t, st.SetAlbumItem(ctx, a, album, true))
 	check(t, st.SetFavourite(ctx, a, true))
+	check(t, st.SetTakenAt(ctx, []int64{a}, 0))
+	check(t, st.SetLocation(ctx, []int64{a}, 51.5074, -0.1278))
 	id, err := st.SaveCompressionPlan(ctx, core.DefaultCompressionOptions(), []core.CompressionJob{{AssetID: a, From: `C:\Photos\a.jpg`, To: `C:\Photos\a-compressed.jpg`, State: core.CompressionCommitting}})
 	check(t, err)
 	jobs, err := st.CompressionJobs(ctx, id)
@@ -70,6 +72,9 @@ func TestRelatedCompressionOutputsRetainExplicitAnnotationsAndFaceCorrections(t 
 	output := jobs[0].OutputAssetID
 	detail, err := st.AssetDetail(ctx, output, false)
 	check(t, err)
+	if detail.DateFrom != core.DateFromUser || detail.TakenAt != 0 || detail.OriginalDate == nil || detail.OriginalLocation == nil || detail.Lat == nil || *detail.Lat != 51.5074 {
+		t.Fatalf("compression lost corrections: %+v", detail)
+	}
 	tags, err := st.AssetTags(ctx, output, core.TagConfidenceDefault)
 	check(t, err)
 	albums, err := st.AssetAlbums(ctx, output)

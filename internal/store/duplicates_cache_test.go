@@ -94,6 +94,7 @@ func TestDuplicateCacheInvalidatesEveryAnswerInput(t *testing.T) {
 		{"extension", `UPDATE assets SET ext = '.arw' WHERE id = 2`},
 		{"camera", `UPDATE assets SET camera = 'Camera' WHERE id = 2`},
 		{"EXIF date", `UPDATE assets SET date_from = 'exif' WHERE id = 2`},
+		{"retained EXIF date", `UPDATE assets SET original_date_from = 'exif' WHERE id = 2`},
 		{"capture date", `UPDATE assets SET taken_at = 50 WHERE id = 2`},
 		{"latitude", `UPDATE assets SET lat = 1 WHERE id = 2`},
 		{"longitude", `UPDATE assets SET lon = 1 WHERE id = 2`},

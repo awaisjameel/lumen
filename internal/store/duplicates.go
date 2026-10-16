@@ -157,7 +157,7 @@ func duplicatePaths(ctx context.Context, tx *sql.Tx, groups []core.DuplicateGrou
 		return err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT f.asset_id, f.path, f.size, f.mtime,
-		a.thumb_version, a.taken_at, a.ext, a.camera IS NOT NULL, a.date_from = ?,
+		a.thumb_version, a.taken_at, a.ext, a.camera IS NOT NULL, COALESCE(a.original_date_from, a.date_from) = ?,
 		a.lat IS NOT NULL AND a.lon IS NOT NULL, a.added_at
 		FROM files f JOIN assets a ON a.id = f.asset_id
 		WHERE f.asset_id IN (SELECT value FROM json_each(?)) ORDER BY f.asset_id, f.path`, core.DateFromEXIF, string(list))

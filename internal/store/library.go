@@ -14,6 +14,9 @@ import (
 // exist (or no longer does), or an asset is not visible.
 var ErrNotFound = errors.New("not found")
 
+// ErrInvalidFilter means a view names no supported timeline filter.
+var ErrInvalidFilter = errors.New("invalid library filter")
+
 // UnavailableAssets identifies stored vectors that must not compete for search
 // results. Keep their embeddings so restored sources become searchable again.
 func (s *Store) UnavailableAssets(ctx context.Context) (map[int64]bool, error) {
@@ -56,7 +59,7 @@ var recountDayCountsSQL = `DELETE FROM day_counts;
 // list. AI tags count from minScore up.
 func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float64) ([]core.DayBucket, error) {
 	if v.Tag == 0 && v.Person == 0 && v.Album == 0 && v.Place == 0 && v.Event == 0 &&
-		(v.Filter == core.FilterAll || v.Filter == core.FilterFavourites || v.Filter == core.FilterVideos) {
+		(v.Filter == core.FilterAll || v.Filter == core.FilterPhotos || v.Filter == core.FilterFavourites || v.Filter == core.FilterVideos) {
 		return keptDayBuckets(ctx, s.r, v.Filter)
 	}
 	return s.dayBucketsCounted(ctx, v, minScore)
@@ -65,6 +68,8 @@ func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float64) (
 func keptDayBuckets(ctx context.Context, db querier, filter core.Filter) ([]core.DayBucket, error) {
 	column := "total"
 	switch filter {
+	case core.FilterPhotos:
+		column = "(total - videos)"
 	case core.FilterFavourites:
 		column = "favourites"
 	case core.FilterVideos:
@@ -92,6 +97,11 @@ func (s *Store) dayBucketsCounted(ctx context.Context, v core.View, minScore flo
 
 // viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
 func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float64) (where string, args []any, err error) {
+	switch v.Filter {
+	case core.FilterAll, core.FilterPhotos, core.FilterVideos, core.FilterFavourites, core.FilterTrash:
+	default:
+		return "", nil, ErrInvalidFilter
+	}
 	targets := []struct {
 		kind core.BlockKind
 		id   int64
@@ -166,6 +176,8 @@ func (s *Store) viewFilterSQL(ctx context.Context, v core.View, minScore float64
 		f.favourites = true
 	case core.FilterVideos:
 		f.kind = core.KindVideo
+	case core.FilterPhotos:
+		f.kind = core.KindPhoto
 	}
 	where, args = f.where(minScore)
 	return where, args, nil
@@ -334,14 +346,19 @@ func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.
 	var camera sql.NullString
 	var duration sql.NullInt64
 	var videoCodec, audioCodec sql.NullString
-	var lat, lon sql.NullFloat64
+	var lat, lon, originalLat, originalLon sql.NullFloat64
+	var originalAt sql.NullInt64
+	var originalFrom sql.NullString
+	var locationCorrected bool
 	var thumb int64
 	err := q.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
 		CASE WHEN `+placeBlocked("assets.place_id")+` THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
-		duration_ms, video_codec, audio_codec, thumb_version, display_rotation, display_flip
+		duration_ms, video_codec, audio_codec, thumb_version, display_rotation, display_flip,
+		original_taken_at, original_date_from, location_corrected, original_lat, original_lon
 		FROM assets WHERE id = ? AND `+servableOf(unlocked), id).
 		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.PlaceID, &d.Favourite,
-			&duration, &videoCodec, &audioCodec, &thumb, &d.Adjustment.Rotation, &d.Adjustment.Flip)
+			&duration, &videoCodec, &audioCodec, &thumb, &d.Adjustment.Rotation, &d.Adjustment.Flip,
+			&originalAt, &originalFrom, &locationCorrected, &originalLat, &originalLon)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -349,6 +366,15 @@ func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.
 		return d, err
 	}
 	d.Width, d.Height, d.Camera = int(w.Int64), int(h.Int64), camera.String
+	if originalAt.Valid {
+		d.OriginalDate = &core.OriginalDate{TakenAt: originalAt.Int64, From: core.DateSource(originalFrom.String)}
+	}
+	if locationCorrected {
+		d.OriginalLocation = &core.OriginalLocation{}
+		if originalLat.Valid && originalLon.Valid {
+			d.OriginalLocation.Lat, d.OriginalLocation.Lon = &originalLat.Float64, &originalLon.Float64
+		}
+	}
 	if lat.Valid && lon.Valid {
 		d.Lat, d.Lon = &lat.Float64, &lon.Float64
 	}

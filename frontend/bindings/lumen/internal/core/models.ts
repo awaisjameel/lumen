@@ -114,6 +114,12 @@ export interface AlbumRule {
  * AssetDetail is everything the details panel shows.
  */
 export interface AssetDetail {
+    /**
+     * OriginalDate and OriginalLocation are present only while corrected.
+     * They follow the latest metadata read, so restoring never revives stale metadata.
+     */
+    "originalDate"?: OriginalDate | null;
+    "originalLocation"?: OriginalLocation | null;
     "adjustment"?: DisplayAdjustment | null;
     "id": number;
     "kind": Kind;
@@ -280,6 +286,11 @@ export interface BlockRef {
  */
 export interface Changes {
     /**
+     * source availability or the source list changed
+     */
+    "sources"?: boolean;
+
+    /**
      * assets came, went, were blocked or unblocked, or their dates or sizes changed
      */
     "assets": boolean;
@@ -298,6 +309,19 @@ export interface Changes {
      * faces were found or grouped into people
      */
     "people": boolean;
+}
+
+/**
+ * CityMatch is a city in the bundled offline catalogue, including cities
+ * that have no photos yet. ID is its GeoNames identity, not an asset ID.
+ */
+export interface CityMatch {
+    "id": number;
+    "name": string;
+    "region": string;
+    "country": string;
+    "lat": number;
+    "lon": number;
 }
 
 /**
@@ -492,7 +516,10 @@ export enum DateSource {
 
     /**
      * Where a date can come from.
+     *
+     * a local correction; the metadata original is kept
      */
+    DateFromUser = "user",
     DateFromEXIF = "exif",
     DateFromFilename = "filename",
 
@@ -683,9 +710,19 @@ export interface Event {
      */
     "id": number;
     "name": string;
+
+    /**
+     * empty when the date/place title is automatic
+     */
+    "nameOverride"?: string;
     "startAt": number;
     "endAt": number;
     "count": number;
+
+    /**
+     * included in Count
+     */
+    "videos"?: number;
     "cover": number;
     "coverThumb": number;
     "placeId": number;
@@ -981,6 +1018,7 @@ export enum Filter {
      * The grid filters.
      */
     FilterAll = "",
+    FilterPhotos = "photos",
     FilterFavourites = "favourites",
     FilterVideos = "videos",
 
@@ -1058,6 +1096,19 @@ export enum Kind {
 export interface LegacyPreferences {
     "theme": Theme;
     "tileSize": number;
+}
+
+/**
+ * LibraryCounts supplies sidebar totals and the Library caption. People
+ * counts named, unblocked people with visible photos. Duplicates are omitted:
+ * their page counts computed similarity groups, which cannot be read cheaply.
+ */
+export interface LibraryCounts {
+    "photos": number;
+    "videos": number;
+    "favourites": number;
+    "people": number;
+    "trash": number;
 }
 
 /**
@@ -1316,6 +1367,26 @@ export enum OrganiseRunState {
      */
     OrganiseFailed = "failed",
 };
+
+/**
+ * OriginalDate is the metadata date underneath a local correction.
+ */
+export interface OriginalDate {
+    /**
+     * wall-clock seconds, including dates before 1970
+     */
+    "takenAt": number;
+    "from": DateSource;
+}
+
+/**
+ * OriginalLocation is the metadata location underneath a local correction.
+ * Both coordinates are nil when the file supplies no location.
+ */
+export interface OriginalLocation {
+    "lat": number | null;
+    "lon": number | null;
+}
 
 /**
  * Person is someone who appears in the photos: a group of faces the AI
@@ -1713,7 +1784,25 @@ export interface Source {
     "id": number;
     "path": string;
     "enabled": boolean;
+    "availability"?: SourceAvailability;
 }
+
+/**
+ * SourceAvailability is the last background check of a source's root.
+ */
+export enum SourceAvailability {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * Source states are kept in memory; an unchecked source is not a missing one.
+     */
+    SourceChecking = "checking",
+    SourceAvailable = "available",
+    SourceUnavailable = "unavailable",
+};
 
 /**
  * StartView is the screen Lumen opens on.

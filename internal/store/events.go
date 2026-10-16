@@ -18,6 +18,7 @@ import (
 type eventAsset struct {
 	id, at, place int64
 	thumb         int
+	video         bool
 	lat, lon      sql.NullFloat64
 }
 
@@ -59,6 +60,19 @@ func (s *Store) Events(ctx context.Context, gapHours int) ([]core.Event, error) 
 	s.eventsCache.loaded = true
 	s.eventsCache.items = out
 	return append([]core.Event(nil), out...), nil
+}
+
+// EventCount counts the events gapHours would make of the visible timeline,
+// without saving the gap or replacing the cached list, so a change of gap can
+// be previewed before it is applied.
+func (s *Store) EventCount(ctx context.Context, gapHours int) (int, error) {
+	var n int
+	err := s.read(ctx, func(tx *sql.Tx) error {
+		events, err := groupEvents(ctx, tx, validGap(gapHours), nil)
+		n = len(events)
+		return err
+	})
+	return n, err
 }
 
 // eventsIn reads the journal and grouping in one snapshot. Its caller holds
@@ -289,7 +303,7 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int, window *[2]int64
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT a.id, a.taken_at, a.lat, a.lon, COALESCE(a.place_id, 0),
-		a.thumb_version FROM assets a WHERE `+where+` ORDER BY a.taken_at, a.id`, args...)
+		a.thumb_version, a.kind = 'video' FROM assets a WHERE `+where+` ORDER BY a.taken_at, a.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -311,6 +325,7 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int, window *[2]int64
 			}
 		}
 		current.Name = customName
+		current.NameOverride = customName
 		if current.Name == "" {
 			current.Name = eventName(places[current.PlaceID], current.StartAt, current.EndAt)
 		}
@@ -320,7 +335,7 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int, window *[2]int64
 	}
 	for rows.Next() {
 		var a eventAsset
-		if err := rows.Scan(&a.id, &a.at, &a.lat, &a.lon, &a.place, &a.thumb); err != nil {
+		if err := rows.Scan(&a.id, &a.at, &a.lat, &a.lon, &a.place, &a.thumb, &a.video); err != nil {
 			return nil, err
 		}
 		if split.next(a) {
@@ -346,6 +361,9 @@ func groupEvents(ctx context.Context, tx *sql.Tx, gapHours int, window *[2]int64
 		}
 		current.LastID, current.EndAt = a.id, a.at
 		current.Count++
+		if a.video {
+			current.Videos++
+		}
 		if a.thumb > 0 {
 			current.Cover, current.CoverThumb = a.id, a.thumb
 		}

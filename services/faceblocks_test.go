@@ -133,6 +133,38 @@ func TestBlockFaceOffersUndoOnlyForANewBlock(t *testing.T) {
 	}
 }
 
+func TestUndoUnblockReanchorsFacesAndRecomputesLookalikesAfterReanalysis(t *testing.T) {
+	for _, lookalikes := range []bool{false, true} {
+		t.Run(map[bool]string{false: "one face", true: "lookalikes"}[lookalikes], func(t *testing.T) {
+			ctx := t.Context()
+			s, st, assets, faces := faceLibrary(t)
+			if err := s.CreateBlockPIN(ctx, "123456"); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.UnlockBlocks(ctx, "123456"); err != nil {
+				t.Fatal(err)
+			}
+			block, err := s.BlockFace(ctx, faces[0], core.BlockPhotos, lookalikes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt, err := s.Unblock(ctx, block.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SaveFaces(ctx, "m2", "m2", []store.FaceResult{{AssetID: assets[0], Faces: []store.DetectedFace{{X: 0.11, Y: 0.1, W: 0.3, H: 0.3, Score: 0.9, Vec: []float32{1, 0}}}}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.UndoUnblock(ctx, receipt); err != nil {
+				t.Fatal(err)
+			}
+			if got := shownAssets(t, st, assets); !slices.Equal(got, []bool{false, !lookalikes, true}) {
+				t.Fatalf("restored face coverage: %v", got)
+			}
+		})
+	}
+}
+
 func TestBlockFaceOfOneFaceLeavesItsLookalikesAndWideningNeedsNoPIN(t *testing.T) {
 	ctx := t.Context()
 	s, st, assets, faces := faceLibrary(t)

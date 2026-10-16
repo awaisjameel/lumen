@@ -67,6 +67,11 @@ type Indexer struct {
 	events Events
 	pc     pc // what the PC is doing, for pcLoop
 
+	sourceWake   chan struct{}
+	sourceState  map[sourceKey]core.SourceAvailability // guarded by mu
+	sourceProbes map[sourceKey]bool                    // guarded by mu; at most one outstanding probe per source
+	checkSource  func(context.Context, string) error   // immutable after Start; tests can substitute a slow disk
+
 	scanWake  chan struct{}
 	scanReqs  []scanRequest // protected by mu, at most one pending request per source
 	wakeMeta  chan struct{}
@@ -133,18 +138,22 @@ type scanRequest struct {
 func New(st *store.Store, paths core.Paths, cache *media.Cache, m Models, ev Events) *Indexer {
 	ix := &Indexer{
 		store: st, paths: paths, cache: cache, search: m.Search, people: m.People, events: ev, pc: systemPC{},
-		scanWake:  make(chan struct{}, 1),
-		scanTurn:  make(chan struct{}, 1),
-		wakeMeta:  make(chan struct{}, 1),
-		wakeThum:  make(chan struct{}, 1),
-		wakeEmbed: make(chan struct{}, 1),
-		wakeFaces: make(chan struct{}, 1),
-		wakeOCR:   make(chan struct{}, 1),
-		wakeVideo: make(chan struct{}, 1),
-		wakeFS:    make(chan struct{}, 1),
-		resume:    make(chan struct{}),
-		pendingFS: map[string]bool{},
-		cpu:       newCPUBudget(core.DefaultCPUThreads()),
+		sourceWake:   make(chan struct{}, 1),
+		sourceState:  make(map[sourceKey]core.SourceAvailability),
+		sourceProbes: make(map[sourceKey]bool),
+		checkSource:  scanner.CheckRoot,
+		scanWake:     make(chan struct{}, 1),
+		scanTurn:     make(chan struct{}, 1),
+		wakeMeta:     make(chan struct{}, 1),
+		wakeThum:     make(chan struct{}, 1),
+		wakeEmbed:    make(chan struct{}, 1),
+		wakeFaces:    make(chan struct{}, 1),
+		wakeOCR:      make(chan struct{}, 1),
+		wakeVideo:    make(chan struct{}, 1),
+		wakeFS:       make(chan struct{}, 1),
+		resume:       make(chan struct{}),
+		pendingFS:    map[string]bool{},
+		cpu:          newCPUBudget(core.DefaultCPUThreads()),
 	}
 	if m.SearchErr != nil {
 		ix.aiError = m.SearchErr.Error()
@@ -205,6 +214,7 @@ const (
 	changedThumbs
 	changedTags
 	changedPeople
+	changedSources
 )
 
 // Bits of Indexer.working, one per field of core.Working.
@@ -264,6 +274,9 @@ func (ix *Indexer) markChanged(c core.Changes) {
 	}
 	if c.People {
 		bits |= changedPeople
+	}
+	if c.Sources {
+		bits |= changedSources
 	}
 	ix.changes.Or(bits)
 }
@@ -423,6 +436,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 			})
 		})
 	}
+	ix.run(func() { ix.sourceLoop(ctx) })
 	ix.run(func() { ix.reportLoop(ctx) })
 	ix.run(func() { ix.pcLoop(ctx) })
 	ix.run(func() { ix.thumbCacheLoop(ctx) })
@@ -537,7 +551,8 @@ func (ix *Indexer) RescanAll() {
 		}
 	}
 	ix.restartWatchers(srcs)
-	ix.markChanged(core.Changes{Assets: true}) // source removal can change visibility without a scan
+	ix.RecheckSources()
+	ix.markChanged(core.Changes{Assets: true, Sources: true}) // source removal can change visibility without a scan
 }
 
 // SetFocus tells the indexer which days the user is looking at (YYYY-MM-DD,
@@ -711,6 +726,18 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 			<-ix.scanTurn
 			continue // removed since it was queued
 		}
+		if err := ix.checkSource(ctx, src.Path); err != nil {
+			if ctx.Err() == nil {
+				ix.setSourceAvailability(src, core.SourceUnavailable)
+			}
+			ix.mu.Lock()
+			ix.scanning, ix.scanPath, ix.scanSeen = len(ix.scanReqs) > 0, "", 0
+			ix.mu.Unlock()
+			ix.stale.Store(true)
+			<-ix.scanTurn
+			continue
+		}
+		ix.setSourceAvailability(src, core.SourceAvailable)
 		if ix.onScanTurn != nil {
 			ix.onScanTurn()
 		}
@@ -727,6 +754,7 @@ func (ix *Indexer) scanLoop(ctx context.Context) {
 			return
 		case err != nil:
 			slog.Error("scan failed", "source", src.Path, "under", req.under, "err", err)
+			ix.RecheckSources()
 		default:
 			slog.Info("scan done", "source", src.Path, "under", req.under, "seen", res.Seen,
 				"changed", res.Changed, "new", res.NewAssets, "removed", res.Removed, "took", time.Since(start).Round(time.Millisecond))
@@ -806,6 +834,7 @@ func (ix *Indexer) watchLoop(ctx context.Context, src core.Source) {
 	failed := false
 	for {
 		err := scanner.Watch(ctx, src.Path, func() {
+			ix.setSourceAvailability(src, core.SourceAvailable)
 			if failed {
 				slog.Info("watching folder again", "dir", src.Path)
 				ix.queueScan(scanRequest{sourceID: src.ID})
@@ -818,6 +847,7 @@ func (ix *Indexer) watchLoop(ctx context.Context, src core.Source) {
 		if !failed {
 			slog.Warn("folder watch stopped; retrying", "dir", src.Path, "err", err)
 		}
+		ix.RecheckSources()
 		failed = true
 		sleep(ctx, wait)
 		wait = min(2*wait, watchRetryMax)
@@ -1026,6 +1056,7 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 			ix.events.LibraryChanged(core.Changes{
 				Assets: bits&changedAssets != 0, Thumbs: bits&changedThumbs != 0,
 				Tags: bits&changedTags != 0, People: bits&changedPeople != 0,
+				Sources: bits&changedSources != 0,
 			})
 		}
 	}

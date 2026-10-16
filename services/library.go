@@ -72,10 +72,14 @@ type LibraryService struct {
 	recycling sync.Mutex
 	blocked   struct { // PIN tries and Undo; guarded by its mutex
 		sync.Mutex
-		failures int
-		retryAt  time.Time
-		lastID   int64
-		lastAt   time.Time
+		failures      int
+		retryAt       time.Time
+		lastID        int64
+		lastAt        time.Time
+		removed       *store.BlockRemoval
+		removedToken  int64
+		removedSerial int64
+		removedAt     time.Time
 	}
 	// verify is the Windows sign-in of ResetBlockPIN; nil means signin.Verify.
 	// A test sets it to answer for the dialog it cannot show.
@@ -107,7 +111,21 @@ func NewLibraryService(st *store.Store, ix *index.Indexer, gate *BlockGate, cach
 
 // Sources lists the folders in the library.
 func (s *LibraryService) Sources(ctx context.Context) ([]core.Source, error) {
-	return s.store.ListSources(ctx)
+	srcs, err := s.store.ListSources(ctx)
+	if err == nil && s.ix != nil {
+		s.ix.SourceAvailability(srcs)
+	}
+	return srcs, err
+}
+
+// RecheckSources queues an immediate background check. It never waits for a
+// source disk; library:changed reports the result, including recovered folders.
+func (s *LibraryService) RecheckSources(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.ix.RecheckSources()
+	return nil
 }
 
 // SuggestedFolders returns likely photo folders that exist on this machine,
@@ -227,7 +245,7 @@ func (s *LibraryService) AddSources(ctx context.Context, paths []string) ([]core
 	if covered && !added {
 		return nil, store.ErrAlreadyCovered
 	}
-	return s.store.ListSources(ctx)
+	return s.Sources(ctx)
 }
 
 // RemoveSource takes a folder out of the library. Files on disk are untouched.
@@ -473,6 +491,12 @@ func (s *LibraryService) SetCPUThreads(ctx context.Context, n int) error {
 	}
 	s.ix.SetCPUThreads(n)
 	return nil
+}
+
+// EventCount previews how many events a quiet period of hours would make; it
+// saves nothing.
+func (s *LibraryService) EventCount(ctx context.Context, hours int) (int, error) {
+	return s.store.EventCount(ctx, min(max(hours, core.EventGapMin), core.EventGapMax))
 }
 
 // SetEventGapHours sets the quiet period that splits detected events.

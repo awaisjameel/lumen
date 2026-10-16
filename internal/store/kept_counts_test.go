@@ -59,6 +59,12 @@ func compareKeptCounts(ctx context.Context, t *testing.T, tx *sql.Tx) {
 	assertTagCountValues(ctx, t, tx)
 	check(t, comparePersonCounts(ctx, tx))
 	check(t, compareJobCounts(ctx, tx))
+	var keptTrash, countedTrash int
+	check(t, tx.QueryRowContext(ctx, "SELECT n FROM trash_count WHERE id = 1").Scan(&keptTrash))
+	check(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM assets WHERE "+trashed).Scan(&countedTrash))
+	if keptTrash != countedTrash {
+		t.Fatalf("kept Trash %d, counted %d", keptTrash, countedTrash)
+	}
 	var marks int
 	check(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM count_rebuild").Scan(&marks))
 	if marks != 0 {

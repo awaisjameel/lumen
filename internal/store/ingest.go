@@ -118,8 +118,13 @@ func (s *Store) Ingest(ctx context.Context, items []IngestItem) (int, error) {
 		// Until EXIF is read, the best date guess across all copies wins, whatever
 		// order they were found in: a date in a file name beats a modified time,
 		// and an older modified time beats a newer one (copies are usually newer).
-		betterGuess, err := tx.PrepareContext(ctx, `UPDATE assets SET taken_at = ?1, date_from = ?2
-			WHERE id = ?3 AND date_from = 'file' AND (?2 = 'filename' OR ?1 < taken_at)`)
+		betterGuess, err := tx.PrepareContext(ctx, `UPDATE assets SET
+			taken_at = CASE WHEN date_from = 'user' THEN taken_at ELSE ?1 END,
+			date_from = CASE WHEN date_from = 'user' THEN date_from ELSE ?2 END,
+			original_taken_at = CASE WHEN date_from = 'user' THEN ?1 END,
+			original_date_from = CASE WHEN date_from = 'user' THEN ?2 END
+			WHERE id = ?3 AND COALESCE(original_date_from, date_from) = 'file'
+			AND (?2 = 'filename' OR ?1 < COALESCE(original_taken_at, taken_at))`)
 		if err != nil {
 			return err
 		}

@@ -60,6 +60,9 @@ type found struct {
 // Scan brings one source, or just the folder under inside it, in line with
 // the disk. Unchanged files (same size and modified time) cost one stat.
 func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt Options) (Result, error) {
+	if err := CheckRoot(ctx, src.Path); err != nil {
+		return Result{}, err
+	}
 	root := src.Path
 	if under != "" {
 		if Excluded(src.Path, under, opt.SkipDirs) {
@@ -238,6 +241,12 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 	}
 	if s.OnProgress != nil {
 		s.OnProgress(res.Seen)
+	}
+
+	// A drive can disappear halfway through an otherwise successful walk.
+	// Absence inside it is only evidence of deletion while its root is readable.
+	if err := CheckRoot(ctx, src.Path); err != nil {
+		return res, err
 	}
 
 	// Whatever is left in known was not found on disk.
@@ -420,4 +429,29 @@ func (r hashReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return r.r.Read(p)
+}
+
+// CheckRoot verifies that a source is a readable directory, including an empty
+// one. Call only in background work: filesystem calls can wait on a dead share.
+func CheckRoot(ctx context.Context, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }() // The probe owns no writable data.
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("source is not a directory: %s", path)
+	}
+	_, err = f.Readdirnames(1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return ctx.Err()
 }
