@@ -33,6 +33,7 @@ watch(
       id: CRASH_NOTIFICATION,
       kind: error.value ? 'error' : 'info',
       title: t('about.crashed'),
+      icon: 'bug',
       description: savedTo.value
         ? t('about.saved', { path: savedTo.value })
         : [t('about.crashedHint'), error.value].filter(Boolean).join('\n'),
@@ -41,7 +42,7 @@ watch(
         ? []
         : [
             {
-              label: about.savingReport ? t('about.saving') : t('about.saveReport'),
+              label: about.savingReport ? t('crash.saving') : error.value ? t('crash.retry') : t('crash.save'),
               disabled: about.savingReport,
               dismiss: false,
               run: () => void saveReport(),

@@ -30,7 +30,10 @@ const resetError = ref('')
 async function resetAll() {
   resetNote.value = ''
   resetError.value = ''
-  if (!(await confirm(t('settings.resetAllTitle'), t('settings.resetAllText'), t('settings.resetAll')))) return
+  if (
+    !(await confirm(t('settings.resetAllTitle'), t('settings.resetAllText'), t('settings.resetAll'), { danger: true }))
+  )
+    return
   emit('reset')
   try {
     await lib.resetPreferences(PREF_CATEGORIES)
@@ -136,19 +139,6 @@ async function apply() {
 <template>
   <div data-customisation>
     <PrefRow
-      v-if="shows('settings.resetAll', 'settings.resetAllHint')"
-      :label="t('settings.resetAll')"
-      :description="t('settings.resetAllHint')"
-      :hint="resetNote"
-      :error="resetError"
-    >
-      <template #default>
-        <UButton data-reset-all color="error" variant="outline" loading-auto @click="resetAll">{{
-          t('settings.resetAll')
-        }}</UButton>
-      </template>
-    </PrefRow>
-    <PrefRow
       v-if="shows('settings.presetExport', 'settings.presetExportHint')"
       :label="t('settings.presetExport')"
       :description="t('settings.presetExportHint')"
@@ -168,6 +158,19 @@ async function apply() {
     >
       <template #default>
         <UButton data-preset-import loading-auto @click="chooseFile">{{ t('settings.presetImportButton') }}</UButton>
+      </template>
+    </PrefRow>
+    <PrefRow
+      v-if="shows('settings.resetAll', 'settings.resetAllHint')"
+      :label="t('settings.resetAll')"
+      :description="t('settings.resetAllHint')"
+      :hint="resetNote"
+      :error="resetError"
+    >
+      <template #default>
+        <UButton data-reset-all color="error" variant="outline" loading-auto @click="resetAll">{{
+          t('settings.resetAll')
+        }}</UButton>
       </template>
     </PrefRow>
     <UModal

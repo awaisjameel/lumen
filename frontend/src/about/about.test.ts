@@ -71,7 +71,7 @@ it('shows the version and where new ones are, opening it only when clicked', asy
   await flushPromises()
   expect(section.text()).toContain('Version 0.9.0')
   expect(engine.openLink).not.toHaveBeenCalled()
-  const link = section.findAll('button').find((a) => a.text() === RELEASES)
+  const link = section.findAll('button').find((a) => a.text() === t('about.viewReleases'))
   if (!link) throw new Error('no releases link')
   await link.trigger('click')
   expect(engine.openLink).toHaveBeenCalledExactlyOnceWith(Link.LinkReleases)

@@ -153,7 +153,7 @@ it('says why a scheme was refused and keeps no preview', async () => {
   )
   await organise.preview()
   expect(organise.plan).toBeNull()
-  expect(organise.error).toContain('folder scheme can’t be used')
+  expect(organise.previewError).toContain('folder scheme can’t be used')
 })
 
 it('forgets a preview when asked, as the scheme it belongs to changes', async () => {
@@ -240,6 +240,8 @@ it('resumes a stopped run for what is left, and undoes a run for what it moved',
   expect(engine.startOrganise).toHaveBeenCalledWith(5)
   expect(organise.progress).toEqual({ runId: 5, state: OrganiseRunState.OrganiseRunning, done: 0, total: 4 })
 
+  emit({ runId: 5, state: OrganiseRunState.OrganiseDone, done: 4, total: 4 })
+  await flushPromises()
   await organise.undo(run(5, OrganiseRunState.OrganiseDone, 6, 6))
   expect(engine.undoOrganise).toHaveBeenCalledWith(5)
   expect(organise.progress).toEqual({ runId: 5, state: OrganiseRunState.OrganiseUndoing, done: 0, total: 6 })
@@ -363,4 +365,57 @@ it('ignores a late event saying a run is still going once its end has arrived, u
   await organise.undo(run(7, OrganiseRunState.OrganiseDone, 4, 4))
   emit({ runId: 7, state: OrganiseRunState.OrganiseUndoing, done: 1, total: 4 })
   expect(organise.progress).toEqual({ runId: 7, state: OrganiseRunState.OrganiseUndoing, done: 1, total: 4 })
+})
+
+it('keeps read failures separate from a move error and clears them when retried', async () => {
+  const organise = useOrganise()
+  organise.error = 'A move could not start'
+  vi.mocked(engine.organiseRuns).mockRejectedValueOnce(new Error('History unavailable'))
+  await organise.loadRuns()
+  expect(organise.runsError).toBe('Something went wrong: History unavailable')
+  expect(organise.error).toBe('A move could not start')
+  vi.mocked(engine.organiseRuns).mockResolvedValue([])
+  await organise.loadRuns()
+  expect(organise.runsError).toBe('')
+  vi.mocked(engine.sources).mockRejectedValueOnce(new Error('Sources unavailable'))
+  await organise.loadSources()
+  expect(organise.sourceError).toBe('Something went wrong: Sources unavailable')
+})
+
+it('refuses a stale confirmed start while another run is already working', async () => {
+  const organise = useOrganise()
+  organise.plan = plan([move(1, OrganiseMoveState.MovePlanned)])
+  organise.progress = { runId: 9, state: OrganiseRunState.OrganiseRunning, done: 1, total: 10 }
+  await organise.start()
+  expect(engine.startOrganise).not.toHaveBeenCalled()
+  expect(organise.plan.runId).toBe(7)
+})
+
+it('returns from a finished result to the unchanged scheme without losing history', () => {
+  const organise = useOrganise()
+  organise.template = '{Year}/{Name}'
+  organise.runs = [run(7, OrganiseRunState.OrganiseDone, 2, 2)]
+  organise.progress = { runId: 7, state: OrganiseRunState.OrganiseDone, done: 2, total: 2 }
+  organise.started = plan([move(1, OrganiseMoveState.MovePlanned)])
+  organise.lastAction = 'move'
+  organise.error = 'Previous failure'
+  organise.dismissRun()
+  expect(organise.progress).toBeNull()
+  expect(organise.started).toBeNull()
+  expect(organise.lastAction).toBeNull()
+  expect(organise.error).toBe('')
+  expect(organise.template).toBe('{Year}/{Name}')
+  expect(organise.runs).toHaveLength(1)
+})
+
+it('keeps a live run when asked to dismiss, resume or undo another run', async () => {
+  const organise = useOrganise()
+  const active = { runId: 7, state: OrganiseRunState.OrganiseRunning, done: 1, total: 2 }
+  organise.progress = active
+  organise.dismissRun()
+  await organise.resume(run(8, OrganiseRunState.OrganiseFailed, 1, 2))
+  await organise.undo(run(9, OrganiseRunState.OrganiseDone, 2, 2))
+  expect(organise.progress).toEqual(active)
+  expect(engine.startOrganise).not.toHaveBeenCalled()
+  expect(engine.undoOrganise).not.toHaveBeenCalled()
 })

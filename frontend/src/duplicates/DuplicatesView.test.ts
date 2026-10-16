@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -23,7 +24,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     trashAssets: vi.fn(),
     deleteCopies: vi.fn(),
     restoreAssets: vi.fn(),
-    trashCount: vi.fn(),
+    counts: vi.fn(),
   },
 }))
 
@@ -87,7 +88,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   notifications = recordNotifications()
   vi.mocked(engine.restoreAssets).mockReset().mockResolvedValue(undefined)
-  vi.mocked(engine.trashCount).mockReset().mockResolvedValue(0)
+  vi.mocked(engine.counts).mockReset().mockResolvedValue({ photos: 0, videos: 0, favourites: 0, people: 0, trash: 0 })
   vi.stubGlobal('ResizeObserver', TestResizeObserver)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     return new DOMRect(
@@ -126,7 +127,7 @@ it('names each similar photo and shows the copy it lists', async () => {
 it('keeps the DOM bounded and jumps directly to the final similar groups', async () => {
   vi.mocked(engine.duplicateGroups).mockResolvedValue(
     Array.from({ length: 1005 }, (_, index) => ({
-      kind: index < 1000 ? DuplicateKind.DuplicateExact : DuplicateKind.DuplicateSimilar,
+      kind: DuplicateKind.DuplicateSimilar,
       items: [photo(index + 1, `C:\\Photos\\photo-${index + 1}.jpg`)],
     })),
   )
@@ -292,7 +293,7 @@ describe('choosing the copy to keep', () => {
     wrapper = mountView()
     await flushPromises()
   }
-  const radios = () => wrapper?.findAll('[role="radio"]') ?? []
+  const radios = () => wrapper?.findAll('[data-duplicate-group] [role="radio"]') ?? []
   const checked = () => radios().map((r) => r.attributes('aria-checked') === 'true')
   const reviewDialog = () => {
     const found = document.body.querySelector<HTMLElement>('[role="dialog"][data-state="open"]')
@@ -550,14 +551,14 @@ describe('choosing the copy to keep', () => {
 
   it('shows the keep choice and removal count together before opening confirmation', async () => {
     await mountWith(similar(2))
-    const summary = wrapper?.get('[role="toolbar"]')
+    const summary = wrapper?.get('[data-duplicate-group] [role="toolbar"]')
     expect(summary?.text()).toContain('Keep: p2.jpg')
     expect(summary?.text()).toContain('2 other photos will go to the Trash after confirmation.')
     await radios()[0]?.trigger('click')
     expect(summary?.text()).toContain('Keep: p1.jpg')
     expect(engine.trashAssets).not.toHaveBeenCalled()
     await mountWith(exact)
-    expect(wrapper?.get('[role="toolbar"]').text()).toContain(
+    expect(wrapper?.get('[data-duplicate-group] [role="toolbar"]').text()).toContain(
       '1 extra file will go to the Recycle Bin after confirmation.',
     )
     expect(engine.deleteCopies).not.toHaveBeenCalled()
@@ -592,4 +593,84 @@ describe('choosing the copy to keep', () => {
     wrapper = undefined
     expect(commands.value.some((entry) => entry.id === command.id)).toBe(false)
   })
+})
+
+it('pauses and resumes the queue without losing its position or keeper choices', async () => {
+  vi.mocked(engine.duplicateGroups).mockResolvedValue(
+    [1, 3].map((id) => ({
+      kind: DuplicateKind.DuplicateSimilar,
+      items: [photo(id, `C:/p${id}.jpg`), photo(id + 1, `C:/p${id + 1}.jpg`)],
+    })),
+  )
+  wrapper = mountView()
+  await flushPromises()
+  await wrapper.get('[data-review-all]').trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('Group 1 of 2')
+  await wrapper.get('[data-duplicate-group] [role="radio"]').trigger('click')
+  await wrapper.get('[data-queue-skip]').trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('Group 2 of 2')
+  await wrapper.get('[data-queue-later]').trigger('click')
+  expect(wrapper.get('[data-review-all]').text()).toBe('Resume review')
+  await wrapper.get('[data-review-all]').trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('Group 2 of 2')
+  expect(wrapper.text()).toContain('0 reviewed · 1 skipped')
+  await wrapper.get('[data-queue-skip]').trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('Review complete')
+  expect(wrapper.text()).toContain('0 reviewed · 2 skipped')
+})
+
+it('shows exact and similar groups in separate tabs and reports their live counts', async () => {
+  vi.mocked(engine.duplicateGroups).mockResolvedValue([
+    {
+      kind: DuplicateKind.DuplicateExact,
+      items: [{ ...photo(1, 'C:/exact.jpg'), paths: ['C:/exact.jpg', 'D:/exact.jpg'] }],
+    },
+    { kind: DuplicateKind.DuplicateSimilar, items: [photo(2, 'C:/similar.jpg'), photo(3, 'C:/other.jpg')] },
+  ])
+  wrapper = mountView()
+  await flushPromises()
+  expect(wrapper.get('[role="radio"]').text()).toBe('Exact copies 1')
+  expect(wrapper.findAll('[role="radio"]')[1]?.text()).toBe('Similar photos 1')
+  expect(wrapper.text()).toContain('exact.jpg')
+  expect(wrapper.text()).not.toContain('similar.jpg')
+  await wrapper.get('[aria-label="Duplicate type"] button:nth-of-type(2)').trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('similar.jpg')
+  expect(wrapper.text()).not.toContain('exact.jpg')
+})
+
+it('browses further virtual groups from Show more groups', async () => {
+  vi.mocked(engine.duplicateGroups).mockResolvedValue(
+    Array.from({ length: 100 }, (_, i) => ({
+      kind: DuplicateKind.DuplicateSimilar,
+      items: [photo(i * 2 + 1, `C:/p${i * 2 + 1}.jpg`), photo(i * 2 + 2, `C:/p${i * 2 + 2}.jpg`)],
+    })),
+  )
+  wrapper = mountView()
+  await flushPromises()
+  const scroller = wrapper.get<HTMLElement>('[data-duplicates-scroll]').element
+  const scroll = vi.fn<(options: ScrollToOptions) => void>((options) => {
+    scroller.scrollTop = options.top ?? 0
+    scroller.dispatchEvent(new Event('scroll'))
+  })
+  Object.defineProperty(scroller, 'scrollTo', { value: scroll })
+  Object.defineProperty(scroller, 'scrollHeight', { value: 30000 })
+  await wrapper.get('[data-duplicates-more]').trigger('click')
+  await flushPromises()
+  expect(scroller.scrollTop).toBeGreaterThan(0)
+  expect(scroll).toHaveBeenCalled()
+  expect(wrapper.findAll('[data-duplicate-group]').length).toBeLessThan(15)
+})
+
+it('offers to check again once, from the empty state, when nothing is left to review', async () => {
+  vi.mocked(engine.duplicateGroups).mockResolvedValue([])
+  wrapper = mountView()
+  await flushPromises()
+  const checks = wrapper.findAll('button').filter((button) => button.text() === t('duplicates.refresh'))
+  expect(checks).toHaveLength(1)
+  expect(wrapper.get('header').text()).not.toContain(t('duplicates.refresh'))
 })

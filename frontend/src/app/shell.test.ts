@@ -52,6 +52,7 @@ beforeEach(async () => {
     routes: [
       ...navEntries.map((e) => ({ path: e.path, name: e.name, component: Blank })),
       { path: '/people/:id', name: 'person', component: Blank },
+      { path: '/videos', name: 'videos', component: Blank },
     ],
   })
   await router.push('/')
@@ -86,17 +87,19 @@ it('names every destination once, in one place', () => {
   expect(library && isActive(library, '/')).toBe(true)
 })
 
-it('shows the sidebar on a wide window, with Videos only while videos are indexed', async () => {
+it('shows the sidebar on a wide window, grouped, with no Videos page even while videos are indexed', async () => {
   setWidth(1400)
   const lib = useLibrary()
   mountShell()
   await flushPromises()
   expect(links()).toContain('Library')
   expect(links()).toContain('Settings')
-  expect(links()).not.toContain('Videos')
+  expect(document.body.querySelector('nav [role="group"][aria-label="Collections"]')?.textContent).toContain('People')
+  expect(document.body.querySelector('nav [role="group"][aria-label="Tools"]')?.textContent).toContain('Trash')
   lib.settings = { ...lib.settings, videos: true }
   await flushPromises()
-  expect(links()).toContain('Videos')
+  // Library's filter shows videos; the sidebar has no page for them.
+  expect(links()).not.toContain('Videos')
 })
 
 it('marks the section a deeper page belongs to as current', async () => {
@@ -171,6 +174,13 @@ it('offers navigation and its own commands only once there is a library', async 
   expect(await runCommand('go.people')).toBe(true)
   await flushPromises()
   expect(router.currentRoute.value.path).toBe('/people')
+
+  // Videos open Library on its filter, and only while they are indexed.
+  expect(await runCommand('go.videos')).toBe(false)
+  lib.settings = { ...lib.settings, videos: true }
+  expect(await runCommand('go.videos')).toBe(true)
+  await flushPromises()
+  expect(router.currentRoute.value.path).toBe('/videos')
 
   expect(await runCommand('app.commandPalette')).toBe(true)
   // The palette is loaded when first asked for.

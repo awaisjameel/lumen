@@ -6,9 +6,16 @@ import UInput from '@nuxt/ui/components/Input.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
-import { engine, ExportFormat, OrganiseRunState, RENDER_SIDE, RENDER_SIDE_MIN } from '../bridge'
-import type { ExportJob, ExportState, OrganiseMoveState, OrganisePlan, Selection, SidecarState } from '../bridge'
-import { confirm } from '../shared/confirm'
+import {
+  engine,
+  ExportFormat,
+  ExportState,
+  OrganiseMoveState,
+  OrganiseRunState,
+  RENDER_SIDE,
+  RENDER_SIDE_MIN,
+} from '../bridge'
+import type { ExportJob, OrganisePlan, Selection, SidecarState } from '../bridge'
 import { errorText } from '../shared/errors'
 import { reasonText } from '../shared/fileReasons'
 import { t } from '../shared/i18n'
@@ -20,15 +27,21 @@ type Operation = ExportFormat | 'move' | 'rename'
 interface Choice {
   value: Operation
   label: string
+  disabled?: boolean
 }
-const props = defineProps<{ ids: number[]; selection?: Selection | null; frame?: number }>()
+const props = defineProps<{
+  ids: number[]
+  selection?: Selection | null
+  frame?: number
+  initialOperation?: Operation
+}>()
 const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>('open', { default: false })
 /** A journalled state in words; the bindings' empty zero value is none. */
 const stateText = (state: ExportState | OrganiseMoveState | SidecarState) => (state ? t(`files.state.${state}`) : '')
 // A frame of a video can only be rendered; anything else starts as a plain copy.
 const startOperation = (): Operation =>
-  props.frame === undefined ? ExportFormat.ExportOriginal : ExportFormat.ExportJPEG
+  props.initialOperation ?? (props.frame === undefined ? ExportFormat.ExportOriginal : ExportFormat.ExportJPEG)
 const operation = ref<Operation>(startOperation())
 const directory = ref('')
 const name = ref('')
@@ -111,7 +124,7 @@ const options = computed((): Choice[] => {
     { value: ExportFormat.ExportOriginal, label: t('files.original') },
     ...rendered,
     { value: 'move', label: t('files.move') },
-    ...(props.ids.length === 1 ? [{ value: 'rename' as const, label: t('files.rename') }] : []),
+    { value: 'rename', label: t('files.rename'), disabled: props.ids.length !== 1 },
   ]
 })
 const moving = computed(() => operation.value === 'move' || operation.value === 'rename')
@@ -162,7 +175,7 @@ async function chooseDirectory() {
     if (mine === generation) error.value = errorText(e)
   }
 }
-async function prepare() {
+async function prepare(retryIDs?: number[]) {
   if (busy.value || !open.value) return
   const chosen = operation.value
   busy.value = true
@@ -171,9 +184,29 @@ async function prepare() {
   error.value = ''
   moves.value = null
   exports.value = []
+  if (
+    chosen !== 'rename' &&
+    (!directory.value.trim() ||
+      (!moving.value &&
+        chosen !== ExportFormat.ExportOriginal &&
+        (!Number.isInteger(Number(side.value)) ||
+          Number(side.value) < RENDER_SIDE_MIN ||
+          Number(side.value) > RENDER_SIDE ||
+          (chosen === ExportFormat.ExportJPEG &&
+            (!Number.isInteger(Number(quality.value)) || Number(quality.value) < 1 || Number(quality.value) > 100)))))
+  ) {
+    error.value = t('files.invalidExport')
+    busy.value = false
+    return
+  }
   const mine = ++generation
   const key = inputKey.value
-  const ids = [...props.ids]
+  const ids = [...(retryIDs ?? props.ids)]
+  if (!ids.length || (chosen === 'rename' && props.ids.length !== 1)) {
+    error.value = t('files.noSelection')
+    busy.value = false
+    return
+  }
   try {
     if (props.selection) await engine.validateSelection(props.selection)
     if (mine !== generation || key !== inputKey.value) return
@@ -231,13 +264,18 @@ async function updateRun(id: number, mine = generation) {
 }
 async function commit() {
   const key = plannedKey.value
-  if (busy.value || !open.value || !key || key !== inputKey.value || props.ids.join(',') !== planIDs.value.join(','))
+  if (
+    busy.value ||
+    !open.value ||
+    !key ||
+    key !== inputKey.value ||
+    planIDs.value.some((id) => !props.ids.includes(id))
+  )
     return
   busy.value = true
   error.value = ''
   const mine = ++generation
   try {
-    if (!(await confirm(t('files.title'), t('files.confirm'), t('files.apply')))) return
     if (mine !== generation || key !== inputKey.value) return
     if (props.selection) await engine.validateSelection(props.selection)
     if (mine !== generation || key !== inputKey.value) return
@@ -282,10 +320,6 @@ async function undo() {
   const id = runID.value
   busy.value = true
   try {
-    if (!(await confirm(t('files.title'), t('organise.undoText'), t('organise.undo')))) {
-      if (mine === generation) busy.value = false
-      return
-    }
     if (mine !== generation || runID.value !== id) return
     await engine.undoOrganise(id)
     await updateRun(id, mine)
@@ -295,6 +329,46 @@ async function undo() {
     error.value = errorText(e)
   }
 }
+const step = computed(() =>
+  completed.value
+    ? 'done'
+    : activeBatch.value || (busy.value && runID.value)
+      ? 'working'
+      : preview.value.length
+        ? 'preview'
+        : 'choose',
+)
+const processed = computed(
+  () =>
+    preview.value.filter((row) =>
+      ['done', 'failed', 'cancelled', 'moved', 'kept', 'skipped', 'undone'].includes(row.state),
+    ).length,
+)
+const failures = computed(
+  () =>
+    preview.value.filter(
+      (row) => row.state === (moving.value ? OrganiseMoveState.MoveFailed : ExportState.ExportFailed),
+    ).length,
+)
+const commitText = computed(() =>
+  t(
+    operation.value === 'move' ? 'files.moveNow' : operation.value === 'rename' ? 'files.renameNow' : 'files.exportNow',
+  ),
+)
+function back() {
+  moves.value = null
+  exports.value = []
+  completed.value = false
+  plannedKey.value = ''
+  runID.value = 0
+}
+async function retry() {
+  const ids = moves.value
+    ? moves.value.moves.filter((row) => row.state === OrganiseMoveState.MoveFailed).map((row) => row.assetId)
+    : exports.value.filter((row) => row.state === ExportState.ExportFailed).map((row) => row.assetId)
+  await prepare([...new Set(ids)])
+}
+
 function invalidate() {
   generation++
   historyRequest++
@@ -337,7 +411,8 @@ function pollExport(batch: number, mine: number) {
   >
     <template #body>
       <UAlert v-if="error" color="error" :title="error" />
-      <div class="file-fields">
+      <p class="step" data-file-step>{{ t(`files.step.${step}`) }}</p>
+      <div v-if="step === 'choose'" class="file-fields">
         <USelect
           v-if="presetItems.length > 1"
           v-model="preset"
@@ -347,6 +422,7 @@ function pollExport(batch: number, mine: number) {
           :aria-label="t('files.preset')"
         />
         <USelect v-model="operation" :items="options" :disabled="busy" :aria-label="t('files.operation')" />
+        <p v-if="ids.length !== 1" class="text-sm text-muted">{{ t('files.renameReason') }}</p>
         <template v-if="operation === 'rename'"
           ><UInput v-model="name" :disabled="busy" :aria-label="t('files.name')" :placeholder="t('files.name')"
         /></template>
@@ -387,7 +463,16 @@ function pollExport(batch: number, mine: number) {
         <p v-if="operation === ExportFormat.ExportOriginal">{{ t('files.metadata') }}</p>
         <p v-if="moving">{{ t('files.moveHint') }}</p>
       </div>
-      <OutcomeList v-slot="{ item: row }" :items="preview">
+      <div v-if="step === 'working'" class="my-4">
+        <p role="status">{{ t('files.progress', { n: processed, total: preview.length, failed: failures }) }}</p>
+        <progress
+          class="w-full"
+          :value="processed"
+          :max="Math.max(1, preview.length)"
+          :aria-label="t('files.working')"
+        />
+      </div>
+      <OutcomeList v-if="step !== 'choose'" v-slot="{ item: row }" :items="preview">
         <div :key="row.id" class="file-outcome">
           <p>{{ row.from }}</p>
           <p>→ {{ row.to }}</p>
@@ -399,28 +484,55 @@ function pollExport(batch: number, mine: number) {
       </OutcomeList>
       <details v-if="history.length" class="file-history">
         <summary>{{ t('files.history') }}</summary>
-        <p v-for="job in history" :key="job.id">
-          {{ job.to }}: {{ stateText(job.state) }}{{ job.error ? `: ${reasonText(job.error)}` : '' }}
-        </p>
+        <OutcomeList v-slot="{ item: job }" :items="history"
+          ><p :key="job.id">
+            {{ job.to }}: {{ stateText(job.state) }}{{ job.error ? `: ${reasonText(job.error)}` : '' }}
+          </p></OutcomeList
+        >
       </details>
     </template>
     <template #footer>
-      <UButton :disabled="busy" variant="outline" @click="prepare">{{ t('files.preview') }}</UButton>
-      <UButton
-        v-if="preview.length && plannedKey === inputKey && !runID && !completed"
-        :disabled="busy"
-        @click="commit"
-        >{{ t('files.apply') }}</UButton
-      >
-      <UButton
-        v-if="runID && moveState === OrganiseRunState.OrganiseDone"
-        :disabled="busy"
-        variant="outline"
-        @click="undo"
-        >{{ t('organise.undo') }}</UButton
-      >
-      <span v-if="busy" role="status">{{ t('files.working') }}</span>
-      <UButton v-if="busy && activeBatch" variant="outline" @click="cancelExport">{{ t('files.cancel') }}</UButton>
+      <div class="w-full flex flex-wrap items-center justify-end gap-2">
+        <UButton v-if="step === 'preview'" :disabled="busy" variant="ghost" color="neutral" @click="back">{{
+          t('files.back')
+        }}</UButton>
+        <UButton
+          v-if="step === 'done' && runID && moveState === OrganiseRunState.OrganiseDone"
+          :disabled="busy"
+          variant="outline"
+          color="neutral"
+          @click="undo"
+          >{{ t('files.undoMove') }}</UButton
+        >
+        <UButton v-if="!busy" variant="ghost" color="neutral" @click="open = false">{{
+          t(step === 'done' ? 'common.close' : 'common.cancel')
+        }}</UButton>
+        <UButton v-if="busy && activeBatch" variant="outline" color="neutral" @click="cancelExport">{{
+          t('files.cancel')
+        }}</UButton>
+        <UButton v-if="step === 'done' && failures" color="primary" variant="solid" :disabled="busy" @click="retry">{{
+          t('files.retry')
+        }}</UButton>
+        <UButton
+          v-if="step === 'choose'"
+          color="primary"
+          variant="solid"
+          :disabled="busy || !ids.length"
+          :loading="busy"
+          @click="prepare()"
+          >{{ t('files.preview') }}</UButton
+        >
+        <UButton
+          v-if="step === 'preview' && plannedKey === inputKey && !runID"
+          data-files-commit
+          color="primary"
+          variant="solid"
+          :disabled="busy"
+          :loading="busy"
+          @click="commit"
+          >{{ commitText }}</UButton
+        >
+      </div>
     </template>
   </UModal>
 </template>
@@ -430,12 +542,23 @@ function pollExport(batch: number, mine: number) {
   gap: 0.75rem;
 }
 .file-outcome {
-  padding: 0.5rem 0;
+  padding: 0.75rem 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
   border-top: 1px solid var(--ui-border);
 }
 .file-history p {
   overflow-wrap: anywhere;
   margin: 0.25rem 0;
   font-size: 0.8125rem;
+}
+.step {
+  margin-bottom: 1rem;
+  color: var(--ui-text-dimmed);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+progress {
+  accent-color: var(--ui-primary);
 }
 </style>

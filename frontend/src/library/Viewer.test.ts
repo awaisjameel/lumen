@@ -15,6 +15,7 @@ import type { AssetDetail } from '../bridge'
 import { useLibrary } from './store'
 import type { ViewerSource } from './store'
 import Viewer from './Viewer.vue'
+import { usePreferences } from '../shared/preferences'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -165,25 +166,21 @@ it('ignores details from an earlier visit to the same asset', async () => {
 })
 
 it('leaves the arrow keys to the seek slider, and Escape to an open menu', async () => {
-  const lib = useLibrary()
-  const neighbour = vi.spyOn(lib, 'neighbour').mockResolvedValue(null)
-  wrapper = mountViewer()
+  const source = { ...fakeSource(), id: 1, item: { id: 1, w: 640, h: 480, t: 1, v: true } }
+  wrapper = mountViewer(source)
   await flushPromises()
   const slider = view().get('[role="slider"]').element
   slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
-  expect(neighbour).not.toHaveBeenCalled()
-
-  // A control that handles Escape itself (a picker closing its menu) keeps the viewer open.
+  expect(source.step).not.toHaveBeenCalled()
   const picker = document.createElement('input')
   picker.addEventListener('keydown', (e) => e.stopPropagation())
   view().get('.viewer').element.appendChild(picker)
   picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-  expect(lib.viewer).not.toBeNull()
-
+  expect(source.close).not.toHaveBeenCalled()
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
-  expect(neighbour).toHaveBeenCalledOnce()
+  expect(source.step).toHaveBeenCalledExactlyOnceWith(1)
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-  expect(lib.viewer).toBeNull()
+  expect(source.close).toHaveBeenCalledOnce()
 })
 
 function fakeSource(more: Partial<ViewerSource['actions']> = {}): ViewerSource {
@@ -226,11 +223,15 @@ it('offers only the actions its source gives, and no details when it says so', a
   const moveToTrash = vi.fn()
   wrapper = mountViewer(fakeSource({ moveToTrash }))
   await flushPromises()
-  const labels = view()
-    .findAll('.bar button')
-    .map((b) => b.text() || b.attributes('aria-label'))
-  expect(labels).toEqual(['Close', 'Move to Trash'])
-  await view().get('button[aria-label="Move to Trash"]').trigger('click')
+  expect(view().find('button[aria-label="Favourite"]').exists()).toBe(false)
+  expect(view().find('button[aria-label="Details"]').exists()).toBe(false)
+  // Its one action is offered directly, not behind a menu of one.
+  expect(view().find('button[aria-label="More actions"]').exists()).toBe(false)
+  const action = view()
+    .findAll('button')
+    .find((entry) => entry.text() === 'Move to Trash')
+  if (!action) throw new Error('Missing Trash action')
+  await action.trigger('click')
   expect(moveToTrash).toHaveBeenCalledOnce()
 })
 
@@ -461,6 +462,8 @@ it('preserves pause, volume, mute and speed when a converted seek replaces the s
   volume.vm.$emit('update:modelValue', 35)
   await flushPromises()
   await view().get('button[aria-label="Mute"]').trigger('click')
+  await view().get('button[aria-label="Playback settings"]').trigger('click')
+  await flushPromises()
   await view().get('select[aria-label="Playback speed"]').setValue('1.5')
   const oldElement = video.element
   seek.vm.$emit('update:modelValue', 25000)
@@ -571,6 +574,8 @@ it('removes existing subtitle cues even when the reused text track was disabled'
   await flushPromises()
   const addTrack = vi.fn(() => track)
   Object.defineProperty(view().get('video').element, 'addTextTrack', { value: addTrack })
+  await view().get('button[aria-label="Subtitle track"]').trigger('click')
+  await flushPromises()
   for (let i = 0; i < 3; i++) {
     await view().get('select[aria-label="Subtitle track"]').setValue('3')
     await flushPromises()
@@ -658,6 +663,8 @@ it('keeps the speed selector arrows in the player and supports playback keys on 
   wrapper = mountViewer()
   await flushPromises()
   const neighbour = vi.spyOn(useLibrary(), 'neighbour').mockResolvedValue(null)
+  await view().get('button[aria-label="Playback settings"]').trigger('click')
+  await flushPromises()
   await view().get('select[aria-label="Playback speed"]').trigger('keydown', { key: 'ArrowRight' })
   const video = view().get<HTMLVideoElement>('video')
   await video.trigger('loadedmetadata')
@@ -836,4 +843,137 @@ it('continues playback after a decoder failure pauses the direct video before co
   await flushPromises()
   expect(view().get('video').attributes('src')).toContain('/play/')
   expect(view().get<HTMLVideoElement>('video').element.autoplay).toBe(true)
+})
+
+it('disables both navigation directions for a one-item source even with the filmstrip hidden', async () => {
+  const source = { ...fakeSource(), window: vi.fn().mockResolvedValue([{ id: 5, w: 4, h: 3, t: 1 }]) }
+  wrapper = mountViewer(source)
+  await flushPromises()
+  expect(source.window).toHaveBeenCalled()
+  expect(view().get('button[aria-label="Previous"]').attributes('disabled')).toBeDefined()
+  expect(view().get('button[aria-label="Next"]').attributes('disabled')).toBeDefined()
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+  expect(source.step).not.toHaveBeenCalled()
+})
+
+it('retries a failed detail read and recovers the current video', async () => {
+  vi.mocked(engine.asset).mockRejectedValueOnce(new Error('Drive disconnected')).mockResolvedValue(detail)
+  wrapper = mountViewer()
+  await flushPromises()
+  const retry = view()
+    .findAll('button')
+    .find((button) => button.text() === 'Try again')
+  if (!retry) throw new Error('Missing retry action')
+  await retry.trigger('click')
+  await flushPromises()
+  expect(view().find('video').exists()).toBe(true)
+  expect(view().find('[role="alert"]').exists()).toBe(false)
+})
+
+it('keeps idle chrome visible while a control has keyboard focus and reveals it on activity', async () => {
+  vi.useFakeTimers()
+  try {
+    wrapper = mountViewer()
+    await flushPromises()
+    const prefs = usePreferences()
+    prefs.prefs = { ...prefs.prefs, viewer: { ...prefs.viewer, autoHide: true } }
+    await flushPromises()
+    view().get<HTMLButtonElement>('button[aria-label="More actions"]').element.focus()
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(view().get('[aria-modal="true"]').attributes('class')).not.toContain('controls-hidden')
+    view().get<HTMLElement>('[aria-modal="true"]').element.focus()
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(view().get('[aria-modal="true"]').attributes('class')).toContain('controls-hidden')
+    await view().get('[aria-modal="true"]').trigger('pointermove')
+    expect(view().get('[aria-modal="true"]').attributes('class')).not.toContain('controls-hidden')
+  } finally {
+    wrapper?.unmount()
+    wrapper = undefined
+    vi.useRealTimers()
+  }
+})
+
+it('shows the full library position instead of calling a bounded neighbourhood the whole collection', async () => {
+  const lib = useLibrary()
+  lib.buckets = [
+    { day: 'earlier', count: 12479 },
+    { day: 'results', count: 1 },
+  ]
+  wrapper = mountViewer()
+  await flushPromises()
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, id: 2, video: null, caps: { ...detail.caps, original: true } })
+  lib.viewer = { day: 'results', id: 2 }
+  lib.days = new Map([['results', [{ id: 2, w: 640, h: 480, t: 1 }]]])
+  await flushPromises()
+  expect(view().text()).toContain('12,480 of 12,480')
+})
+
+it('keeps focus in the floating details sheet and returns it when Escape closes the sheet', async () => {
+  displayProperty(window, 'innerWidth', 720)
+  const panel = {
+    render: () =>
+      h('aside', { class: 'inspector' }, [
+        h('button', { 'aria-label': 'Close details' }, 'Close details'),
+        h('button', { 'aria-label': 'Last detail action' }, 'Last detail action'),
+      ]),
+  }
+  wrapper = mountInApp(Viewer, {
+    props: { source: fakeSource({ details: true }) },
+    plugins: [getTestPinia()],
+    stubs: { DetailsPanel: panel },
+  })
+  await flushPromises()
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'i' }))
+  await flushPromises()
+  expect(document.activeElement).toBe(view().get('button[aria-label="Close details"]').element)
+  const last = view().get<HTMLButtonElement>('button[aria-label="Last detail action"]')
+  last.element.focus()
+  await last.trigger('keydown', { key: 'Tab' })
+  expect(document.activeElement).toBe(view().get('button[aria-label="Close details"]').element)
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  await flushPromises()
+  expect(view().find('button[aria-label="Close details"]').exists()).toBe(false)
+  expect(document.activeElement).toBe(view().get('button[aria-label="Details"]').element)
+})
+
+it('rearms a looping slideshow when the collection contains only one photo', async () => {
+  displayProperty(document, 'hidden', false)
+  vi.useFakeTimers()
+  try {
+    vi.mocked(engine.asset).mockResolvedValue({
+      ...detail,
+      id: 5,
+      video: null,
+      caps: { ...detail.caps, original: true },
+    })
+    const source = {
+      ...fakeSource(),
+      window: vi.fn().mockResolvedValue([{ id: 5, w: 4, h: 3, t: 1 }]),
+      first: vi.fn().mockResolvedValue(undefined),
+    }
+    const prefs = usePreferences()
+    prefs.prefs = { ...prefs.prefs, viewer: { ...prefs.viewer, loop: true, slideshowSeconds: 1 } }
+    wrapper = mountViewer(source)
+    await flushPromises()
+    await runCommand('viewer.slideshow')
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(source.step).toHaveBeenCalledTimes(2)
+    expect(source.first).toHaveBeenCalledTimes(2)
+    expect(view().get('[role="progressbar"]').attributes('aria-valuenow')).toBeDefined()
+  } finally {
+    wrapper?.unmount()
+    wrapper = undefined
+    vi.useRealTimers()
+  }
+})
+
+it('answers the existing playback keys when the viewer itself has focus', async () => {
+  wrapper = mountViewer()
+  await flushPromises()
+  const video = view().get<HTMLVideoElement>('video')
+  const playback = simulatePlayback(video.element)
+  await view().get('[aria-modal="true"]').trigger('keydown', { key: 'k' })
+  expect(playback.play).toHaveBeenCalledOnce()
+  await view().get('[aria-modal="true"]').trigger('keydown', { key: 'm' })
+  expect(video.element.muted).toBe(true)
 })

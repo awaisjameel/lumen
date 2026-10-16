@@ -67,6 +67,20 @@ it('subscribes once and ignores a late snapshot older than an event', async () =
   expect(store.status?.phase).toBe(UpdatePhase.UpdateReady)
 })
 
+it('retries an initial status failure and removes the failed subscription', async () => {
+  const stop = vi.fn()
+  vi.mocked(onUpdateStatus).mockReturnValueOnce(stop)
+  vi.mocked(engine.updateStatus).mockRejectedValueOnce(new Error('Status is unavailable.'))
+  const store = useUpdates()
+  await store.start()
+  expect(store.error).toContain('Status is unavailable.')
+  expect(stop).toHaveBeenCalledOnce()
+  await store.start()
+  expect(store.status?.phase).toBe(UpdatePhase.UpdateIdle)
+  expect(store.error).toBe('')
+  expect(onUpdateStatus).toHaveBeenCalledTimes(2)
+})
+
 it('allows cancellation while a manual check is still waiting', async () => {
   const store = useUpdates()
   await store.start()

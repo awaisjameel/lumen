@@ -6,6 +6,7 @@ import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
+import UModal from '@nuxt/ui/components/Modal.vue'
 import { computed, ref } from 'vue'
 import {
   EXPORT_QUALITY_DEFAULT,
@@ -23,6 +24,8 @@ import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import IconButton from '../shared/IconButton.vue'
 import PrefRow from '../shared/PrefRow.vue'
+import { notify } from '../shared/notify'
+import { nameTooLong, trimName } from '../shared/names'
 
 const prefs = usePreferences()
 const presets = computed(() => prefs.prefs.exportPresets)
@@ -43,6 +46,11 @@ const side = ref(String(RENDER_SIDE))
 const quality = ref(String(EXPORT_QUALITY_DEFAULT))
 const adjust = ref(true)
 const error = ref('')
+const open = ref(false)
+function openEditor() {
+  error.value = ''
+  open.value = true
+}
 
 function summary(p: ExportPreset): string {
   if (p.format === ExportFormat.ExportOriginal) return t('settings.presetOriginal')
@@ -58,8 +66,8 @@ const within = (value: string, min: number, max: number, fallback: number) => {
 
 async function add() {
   error.value = ''
-  const title = name.value.trim()
-  if (!title || title.length > MAX_NAME_LEN) {
+  const title = trimName(name.value)
+  if (!title || nameTooLong(title)) {
     error.value = t('settings.presetNameNeeded', { n: MAX_NAME_LEN })
     return
   }
@@ -83,17 +91,31 @@ async function add() {
     return
   }
   name.value = ''
+  open.value = false
 }
 
-function remove(preset: ExportPreset) {
-  void prefs.setExportPresets(presets.value.filter((p) => p.name !== preset.name))
+async function remove(preset: ExportPreset) {
+  if (!(await prefs.setExportPresets(presets.value.filter((p) => p.name !== preset.name)))) return
+  notify({
+    id: 'settings.presetRemoved',
+    kind: 'success',
+    title: t('settings.presetRemoved', { name: preset.name }),
+    actions: [
+      {
+        label: t('settings.undo'),
+        run: () => {
+          void prefs.setExportPresets([...presets.value, preset])
+        },
+      },
+    ],
+  })
 }
 </script>
 <template>
   <PrefRow
     :label="t('settings.exportPresets')"
+    :modified="presets.length > 0"
     :description="t('settings.exportPresetsHint')"
-    :error="error"
     :hint="full ? t('settings.presetFull', { n: MAX_EXPORT_PRESETS }) : ''"
   >
     <template #default>
@@ -112,42 +134,65 @@ function remove(preset: ExportPreset) {
             />
           </li>
         </ul>
-        <form v-if="!full" class="add" @submit.prevent="add">
-          <UInput
-            v-model="name"
-            data-preset-name
-            :maxlength="MAX_NAME_LEN"
-            :placeholder="t('settings.presetName')"
-            :aria-label="t('settings.presetName')"
-          />
-          <USelect v-model="format" :items="formatItems" :aria-label="t('settings.presetFormat')" />
-          <template v-if="format !== ExportFormat.ExportOriginal">
-            <UInput
-              v-model="side"
-              type="number"
-              class="w-24"
-              :min="RENDER_SIDE_MIN"
-              :max="RENDER_SIDE"
-              :aria-label="t('files.size')"
-              :title="t('files.size')"
-            />
-            <UInput
-              v-if="format === ExportFormat.ExportJPEG"
-              v-model="quality"
-              type="number"
-              class="w-20"
-              :min="EXPORT_QUALITY_MIN"
-              :max="EXPORT_QUALITY_MAX"
-              :aria-label="t('files.quality')"
-              :title="t('files.quality')"
-            />
-            <UCheckbox v-model="adjust" :label="t('files.adjust')" />
-          </template>
-          <UButton type="submit" data-preset-add :icon="icons.plus">{{ t('settings.presetAdd') }}</UButton>
-        </form>
+        <UButton
+          data-preset-new
+          :icon="icons.plus"
+          :disabled="full"
+          :title="full ? t('settings.presetFull', { n: MAX_EXPORT_PRESETS }) : undefined"
+          @click="openEditor"
+          >{{ t('settings.presetAdd') }}</UButton
+        >
       </div>
     </template>
   </PrefRow>
+  <UModal v-model:open="open" :title="t('settings.presetAdd')" :description="t('settings.exportPresetsHint')">
+    <template #body>
+      <form id="settings-export-preset" class="add" @submit.prevent="add">
+        <UInput
+          v-model="name"
+          data-preset-name
+          :maxlength="MAX_NAME_LEN"
+          :placeholder="t('settings.presetName')"
+          :aria-label="t('settings.presetName')"
+        />
+        <USelect v-model="format" :items="formatItems" :aria-label="t('settings.presetFormat')" />
+        <template v-if="format !== ExportFormat.ExportOriginal">
+          <UInput
+            v-model="side"
+            type="number"
+            class="w-24"
+            :min="RENDER_SIDE_MIN"
+            :max="RENDER_SIDE"
+            :aria-label="t('files.size')"
+            :title="t('files.size')"
+          />
+          <UInput
+            v-if="format === ExportFormat.ExportJPEG"
+            v-model="quality"
+            type="number"
+            class="w-20"
+            :min="EXPORT_QUALITY_MIN"
+            :max="EXPORT_QUALITY_MAX"
+            :aria-label="t('files.quality')"
+            :title="t('files.quality')"
+          />
+          <UCheckbox v-model="adjust" :label="t('files.adjust')" />
+        </template>
+        <p v-if="error" role="alert" class="text-error">{{ error }}</p>
+      </form>
+    </template>
+    <template #footer
+      ><UButton variant="outline" @click="open = false">{{ t('common.cancel') }}</UButton
+      ><UButton
+        type="submit"
+        form="settings-export-preset"
+        data-preset-add
+        :disabled="prefs.saving"
+        :loading="prefs.saving"
+        >{{ t('settings.presetAdd') }}</UButton
+      ></template
+    >
+  </UModal>
 </template>
 <style scoped>
 .presets {
@@ -170,6 +215,8 @@ ul {
 li {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
   gap: 0.75rem;
   min-height: var(--lumen-row-h);
 }
@@ -186,8 +233,8 @@ li .text-muted {
 
 .add {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
 }
 </style>

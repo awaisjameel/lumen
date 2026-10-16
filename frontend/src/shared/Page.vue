@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// A page: its header fixed over a body that scrolls. Pages with their own
-// scroller (the grid) set scroll to false and fill the body themselves.
+// A page: its top bar and view bar fixed over a body that scrolls, and the
+// selection dock at its foot while something is selected. Pages with their
+// own scroller (the grid) set scroll to false and fill the body themselves.
 withDefaults(defineProps<{ scroll?: boolean }>(), { scroll: true })
 </script>
 
@@ -11,6 +12,7 @@ withDefaults(defineProps<{ scroll?: boolean }>(), { scroll: true })
     <div class="body" :class="{ scroll }">
       <slot />
     </div>
+    <slot name="dock" />
   </section>
 </template>
 
@@ -28,6 +30,6 @@ withDefaults(defineProps<{ scroll?: boolean }>(), { scroll: true })
 }
 .body.scroll {
   overflow-y: auto;
-  padding: 0.25rem var(--lumen-page-x) 1.5rem;
+  padding: 0.5rem var(--lumen-page-x) 3rem;
 }
 </style>

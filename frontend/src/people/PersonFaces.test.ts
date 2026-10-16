@@ -1,5 +1,7 @@
 import type * as Router from 'vue-router'
-import { mountInApp } from '../shared/testing'
+import { mountInApp, recordNotifications } from '../shared/testing'
+import { blockRequest } from '../shared/block'
+import { BlockKind } from '../bridge'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
@@ -12,13 +14,20 @@ import PersonFaces from './PersonFaces.vue'
 const { replace } = vi.hoisted(() => ({ replace: vi.fn() }))
 vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal<typeof Router>()),
-  useRoute: () => ({ params: { id: '1' } }),
+  useRoute: () => ({ params: { id: '1' }, query: {} }),
   useRouter: () => ({ replace }),
 }))
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
-  engine: { person: vi.fn(), personFaces: vi.fn(), rejectFaces: vi.fn(), people: vi.fn() },
+  engine: {
+    person: vi.fn(),
+    personFaces: vi.fn(),
+    rejectFaces: vi.fn(),
+    people: vi.fn(),
+    timeline: vi.fn().mockResolvedValue([]),
+    setPersonCover: vi.fn().mockResolvedValue(undefined),
+  },
 }))
 
 const face: Face = {
@@ -49,13 +58,72 @@ beforeEach(() => {
 })
 afterEach(() => {
   wrapper?.unmount()
+  blockRequest.value?.answer(false)
+  blockRequest.value = null
   vi.useRealTimers()
+})
+
+it('keeps the dock absent without a selection and explains why two faces cannot be a picture', async () => {
+  vi.mocked(engine.personFaces).mockResolvedValue([face, { ...face, id: 12 }])
+  wrapper = mountInApp(PersonFaces, { plugins: [testRouter()] })
+  await flushPromises()
+  expect(wrapper.find('[role="toolbar"][aria-label="0 selected"]').exists()).toBe(false)
+  expect(wrapper.find('[data-action="reject"]').exists()).toBe(false)
+  await wrapper.get('[data-face="11"] [data-tile-check]').trigger('click')
+  await wrapper.get('[data-face="12"] [data-tile-check]').trigger('click')
+  expect(wrapper.find('[role="toolbar"][aria-label="2 selected"]').exists()).toBe(true)
+  expect(wrapper.get('[title="Select one face to use as their picture."]').attributes('disabled')).toBeDefined()
+  await wrapper.get('[aria-label="Clear selection"]').trigger('click')
+  expect(wrapper.find('[data-action="reject"]').exists()).toBe(false)
+})
+
+it('keeps a failed correction selected and prevents changes while the correction is saving', async () => {
+  let fail: ((reason: Error) => void) | undefined
+  vi.mocked(engine.rejectFaces).mockImplementation(
+    () =>
+      new Promise((_resolve, reject) => {
+        fail = reject
+      }),
+  )
+  const w = await mounted()
+  await w.get('[data-action="reject"]').trigger('click')
+  expect(w.get('[aria-label="Face 1"]').attributes('disabled')).toBeDefined()
+  await w.get('[aria-label="Face 1"]').trigger('click')
+  expect(w.get('[aria-label="Face 1"]').attributes('aria-pressed')).toBe('true')
+  fail?.(new Error('library busy'))
+  await flushPromises()
+  expect(w.get('[aria-label="Face 1"]').attributes('aria-pressed')).toBe('true')
+  expect(w.get('[role="alert"]').text()).toContain('library busy')
+})
+
+it('opens the shared face block flow from a quick action without changing the selection', async () => {
+  const w = await mounted()
+  await w.get('[aria-label="Block face 1"]').trigger('click')
+  expect(blockRequest.value?.kind).toBe(BlockKind.BlockFace)
+  expect(blockRequest.value?.targetID).toBe(11)
+  expect(w.get('[aria-label="Face 1"]').attributes('aria-pressed')).toBe('true')
+})
+
+it('restores the previous representative face through the quiet picture notification', async () => {
+  const notices = recordNotifications()
+  try {
+    vi.mocked(engine.person).mockResolvedValue({ ...person, cover: { ...face, id: 9 } })
+    const w = await mounted()
+    await w.get('[title="Use as their picture"]').trigger('click')
+    await flushPromises()
+    expect(engine.setPersonCover).toHaveBeenCalledWith(1, 11)
+    notices.find('faces.picture')?.actions?.[0]?.run()
+    await flushPromises()
+    expect(engine.setPersonCover).toHaveBeenLastCalledWith(1, 9)
+  } finally {
+    notices.stop()
+  }
 })
 
 async function mounted() {
   wrapper = mountInApp(PersonFaces, { plugins: [testRouter()] })
   await flushPromises()
-  await wrapper.get('.face-tile').trigger('click')
+  await wrapper.get('[aria-label="Face 1"]').trigger('click')
   return wrapper
 }
 
@@ -80,22 +148,24 @@ it('leaves face review when a correction removes the person', async () => {
 
 it('updates memoised faces and prunes the selection when a reload replaces the list', async () => {
   vi.useFakeTimers()
-  let changed: ((c: Changes) => void) | undefined
+  const listeners = new Set<(c: Changes) => void>()
   vi.mocked(onLibraryChanged).mockImplementation((cb) => {
-    changed = cb
-    return () => undefined
+    listeners.add(cb)
+    return () => {
+      listeners.delete(cb)
+    }
   })
   const w = await mounted()
-  expect(w.get('.face-tile').attributes('aria-pressed')).toBe('true')
-  await w.get('.face-tile').trigger('click')
-  expect(w.get('.face-tile').attributes('aria-pressed')).toBe('false')
-  await w.get('.face-tile').trigger('click')
+  expect(w.get('[aria-label="Face 1"]').attributes('aria-pressed')).toBe('true')
+  await w.get('[aria-label="Face 1"]').trigger('click')
+  expect(w.get('[aria-label="Face 1"]').attributes('aria-pressed')).toBe('false')
+  await w.get('[aria-label="Face 1"]').trigger('click')
   vi.mocked(engine.personFaces).mockResolvedValue([{ ...face, id: 12, byUser: true }])
-  changed?.({ assets: false, thumbs: false, tags: false, people: true })
+  for (const changed of listeners) changed({ assets: false, thumbs: false, tags: false, people: true })
   await vi.advanceTimersByTimeAsync(3000)
   await flushPromises()
-  expect(w.get('.face-tile').attributes('aria-label')).toContain('placed by you')
-  expect(w.get('.face-tile').attributes('aria-pressed')).toBe('false')
+  expect(w.get('[data-face="12"] button[aria-pressed]').attributes('aria-label')).toContain('placed by you')
+  expect(w.get('[data-face="12"] button[aria-pressed]').attributes('aria-pressed')).toBe('false')
   expect(w.text()).not.toContain('1 selected')
 })
 

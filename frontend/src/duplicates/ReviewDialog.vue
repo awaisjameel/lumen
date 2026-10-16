@@ -46,7 +46,11 @@ function returnFocus(event: Event) {
     :close="false"
     :dismissible="!busy"
     :content="{ onCloseAutoFocus: returnFocus }"
-    :ui="{ content: 'max-w-4xl', footer: 'justify-end flex-wrap' }"
+    :ui="{
+      content: 'max-w-3xl max-h-[calc(100dvh-2rem)]',
+      body: 'overflow-y-auto min-h-0',
+      footer: 'justify-end flex-wrap shrink-0',
+    }"
   >
     <template #body>
       <div v-if="review" class="comparison" data-duplicate-review>
@@ -70,6 +74,7 @@ function returnFocus(event: Event) {
           <ul class="removes lumen-selectable">
             <li v-for="path in removes" :key="path">{{ path }}</li>
           </ul>
+          <p class="recovery">{{ t(exact ? 'duplicates.recycleRecovery' : 'duplicates.trashRecovery') }}</p>
         </section>
       </div>
     </template>
@@ -80,12 +85,12 @@ function returnFocus(event: Event) {
       <UButton
         :loading="busy"
         :icon="exact ? icons.recycle : icons.trash"
-        color="primary"
+        color="error"
         variant="solid"
         data-review-confirm
         @click="emit('confirm')"
       >
-        {{ t(exact ? 'duplicates.reviewOkRecycle' : 'duplicates.reviewOkTrash') }}
+        {{ t(exact ? 'duplicates.moveFiles' : 'duplicates.moveItems', { n: count }) }}
       </UButton>
     </template>
   </UModal>
@@ -94,7 +99,7 @@ function returnFocus(event: Event) {
 <style scoped>
 .comparison {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.25rem;
 }
 h3 {
@@ -103,9 +108,18 @@ h3 {
   font-weight: 600;
 }
 .review-tile {
-  width: 8rem;
-  height: 8rem;
+  width: 4rem;
+  height: 3rem;
   flex-shrink: 0;
+}
+.comparison section:first-child {
+  padding: 0.75rem;
+  background: var(--lumen-bg-sunken);
+  border-radius: var(--lumen-r-md);
+}
+.recovery {
+  font-size: 0.8125rem;
+  color: var(--ui-text-dimmed);
 }
 .removed-previews {
   display: flex;

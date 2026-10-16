@@ -92,6 +92,7 @@ describe('failures reach Lumen’s log', () => {
     reportUnexpected(new TypeError('x is undefined'), 'vue: render function')
     expect(notified.find(ERROR_NOTIFICATION)).toMatchObject({
       kind: 'error',
+      duration: 0,
       title: 'Something went wrong. Lumen saved the details in its log.',
     })
     expect(logUIError).toHaveBeenCalledWith(expect.objectContaining({ where: 'vue: render function' }))

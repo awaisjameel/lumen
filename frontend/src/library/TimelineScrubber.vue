@@ -3,6 +3,7 @@
 // timeline. Click or drag to jump; hover shows which month is there.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DayBucket } from '../bridge'
+import { t } from '../shared/i18n'
 import { monthLabel } from '../shared/format'
 import { observeResize } from '../shared/observeResize'
 import { rowAt } from './layout'
@@ -49,7 +50,7 @@ const marks = computed<Mark[]>(() => {
   return out
 })
 
-const thumbY = computed(() => Math.min(1, props.scrollTop / scrollRange.value) * trackH.value)
+const currentYear = computed(() => props.layout.rows[rowAt(props.layout, props.scrollTop)]?.day.slice(0, 4))
 
 const hoverLabel = computed(() => {
   if (hoverY.value === null) return ''
@@ -66,7 +67,7 @@ function yOf(e: PointerEvent): number {
 }
 
 function seekTo(y: number) {
-  emit('seek', (y / trackH.value) * scrollRange.value)
+  if (trackH.value > 0) emit('seek', (y / trackH.value) * scrollRange.value)
 }
 
 function down(e: PointerEvent) {
@@ -93,11 +94,12 @@ onBeforeUnmount(() => stopResize?.())
 </script>
 
 <template>
-  <!-- For the pointer only: the grid itself scrolls with the keyboard. -->
+  <!-- Year buttons give keyboard users the same jumps as the pointer track. -->
   <div
     ref="track"
     class="scrubber"
-    aria-hidden="true"
+    role="navigation"
+    :aria-label="t('library.timeline')"
     @pointerdown="down"
     @pointermove="moveP"
     @pointerup="up"
@@ -105,10 +107,21 @@ onBeforeUnmount(() => stopResize?.())
     @pointerleave="hoverY = null"
   >
     <template v-for="m in marks" :key="m.month">
-      <span v-if="m.year" class="year" :style="{ top: m.y + 'px' }">{{ m.label }}</span>
-      <span v-else class="dot" :style="{ top: m.y + 'px' }" />
+      <button
+        v-if="m.year"
+        type="button"
+        class="year"
+        :class="{ 'is-current': m.label === currentYear }"
+        :aria-label="t('library.jump', { year: m.label })"
+        :aria-current="m.label === currentYear ? 'date' : undefined"
+        :style="{ top: m.y + 'px' }"
+        @pointerdown.stop
+        @click.stop="seekTo(m.y)"
+      >
+        {{ m.label }}
+      </button>
+      <span v-else aria-hidden="true" class="dot" :style="{ top: m.y + 'px' }" />
     </template>
-    <span class="thumb" :style="{ top: thumbY + 'px' }" />
     <span v-if="hoverY !== null" class="hover" :style="{ top: hoverY + 'px' }">{{ hoverLabel }}</span>
   </div>
 </template>
@@ -116,21 +129,43 @@ onBeforeUnmount(() => stopResize?.())
 <style scoped>
 .scrubber {
   position: absolute;
-  top: 8px;
+  top: 1rem;
   right: 0;
-  bottom: 8px;
+  bottom: 1rem;
   width: 56px;
   cursor: ns-resize;
   touch-action: none;
 }
 .year {
   position: absolute;
-  right: 12px;
-  transform: translateY(-2px);
+  right: 0.5rem;
+  min-height: 1.5rem;
+  min-width: 1.5rem;
+  padding: 0 0.25rem;
+  border: 0;
+  border-radius: var(--lumen-r-sm);
+  background: transparent;
+  cursor: pointer;
   font-size: 0.6875rem;
   font-weight: 600;
   color: var(--ui-text-dimmed);
-  pointer-events: none;
+}
+.year:hover {
+  background: var(--lumen-bg-hover);
+  color: var(--ui-text-highlighted);
+}
+.year.is-current {
+  color: var(--ui-primary);
+}
+.year.is-current::before {
+  content: '';
+  position: absolute;
+  right: calc(100% + 0.25rem);
+  top: 50%;
+  width: 0.75rem;
+  height: 2px;
+  background: var(--ui-primary);
+  border-radius: var(--lumen-r-xs);
 }
 .dot {
   position: absolute;
@@ -142,15 +177,6 @@ onBeforeUnmount(() => stopResize?.())
   opacity: 0.5;
   pointer-events: none;
 }
-.thumb {
-  position: absolute;
-  right: 8px;
-  width: 28px;
-  height: 2px;
-  background: var(--ui-primary);
-  border-radius: 1px;
-  pointer-events: none;
-}
 .hover {
   position: absolute;
   right: 48px;
@@ -160,7 +186,7 @@ onBeforeUnmount(() => stopResize?.())
   border: 1px solid var(--ui-border);
   background: var(--ui-bg);
   color: var(--ui-text-highlighted);
-  box-shadow: var(--lumen-shadow);
+  box-shadow: var(--lumen-shadow-3);
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;

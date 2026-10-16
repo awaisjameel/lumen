@@ -11,7 +11,7 @@ import { useCoveredPhotos } from './covered'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
-  engine: { blockedItems: vi.fn(), trashCovered: vi.fn() },
+  engine: { blockedItems: vi.fn(), trashCovered: vi.fn(), restoreAssets: vi.fn() },
 }))
 
 vi.mock('../shared/confirm', () => ({ confirm: vi.fn() }))
@@ -40,6 +40,7 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue([item(1), item(2), item(3)])
   vi.mocked(engine.trashCovered).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.restoreAssets).mockReset().mockResolvedValue(undefined)
   vi.mocked(confirm).mockReset().mockResolvedValue(true)
   notifications = recordNotifications()
 })
@@ -298,4 +299,81 @@ it('forgets the selection and rejects a delayed bulk confirmation after locking'
   expect(covered.selected.size).toBe(0)
   expect(covered.items).toEqual([])
   expect(covered.trashing).toBe(false)
+})
+
+it('keeps a failed coverage load open for an explicit retry', async () => {
+  vi.mocked(engine.blockedItems).mockRejectedValueOnce(new Error('library busy'))
+  const covered = useCoveredPhotos(hooks)
+  await covered.open(block(5))
+  expect(covered.block?.id).toBe(5)
+  expect(covered.error).toContain('library busy')
+  await covered.retry()
+  expect(covered.error).toBe('')
+  expect(covered.items).toHaveLength(3)
+})
+
+it('offers Trash Undo and reloads current coverage after restoring the successful selection', async () => {
+  const covered = await opened()
+  covered.select(1, true)
+  await covered.trashSelection()
+  expect(notifications.find('trash.undo')?.title).toBe(t('trash.moved', { n: 1 }))
+  notifications.find('trash.undo')?.actions?.[0]?.run()
+  await vi.waitFor(() => expect(engine.restoreAssets).toHaveBeenCalledExactlyOnceWith([1]))
+  await vi.waitFor(() => expect(covered.items).toHaveLength(3))
+})
+
+it('dismisses private Trash Undo on close and ignores its captured action afterwards', async () => {
+  const covered = await opened()
+  covered.select(1, true)
+  await covered.trashSelection()
+  const undo = notifications.find('trash.undo')?.actions?.[0]
+  covered.close()
+  expect(notifications.find('trash.undo')).toBeUndefined()
+  undo?.run()
+  await Promise.resolve()
+  expect(engine.restoreAssets).not.toHaveBeenCalled()
+})
+
+it('retries a failed Trash action with the same selected targets', async () => {
+  const covered = await opened()
+  covered.select(2, true)
+  vi.mocked(engine.trashCovered).mockRejectedValueOnce(new Error('library busy'))
+  await covered.trashSelection()
+  expect(covered.error).toContain('library busy')
+  await covered.retry()
+  expect(vi.mocked(engine.trashCovered).mock.calls).toEqual([[[2]], [[2]]])
+  expect(covered.selected.size).toBe(0)
+  expect(covered.error).toBe('')
+})
+
+it('clears a private operation error when its browser closes', async () => {
+  const covered = await opened()
+  covered.select(1, true)
+  vi.mocked(engine.trashCovered).mockRejectedValueOnce(new Error('private path unavailable'))
+  await covered.trashSelection()
+  expect(notifications.find(ERROR_NOTIFICATION)).toBeDefined()
+  covered.close()
+  expect(notifications.find(ERROR_NOTIFICATION)).toBeUndefined()
+  expect(covered.error).toBe('')
+})
+
+it('never reinstalls photos restored by an Undo that finished after closing', async () => {
+  const covered = await opened()
+  covered.select(1, true)
+  await covered.trashSelection()
+  let finish: () => void = () => {
+    throw new Error('restore has no resolver')
+  }
+  vi.mocked(engine.restoreAssets).mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      finish = resolve
+    }),
+  )
+  notifications.find('trash.undo')?.actions?.[0]?.run()
+  covered.close()
+  finish()
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(covered.items).toEqual([])
+  expect(engine.blockedItems).toHaveBeenCalledTimes(1)
 })

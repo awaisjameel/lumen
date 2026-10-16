@@ -13,7 +13,13 @@ import BlockDialog from './BlockDialog.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
-  engine: { blockPINConfigured: vi.fn(), setBlock: vi.fn(), blockFace: vi.fn(), undoBlock: vi.fn() },
+  engine: {
+    blockPINConfigured: vi.fn(),
+    setBlock: vi.fn(),
+    blockFace: vi.fn(),
+    undoBlock: vi.fn(),
+    createBlockPIN: vi.fn(),
+  },
 }))
 
 function deferred<T>() {
@@ -51,7 +57,7 @@ it('cancels a batch between items while settling the current item once', async (
 })
 
 async function choose(label: string) {
-  const field = body.findAll('label').find((item) => item.text() === label)
+  const field = body.findAll('[for]').find((item) => item.text() === label)
   const id = field?.attributes('for')
   if (!id) throw new Error(`the dialog has no radio labelled ${label}`)
   await body.get(`[id="${id}"][role="radio"]`).trigger('click')
@@ -60,6 +66,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   notifications = recordNotifications()
   vi.mocked(engine.blockPINConfigured).mockReset().mockResolvedValue(true)
+  vi.mocked(engine.createBlockPIN).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setBlock).mockReset()
   vi.mocked(engine.blockFace).mockReset()
   vi.mocked(engine.undoBlock).mockReset().mockResolvedValue(undefined)
@@ -132,7 +139,7 @@ it('blocks the face and its look-alikes in label mode when the user chooses so',
   const saved = block(BlockKind.BlockFace, 11, 'this face')
   await flushPromises()
   await choose('This face and look-alikes')
-  await choose('Label only')
+  await choose(t('block.hideName'))
   await body.get('[data-block-form]').trigger('submit')
   await flushPromises()
   expect(await saved).toBe(true)
@@ -183,4 +190,43 @@ it('returns focus to the initiating control when the modal is cancelled', async 
   } finally {
     trigger.remove()
   }
+})
+
+it('hands the first block to PIN setup, keeps its scope and explains a mismatch before saving', async () => {
+  vi.mocked(engine.blockPINConfigured).mockResolvedValueOnce(false)
+  vi.mocked(engine.setBlock).mockResolvedValueOnce({ id: 12, created: true })
+  wrapper = mountDialog()
+  const saved = block(BlockKind.BlockAlbum, 8, 'Documents')
+  await flushPromises()
+  await choose(t('block.hideName'))
+  await body.get('[data-block-form]').trigger('submit')
+  expect(body.text()).toContain(t('block.createTitle'))
+  const fields = body.findAll('input[type="password"]')
+  await fields[0]?.setValue('123456')
+  await fields[1]?.setValue('654321')
+  await body.get('[data-block-form]').trigger('submit')
+  expect(body.text()).toContain(t('blocked.pinMismatch'))
+  expect(engine.createBlockPIN).not.toHaveBeenCalled()
+  await fields[1]?.setValue('123456')
+  await body.get('[data-block-form]').trigger('submit')
+  await flushPromises()
+  expect(await saved).toBe(true)
+  expect(engine.createBlockPIN).toHaveBeenCalledExactlyOnceWith('123456')
+  expect(engine.setBlock).toHaveBeenCalledWith(BlockKind.BlockAlbum, 8, '', BlockMode.BlockLabel)
+})
+
+it('retries a failed PIN configuration read without saving until protection is known', async () => {
+  vi.mocked(engine.blockPINConfigured).mockRejectedValueOnce(new Error('library busy'))
+  wrapper = mountDialog()
+  const saved = block(BlockKind.BlockTag, 4, 'Receipts')
+  await flushPromises()
+  expect(body.get('[data-block="save"]').attributes('disabled')).toBeDefined()
+  await body
+    .findAll('button')
+    .find((button) => button.text() === t('blocked.retry'))
+    ?.trigger('click')
+  await flushPromises()
+  expect(body.get('[data-block="save"]').attributes('disabled')).toBeUndefined()
+  await body.get('[data-block="cancel"]').trigger('click')
+  expect(await saved).toBe(false)
 })

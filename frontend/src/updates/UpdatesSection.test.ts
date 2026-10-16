@@ -12,6 +12,7 @@ import { mountInApp, recordNotifications } from '../shared/testing'
 import type { RecordedNotifications } from '../shared/testing'
 import UpdateNotice from './UpdateNotice.vue'
 import UpdatesSection from './UpdatesSection.vue'
+import { useUpdates } from './store'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
@@ -19,6 +20,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   engine: {
     updateStatus: vi.fn<typeof Bridge.engine.updateStatus>(),
     dismissUpdate: vi.fn<typeof Bridge.engine.dismissUpdate>(),
+    setUpdatePolicy: vi.fn<typeof Bridge.engine.setUpdatePolicy>(),
   },
 }))
 
@@ -57,13 +59,13 @@ afterEach(() => {
   notified.stop()
 })
 
-async function show(component: Component, status: Bridge.UpdateStatus) {
+async function show(component: Component, status: Bridge.UpdateStatus, query = '') {
   vi.mocked(engine.updateStatus).mockResolvedValue(status)
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/settings', name: 'settings', component: { render: () => null } }],
   })
-  wrapper = mountInApp(component, { plugins: [pinia, router] })
+  wrapper = mountInApp(component, { plugins: [pinia, router], props: { query } })
   await flushPromises()
   return wrapper
 }
@@ -76,6 +78,36 @@ it('offers no download for the release an update has just installed', async () =
   const w = await show(UpdatesSection, snapshot({ phase: UpdatePhase.UpdateComplete }))
   expect(w.text()).toContain(t('update.phase.complete'))
   expect(buttons(w)).toEqual([t('update.check')])
+})
+
+it('reports byte progress only while downloading and names cancellation', async () => {
+  const offer = { version: '0.13.0', notes: 'Camera RAW improvements.', downloadBytes: 100, expandedBytes: 200 }
+  const w = await show(UpdatesSection, snapshot({ phase: UpdatePhase.UpdateDownloading, bytes: 25, offer }))
+  expect(w.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('25')
+  expect(buttons(w)).toContain(t('update.cancelDownload'))
+  const callback = vi.mocked(onUpdateStatus).mock.calls[0]?.[0]
+  callback?.(snapshot({ generation: 2, phase: UpdatePhase.UpdateVerifying, bytes: 100, offer }))
+  await flushPromises()
+  expect(w.find('[role="progressbar"]').exists()).toBe(false)
+  expect(w.text()).toContain(t('update.phase.verifying'))
+})
+
+it('filters update rows and explains an invalid bandwidth value without saving it', async () => {
+  const w = await show(UpdatesSection, snapshot(), 'KiB/s')
+  expect(w.findAll('[data-pref]').map((row) => row.attributes('data-pref'))).toEqual([t('update.bandwidth')])
+  const input = w.get<HTMLInputElement>('input[type="number"]')
+  await input.setValue('-1')
+  expect(input.element.value).toBe('0')
+  expect(w.get('[role="alert"]').text()).toContain(t('update.bandwidthRange'))
+  expect(useUpdates().status?.policy.bandwidthKB).toBe(0)
+  expect(engine.setUpdatePolicy).not.toHaveBeenCalled()
+})
+
+it('explains why an unconfigured installation cannot check for updates', async () => {
+  const w = await show(UpdatesSection, snapshot({ configured: false }))
+  const check = actions(w).find((button) => button.text() === t('update.check'))
+  expect(check?.attributes('disabled')).toBeDefined()
+  expect(check?.attributes('title')).toBe(t('update.unavailable'))
 })
 
 it('keeps a restart that failed ready to try again, and says what happened', async () => {

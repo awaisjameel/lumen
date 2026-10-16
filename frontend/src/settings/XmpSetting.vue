@@ -96,6 +96,7 @@ useCommands([
     <PrefRow
       v-if="matches('settings.xmp', 'settings.xmpHint')"
       :label="t('settings.xmp')"
+      :modified="lib.settings.xmp"
       :description="t('settings.xmpHint')"
       :error="lib.settingErrors.xmp"
       :hint="hint('xmp')"

@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { Device, engine, Filter, onLibraryChanged, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event, Progress } from '../bridge'
+import { t } from '../shared/i18n'
 import { mountInApp } from '../shared/testing'
 import LibraryView from './LibraryView.vue'
 import { useLibrary } from './store'
@@ -14,6 +15,8 @@ vi.mock('../bridge', async (importOriginal) => ({
   engine: {
     timeline: vi.fn<typeof Bridge.engine.timeline>().mockResolvedValue([]),
     event: vi.fn<typeof Bridge.engine.event>(),
+    days: vi.fn<typeof Bridge.engine.days>().mockResolvedValue([]),
+    trashSelection: vi.fn<typeof Bridge.engine.trashSelection>(),
   },
   onLibraryChanged: vi.fn<typeof Bridge.onLibraryChanged>(),
 }))
@@ -81,7 +84,10 @@ afterEach(() => {
 async function mountedTimeline() {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/events/:id', name: 'event', component: LibraryView }],
+    routes: [
+      { path: '/events/:id', name: 'event', component: LibraryView },
+      { path: '/events', name: 'events', component: { template: '<div />' } },
+    ],
   })
   await router.push('/events/1')
   const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
@@ -145,6 +151,40 @@ it('shows the empty Trash with its own message and no toolbar', async () => {
   wrapper.unmount()
 })
 
+it('puts the Trash actions and its files on disk in the header, with no photo search', async () => {
+  vi.mocked(engine.timeline).mockResolvedValueOnce([{ day: '2021-01-23', count: 3 }])
+  vi.mocked(engine.trashSelection).mockResolvedValue({ assets: [1, 2, 3], files: 5 })
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/trash', name: 'trash', component: LibraryView, meta: { filter: Filter.FilterTrash } }],
+  })
+  await router.push('/trash')
+  const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
+  await flushPromises()
+  const header = wrapper.get('header')
+  expect(header.text()).toContain('3 items · 5 files on disk')
+  expect(header.find('[data-trash-restore-all]').exists()).toBe(true)
+  expect(wrapper.find('search-box-stub').exists()).toBe(false)
+  expect(wrapper.get('[data-trash-notice]').text()).toContain(t('trash.summary', { n: 3 }))
+  wrapper.unmount()
+})
+
+it('uses the Photos title and passes the photos filter to the timeline', async () => {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/', name: 'library', component: LibraryView, meta: { filter: Filter.FilterPhotos } }],
+  })
+  await router.push('/')
+  const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
+  await flushPromises()
+  expect(wrapper.get('h1').text()).toBe('Photos')
+  expect(engine.timeline).toHaveBeenCalledWith(
+    expect.objectContaining({ filter: Filter.FilterPhotos }),
+    expect.anything(),
+  )
+  wrapper.unmount()
+})
+
 it('leaves grid shortcuts to an open overlay and ignores composing key events', async () => {
   vi.mocked(engine.event).mockResolvedValue(event(1, 'Event'))
   const { wrapper } = await mountedTimeline()
@@ -200,5 +240,80 @@ it('says it is looking while the first scan runs, and that nothing was found onc
   await flushPromises()
   expect(wrapper.text()).toContain('No photos here yet')
   expect(wrapper.text()).toContain('Add a folder in Settings')
+  wrapper.unmount()
+})
+
+async function mountedLibrary(path = '/') {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', name: 'library', component: LibraryView },
+      { path: '/videos', name: 'videos', component: LibraryView },
+      { path: '/settings', name: 'settings', component: { template: '<div />' } },
+      { path: '/compression', name: 'compression', component: { template: '<div />' } },
+    ],
+  })
+  await router.push(path)
+  const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
+  await flushPromises()
+  return { wrapper, router, lib: useLibrary() }
+}
+
+it('keeps view controls below the search header and hides the dock until selection', async () => {
+  const { wrapper, lib } = await mountedLibrary()
+  expect(wrapper.get('header').find('search-box-stub').exists()).toBe(true)
+  expect(wrapper.get('header').find('[role="radiogroup"]').exists()).toBe(false)
+  expect(wrapper.find('[data-command="library.trashSelection"]').exists()).toBe(false)
+  lib.selectVisible([1, 2])
+  await flushPromises()
+  expect(wrapper.get('[data-command="library.trashSelection"]').text()).toContain('Trash')
+  expect(wrapper.find('[data-command="library.exportSelection"]').exists()).toBe(true)
+  await wrapper.get('[aria-label="Clear selection"]').trigger('click')
+  expect(lib.selectedIDs.size).toBe(0)
+  wrapper.unmount()
+})
+
+it('hides Videos when disabled and clears selection when the media filter changes', async () => {
+  const { wrapper, lib, router } = await mountedLibrary()
+  expect(wrapper.findAll('[role="radio"]').map((button) => button.text())).toEqual(['All', 'Photos'])
+  lib.settings.videos = true
+  lib.selectVisible([1])
+  await flushPromises()
+  await wrapper
+    .findAll('[role="radio"]')
+    .find((button) => button.text() === 'Photos')
+    ?.trigger('click')
+  await flushPromises()
+  expect(router.currentRoute.value.query.media).toBe('photos')
+  expect(lib.selectedIDs.size).toBe(0)
+  expect(engine.timeline).toHaveBeenLastCalledWith(
+    expect.objectContaining({ filter: Filter.FilterPhotos }),
+    expect.anything(),
+  )
+  wrapper.unmount()
+})
+
+it('opens the legacy Videos route with the Videos filter selected', async () => {
+  const { wrapper, lib } = await mountedLibrary('/videos')
+  lib.settings.videos = true
+  await flushPromises()
+  expect(
+    wrapper
+      .findAll('[role="radio"]')
+      .find((button) => button.text() === 'Videos')
+      ?.attributes('aria-checked'),
+  ).toBe('true')
+  expect(engine.timeline).toHaveBeenLastCalledWith(
+    expect.objectContaining({ filter: Filter.FilterVideos }),
+    expect.anything(),
+  )
+  wrapper.unmount()
+})
+
+it('shows a live Photos caption using the filtered timeline total', async () => {
+  const { wrapper, lib } = await mountedLibrary('/?media=photos')
+  lib.buckets = [{ day: '2026-10-01', count: 248 }]
+  await flushPromises()
+  expect(wrapper.get('[aria-live="polite"]').text()).toBe('248 photos')
   wrapper.unmount()
 })

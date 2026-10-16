@@ -1,4 +1,5 @@
 import { ORGANISE_FALLBACKS, ORGANISE_TOKENS } from '../bridge'
+import { trimName } from '../shared/names'
 
 // The editor's example is drawn here from one real photo, so the user sees
 // what a scheme does as they type. It follows the rules of fileops (the
@@ -126,4 +127,68 @@ export function renderExample(template: string, example: Example): string {
   const last = parts.pop()
   if (last === undefined) return ''
   return [...parts.map((dir) => safeName(dir, '')), safeName(last, ext) + ext].join('\\')
+}
+
+const templateLimit = 200
+
+/** Whether Windows forbids a character the user typed in a name (fileops forbiddenRune). */
+function forbiddenTyped(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0
+  return '<>:"|?*'.includes(ch) || code < 32 || code === 0x7f
+}
+
+/** One run of literal text, or one token, of a folder or file name in a scheme. */
+interface Segment {
+  text: string
+  token: boolean
+}
+
+/** One name of a scheme in segments, or null where fileops parseComponent refuses it. */
+function parseComponent(comp: string): Segment[] | null {
+  if (!trimName(comp)) return null
+  const segments: Segment[] = []
+  let literal = ''
+  for (let rest = comp; rest !== '';) {
+    const ch = String.fromCodePoint(rest.codePointAt(0) ?? 0)
+    if (ch === '{') {
+      const end = rest.indexOf('}')
+      const name = end < 0 ? '' : rest.slice(1, end)
+      if (end < 0 || !isToken(name)) return null
+      if (literal) segments.push({ text: literal, token: false })
+      literal = ''
+      segments.push({ text: name, token: true })
+      rest = rest.slice(end + 1)
+      continue
+    }
+    if (ch === '}' || forbiddenTyped(ch)) return null
+    literal += ch
+    rest = rest.slice(ch.length)
+  }
+  if (literal) segments.push({ text: literal, token: false })
+  const first = segments[0]
+  const last = segments[segments.length - 1]
+  if (!first || !last) return null
+  const tokens = segments.some((segment) => segment.token)
+  if (!tokens && comp.replace(/^[. ]+|[. ]+$/g, '') === '') return null
+  if (!last.token && /[. ]$/.test(last.text)) return null
+  if (!tokens && isReserved(comp)) return null
+  if ((!first.token && skipped(first.text)) || (!tokens && skipped(comp))) return null
+  return segments
+}
+
+/**
+ * Whether the engine will accept a scheme: the rules of fileops ParseTemplate,
+ * so the editor can say a scheme cannot be used before asking for a preview.
+ * The engine checks again when it plans.
+ */
+export function validTemplate(template: string): boolean {
+  if (!trimName(template) || Array.from(template).length > templateLimit) return false
+  if (/^[\\/]|^[a-z]:/i.test(template)) return false
+  const names = template.split(/[\\/]/).map(parseComponent)
+  const last = names[names.length - 1]
+  if (!last || names.some((segments) => segments === null)) return false
+  // The file keeps its own extension, so a scheme that spells it out would give "IMG.jpg.jpg".
+  const ext = last[last.length - 1]
+  const before = last[last.length - 2]
+  return !(ext?.token && ext.text === 'Ext' && before && !before.token && before.text.endsWith('.'))
 }

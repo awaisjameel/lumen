@@ -1,4 +1,4 @@
-import { shallowReactive } from 'vue'
+import { computed, shallowReactive } from 'vue'
 import { t } from '../shared/i18n'
 
 /**
@@ -30,5 +30,6 @@ export function useSaveFeedback<K extends string>(failed: (key: K) => string | u
     return note || (saved.has(key) ? t('settings.saved') : '')
   }
 
-  return { save, saving, hint }
+  const savingAny = computed(() => running.size > 0)
+  return { save, saving, hint, savingAny }
 }

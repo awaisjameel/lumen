@@ -35,9 +35,19 @@ useCommands([
     group: 'navigate',
     title: () => t('commands.goTo', { place: t(e.label) }),
     icon: e.icon,
-    available: () => inApp() && (!e.videos || lib.settings.videos),
+    available: inApp,
     run: () => router.push(e.path),
   })),
+  // Videos have no page of their own: this opens Library on its Videos
+  // filter, while videos are indexed.
+  {
+    id: 'go.videos',
+    group: 'navigate',
+    title: () => t('commands.showVideos'),
+    icon: 'video',
+    available: () => inApp() && lib.settings.videos,
+    run: () => router.push('/videos'),
+  },
   {
     id: 'app.commandPalette',
     group: 'app',

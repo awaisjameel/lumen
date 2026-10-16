@@ -5,6 +5,7 @@
 import UButton from '@nuxt/ui/components/Button.vue'
 import { useToast } from '@nuxt/ui/composables'
 import { h, nextTick, onBeforeUnmount } from 'vue'
+import { t } from '../shared/i18n'
 import { icons } from '../design/icons'
 import type { IconName } from '../design/icons'
 import { setPresenter } from '../shared/notify'
@@ -42,7 +43,8 @@ function show(n: Notification) {
   const button = (a: NotificationAction) => ({
     label: a.label,
     color: 'neutral' as const,
-    variant: 'outline' as const,
+    variant: 'ghost' as const,
+    class: 'text-(--lumen-toast-text) hover:bg-elevated focus-visible:ring-inverted',
     disabled: a.disabled,
     onClick: () => {
       if (a.disabled) return
@@ -58,22 +60,47 @@ function show(n: Notification) {
   const keeping = n.actions?.filter((a) => a.dismiss === false) ?? []
   const body = {
     title: n.title,
-    description: keeping.length
-      ? () =>
-          h('div', [
-            n.description,
-            h(
-              'div',
-              { class: 'mt-2.5 flex flex-wrap gap-1.5' },
-              keeping.map((a) => h(UButton, { size: 'xs', ...button(a) })),
-            ),
-          ])
-      : n.description,
+    description:
+      keeping.length || n.work
+        ? () =>
+            h('div', [
+              n.description,
+              n.work
+                ? h(
+                    'div',
+                    {
+                      role: 'progressbar',
+                      'aria-label': n.title,
+                      'aria-valuemin': 0,
+                      'aria-valuemax': n.work.total,
+                      'aria-valuenow': n.work.done,
+                      class: 'mt-3 h-1 overflow-hidden rounded-full bg-accented',
+                    },
+                    h('span', {
+                      class: 'block size-full origin-left bg-primary',
+                      style: {
+                        transform: `scaleX(${n.work.total > 0 ? Math.min(1, Math.max(0, n.work.done / n.work.total)) : 0})`,
+                      },
+                    }),
+                  )
+                : null,
+              keeping.length
+                ? h(
+                    'div',
+                    { class: 'mt-2.5 flex flex-wrap gap-1.5' },
+                    keeping.map((a) => h(UButton, { size: 'xs', ...button(a) })),
+                  )
+                : null,
+            ])
+        : n.description,
     icon: icons[n.icon ?? look[n.kind].icon],
     color: look[n.kind].color,
     // Nuxt UI keeps a toast with no duration for its default time: 0 is
     // "until dismissed".
-    duration: n.duration ?? 6000,
+    progress: { color: 'primary' as const, ui: { base: 'h-0.5', indicator: 'transition-none' } },
+    duration: n.duration ?? (n.kind === 'error' || n.work ? 0 : 6000),
+    type: n.kind === 'error' ? ('foreground' as const) : ('background' as const),
+    close: { 'aria-label': t('notify.dismiss'), class: 'text-(--lumen-toast-text)' },
     actions: n.actions?.filter((a) => a.dismiss !== false).map(button),
     'onUpdate:open': (open: boolean) => {
       if (!open) gone(n.id, toastID)

@@ -40,6 +40,10 @@ export interface Command {
   available?: () => boolean
   /** Whether it can run now; false shows it disabled (a save in flight). */
   enabled?: () => boolean
+  /** Why it cannot run now, shown beside it while it is disabled. */
+  reason?: () => string | undefined
+  /** It removes or hides something: drawn in the danger colour. */
+  danger?: boolean
   run: () => unknown
 }
 
@@ -120,6 +124,8 @@ export function menuItems(cmds: readonly Command[]): DropdownMenuItem[] {
     label: c.title(),
     icon: c.icon ? icons[c.icon] : undefined,
     disabled: !isEnabled(c),
+    color: c.danger ? 'error' : undefined,
+    description: isEnabled(c) ? undefined : c.reason?.(),
     onSelect: () => runCommand(c.id),
   }))
 }

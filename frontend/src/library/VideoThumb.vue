@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { SPRITE_COLS, SPRITE_ROWS, thumbUrl } from '../bridge'
+import { SPRITE_COLS, SPRITE_ROWS } from '../bridge'
 import type { GridItem } from '../bridge'
+import LibraryThumb from './LibraryThumb.vue'
 import { videoSpriteStyle } from '../shared/videoSprite'
 
 const props = defineProps<{ item: GridItem; cell: number }>()
@@ -12,7 +13,7 @@ function move(e: PointerEvent) {
   if (e.pointerType === 'touch' || !props.item.t) return
   const rect = e.currentTarget instanceof Element ? e.currentTarget.getBoundingClientRect() : null
   if (!rect?.width) return
-  frame.value = Math.min(count - 1, Math.floor(((e.clientX - rect.left) / rect.width) * count))
+  frame.value = Math.max(0, Math.min(count - 1, Math.floor(((e.clientX - rect.left) / rect.width) * count)))
 }
 
 const sprite = computed(() => {
@@ -29,7 +30,7 @@ const sprite = computed(() => {
 
 <template>
   <span class="video-thumb" @pointermove="move" @pointerleave="frame = -1">
-    <img v-show="frame < 0" :src="thumbUrl(item.id, item.t)" loading="lazy" decoding="async" draggable="false" alt="" />
+    <LibraryThumb v-show="frame < 0" :id="item.id" :thumb="item.t" />
     <span v-if="frame >= 0" class="sprite-frame" :style="sprite" />
   </span>
 </template>

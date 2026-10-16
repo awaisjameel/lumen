@@ -43,12 +43,16 @@ export const useUpdates = defineStore('updates', () => {
 
   function start(): Promise<void> {
     if (initial) return initial
+    error.value = ''
     stop = onUpdateStatus(accept)
     initial = Promise.resolve()
       .then(() => engine.updateStatus())
       .then(accept)
       .catch((e: unknown) => {
         error.value = errorText(e)
+        stop?.()
+        stop = undefined
+        initial = undefined
       })
     return initial
   }

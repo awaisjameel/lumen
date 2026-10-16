@@ -19,6 +19,8 @@ export const icons = {
   settings: 'i-lucide-settings',
   blocked: 'i-lucide-shield',
   organise: 'i-lucide-folder-tree',
+  compress: 'i-lucide-file-archive',
+  aperture: 'i-lucide-aperture',
 
   // Shell
   menu: 'i-lucide-menu',
@@ -75,6 +77,14 @@ export const icons = {
   'chevron-up': 'i-lucide-chevron-up',
   'arrow-left': 'i-lucide-arrow-left',
   'arrow-right': 'i-lucide-arrow-right',
+  'skip-back': 'i-lucide-rotate-ccw',
+  'skip-forward': 'i-lucide-rotate-cw',
+  slideshow: 'i-lucide-presentation',
+  subtitles: 'i-lucide-captions',
+  select: 'i-lucide-square-check',
+  compare: 'i-lucide-columns-2',
+  move: 'i-lucide-folder-output',
+  share: 'i-lucide-share',
 
   // Things in the library
   image: 'i-lucide-image',
@@ -100,6 +110,12 @@ export const icons = {
   document: 'i-lucide-file-text',
   sidecar: 'i-lucide-file-code',
   ocr: 'i-lucide-scan-text',
+  camera: 'i-lucide-camera',
+  globe: 'i-lucide-globe',
+  sliders: 'i-lucide-sliders-horizontal',
+  zap: 'i-lucide-zap',
+  update: 'i-lucide-circle-arrow-down',
+  'success-big': 'i-lucide-circle-check-big',
 
   // Status
   info: 'i-lucide-info',

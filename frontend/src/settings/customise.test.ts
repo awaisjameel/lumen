@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises } from '@vue/test-utils'
-import { mountInApp } from '../shared/testing'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
+import { mountInApp, recordNotifications } from '../shared/testing'
 import { engine, ErrorCode, ExportFormat, Family, FocusRing, Motion, PrefCategory, Theme } from '../bridge'
 import type * as Bridge from '../bridge'
 import { useLibrary } from '../library/store'
@@ -380,6 +380,7 @@ it('resets every category only after the user confirms, then shows what the libr
     t('settings.resetAllTitle'),
     t('settings.resetAllText'),
     t('settings.resetAll'),
+    { danger: true },
   )
   expect(engine.resetPreferences).toHaveBeenCalledExactlyOnceWith([
     PrefCategory.PrefAppearance,
@@ -438,29 +439,41 @@ it('turns a photo format off and on, and puts back what the library holds when a
 it('saves a named export preset, refuses a nameless or repeated one, and removes one', async () => {
   const prefs = usePreferences()
   const wrapper = show(ExportPresets)
-  expect(wrapper.text()).toContain(t('settings.presetNone'))
-  await wrapper.get('[data-preset-add]').trigger('submit')
+  await wrapper.get('[data-preset-new]').trigger('click')
   await flushPromises()
-  expect(wrapper.get('[role="alert"]').text()).toContain('Give the preset a name')
+  const dialog = new DOMWrapper(document.body)
+  expect(wrapper.text()).toContain(t('settings.presetNone'))
+  await dialog.get('form').trigger('submit')
+  await flushPromises()
+  expect(dialog.get('[role="alert"]').text()).toContain('Give the preset a name')
   expect(prefs.prefs.exportPresets).toEqual([])
 
-  await wrapper.get('[data-preset-name]').setValue('  Web  ')
-  await wrapper.get('form').trigger('submit')
+  await dialog.get('[data-preset-name]').setValue('  Web  ')
+  await dialog.get('form').trigger('submit')
   await flushPromises()
   expect(prefs.prefs.exportPresets).toEqual([
     { name: 'Web', format: ExportFormat.ExportJPEG, side: 4096, quality: 92, adjust: true },
   ])
   expect(wrapper.get('[data-preset="Web"]').text()).toContain('quality 92')
 
-  await wrapper.get('[data-preset-name]').setValue('web')
-  await wrapper.get('form').trigger('submit')
+  await wrapper.get('[data-preset-new]').trigger('click')
   await flushPromises()
-  expect(wrapper.get('[role="alert"]').text()).toBe(t('settings.presetNameTaken'))
+  await dialog.get('[data-preset-name]').setValue('web')
+  await dialog.get('form').trigger('submit')
+  await flushPromises()
+  expect(dialog.get('[role="alert"]').text()).toBe(t('settings.presetNameTaken'))
   expect(prefs.prefs.exportPresets).toHaveLength(1)
 
+  const cancel = dialog.findAll('button').find((button) => button.text() === t('common.cancel'))
+  await cancel?.trigger('click')
+  const notices = recordNotifications()
   await wrapper.get('[data-preset="Web"] button').trigger('click')
   await flushPromises()
   expect(prefs.prefs.exportPresets).toEqual([])
+  notices.find('settings.presetRemoved')?.actions?.[0]?.run()
+  await flushPromises()
+  expect(prefs.prefs.exportPresets[0]?.name).toBe('Web')
+  notices.stop()
 })
 
 it('explains a preset name the engine folds to an existing name and keeps it available to edit', async () => {
@@ -469,10 +482,13 @@ it('explains a preset name the engine folds to an existing name and keeps it ava
   await prefs.setExportPresets([existing])
   vi.mocked(engine.setPreferences).mockImplementationOnce((p) => Promise.resolve({ ...p, exportPresets: [existing] }))
   const wrapper = show(ExportPresets)
-  await wrapper.get('[data-preset-name]').setValue('ſ')
-  await wrapper.get('form').trigger('submit')
+  await wrapper.get('[data-preset-new]').trigger('click')
   await flushPromises()
-  expect(wrapper.get('[role="alert"]').text()).toBe(t('settings.presetNameTaken'))
-  expect(wrapper.get<HTMLInputElement>('[data-preset-name]').element.value).toBe('ſ')
+  const dialog = new DOMWrapper(document.body)
+  await dialog.get('[data-preset-name]').setValue('ſ')
+  await dialog.get('form').trigger('submit')
+  await flushPromises()
+  expect(dialog.get('[role="alert"]').text()).toBe(t('settings.presetNameTaken'))
+  expect(dialog.get<HTMLInputElement>('[data-preset-name]').element.value).toBe('ſ')
   expect(prefs.prefs.exportPresets).toEqual([existing])
 })

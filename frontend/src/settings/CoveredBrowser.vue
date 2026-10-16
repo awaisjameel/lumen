@@ -5,17 +5,16 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
-import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { BlockMode } from '../bridge'
 import type { CoveredItem } from '../bridge'
 import { listFormat, t } from '../shared/i18n'
 import { icons } from '../design/icons'
 import { runCommand, useCommands } from '../shared/commands'
+import { shortcutsSuspended } from '../shared/overlay'
 import { observeResize } from '../shared/observeResize'
 import FeatureState from '../shared/FeatureState.vue'
 import MediaTile from '../shared/MediaTile.vue'
-import SelectionBar from '../shared/SelectionBar.vue'
 import { buildLayout, GAP, rowHeight } from '../library/layout'
 import VideoThumb from '../library/VideoThumb.vue'
 import Viewer from '../library/Viewer.vue'
@@ -34,7 +33,17 @@ onMounted(() => {
     if (scroller.value) width.value = scroller.value.clientWidth
   })
 })
-onBeforeUnmount(() => stopResize?.())
+function onKey(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || event.defaultPrevented || shortcutsSuspended()) return
+  if (props.covered.selected.size) props.covered.clearSelection()
+  else props.covered.close()
+  event.preventDefault()
+}
+onMounted(() => window.addEventListener('keydown', onKey))
+onBeforeUnmount(() => {
+  stopResize?.()
+  window.removeEventListener('keydown', onKey)
+})
 
 const labelOnly = computed(() => props.covered.block?.mode === BlockMode.BlockLabel)
 const layout = computed(() =>
@@ -114,23 +123,21 @@ useCommands([
       <small v-if="!covered.loading" class="text-muted">{{ t('covered.count', { n: covered.items.length }) }}</small>
     </header>
     <UAlert v-if="labelOnly" color="neutral" variant="subtle" :title="t('covered.stillShown')" />
-    <SelectionBar
-      v-if="covered.selected.size"
-      :summary="t('blocked.selected', { n: covered.selected.size })"
-      :hint="t('covered.trashText')"
-    >
-      <UButton
-        :disabled="covered.trashing"
-        :loading="covered.trashing"
-        :icon="icons.trash"
-        @click="runCommand('blocked.covered.trash')"
-        >{{ t('trash.move') }}</UButton
+    <UAlert color="warning" variant="subtle" :icon="icons.warning" :title="t('covered.trashText')" class="mt-4" />
+    <UAlert v-if="covered.error" data-covered-error color="error" :title="covered.error" role="alert" class="mt-4">
+      <template #actions
+        ><UButton :disabled="covered.trashing" @click="covered.retry">{{ t('blocked.retry') }}</UButton></template
       >
-      <UButton @click="runCommand('blocked.covered.clear')">{{ t('blocked.clearSelection') }}</UButton>
-    </SelectionBar>
+    </UAlert>
     <FeatureState v-if="covered.loading" kind="loading" :title="t('covered.loading')" />
-    <FeatureState v-else-if="!covered.items.length" kind="empty" icon="photos" :title="t('covered.empty')" />
-    <div ref="scroller" class="scroller" @scroll.passive="covered.touch">
+    <FeatureState
+      v-else-if="!covered.items.length && !covered.error"
+      kind="empty"
+      icon="photos"
+      :title="t('covered.empty')"
+      :text="t('covered.emptyHint')"
+    />
+    <div ref="scroller" class="scroller" role="group" :aria-label="t('covered.grid')" @scroll.passive="covered.touch">
       <div class="rows" :style="{ height: virtualizer.getTotalSize() + 'px' }">
         <div
           v-for="row in visible"
@@ -142,6 +149,7 @@ useCommands([
             <div class="tile-wrap" :style="{ width: layout.cell + 'px', height: layout.cell + 'px' }">
               <button
                 class="cell"
+                data-covered-preview
                 :aria-label="t(item.v ? 'covered.openVideo' : 'covered.openPhoto')"
                 @click="covered.view(item.id)"
               >
@@ -151,17 +159,24 @@ useCommands([
                   :video="item.v"
                   :duration-ms="item.d"
                   :selected="covered.selected.has(item.id)"
+                  checkable
+                  selecting
+                  @check="!covered.trashing && covered.select(item.id, !covered.selected.has(item.id))"
                 >
                   <template v-if="item.v && item.t" #media><VideoThumb :item="item" :cell="layout.cell" /></template>
                 </MediaTile>
               </button>
-              <UCheckbox
-                class="tile-select"
-                :model-value="covered.selected.has(item.id)"
+              <button
+                type="button"
+                class="sr-only accessible-check"
+                data-covered-select
                 :aria-label="t('blocked.selectMedia')"
+                :aria-pressed="covered.selected.has(item.id)"
                 :disabled="covered.trashing"
-                @update:model-value="covered.select(item.id, $event === true)"
-              />
+                @click="covered.select(item.id, !covered.selected.has(item.id))"
+              >
+                {{ t('blocked.selectMedia') }}
+              </button>
             </div>
             <p v-if="item.hiddenBy.length" class="also" :title="names(item)">
               {{ t('covered.hiddenBy', { names: names(item) }) }}
@@ -175,6 +190,16 @@ useCommands([
 </template>
 
 <style scoped>
+.covered {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 1.5rem var(--lumen-page-x);
+  overflow: auto;
+}
+.covered > :not(.scroller) {
+  flex-shrink: 0;
+}
 .head {
   display: flex;
   flex-wrap: wrap;
@@ -191,10 +216,10 @@ useCommands([
   overflow-wrap: anywhere;
 }
 .scroller {
-  height: calc(100vh - 280px);
-  min-height: 320px;
+  flex: 1;
+  min-height: 8rem;
   overflow-y: auto;
-  margin-top: 0.75rem;
+  margin-top: 1.25rem;
 }
 .rows {
   position: relative;
@@ -221,17 +246,25 @@ useCommands([
   height: 100%;
   padding: 0;
   border: 0;
-  border-radius: var(--ui-radius);
+  border-radius: var(--lumen-r-sm);
   background: var(--lumen-placeholder);
   cursor: pointer;
 }
-.tile-select {
-  position: absolute;
-  top: 0.375rem;
-  left: 0.375rem;
-  padding: 0.125rem;
-  border-radius: var(--ui-radius);
-  background: var(--ui-bg);
+.accessible-check:focus-visible {
+  clip: auto;
+  clip-path: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 3;
+  white-space: normal;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--ui-primary);
+  color: var(--lumen-on-primary);
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
 }
 .also {
   margin: 0;

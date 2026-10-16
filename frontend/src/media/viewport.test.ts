@@ -19,3 +19,10 @@ it('constrains the pan after a viewport resize', () => {
     y: -50,
   })
 })
+
+it('bounds repeated zooming at the existing minimum and eight times source size', () => {
+  expect(zoomAt(viewport, 100).scale).toBe(8)
+  expect(zoomAt(viewport, 0).scale).toBe(0.1)
+  const small = { ...viewport, width: 100, height: 60 }
+  expect(zoomAt(small, 0).scale).toBe(fitScale(small))
+})

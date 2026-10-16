@@ -12,15 +12,21 @@ import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import { assignmentConflict, canReassign, shortcutCatalogue, shortcutZones, zoneOf } from '../shared/shortcuts'
 import type { ShortcutEntry } from '../shared/shortcuts'
+import { useRowFilter } from './rowFilter'
 
+const props = withDefaults(defineProps<{ query?: string }>(), { query: '' })
 const prefs = usePreferences()
+const matches = useRowFilter(() => props.query)
 
 const zones = computed(() =>
   shortcutZones.map((zone) => ({
     zone,
     label: t(`settings.shortcutZone.${zone}`),
     entries: shortcutCatalogue
-      .filter((entry) => zoneOf(entry) === zone)
+      .filter(
+        (entry) =>
+          zoneOf(entry) === zone && (matches('settings.shortcuts', 'settings.shortcutsHint') || matches(entry.title)),
+      )
       .map((entry) => {
         const keys = keysOf(entry)
         return {
@@ -109,11 +115,13 @@ function resetAll() {
         t('settings.shortcutResetAll')
       }}</UButton>
     </div>
-    <section v-for="z in zones" :key="z.zone" :aria-label="z.label">
+    <section v-for="z in zones.filter((zone) => zone.entries.length)" :key="z.zone" :aria-label="z.label">
       <h3>{{ z.label }}</h3>
       <ul>
         <li v-for="row in z.entries" :key="row.entry.id" :data-shortcut="row.entry.id">
-          <span class="title">{{ row.title }}</span>
+          <span class="title"
+            >{{ row.title }}<span v-if="row.changed" class="modified-dot" :aria-label="t('settings.modified')"
+          /></span>
           <span class="keys" data-shortcut-keys>
             <UKbd v-for="cap in row.caps" :key="cap" :value="cap" />
             <span v-if="!row.caps.length" class="text-dimmed">{{ t('settings.shortcutNone') }}</span>
@@ -166,6 +174,17 @@ function resetAll() {
   </div>
 </template>
 <style scoped>
+.shortcuts {
+  padding: 1.25rem;
+}
+.modified-dot {
+  display: inline-block;
+  width: 0.375rem;
+  height: 0.375rem;
+  margin-left: 0.5rem;
+  border-radius: 50%;
+  background: var(--ui-primary);
+}
 .intro {
   display: flex;
   flex-wrap: wrap;

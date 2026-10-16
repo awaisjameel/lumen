@@ -4,11 +4,23 @@ import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, shallowRef } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { mountInApp } from '../shared/testing'
+import { mountInApp, recordNotifications } from '../shared/testing'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import type { Sel } from './store'
-import { AlbumKind, BlockKind, DateSource, engine, Kind, MAX_NAME_LEN, onLibraryChanged, Playback } from '../bridge'
+import {
+  AlbumKind,
+  BlockKind,
+  DateSource,
+  engine,
+  INSPECTOR_WIDTH_DEFAULT,
+  Kind,
+  MAX_NAME_LEN,
+  onLibraryChanged,
+  Playback,
+  TagKind,
+  TagSource,
+} from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Block from '../shared/block'
 import type { AssetDetail, Changes, Event, Face } from '../bridge'
@@ -49,6 +61,10 @@ vi.mock('../bridge', async (importOriginal) => ({
     createAlbum: vi.fn(),
     setAlbumItem: vi.fn(),
     place: vi.fn(),
+    untagAsset: vi.fn().mockResolvedValue(undefined),
+    rejectFaces: vi.fn().mockResolvedValue(undefined),
+    nameFaces: vi.fn().mockResolvedValue(5),
+    openMedia: vi.fn().mockResolvedValue(undefined),
     tagAsset: vi.fn(),
     showInFolder: vi.fn<typeof Bridge.engine.showInFolder>().mockResolvedValue(undefined),
     event: vi.fn(),
@@ -236,34 +252,50 @@ it('ignores an older live metadata response after changing selection', async () 
   expect(wrapper.text()).not.toContain('Stale indexed camera')
 })
 
-it('validates full Unicode names without truncation and rejects overlong tag and album drafts', async () => {
+async function press(label: string) {
+  const button = new DOMWrapper(document.body).findAll('button').find((button) => button.text() === label)
+  if (!button) throw new Error(`Missing ${label}`)
+  await button.trigger('click')
+  await flushPromises()
+}
+
+it('validates full Unicode tag names in the add tag dialog without truncation', async () => {
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
-  const tag = wrapper.get<HTMLInputElement>('[data-tag-draft]')
-  const album = wrapper.get<HTMLInputElement>('.album-new input')
+  await press(t('details.addTag'))
+  const body = new DOMWrapper(document.body)
+  const tag = body.get<HTMLInputElement>('[data-tag-draft]')
   expect(tag.attributes('maxlength')).toBeUndefined()
-  expect(album.attributes('maxlength')).toBeUndefined()
   const overlong = '😀'.repeat(MAX_NAME_LEN + 1)
   await tag.setValue(overlong)
-  await album.setValue(overlong)
   expect(tag.element.value).toBe(overlong)
   expect(tag.attributes('aria-invalid')).toBe('true')
-  expect(album.attributes('aria-invalid')).toBe('true')
-  expect(wrapper.get<HTMLButtonElement>('.album-new button').element.disabled).toBe(true)
-  expect(wrapper.findAll('[role="alert"]')).toHaveLength(2)
+  expect(body.get('[role="alert"]').text()).toContain(t('error.invalidName', { max: MAX_NAME_LEN }))
   await tag.trigger('keydown', { key: 'Enter' })
-  await wrapper.get('.album-new').trigger('submit')
   expect(engine.tagAsset).not.toHaveBeenCalled()
-  expect(engine.createAlbum).not.toHaveBeenCalled()
   const valid = '😀'.repeat(MAX_NAME_LEN)
   await tag.setValue(` ${valid} `)
-  await album.setValue(` ${valid} `)
   expect(tag.attributes('aria-invalid')).toBeUndefined()
-  expect(album.attributes('aria-invalid')).toBeUndefined()
-  await tag.trigger('keydown', { key: 'Enter' })
-  await wrapper.get('.album-new').trigger('submit')
-  await flushPromises()
+  await press(t('details.tag.save'))
   expect(engine.tagAsset).toHaveBeenCalledWith(1, valid)
+})
+
+it('validates full Unicode album names in the creation dialog without truncation', async () => {
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  await press(t('albums.createForItem'))
+  const body = new DOMWrapper(document.body)
+  const album = body.get<HTMLInputElement>(`input[aria-label="${t('albums.createForItem')}"]`)
+  expect(album.attributes('maxlength')).toBeUndefined()
+  const overlong = '😀'.repeat(MAX_NAME_LEN + 1)
+  await album.setValue(overlong)
+  expect(album.attributes('aria-invalid')).toBe('true')
+  await album.trigger('keydown', { key: 'Enter' })
+  expect(engine.createAlbum).not.toHaveBeenCalled()
+  const valid = '😀'.repeat(MAX_NAME_LEN)
+  await album.setValue(` ${valid} `)
+  await body.get('form').trigger('submit')
+  await flushPromises()
   expect(engine.createAlbum).toHaveBeenCalledWith(valid, AlbumKind.AlbumManual, emptyRule(), [1])
 })
 
@@ -286,15 +318,20 @@ it('does not clear the next selection draft when album creation finishes', async
   vi.mocked(engine.createAlbum).mockReturnValueOnce(pending.promise)
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
-  await wrapper.get('.album-new input').setValue('First album')
-  await wrapper.get('.album-new').trigger('submit')
+  await press(t('albums.createForItem'))
+  await new DOMWrapper(document.body).get(`input[aria-label="${t('albums.createForItem')}"]`).setValue('First album')
+  await new DOMWrapper(document.body).get('form').trigger('submit')
   await select({ day: 'results', id: 2 })
   await flushPromises()
-  await wrapper.get('.album-new input').setValue('Second album')
+  await press(t('albums.createForItem'))
+  await new DOMWrapper(document.body).get(`input[aria-label="${t('albums.createForItem')}"]`).setValue('Second album')
   pending.resolve(4)
   await flushPromises()
   expect(engine.createAlbum).toHaveBeenCalledWith('First album', AlbumKind.AlbumManual, emptyRule(), [1])
-  expect(wrapper.get<HTMLInputElement>('.album-new input').element.value).toBe('Second album')
+  expect(
+    new DOMWrapper(document.body).get<HTMLInputElement>(`input[aria-label="${t('albums.createForItem')}"]`).element
+      .value,
+  ).toBe('Second album')
 })
 
 it('puts an album checkbox back when the change fails', async () => {
@@ -402,12 +439,23 @@ it('states missing metadata rather than inventing a date, camera or location', a
   vi.mocked(engine.asset).mockResolvedValueOnce({ ...detail(1), width: 0, height: 0, size: 0 })
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
-  for (const title of ['Overview', 'Camera', 'Location', 'People', 'Tags', 'Albums', 'Files']) {
+  for (const title of ['Overview', 'Camera', 'Location', 'People', 'Things', 'Albums', 'Files']) {
     expect(wrapper.text()).toContain(title)
   }
-  expect(wrapper.findAll('.meta-row').filter((row) => row.text().includes('Not available'))).toHaveLength(12)
+  expect(wrapper.findAll('.meta-row').filter((row) => row.text().includes('Not available'))).toHaveLength(9)
   expect(wrapper.text()).toContain('Photo')
   expect(wrapper.text()).toContain(t('details.dateFrom.file'))
+})
+
+it('labels a corrected date with its retained original', async () => {
+  vi.mocked(engine.asset).mockResolvedValueOnce({
+    ...detail(1),
+    dateFrom: DateSource.DateFromUser,
+    originalDate: { takenAt: 1, from: DateSource.DateFromFile },
+  })
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(wrapper.text()).toContain('Corrected by you · original kept')
 })
 
 it('resizes the inline inspector from its left edge and saves through the preference owner', async () => {
@@ -528,4 +576,87 @@ it('lists only what a video records and offers to copy only the values it has', 
   expect(section.find(`button[aria-label="${t('files.copyField', { name: t('details.frameRate') })}"]`).exists()).toBe(
     false,
   )
+})
+
+it('opens the medium-width inspector as a sheet and Escape returns focus to the grid trigger', async () => {
+  vi.stubGlobal('innerWidth', 720)
+  const trigger = document.createElement('button')
+  trigger.textContent = 'Grid photo'
+  document.body.append(trigger)
+  trigger.focus()
+  const lib = useLibrary()
+  lib.showDetails = true
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(wrapper.find('aside').exists()).toBe(false)
+  const dialog = new DOMWrapper(document.body).get('[role="dialog"]')
+  // The sheet keeps the width the user gave the inline inspector.
+  expect(dialog.get('[data-slot="body"] > div').attributes('style')).toContain(`${INSPECTOR_WIDTH_DEFAULT}px`)
+  await dialog.trigger('keydown', { key: 'Escape' })
+  await flushPromises()
+  expect(lib.showDetails).toBe(false)
+  wrapper.unmount()
+  await flushPromises()
+  expect(document.activeElement).toBe(trigger)
+})
+
+it('shows a selection summary instead of a focused item’s private metadata for several selected items', async () => {
+  useLibrary().selectedIDs = new Set([1, 2, 3])
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(wrapper.text()).toContain(t('details.multiple', { n: '3' }))
+  expect(wrapper.text()).not.toContain('Current')
+  expect(wrapper.find('[data-edit-date]').exists()).toBe(false)
+})
+
+it('removes a suggested tag immediately and Undo adds it back as a user choice', async () => {
+  const notices = recordNotifications()
+  try {
+    vi.mocked(engine.assetTags)
+      .mockResolvedValueOnce([{ id: 7, name: 'Sunset', source: TagSource.TagByAI, kind: TagKind.$zero, score: 0.9 }])
+      .mockResolvedValueOnce([])
+    wrapper = mountDetails({ day: 'results', id: 1 })
+    await flushPromises()
+    await wrapper.get(`button[aria-label="${t('details.removeTag', { name: 'Sunset' })}"]`).trigger('click')
+    await flushPromises()
+    expect(engine.untagAsset).toHaveBeenCalledWith(1, 7)
+    notices.find('tag-1-7')?.actions?.[0]?.run()
+    await flushPromises()
+    expect(engine.tagAsset).toHaveBeenCalledWith(1, 'Sunset')
+  } finally {
+    notices.stop()
+  }
+})
+
+it('corrects a wrong named face and Undo restores its named membership', async () => {
+  const notices = recordNotifications()
+  try {
+    vi.mocked(engine.assetFaces)
+      .mockResolvedValueOnce([faceOf(11, 'Amina')])
+      .mockResolvedValueOnce([])
+    wrapper = mountDetails({ day: 'results', id: 1 })
+    await flushPromises()
+    await wrapper.get('button[aria-label="Not Amina"]').trigger('click')
+    await flushPromises()
+    expect(engine.rejectFaces).toHaveBeenCalledWith(5, [11])
+    notices.find('face-11')?.actions?.[0]?.run()
+    await flushPromises()
+    expect(engine.nameFaces).toHaveBeenCalledWith([11], 'Amina')
+  } finally {
+    notices.stop()
+  }
+})
+
+it('offers recovery with the exact local path after a Windows hand-off fails', async () => {
+  vi.mocked(engine.asset).mockResolvedValueOnce({ ...detail(1), paths: ['C:/Photos/a.jpg'] })
+  vi.mocked(engine.openMedia).mockRejectedValueOnce(new Error('Drive disconnected'))
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  await wrapper.get(`button[aria-label="${t('files.open')}"]`).trigger('click')
+  await flushPromises()
+  const body = new DOMWrapper(document.body)
+  expect(body.get('[role="dialog"]').text()).toContain('C:/Photos/a.jpg')
+  expect(body.get('[role="alert"]').text()).toContain('Drive disconnected')
+  await press(t('common.retry'))
+  expect(engine.openMedia).toHaveBeenLastCalledWith(1, 'C:/Photos/a.jpg', false)
 })

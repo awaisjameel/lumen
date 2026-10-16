@@ -290,3 +290,38 @@ it('shows a still original as ever when animations are held, and an animated one
     free.unmount()
   }
 })
+
+it('retains the preview after a viewing-copy failure and retries the same page', async () => {
+  vi.mocked(engine.render).mockReset().mockRejectedValueOnce(new Error('Drive disconnected')).mockResolvedValue(render)
+  const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 1, width: 6000, height: 4000, detail: detail(1) } })
+  try {
+    await flushPromises()
+    expect(wrapper.get('img.preview').isVisible()).toBe(true)
+    expect(wrapper.get('[role="alert"]').text()).toContain('The preview remains available.')
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(engine.render).toHaveBeenCalledTimes(2)
+    await wrapper.get('img.original').trigger('load')
+    expect(wrapper.get('img.original').isVisible()).toBe(true)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('exposes zoom limits without changing the pointer-centred zoom range', async () => {
+  const photo = { ...detail(1), width: 600, height: 400, caps: { ...detail(1).caps, original: true } }
+  const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 1, width: 600, height: 400, detail: photo } })
+  try {
+    await flushPromises()
+    wrapper.vm.zoom(100000)
+    expect(wrapper.vm.scale).toBe(800)
+    expect(wrapper.vm.canZoomIn).toBe(false)
+    expect(wrapper.vm.canZoomOut).toBe(true)
+    wrapper.vm.zoom(0.000001)
+    expect(wrapper.vm.canZoomOut).toBe(false)
+    expect(wrapper.vm.canZoomIn).toBe(true)
+  } finally {
+    wrapper.unmount()
+  }
+})

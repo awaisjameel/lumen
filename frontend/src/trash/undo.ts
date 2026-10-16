@@ -26,3 +26,26 @@ export function showTrashUndo(ids: number[], restore: (ids: number[]) => Promise
     ],
   })
 }
+
+/** The id of the notification that offers to undo a restore. */
+export const RESTORE_UNDO_NOTIFICATION = 'trash.restoreUndo'
+
+/** Returns only the restored items to Lumen's Trash when Undo is chosen. */
+export function showRestoreUndo(ids: number[], trash: (ids: number[]) => Promise<unknown>): void {
+  const restored = [...ids]
+  notify({
+    id: RESTORE_UNDO_NOTIFICATION,
+    kind: 'success',
+    title: t('trash.restored', { n: restored.length }),
+    duration: 8000,
+    actions: [
+      {
+        label: t('trash.undo'),
+        run: () => {
+          dismiss(RESTORE_UNDO_NOTIFICATION)
+          void trash(restored).catch(reportError)
+        },
+      },
+    ],
+  })
+}

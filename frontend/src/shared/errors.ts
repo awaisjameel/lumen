@@ -16,6 +16,10 @@ import { notify } from './notify'
 
 // Failures the engine names (ErrorCode) read in the UI's own words.
 const codeText: Record<ErrorCode, MessageKey> = {
+  [ErrorCode.CorrectionSelection]: 'error.correctionSelection',
+  [ErrorCode.CorrectionDate]: 'error.correctionDate',
+  [ErrorCode.CorrectionLocation]: 'error.correctionLocation',
+  [ErrorCode.InvalidFilter]: 'error.invalidFilter',
   [ErrorCode.UpdateUnavailable]: 'update.unavailable',
   [ErrorCode.UpdateBusy]: 'update.busy',
   [ErrorCode.UpdateInvalid]: 'update.invalid',
@@ -155,14 +159,14 @@ export const ERROR_NOTIFICATION = 'error'
 
 /**
  * For failures of something the user did that has no place of its own to
- * say so (the favourite heart, the pause button): shown for a few seconds.
+ * say so (the favourite heart, the pause button): kept until dismissed.
  */
 export function reportError(e: unknown): void {
   logError(e)
   showError(errorText(e))
 }
 
-/** Says text as a failure notification for a few seconds. */
+/** Keeps a failure notification visible until explicitly dismissed. */
 function showError(text: string): void {
-  notify({ id: ERROR_NOTIFICATION, kind: 'error', title: text, duration: 6000 })
+  notify({ id: ERROR_NOTIFICATION, kind: 'error', title: text, duration: 0 })
 }

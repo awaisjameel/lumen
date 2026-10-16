@@ -1,18 +1,23 @@
-/* Lumen's design tokens, over Tailwind CSS 4 and Nuxt UI. Photo-first:
-   neutral surfaces so images carry the colour, one restrained accent, system
-   fonts and Windows 11 proportions. Nothing here is fetched: fonts are the
-   system's and icons are bundled (see icons.ts).
+/* Lumen's design tokens, over Tailwind CSS 4 and Nuxt UI: the "Daylight"
+   and "Darkroom" themes. Photo-first: navy-tinted neutrals carry the chrome
+   so images carry the colour, one accent (cobalt unless the user chooses
+   another), system fonts and Windows 11 proportions. The warm "aperture
+   light" (gold, from the brand mark) is reserved for Lumen's own activity
+   and AI suggestions, never for controls. Nothing here is fetched: fonts are
+   the system's and icons are bundled (see icons.ts).
 
    Nuxt UI's semantic variables (--ui-bg, --ui-text, --ui-primary…) are the
-   colour tokens; components use its utilities (bg-default, text-muted,
-   border-default, text-primary). The --lumen-* tokens add what Nuxt UI has
-   no name for: layout sizes, density, motion, layers and the viewer. */
+   colour tokens its components read; Lumen's own components use them too
+   where the meaning is the same. The --lumen-* tokens add what Nuxt UI has
+   no name for: the shell's surfaces, elevation, Lumen's light, layout
+   sizes, density, radii, motion, layers and the viewer. */
 @import 'tailwindcss';
 @import '@nuxt/ui';
 
 @theme static {
   --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
   --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, monospace;
   /* Content-width breakpoints (see breakpoints.ts): the shell and pages
      respond to the room they have, as container queries. */
   --container-medium: 900px;
@@ -21,100 +26,185 @@
 
 :root {
   color-scheme: light;
-  --ui-radius: 0.375rem;
+  /* Nuxt UI derives its radii from this: md 7.5px, lg 10px, xl 15px. */
+  --ui-radius: 0.3125rem;
 
-  /* Surfaces and text, light. Small counts keep 4.5:1 on every surface. */
-  --ui-bg: #ffffff;
-  --ui-bg-muted: #f5f5f6;
-  --ui-bg-elevated: #ececef;
-  --ui-bg-accented: #e2e2e6;
-  --ui-border: rgb(0 0 0 / 0.09);
-  --ui-border-muted: rgb(0 0 0 / 0.06);
-  --ui-border-accented: rgb(0 0 0 / 0.16);
-  --ui-text-dimmed: #6c6c76;
-  --ui-text-muted: #5c5c66;
-  --ui-text-toned: #45454d;
-  --ui-text: #2c2c33;
-  --ui-text-highlighted: #1b1b1f;
-  /* White text on the accent needs a deeper shade than Nuxt UI's 500. */
-  --ui-primary: var(--ui-color-primary-600);
+  /* Daylight. The page sheet (--ui-bg) sits on a slightly deeper window
+     base; small text keeps 4.5:1 on every surface. */
+  --ui-bg: #f9fafc;
+  --ui-bg-muted: #f1f3f7;
+  --ui-bg-elevated: #e9ecf2;
+  --ui-bg-accented: #e3e6ed;
+  --ui-border: rgb(20 30 60 / 0.09);
+  --ui-border-muted: rgb(20 30 60 / 0.06);
+  --ui-border-accented: rgb(20 30 60 / 0.16);
+  --ui-text-dimmed: #626a7c;
+  --ui-text-muted: #555d6f;
+  --ui-text-toned: #464e60;
+  --ui-text: #2a3040;
+  --ui-text-highlighted: #151a26;
+  --ui-primary: #2f5fe0;
+
+  /* Surfaces, from the window outwards. */
+  --lumen-bg-base: #eceef3;
+  --lumen-bg-canvas: var(--ui-bg);
+  --lumen-bg-sunken: #f1f3f7;
+  --lumen-bg-raised: #ffffff;
+  --lumen-bg-overlay: #ffffff;
+  --lumen-bg-hover: rgb(20 30 60 / 0.055);
+  --lumen-bg-active: rgb(20 30 60 / 0.09);
+  --lumen-placeholder: #e3e6ed;
+
+  /* The accent as a quiet fill (selection, "on" toggles) and its text. */
+  --lumen-primary-hover: color-mix(in oklab, var(--ui-primary) 86%, #000);
+  --lumen-primary-soft: color-mix(in srgb, var(--ui-primary) 10%, transparent);
+  --lumen-primary-soft-2: color-mix(in srgb, var(--ui-primary) 18%, transparent);
+  --lumen-primary-text: color-mix(in oklab, var(--ui-primary) 86%, #000);
+  --lumen-on-primary: #ffffff;
+
+  /* Lumen's own light: its activity and its suggestions. */
+  --lumen-light: #e9a31f;
+  --lumen-light-soft: rgb(245 184 61 / 0.16);
+  --lumen-light-text: #8a5a00;
+  --lumen-heart: #e5484d;
+
+  /* Elevation: resting cards, raised panels, overlays. */
+  --lumen-shadow-1: 0 1px 2px rgb(15 25 55 / 0.06), 0 1px 1px rgb(15 25 55 / 0.04);
+  --lumen-shadow-2: 0 2px 4px rgb(15 25 55 / 0.05), 0 8px 24px rgb(15 25 55 / 0.08);
+  --lumen-shadow-3: 0 4px 12px rgb(15 25 55 / 0.08), 0 24px 64px rgb(15 25 55 / 0.16);
+  --lumen-backdrop: rgb(10 14 26 / 0.42);
+  --lumen-toast-bg: #1b2030;
+  --lumen-toast-text: #eef0f5;
+
+  /* Radii, concentric: an outer corner is the inner one plus its padding. */
+  --lumen-r-xs: 4px;
+  --lumen-r-sm: 6px;
+  --lumen-r-md: 8px;
+  --lumen-r-lg: 12px;
+  --lumen-r-xl: 16px;
 
   /* Layout */
-  --lumen-topbar-h: 3.25rem;
-  --lumen-page-x: 1.25rem;
+  --lumen-rail-w: 4rem;
+  --lumen-topbar-h: 3.5rem;
+  --lumen-page-x: 1.5rem;
   --lumen-control-h: 2rem;
   --lumen-row-h: 2.25rem;
   --lumen-gap: 0.75rem;
-  --lumen-card-min: 9.75rem;
+  --lumen-card-min: 12.5rem;
 
-  /* Motion: quick for controls, a little longer for panels. Opacity and
-     transform only; grid tiles do not animate. */
-  --lumen-motion-control: 120ms;
-  --lumen-motion-panel: 190ms;
-  --lumen-ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Motion: quick for controls, longer for panels and arrivals; exits are
+     faster than entrances. Opacity and transform only; grid tiles do not
+     animate while the grid scrolls. */
+  --lumen-d-fast: 120ms;
+  --lumen-d-base: 200ms;
+  --lumen-d-slow: 320ms;
+  --lumen-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --lumen-ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --lumen-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 
   /* Layers. Nuxt UI's portalled overlays sit above all of these. */
   --lumen-z-sticky: 10;
   --lumen-z-panel: 20;
+  --lumen-z-dock: 25;
   --lumen-z-viewer: 30;
   --lumen-z-portal: 40;
 
-  /* Elevation */
-  --lumen-shadow: 0 8px 32px rgb(0 0 0 / 0.14);
-  --lumen-backdrop: rgb(0 0 0 / 0.45);
-  --lumen-placeholder: #e2e2e6;
-
   /* The viewer is dark in either theme, as photo viewers are. */
-  --lumen-viewer-bg: #0c0c0e;
-  --lumen-viewer-text: #ececef;
-  --lumen-viewer-text-muted: #b4b4bc;
+  --lumen-viewer-bg: #07080b;
+  --lumen-viewer-text: #eef0f5;
+  --lumen-viewer-text-muted: #b4bac7;
   --lumen-viewer-control: rgb(255 255 255 / 0.1);
+  --lumen-viewer-glass: rgb(22 26 36 / 0.72);
 }
 
-/* The theme owner (appearance.ts) sets .dark from the user's choice and,
-   for "system", from Windows. */
+/* Darkroom. The theme owner (appearance.ts) sets .dark from the user's
+   choice and, for "system", from Windows. */
 .dark {
   color-scheme: dark;
-  --ui-bg: #111113;
-  --ui-bg-muted: #1a1a1d;
-  --ui-bg-elevated: #242428;
-  --ui-bg-accented: #303036;
-  --ui-border: rgb(255 255 255 / 0.08);
-  --ui-border-muted: rgb(255 255 255 / 0.06);
-  --ui-border-accented: rgb(255 255 255 / 0.16);
-  --ui-text-dimmed: #8f8f99;
-  --ui-text-muted: #a4a4ad;
-  --ui-text-toned: #c4c4cc;
-  --ui-text: #dedee3;
-  --ui-text-highlighted: #f4f4f6;
-  --ui-primary: var(--ui-color-primary-400);
-  --lumen-shadow: 0 8px 32px rgb(0 0 0 / 0.5);
-  --lumen-placeholder: #1f1f23;
+  --ui-bg: #10131a;
+  --ui-bg-muted: #161a23;
+  --ui-bg-elevated: #1f2430;
+  --ui-bg-accented: #262c3a;
+  --ui-border: rgb(200 215 255 / 0.08);
+  --ui-border-muted: rgb(200 215 255 / 0.06);
+  --ui-border-accented: rgb(200 215 255 / 0.15);
+  --ui-text-dimmed: #8d95a6;
+  --ui-text-muted: #a0a7b6;
+  --ui-text-toned: #b3b9c7;
+  --ui-text: #d6dae3;
+  --ui-text-highlighted: #e8eaf0;
+  --ui-primary: #6e93ff;
+
+  --lumen-bg-base: #090b10;
+  --lumen-bg-sunken: #0c0e14;
+  --lumen-bg-raised: #181c25;
+  --lumen-bg-overlay: #1f2430;
+  --lumen-bg-hover: rgb(200 215 255 / 0.06);
+  --lumen-bg-active: rgb(200 215 255 / 0.1);
+  --lumen-placeholder: #1c2029;
+  --lumen-primary-hover: color-mix(in oklab, var(--ui-primary) 88%, #fff);
+  --lumen-primary-soft: color-mix(in srgb, var(--ui-primary) 14%, transparent);
+  --lumen-primary-soft-2: color-mix(in srgb, var(--ui-primary) 24%, transparent);
+  --lumen-primary-text: color-mix(in oklab, var(--ui-primary) 80%, #fff);
+  --lumen-on-primary: #0a1230;
+  --lumen-light: #f5b83d;
+  --lumen-light-soft: rgb(245 184 61 / 0.14);
+  --lumen-light-text: #f6c66e;
+  --lumen-heart: #ff6b70;
+  --lumen-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+  --lumen-shadow-2: 0 2px 6px rgb(0 0 0 / 0.35), 0 10px 28px rgb(0 0 0 / 0.35);
+  --lumen-shadow-3: 0 6px 16px rgb(0 0 0 / 0.4), 0 28px 72px rgb(0 0 0 / 0.55);
+  --lumen-backdrop: rgb(0 0 0 / 0.6);
+  --lumen-toast-bg: #232938;
 }
 
-/* Accents whose 600 is too light for white text use their 700 in light. */
-:root:not(.dark)[data-accent='teal'],
-:root:not(.dark)[data-accent='green'],
-:root:not(.dark)[data-accent='amber'] {
-  --ui-primary: var(--ui-color-primary-700);
-}
-
-/* Each accent as --ui-primary shows it, for the accent choice's swatches. */
+/* The accent choices, each as --ui-primary shows it in either theme. The
+   light theme's shades carry white text; the dark theme's carry dark text. */
 :root {
-  --lumen-accent-blue: var(--color-blue-600);
-  --lumen-accent-teal: var(--color-teal-700);
-  --lumen-accent-green: var(--color-green-700);
-  --lumen-accent-violet: var(--color-violet-600);
-  --lumen-accent-rose: var(--color-rose-600);
-  --lumen-accent-amber: var(--color-amber-700);
+  --lumen-accent-blue: #2f5fe0;
+  --lumen-accent-teal: #0e7c86;
+  --lumen-accent-green: #1f7a3f;
+  --lumen-accent-violet: #6b4fd8;
+  --lumen-accent-rose: #d02f68;
+  --lumen-accent-amber: #a75a00;
 }
 .dark {
-  --lumen-accent-blue: var(--color-blue-400);
-  --lumen-accent-teal: var(--color-teal-400);
-  --lumen-accent-green: var(--color-green-400);
-  --lumen-accent-violet: var(--color-violet-400);
-  --lumen-accent-rose: var(--color-rose-400);
-  --lumen-accent-amber: var(--color-amber-400);
+  --lumen-accent-blue: #6e93ff;
+  --lumen-accent-teal: #3cc3cd;
+  --lumen-accent-green: #4cc97a;
+  --lumen-accent-violet: #a48cff;
+  --lumen-accent-rose: #ff7aa6;
+  --lumen-accent-amber: #f2b445;
+}
+:root[data-accent='teal'] {
+  --ui-primary: var(--lumen-accent-teal);
+}
+:root[data-accent='green'] {
+  --ui-primary: var(--lumen-accent-green);
+}
+:root[data-accent='violet'] {
+  --ui-primary: var(--lumen-accent-violet);
+}
+:root[data-accent='rose'] {
+  --ui-primary: var(--lumen-accent-rose);
+}
+:root[data-accent='amber'] {
+  --ui-primary: var(--lumen-accent-amber);
+}
+.dark[data-accent='teal'] {
+  --lumen-on-primary: #032326;
+}
+.dark[data-accent='green'] {
+  --lumen-on-primary: #052812;
+}
+.dark[data-accent='violet'] {
+  --lumen-on-primary: #170c3d;
+}
+.dark[data-accent='rose'] {
+  --lumen-on-primary: #3b0618;
+}
+.dark[data-accent='amber'] {
+  --lumen-on-primary: #2e1d00;
 }
 
 /* What surrounds a photo in the viewer (the viewer background preference).
@@ -129,12 +219,12 @@
 /* Compact density: the same hierarchy with less air. Control sizes follow
    through Nuxt UI's size variants (appearance.ts). */
 :root[data-density='compact'] {
-  --lumen-topbar-h: 2.75rem;
+  --lumen-topbar-h: 3rem;
   --lumen-page-x: 1rem;
   --lumen-control-h: 1.75rem;
   --lumen-row-h: 1.875rem;
   --lumen-gap: 0.5rem;
-  --lumen-card-min: 8.5rem;
+  --lumen-card-min: 10.5rem;
 }
 
 html {
@@ -151,7 +241,7 @@ body,
 }
 
 body {
-  background: var(--ui-bg);
+  background: var(--lumen-bg-base);
   color: var(--ui-text);
   font-family: var(--font-sans);
   font-size: 0.875rem;
@@ -180,11 +270,179 @@ body {
   box-shadow: 0 0 0 6px var(--ui-bg);
 }
 
-/* Overlays and tooltips (see nuxt-ui.config.ts) take the panel motion. */
+/* Overlays (see nuxt-ui.config.ts): a raised surface, its edge and the
+   deepest shadow, arriving with the panel motion. */
+.lumen-overlay {
+  background: var(--lumen-bg-overlay);
+  box-shadow: var(--lumen-shadow-3);
+}
 .lumen-overlay,
 .lumen-tooltip {
-  animation-duration: var(--lumen-motion-panel);
-  animation-timing-function: var(--lumen-ease);
+  animation-duration: var(--lumen-d-base);
+  animation-timing-function: var(--lumen-ease-out);
+}
+
+/* A dialog's actions sit on a sunken footer, the primary one last. */
+.lumen-dialog-foot {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-top: 1px solid var(--ui-border);
+  background: var(--lumen-bg-sunken);
+}
+
+/* A notice: the same dark pill in either theme, so it reads over photos
+   and pages alike. */
+.lumen-toast {
+  --ui-text-highlighted: var(--lumen-toast-text);
+  --ui-text-muted: #c2c8d4;
+  --ui-text-dimmed: #a7aebd;
+  --ui-text: var(--lumen-toast-text);
+  --ui-border-accented: rgb(255 255 255 / 0.22);
+  --ui-bg-elevated: rgb(255 255 255 / 0.08);
+  --ui-bg-accented: rgb(255 255 255 / 0.14);
+  --ui-primary: #8fb4ff;
+  border-radius: var(--lumen-r-lg);
+  background: var(--lumen-toast-bg);
+  box-shadow: var(--lumen-shadow-3);
+  color: var(--lumen-toast-text);
+  color-scheme: dark;
+}
+
+/* A surface that floats over the page: menus, popovers, the dock. */
+.lumen-float {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--lumen-r-lg);
+  background: var(--lumen-bg-overlay);
+  box-shadow: var(--lumen-shadow-3);
+}
+
+/* Shared arrivals. Each moves from where its trigger is, by a little. */
+@keyframes lumen-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes lumen-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+}
+@keyframes lumen-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes lumen-slide-left {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+@keyframes lumen-grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes lumen-grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes lumen-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes lumen-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+@keyframes lumen-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes lumen-shake {
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+
+/* A placeholder shaped like the content it stands for. */
+.lumen-skeleton {
+  border-radius: var(--lumen-r-sm);
+  background: linear-gradient(
+    90deg,
+    var(--lumen-placeholder) 0%,
+    color-mix(in srgb, var(--lumen-placeholder) 55%, var(--lumen-bg-raised)) 50%,
+    var(--lumen-placeholder) 100%
+  );
+  background-size: 200% 100%;
+  animation: lumen-shimmer 1.6s linear infinite;
+}
+
+/* A keyboard key, as menus, tooltips and the shortcut reference show it. */
+.lumen-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 1.25rem;
+  min-width: 1.25rem;
+  padding: 0 0.3125rem;
+  border: 1px solid var(--ui-border-accented);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--lumen-bg-raised);
+  color: var(--ui-text-dimmed);
+  font: 600 0.6875rem var(--font-sans);
+}
+
+/* Lumen's own light: the pulsing aperture dot that means "Lumen is at
+   work". Idle it is calm green; held back it is grey. */
+.lumen-light-dot {
+  position: relative;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lumen-light);
+}
+.lumen-light-dot::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: var(--lumen-light);
+  opacity: 0.35;
+  animation: lumen-pulse 2s var(--lumen-ease-out) infinite;
+}
+.lumen-light-dot.idle {
+  background: var(--ui-success);
+}
+.lumen-light-dot.paused {
+  background: var(--ui-text-dimmed);
+}
+.lumen-light-dot.idle::after,
+.lumen-light-dot.paused::after {
+  display: none;
 }
 
 ::-webkit-scrollbar {
@@ -286,7 +544,8 @@ body {
   }
   .lumen-overlay,
   .lumen-tooltip,
-  .lumen-surface {
+  .lumen-surface,
+  .lumen-float {
     border: 1px solid CanvasText;
   }
 }
