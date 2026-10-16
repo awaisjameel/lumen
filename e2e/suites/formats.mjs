@@ -48,7 +48,7 @@ const indexSeconds = Math.round((Date.now() - started) / 1000)
 await page.reload()
 await sleep(2500)
 
-const days = await lib(page, 'Days', '0001-01-01', '9999-12-31', { filter: 'all' })
+const days = await lib(page, 'Days', '0001-01-01', '9999-12-31', { filter: '' })
 const items = days.flatMap((d) => d.items)
 const assets = []
 for (const it of items) {
@@ -264,8 +264,10 @@ await guard('viewer', async () => {
           () => {
             const img = document.querySelector('[aria-modal="true"] img.original')
             return (
+              // The resolution note can show before the developed copy has
+              // loaded, so wait for the image itself, or for its failure.
               (img && img.complete && img.naturalWidth > 0 && getComputedStyle(img).display !== 'none') ||
-              !!document.querySelector('[aria-modal="true"] .image-surface .resolution')
+              !!document.querySelector('[aria-modal="true"] .image-surface .failure')
             )
           },
           { timeout: 60000 },

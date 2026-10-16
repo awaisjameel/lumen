@@ -77,7 +77,8 @@ await guard('themes', async () => {
   await page.keyboard.down('Control')
   await page.keyboard.press('k')
   await page.keyboard.up('Control')
-  await sleep(600)
+  await page.waitForSelector('[role="dialog"]', { timeout: 3000 }).catch(() => {})
+  await sleep(300)
   const portal = await page.evaluate(() => {
     const d = document.querySelector('[role="dialog"]')
     return d ? { bg: getComputedStyle(d).backgroundColor, inDark: !!d.closest('.dark') } : null
@@ -96,7 +97,8 @@ await guard('themes', async () => {
   }))
   check(
     'light theme applies',
-    !light.dark && light.rootFont === '16px' && light.bg === 'rgb(255, 255, 255)',
+    // The window behind the inset sheet is the light base colour.
+    !light.dark && light.rootFont === '16px' && light.bg === 'rgb(236, 238, 243)',
     JSON.stringify(light),
   )
   await shot('theme-light')
@@ -476,7 +478,11 @@ await guard('narrow', async () => {
   }))
   check(
     'the navigation drawer opens with every destination and holds the focus',
-    drawer.open && drawer.links.includes('People') && drawer.links.includes('Settings') && drawer.focusInside,
+    // A link's text ends with its count ("People0").
+    drawer.open &&
+      drawer.links.some((l) => l.startsWith('People')) &&
+      drawer.links.includes('Settings') &&
+      drawer.focusInside,
     JSON.stringify(drawer),
   )
   await shot('narrow-drawer')

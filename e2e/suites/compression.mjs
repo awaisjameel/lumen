@@ -108,7 +108,7 @@ try {
   await page.reload()
   await page.waitForSelector('.scroller')
   const days = await lib(page, 'Days', '0001-01-01', '9999-12-31', {
-    filter: 'all',
+    filter: '',
   })
   const assets = await Promise.all(
     days
@@ -157,10 +157,10 @@ try {
     await go(page, '/')
     await page.waitForSelector(`#cell-${source.id}`)
     await page.click(`#cell-${source.id}`, { count: 2 })
-    await page.waitForSelector(
-      '.viewer button[aria-label="Compress losslessly…"]',
-    )
-    await page.click('.viewer button[aria-label="Compress losslessly…"]')
+    await page.waitForSelector('.viewer button[aria-label="More actions"]')
+    await page.click('.viewer button[aria-label="More actions"]')
+    await page.waitForSelector('aria/Compress losslessly…')
+    await page.click('aria/Compress losslessly…')
     await page.waitForSelector('[data-compression-plan]')
     s.check(
       'viewer opens the same compression workspace',

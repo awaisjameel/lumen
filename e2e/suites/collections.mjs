@@ -84,9 +84,11 @@ try {
   await lib(page, 'DeleteAlbum', smart)
 
   await go(page, '/things', 600)
-  await page.waitForSelector('form.new input')
-  await page.type('form.new input', 'End to end red circle')
-  await page.$eval('form.new', (form) => form.requestSubmit())
+  await page.waitForSelector('form[data-create-thing] input')
+  await page.type('form[data-create-thing] input', 'End to end red circle')
+  await page.$eval('form[data-create-thing]', (form) => form.requestSubmit())
+  await page.waitForSelector('[data-created-thing] a', { timeout: 30000 })
+  await page.click('[data-created-thing] a')
   await page.waitForFunction(() => /^\/things\/\d+$/.test(location.pathname), { timeout: 30000 })
   const tag = await page.evaluate(() => Number(location.pathname.split('/').at(-1)))
   must(
@@ -95,7 +97,8 @@ try {
   )
   await search(page, 'DeleteTag', tag)
 
-  await go(page, '/settings', 600)
+  // About is in the Updates and about category.
+  await go(page, '/settings?section=updates', 600)
   const want = version()
   await page.waitForFunction(
     (want) => document.body.innerText.includes('About Lumen') && document.body.innerText.includes(want),
