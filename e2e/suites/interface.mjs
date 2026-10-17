@@ -5,7 +5,7 @@
 // with what was observed. SECTIONS=themes,video runs only those sections.
 //   node suites/interface.mjs
 import { join } from 'node:path'
-import { close, launch, lib, resize, sleep } from '../lib/app.mjs'
+import { close, launch, lib, resize, search, sleep } from '../lib/app.mjs'
 import { fixture, libraryCopy } from '../lib/fixtures.mjs'
 import { suite } from '../lib/suite.mjs'
 
@@ -51,6 +51,39 @@ const byText = (selector, text) =>
     selector,
     text,
   )
+
+// --- 0. Recent searches: kept in the library, offered by the empty box -----------
+await guard('recent searches', async () => {
+  await search(page, 'ClearRecentSearches')
+  await go('/')
+  const box = 'input[role="combobox"]'
+  await page.click(box)
+  await page.type(box, 'sunset over the sea')
+  await page.keyboard.press('Enter')
+  await sleep(1500)
+  const kept = await search(page, 'RecentSearches')
+  check('a search run from the box is kept', kept?.[0] === 'sunset over the sea', JSON.stringify(kept))
+  await go('/')
+  await page.click(box)
+  await page.waitForFunction(() => document.querySelectorAll('li[role="option"]').length > 0, { timeout: 5000 })
+  const offered = await page.evaluate(() => ({
+    options: [...document.querySelectorAll('li[role="option"]')].map((o) => o.textContent.trim()),
+    heading: [...document.querySelectorAll('.heading')].map((h) => h.textContent.trim()),
+  }))
+  check(
+    'the empty box offers the recent searches',
+    offered.heading.includes('Recent searches') && offered.options.includes('sunset over the sea'),
+    JSON.stringify(offered),
+  )
+  await shot('recent-searches')
+  const forget = await page.$('[data-search-forget]')
+  await forget?.click()
+  await sleep(600)
+  check('Forget recent searches empties them', ((await search(page, 'RecentSearches')) ?? []).length === 0)
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await go('/')
+})
 
 // --- 1. Themes, accent, density, text scale --------------------------------------
 await guard('themes', async () => {
@@ -258,6 +291,29 @@ await guard('keyboard', async () => {
     after.selected && after.selected === after.active,
     JSON.stringify(after),
   )
+})
+
+// --- 3a. The Trash: grouped by the day items were moved there, named by file ------
+await guard('trash grid', async () => {
+  await go('/trash')
+  await page.waitForFunction(() => document.querySelectorAll('[data-trash-caption]').length > 0, { timeout: 20000 })
+  const seen = await page.evaluate(() => ({
+    heading: document.querySelector('.day-header h2')?.textContent?.trim() ?? '',
+    caption: document.querySelector('[data-trash-caption]')?.textContent?.trim() ?? '',
+    select: document.querySelector('[data-trash-select-day]')?.textContent?.trim() ?? '',
+  }))
+  check(
+    'the Trash groups its items by the day they were moved there',
+    /^Moved to Trash · \d{1,2} \p{L}+ \d{4}$/u.test(seen.heading),
+    seen.heading,
+  )
+  check(
+    'each Trash item is named by its file, with its size and kind',
+    /\.\w+.+ · (Photo|Video)/.test(seen.caption),
+    seen.caption,
+  )
+  check('each Trash day offers its selection in words', seen.select === 'Select all', seen.select)
+  await shot('trash-grid')
 })
 
 // --- 3b. Escape ownership: a confirmation above the viewer -----------------------
@@ -620,6 +676,12 @@ await guard('privacy', async () => {
     /Unblock|Switch mode|Photo or video/.test(unlockedText),
     unlockedText.slice(0, 160),
   )
+  const row = await page.evaluate(() => ({
+    meta: document.querySelector('[data-block-row] .item-name small')?.textContent?.trim() ?? '',
+    cover: !!document.querySelector('[data-block-row] [data-block-cover] img'),
+  }))
+  check('each block says how many photos it covers', /· \d[\d,]* photos?$/.test(row.meta), row.meta)
+  check('a block is shown by what it hides while unlocked', row.cover, JSON.stringify(row))
 
   // Open the covered media of the block.
   const browse = await byText('main button', 'Show')
