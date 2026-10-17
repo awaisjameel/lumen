@@ -468,6 +468,21 @@ function isSelected(item: GridItem | null): boolean {
   return lib.selectedIDs.size ? lib.selectedIDs.has(item.id) : lib.selected?.id === item.id
 }
 
+/**
+ * Of several selected, the one the details panel shows (and the grid's keys
+ * act on): ringed, as only it is changed by a correction made there.
+ */
+function isShown(item: GridItem | null): boolean {
+  return !!item && lib.selectedIDs.size > 1 && lib.selected?.id === item.id
+}
+// Stepping through the selection in the details panel brings each into view.
+watch(
+  () => lib.selected,
+  (sel) => {
+    if (sel && lib.showDetails && lib.selectedIDs.size > 1 && !lib.viewer) scrollIntoView(sel)
+  },
+)
+
 function selectVisible() {
   lib.selectVisible(
     visible.value
@@ -1220,7 +1235,7 @@ const searchNotes = computed(() => {
                   :id="it ? cellId(it.id) : undefined"
                   :key="it?.id ?? `p${k}`"
                   class="cell"
-                  :class="{ selected: isSelected(it) }"
+                  :class="{ selected: isSelected(it), shown: isShown(it) }"
                   :style="{ width: layout.cell + 'px', height: layout.cell + layout.caption + 'px' }"
                   :role="it ? 'option' : undefined"
                   :aria-label="it ? cellLabel(v.row.day, it) : undefined"
@@ -1464,6 +1479,12 @@ const searchNotes = computed(() => {
   box-shadow: inset 0 0 0 5px var(--ui-bg);
 }
 
+.cell.shown :deep(.media-tile) {
+  box-shadow:
+    0 0 0 2px var(--ui-bg),
+    0 0 0 4px var(--ui-primary);
+}
+
 .rows {
   position: relative;
   width: 100%;
@@ -1511,6 +1532,9 @@ const searchNotes = computed(() => {
   .scroller:focus-visible .cell.selected {
     outline: 3px solid Highlight;
     outline-offset: -3px;
+  }
+  .cell.shown :deep(.media-tile) {
+    outline: 3px solid Highlight;
   }
 }
 .results-order {

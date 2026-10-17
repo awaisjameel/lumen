@@ -69,6 +69,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     showInFolder: vi.fn<typeof Bridge.engine.showInFolder>().mockResolvedValue(undefined),
     event: vi.fn(),
     setPreferences: vi.fn().mockImplementation((prefs) => Promise.resolve(prefs)),
+    setTakenAt: vi.fn().mockResolvedValue(undefined),
   },
 }))
 
@@ -106,10 +107,16 @@ const detail = (id: number, camera = ''): AssetDetail => ({
 })
 let wrapper: VueWrapper | undefined
 const selection = shallowRef<Sel | null>(null)
+// Whether the panel follows the library's focus, as LibraryView mounts it,
+// rather than the item a test gives it.
+const followFocus = shallowRef(false)
 
 function mountDetails(sel: Sel | null) {
   selection.value = sel
-  const Host = defineComponent({ render: () => h(DetailsPanel, { sel: selection.value }) })
+  const lib = useLibrary()
+  const Host = defineComponent({
+    render: () => h(DetailsPanel, { sel: followFocus.value ? lib.selected : selection.value }),
+  })
   const pinia = getActivePinia()
   if (!pinia) throw new Error('No active test Pinia')
   const Page = { render: () => h('div') }
@@ -130,6 +137,7 @@ async function select(sel: Sel | null) {
 }
 
 beforeEach(() => {
+  followFocus.value = false
   vi.stubGlobal('innerWidth', 1200)
   setActivePinia(createPinia())
   vi.mocked(engine.asset)
@@ -600,13 +608,54 @@ it('opens the medium-width inspector as a sheet and Escape returns focus to the 
   expect(document.activeElement).toBe(trigger)
 })
 
-it('shows a selection summary instead of a focused item’s private metadata for several selected items', async () => {
-  useLibrary().selectedIDs = new Set([1, 2, 3])
-  wrapper = mountDetails({ day: 'results', id: 1 })
+/** Mounts the panel as the library does: on the item the library has in focus. */
+function mountOnTheFocus() {
+  followFocus.value = true
+  return mountDetails(null)
+}
+
+it('shows one of several selected items at a time and corrects only the one shown', async () => {
+  const lib = useLibrary()
+  lib.buckets = [{ day: '2026-10-03', count: 3 }]
+  lib.days = new Map([['2026-10-03', [1, 2, 3].map((id) => ({ id, w: 4, h: 3, t: 1 }))]])
+  lib.selectedIDs = new Set([1, 3])
+  wrapper = mountOnTheFocus()
   await flushPromises()
-  expect(wrapper.text()).toContain(t('details.multiple', { n: '3' }))
-  expect(wrapper.text()).not.toContain('Current')
-  expect(wrapper.find('[data-edit-date]').exists()).toBe(false)
+  // Nothing was in focus, so the panel takes the first selected item.
+  expect(lib.selected).toEqual({ day: '2026-10-03', id: 1 })
+  expect(vi.mocked(engine.asset).mock.calls.at(-1)?.[0]).toBe(1)
+  const stepper = wrapper.get('[data-selection-step]')
+  expect(stepper.text()).toContain(t('details.multiple', { n: '2' }))
+  expect(stepper.text()).toContain(t('details.stepPosition', { i: '1', n: '2' }))
+  expect(stepper.get('[data-step="previous"]').attributes('disabled')).toBeDefined()
+
+  await stepper.get('[data-step="next"]').trigger('click')
+  await flushPromises()
+  // The next selected item, skipping the one not selected; the selection stays.
+  expect(lib.selected).toEqual({ day: '2026-10-03', id: 3 })
+  expect([...lib.selectedIDs]).toEqual([1, 3])
+  expect(vi.mocked(engine.asset).mock.calls.at(-1)?.[0]).toBe(3)
+  expect(wrapper.get('[data-step="next"]').attributes('disabled')).toBeDefined()
+
+  await wrapper.get('[data-edit-date]').trigger('click')
+  await flushPromises()
+  const body = new DOMWrapper(document.body)
+  await body.get('#correct-date-input').setValue('2020-05-01T10:00:00')
+  await body.get('form#correct-date').trigger('submit')
+  await flushPromises()
+  expect(engine.setTakenAt).toHaveBeenCalledExactlyOnceWith([3], Date.UTC(2020, 4, 1, 10) / 1000)
+})
+
+it('moves the focus onto the selection when the item in focus is not selected', async () => {
+  const lib = useLibrary()
+  lib.buckets = [{ day: '2026-10-03', count: 3 }]
+  lib.days = new Map([['2026-10-03', [1, 2, 3].map((id) => ({ id, w: 4, h: 3, t: 1 }))]])
+  lib.selected = { day: '2026-10-03', id: 1 }
+  lib.selectedIDs = new Set([2, 3])
+  wrapper = mountOnTheFocus()
+  await flushPromises()
+  expect(lib.selected).toEqual({ day: '2026-10-03', id: 2 })
+  expect(wrapper.get('[data-selection-step]').text()).toContain(t('details.stepPosition', { i: '1', n: '2' }))
 })
 
 it('removes a suggested tag immediately and Undo adds it back as a user choice', async () => {

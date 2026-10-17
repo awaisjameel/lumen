@@ -384,6 +384,20 @@ export const useLibrary = defineStore('library', () => {
 
   const total = computed(() => buckets.value.reduce((n, b) => n + b.count, 0))
   const selectedItem = computed(() => itemAt(selected.value))
+  /**
+   * The selected items whose days are loaded, in the grid's order: what the
+   * details panel steps through when several are selected. A selection of
+   * every result can hold more than is loaded; those are left out.
+   */
+  const selectedLoaded = computed<Sel[]>(() => {
+    const ids = selectedIDs.value
+    if (ids.size < 2) return []
+    const out: Sel[] = []
+    for (const { day } of buckets.value) {
+      for (const item of days.value.get(day) ?? []) if (ids.has(item.id)) out.push({ day, id: item.id })
+    }
+    return out
+  })
   const viewerItem = computed(() => itemAt(viewer.value))
   const isSearch = computed(() => scope.value.kind === 'search')
   const inTrash = computed(() => scope.value.kind === 'timeline' && scope.value.view.filter === Filter.FilterTrash)
@@ -1028,6 +1042,7 @@ export const useLibrary = defineStore('library', () => {
     showDetails,
     total,
     selectedItem,
+    selectedLoaded,
     viewerItem,
     isSearch,
     inTrash,

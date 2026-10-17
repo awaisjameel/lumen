@@ -243,6 +243,31 @@ it('groups the Trash by the day items were moved there and names each by its fil
   wrapper.unmount()
 })
 
+it('rings the one of several selected items that the details panel shows', async () => {
+  vi.stubGlobal('ResizeObserver', SizedResizeObserver)
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(900)
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(900)
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600)
+  vi.mocked(engine.timeline).mockResolvedValueOnce([{ day: '2026-10-03', count: 3 }])
+  vi.mocked(engine.days).mockResolvedValueOnce([
+    { day: '2026-10-03', items: [1, 2, 3].map((id) => ({ id, w: 4, h: 3, t: 1 })) },
+  ])
+  const { wrapper, lib } = await mountedLibrary()
+  await vi.advanceTimersByTimeAsync(50)
+  await flushPromises()
+  const shown = () => wrapper.findAll('.cell.shown').map((cell) => cell.attributes('id'))
+  lib.selected = { day: '2026-10-03', id: 2 }
+  await flushPromises()
+  // One item selected is ringed by its selection alone.
+  expect(shown()).toEqual([])
+  lib.selectVisible([1, 2])
+  lib.selected = { day: '2026-10-03', id: 2 }
+  await flushPromises()
+  expect(shown()).toEqual(['cell-2'])
+  wrapper.unmount()
+})
+
 it('uses the Photos title and passes the photos filter to the timeline', async () => {
   const router = createRouter({
     history: createMemoryHistory(),

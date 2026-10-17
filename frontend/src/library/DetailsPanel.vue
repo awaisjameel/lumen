@@ -72,6 +72,25 @@ const handoffBusy = ref(false)
 const faceBusy = ref(false)
 const tagBusy = ref(false)
 const multiple = computed(() => !lib.viewer && lib.selectedIDs.size > 1)
+// With several selected, the panel shows one of them at a time, and what is
+// changed here (a corrected date or place) changes that one only; the
+// selection dock acts on them all. Its place among the loaded selected items:
+const step = computed(() => lib.selectedLoaded.findIndex((sel) => sel.id === props.sel?.id))
+// Show a selected item when the focus is on none of them (Select all, a
+// whole day), so the panel never shows a photo outside the selection.
+watch(
+  [multiple, () => lib.selectedLoaded, () => props.sel?.id],
+  () => {
+    const first = lib.selectedLoaded[0]
+    if (multiple.value && first && (!props.sel || !lib.selectedIDs.has(props.sel.id))) lib.selected = first
+  },
+  { immediate: true },
+)
+/** Shows the selected item before or after this one, keeping the selection. */
+function stepTo(by: number) {
+  const next = lib.selectedLoaded[step.value + by]
+  if (next) lib.selected = next
+}
 const previewUrl = computed(() => (props.sel ? thumbUrl(props.sel.id, lib.itemAt(props.sel)?.t ?? 0) : undefined))
 const placeName = ref('') // the city near the photo, once known
 const tags = ref<AssetTag[]>([])
@@ -675,14 +694,39 @@ useCommands([
 
 <template>
   <InspectorContent>
-    <FeatureState
-      v-if="multiple"
-      kind="empty"
-      icon="select"
-      :title="t('details.multiple', { n: formatNumber(lib.selectedIDs.size) })"
-      :text="t('details.multipleHint')"
-    />
-    <FeatureState v-else-if="!detail && shownError" kind="error" :title="t('details.error')" :text="shownError"
+    <div v-if="multiple" class="selection-step" role="group" :aria-label="t('details.stepLabel')" data-selection-step>
+      <div class="step-head">
+        <strong>{{ t('details.multiple', { n: formatNumber(lib.selectedIDs.size) }) }}</strong>
+        <span v-if="step >= 0" class="step-position" aria-live="polite">{{
+          t('details.stepPosition', {
+            i: formatNumber(step + 1),
+            n: formatNumber(lib.selectedLoaded.length),
+          })
+        }}</span>
+        <IconButton
+          :icon="icons['chevron-left']"
+          :label="t('details.stepPrevious')"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          :disabled="step <= 0"
+          data-step="previous"
+          @click="stepTo(-1)"
+        />
+        <IconButton
+          :icon="icons['chevron-right']"
+          :label="t('details.stepNext')"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          :disabled="step < 0 || step >= lib.selectedLoaded.length - 1"
+          data-step="next"
+          @click="stepTo(1)"
+        />
+      </div>
+      <p>{{ t('details.multipleHint') }}</p>
+    </div>
+    <FeatureState v-if="!detail && shownError" kind="error" :title="t('details.error')" :text="shownError"
       ><UButton @click="correctionsChanged">{{ t('common.retry') }}</UButton></FeatureState
     >
     <FeatureState
@@ -1224,6 +1268,38 @@ h2 {
   flex-direction: column;
   gap: 1.5rem;
   padding: 1rem 1.25rem 2rem;
+}
+
+/* Several selected: which of them the panel shows, and how to move on. */
+.selection-step {
+  display: grid;
+  gap: 0.375rem;
+  margin: 1rem 1.25rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--lumen-r-md);
+  background: var(--lumen-primary-soft);
+}
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.step-head strong {
+  flex: 1;
+  min-width: 0;
+  color: var(--ui-text-highlighted);
+  font-size: 0.8125rem;
+}
+.step-position {
+  color: var(--ui-text-toned);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.selection-step p {
+  margin: 0;
+  color: var(--ui-text-toned);
+  font-size: 0.75rem;
 }
 
 section {

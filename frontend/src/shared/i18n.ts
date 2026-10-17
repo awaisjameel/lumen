@@ -1125,7 +1125,12 @@ const en = {
   'details.copied': 'Copied.',
   'details.copyMetadata': 'Copy metadata',
   'details.multiple': '{n} items selected',
-  'details.multipleHint': 'Use the selection dock to edit or organise these items together.',
+  'details.multipleHint':
+    'Changes made here, such as a corrected date or place, apply to the item shown. The selection dock changes them all together.',
+  'details.stepLabel': 'Selected items',
+  'details.stepPosition': 'Showing {i} of {n}',
+  'details.stepPrevious': 'Previous selected item',
+  'details.stepNext': 'Next selected item',
   'details.handoff.hint': 'Open a local file or folder with Windows.',
   'details.handoff.working': 'Asking Windows to open this file…',
   'details.handoff.sent':
