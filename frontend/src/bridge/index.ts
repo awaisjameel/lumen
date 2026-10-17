@@ -736,6 +736,11 @@ export const engine = {
     (await cancellable(SearchService.Hits(ids), signal)) ?? [],
   suggestTags: async (text: string): Promise<Tag[]> => (await SearchService.SuggestTags(text)) ?? [],
   prepareSearch: (): Promise<void> => SearchService.PrepareSearch(),
+  /** The searches run last, newest first, without any that name something blocked. */
+  recentSearches: async (): Promise<string[]> => (await SearchService.RecentSearches()) ?? [],
+  /** Keeps a search the user ran; returns the recent searches as recentSearches does. */
+  rememberSearch: async (query: string): Promise<string[]> => (await SearchService.RememberSearch(query)) ?? [],
+  clearRecentSearches: (): Promise<void> => SearchService.ClearRecentSearches(),
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],
   createLabel: (name: string): Promise<number> => SearchService.CreateLabel(name),
   deleteTag: (id: number): Promise<void> => SearchService.DeleteTag(id),

@@ -51,7 +51,7 @@ const layout = computed(() =>
     props.covered.items.length ? [{ day: 'covered', count: props.covered.items.length }] : [],
     Math.max(width.value, 200),
     TARGET_CELL,
-    false,
+    { headers: false, caption: CAPTION_H },
   ),
 )
 const virtualizer = useVirtualizer(
@@ -60,7 +60,7 @@ const virtualizer = useVirtualizer(
     getScrollElement: () => scroller.value,
     estimateSize: (i: number) => {
       const row = layout.value.rows[i]
-      return (row ? rowHeight(row, layout.value.cell) : layout.value.cell) + CAPTION_H
+      return row ? rowHeight(row, layout.value) : layout.value.cell + CAPTION_H
     },
     overscan: 4,
     useAnimationFrameWithResizeObserver: true,

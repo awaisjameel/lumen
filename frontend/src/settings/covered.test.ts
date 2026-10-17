@@ -7,6 +7,7 @@ import { ERROR_NOTIFICATION } from '../shared/errors'
 import { recordNotifications } from '../shared/testing'
 import type { RecordedNotifications } from '../shared/testing'
 import { t } from '../shared/i18n'
+import { faceFixture } from '../people/testing'
 import { useCoveredPhotos } from './covered'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -23,6 +24,10 @@ const block = (id: number): Block => ({
   targetId: 0,
   path: 'C:\\Photos',
   name: `Block ${id}`,
+  count: 0,
+  cover: 0,
+  coverThumb: 0,
+  face: { ...faceFixture, id: 0 },
 })
 const item = (id: number): CoveredItem => ({ id, w: 4, h: 3, t: 1, hiddenBy: [] })
 const locked = () => new Error('locked', { cause: { code: ErrorCode.BlocksLocked } })

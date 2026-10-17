@@ -24,6 +24,7 @@ import { confirm } from '../shared/confirm'
 import type * as Confirm from '../shared/confirm'
 import { ERROR_NOTIFICATION } from '../shared/errors'
 import { t } from '../shared/i18n'
+import { faceFixture } from '../people/testing'
 import BlockedView from './BlockedView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -75,6 +76,10 @@ const privateBlock = {
   targetId: 1,
   path: '',
   name: 'Private name',
+  count: 3,
+  cover: 0,
+  coverThumb: 0,
+  face: { ...faceFixture, id: 0 },
 }
 const idle = BLOCK_UNLOCK_IDLE_MINUTES * 60 * 1000
 
@@ -573,6 +578,24 @@ it('names event and face blocks by their kind', async () => {
   const kinds = view.findAll('.item-name small').map((el) => el.text())
   expect(kinds[0]).toContain(t('nav.events'))
   expect(kinds[1]).toContain(t('blocked.kindFace'))
+})
+
+it('shows each block by its face or newest photo, with how many photos it covers', async () => {
+  vi.mocked(engine.blocks).mockResolvedValue([
+    { ...privateBlock, id: 1, count: 1, face: { ...faceFixture, thumb: 3 } },
+    { ...privateBlock, id: 2, kind: BlockKind.BlockFolder, name: 'C:\\Private', count: 12, cover: 40, coverThumb: 2 },
+    { ...privateBlock, id: 3, kind: BlockKind.BlockTag, name: 'Receipts', count: 0 },
+  ])
+  const view = await opened()
+  const row = (id: number) => view.get(`[data-block-row="${id}"]`)
+  expect(row(1).get('[data-block-cover]').classes()).toContain('round')
+  expect(row(1).find('[data-block-cover] .face').exists()).toBe(true)
+  expect(row(1).get('.item-name small').text()).toBe(`${t('nav.people')} · ${t('covered.count', { n: 1 })}`)
+  expect(row(2).get('[data-block-cover] img').attributes('src')).toContain('40')
+  expect(row(2).get('.item-name small').text()).toContain(t('covered.count', { n: 12 }))
+  // A block covering nothing yet keeps its icon.
+  expect(row(3).find('[data-block-cover] img').exists()).toBe(false)
+  expect(row(3).get('.item-name small').text()).toContain(t('covered.count', { n: 0 }))
 })
 
 it('does not bring the browser back when the screen is unlocked again after a relock', async () => {

@@ -8,6 +8,7 @@ const UTC = 'UTC'
 const dayFmt = new Intl.DateTimeFormat(LOCALE, { weekday: 'long', day: 'numeric', month: 'long', timeZone: UTC })
 const monthSpanFmt = new Intl.DateTimeFormat(LOCALE, { month: 'short', year: 'numeric', timeZone: UTC })
 const daySpanFmt = new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'short', year: 'numeric', timeZone: UTC })
+const dateFmt = new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'long', year: 'numeric', timeZone: UTC })
 const monthFmt = new Intl.DateTimeFormat(LOCALE, { month: 'long', year: 'numeric', timeZone: UTC })
 const fullFmt = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'full', timeStyle: 'short', timeZone: UTC })
 
@@ -38,6 +39,11 @@ export function dayLabel(day: string): string {
  * or by day for an event ("3–4 Oct 2026"). Each is a "YYYY-MM-DD" day. */
 export function daySpan(first: string, last: string, byDay = false): string {
   return (byDay ? daySpanFmt : monthSpanFmt).formatRange(parseDay(first), parseDay(last))
+}
+
+/** A day as a date, without its weekday: "15 October 2026". */
+export function dateLabel(day: string): string {
+  return dateFmt.format(parseDay(day))
 }
 
 export function monthLabel(day: string): string {

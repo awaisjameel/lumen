@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import type { VueWrapper } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { engine, TagKind } from '../bridge'
@@ -12,7 +13,14 @@ const scope = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 vi.mock('../library/store', () => ({ useLibrary: () => ({ setScope: scope }) }))
 vi.mock('../bridge', async (original) => ({
   ...(await original<typeof Bridge>()),
-  engine: { suggestPeople: vi.fn(), suggestTags: vi.fn(), prepareSearch: vi.fn() },
+  engine: {
+    suggestPeople: vi.fn(),
+    suggestTags: vi.fn(),
+    prepareSearch: vi.fn(),
+    recentSearches: vi.fn(),
+    rememberSearch: vi.fn(),
+    clearRecentSearches: vi.fn(),
+  },
 }))
 let wrapper: VueWrapper | undefined
 const router = createRouter({
@@ -34,6 +42,10 @@ const settle = async () => {
   await flushPromises()
 }
 beforeEach(() => {
+  setActivePinia(createPinia())
+  vi.mocked(engine.recentSearches).mockResolvedValue([])
+  vi.mocked(engine.rememberSearch).mockResolvedValue([])
+  vi.mocked(engine.clearRecentSearches).mockResolvedValue(undefined)
   vi.mocked(engine.suggestPeople).mockResolvedValue([])
   vi.mocked(engine.suggestTags).mockResolvedValue([])
   vi.mocked(engine.prepareSearch).mockResolvedValue(undefined)
@@ -180,4 +192,42 @@ it('searches a picked person and ignores a hidden active suggestion after Escape
   await input.trigger('keydown', { key: 'Enter' })
   await flushPromises()
   expect(router.currentRoute.value.query.q).toBe('amina at the beach')
+})
+
+it('offers the recent searches in an empty box and runs one when it is chosen', async () => {
+  vi.mocked(engine.recentSearches).mockResolvedValue(['beach sunset', 'birthday cake'])
+  vi.mocked(engine.rememberSearch).mockResolvedValue(['birthday cake', 'beach sunset'])
+  const input = await start()
+  await flushPromises()
+  const options = () => wrapper?.findAll('li[role="option"]').map((o) => o.text()) ?? []
+  expect(wrapper?.text()).toContain('Recent searches')
+  expect(options()).toEqual(['beach sunset', 'birthday cake'])
+  await input.trigger('keydown', { key: 'ArrowDown' })
+  await input.trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(router.currentRoute.value.query.q).toBe('birthday cake')
+  expect(engine.rememberSearch).toHaveBeenCalledWith('birthday cake')
+})
+
+it('offers the recent searches that hold what is typed after the suggestions', async () => {
+  vi.mocked(engine.recentSearches).mockResolvedValue(['beach sunset', 'birthday cake', 'beach'])
+  const input = await start()
+  await flushPromises()
+  await input.setValue('beach')
+  await settle()
+  const options = wrapper?.findAll('li[role="option"]').map((o) => o.text()) ?? []
+  // Searching for the text comes first; the recent search that is the text
+  // itself is not offered twice.
+  expect(options[0]).toContain('Search for “beach”')
+  expect(options.slice(1)).toEqual(['beach sunset'])
+})
+
+it('forgets the recent searches when asked', async () => {
+  vi.mocked(engine.recentSearches).mockResolvedValue(['beach sunset'])
+  await start()
+  await flushPromises()
+  await wrapper?.get('[data-search-forget]').trigger('click')
+  await flushPromises()
+  expect(engine.clearRecentSearches).toHaveBeenCalledOnce()
+  expect(wrapper?.text()).not.toContain('Recent searches')
 })

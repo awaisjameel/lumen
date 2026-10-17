@@ -15,6 +15,7 @@ import {
   PIN_PATTERN,
   PIN_MAX_LEN,
   PIN_MIN_LEN,
+  thumbUrl,
 } from '../bridge'
 import type { ComponentPublicInstance } from 'vue'
 import type { Block } from '../bridge'
@@ -34,6 +35,7 @@ import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
 import FeatureState from '../shared/FeatureState.vue'
 import Icon from '../shared/Icon.vue'
+import FaceThumb from '../people/FaceThumb.vue'
 import CoveredBrowser from './CoveredBrowser.vue'
 import { useCoveredPhotos } from './covered'
 
@@ -705,10 +707,23 @@ watch(
             "
           >
             <template v-if="row.item">
-              <span class="block-art"><Icon name="blocked" :size="20" /></span>
+              <!-- What the rule hides, shown by its face or newest photo: the
+              list is read only while the screen is unlocked, as the media is. -->
+              <span class="block-art" :class="{ round: row.item.face.id > 0 }" data-block-cover>
+                <FaceThumb v-if="row.item.face.id" :face="row.item.face" :size="48" round fill />
+                <img
+                  v-else-if="row.item.cover && row.item.coverThumb"
+                  :src="thumbUrl(row.item.cover, row.item.coverThumb)"
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  draggable="false"
+                />
+                <Icon v-else name="blocked" :size="20" />
+              </span>
               <div class="item-name">
-                <strong>{{ row.item.name }}</strong
-                ><small>{{ kindName(row.kind) }}</small>
+                <strong :title="row.item.name">{{ row.item.name }}</strong
+                ><small>{{ kindName(row.kind) }} · {{ t('covered.count', { n: row.item.count }) }}</small>
               </div>
               <span class="scope">{{
                 t(row.item.mode === BlockMode.BlockPhotos ? 'blocked.labelPhotos' : 'blocked.labelOnly')
@@ -840,9 +855,18 @@ p {
   flex: none;
   width: 3rem;
   height: 3rem;
+  overflow: hidden;
   border-radius: var(--lumen-r-md);
   color: var(--ui-text-toned);
   background: var(--lumen-bg-sunken);
+}
+.block-art.round {
+  border-radius: 50%;
+}
+.block-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .privacy {
   display: flex;

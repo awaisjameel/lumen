@@ -37,7 +37,7 @@ import { logError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { useLiveReload } from '../shared/liveReload'
 import FeatureState from '../shared/FeatureState.vue'
-import { dayLabel } from '../shared/format'
+import { dateLabel, dayLabel } from '../shared/format'
 import { formatNumber, listFormat, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import { useLayoutMode } from '../shared/layout'
@@ -57,6 +57,7 @@ import { useAlbums } from '../albums/store'
 import { buildLayout, GAP, move, rowHeight, rowOfItem } from './layout'
 import type { Row } from './layout'
 import TrashBar from '../trash/TrashBar.vue'
+import TrashCaption from '../trash/TrashCaption.vue'
 import { RESULTS, scopeKey, useLibrary } from './store'
 import type { Scope, Sel } from './store'
 import TimelineScrubber from './TimelineScrubber.vue'
@@ -75,6 +76,7 @@ import { BatchTools, FileTools } from '../media/lazy'
 import { compressionCommand } from '../shared/compression'
 
 const PAD = 24 // horizontal padding of the grid
+const TRASH_CAPTION_H = 48 // a Trash tile's file name and size, under it
 
 const lib = useLibrary()
 // The viewer is as large as the grid itself, and a session may never open it.
@@ -365,7 +367,12 @@ onBeforeUnmount(() => {
   lib.detach()
 })
 
-const layout = computed(() => buildLayout(lib.buckets, Math.max(width.value, 200), prefs.prefs.tileSize, !lib.isSearch))
+const layout = computed(() =>
+  buildLayout(lib.buckets, Math.max(width.value, 200), prefs.prefs.tileSize, {
+    headers: !lib.isSearch,
+    caption: lib.inTrash ? TRASH_CAPTION_H : 0,
+  }),
+)
 
 const virtualizer = useVirtualizer(
   computed(() => ({
@@ -373,7 +380,7 @@ const virtualizer = useVirtualizer(
     getScrollElement: () => scroller.value,
     estimateSize: (i: number) => {
       const row = layout.value.rows[i]
-      return row ? rowHeight(row, layout.value.cell) : layout.value.cell
+      return row ? rowHeight(row, layout.value) : layout.value.cell
     },
     overscan: 4,
     useAnimationFrameWithResizeObserver: true,
@@ -433,7 +440,9 @@ watch(
     const near = daysOfRows(first - screen, last + screen)
     void lib.ensureDays(lib.needsDays(near) ? daysOfRows(first - 3 * screen, last + 3 * screen) : days)
     clearTimeout(focusTimer)
-    focusTimer = window.setTimeout(() => void engine.focus(oldest, newest).catch(logError), 300)
+    // The Trash's days are when items were trashed, which says nothing of
+    // what indexing should do first.
+    if (!lib.inTrash) focusTimer = window.setTimeout(() => void engine.focus(oldest, newest).catch(logError), 300)
   },
   { flush: 'post' },
 )
@@ -463,8 +472,7 @@ function selectVisible() {
   lib.selectVisible(
     visible.value
       .filter(
-        (v) =>
-          v.top + rowHeight(v.row, layout.value.cell) > scrollTop.value && v.top < scrollTop.value + viewportH.value,
+        (v) => v.top + rowHeight(v.row, layout.value) > scrollTop.value && v.top < scrollTop.value + viewportH.value,
       )
       .flatMap((row) => row.items.flatMap((item) => (item ? [item.id] : []))),
   )
@@ -489,6 +497,12 @@ const activeCell = computed(() => {
   const sel = lib.selected
   return sel && visible.value.some((v) => v.items.some((it) => it?.id === sel.id)) ? cellId(sel.id) : undefined
 })
+
+/** A Trash caption's details button: that item, in the details panel. */
+function showInfo(day: string, item: GridItem) {
+  void lib.selectItems({ day, id: item.id }, false, false)
+  lib.showDetails = true
+}
 
 function open(day: string, item: GridItem | null) {
   if (!item) return
@@ -894,6 +908,8 @@ function onZoom(v: number | undefined) {
 
 /** What a cell is, for screen readers: the kind, the day, a favourite. */
 function cellLabel(day: string, it: GridItem): string {
+  if (lib.inTrash)
+    return t('trash.cell', { name: it.name || t(it.v ? 'library.video' : 'library.photo'), day: dateLabel(day) })
   const what =
     day === RESULTS
       ? t(it.v ? 'library.video' : 'library.photo')
@@ -1166,16 +1182,37 @@ const searchNotes = computed(() => {
             >
               <!-- Each cell says its day, so the headings are for the eye only. -->
               <div v-if="v.row.kind === 'header'" class="day-header" :class="{ selecting: lib.selectedIDs.size > 0 }">
-                <UCheckbox
-                  class="day-check"
-                  :ui="{ base: 'size-6' }"
-                  :model-value="dayState(v.row.day)"
-                  :aria-label="t('library.selectDay', { day: dayLabel(v.row.day) })"
-                  @update:model-value="lib.selectDay(v.row.day)"
-                />
-                <h2>{{ dayLabel(v.row.day) }}</h2>
-                <span v-if="group && 'country' in group" class="day-place">{{ group.name }}</span>
-                <span class="day-count">{{ t('library.dayCount', { n: v.row.count }) }}</span>
+                <!-- The Trash groups by the day items were moved there, and
+                offers its day's selection in words, as its tiles are files. -->
+                <template v-if="lib.inTrash">
+                  <h2>{{ t('trash.movedOn', { day: dateLabel(v.row.day) }) }}</h2>
+                  <UButton
+                    class="day-select"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    :aria-label="
+                      t(dayState(v.row.day) === true ? 'trash.clearDay' : 'trash.selectDay', {
+                        day: dateLabel(v.row.day),
+                      })
+                    "
+                    data-trash-select-day
+                    @click="lib.selectDay(v.row.day)"
+                    >{{ t(dayState(v.row.day) === true ? 'selection.clear' : 'trash.selectAll') }}</UButton
+                  >
+                </template>
+                <template v-else>
+                  <UCheckbox
+                    class="day-check"
+                    :ui="{ base: 'size-6' }"
+                    :model-value="dayState(v.row.day)"
+                    :aria-label="t('library.selectDay', { day: dayLabel(v.row.day) })"
+                    @update:model-value="lib.selectDay(v.row.day)"
+                  />
+                  <h2>{{ dayLabel(v.row.day) }}</h2>
+                  <span v-if="group && 'country' in group" class="day-place">{{ group.name }}</span>
+                  <span class="day-count">{{ t('library.dayCount', { n: v.row.count }) }}</span>
+                </template>
               </div>
               <div v-else class="cells" role="presentation" :style="{ gap: GAP + 'px' }">
                 <div
@@ -1184,7 +1221,7 @@ const searchNotes = computed(() => {
                   :key="it?.id ?? `p${k}`"
                   class="cell"
                   :class="{ selected: isSelected(it) }"
-                  :style="{ width: layout.cell + 'px', height: layout.cell + 'px' }"
+                  :style="{ width: layout.cell + 'px', height: layout.cell + layout.caption + 'px' }"
                   :role="it ? 'option' : undefined"
                   :aria-label="it ? cellLabel(v.row.day, it) : undefined"
                   :aria-selected="it ? isSelected(it) : undefined"
@@ -1195,6 +1232,7 @@ const searchNotes = computed(() => {
                   <UContextMenu :items="fileMenu" @contextmenu="contextSelect(v.row.day, it)">
                     <MediaTile
                       :id="it?.id ?? 0"
+                      :style="{ height: layout.cell + 'px' }"
                       :thumb="it?.t ?? 0"
                       :video="it?.v"
                       :duration-ms="it?.d"
@@ -1222,6 +1260,7 @@ const searchNotes = computed(() => {
                       </template>
                     </MediaTile>
                   </UContextMenu>
+                  <TrashCaption v-if="lib.inTrash && it" :item="it" @info="showInfo(v.row.day, it)" />
                 </div>
               </div>
             </div>
@@ -1496,6 +1535,9 @@ const searchNotes = computed(() => {
 }
 .day-check {
   opacity: 0;
+}
+.day-select {
+  margin-left: auto;
 }
 .day-header:hover .day-check,
 .day-header:focus-within .day-check,

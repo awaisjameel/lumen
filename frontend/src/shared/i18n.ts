@@ -496,6 +496,8 @@ const en = {
   'search.clear': 'Clear search',
   'search.command': 'Search your photos',
   'search.thingsHeading': 'Things',
+  'search.recentHeading': 'Recent searches',
+  'search.recentClear': 'Forget recent searches',
   'search.for': 'Search for “{q}”',
   'search.results': { one: '1 match', other: '{n} matches, best first' },
   'search.more': 'Showing the best {n}. Add words to narrow it down.',
@@ -1507,6 +1509,12 @@ const en = {
   'trash.deleteAll': 'Delete all from disk…',
   'trash.recoveryHint':
     'The Trash is never emptied automatically. Deleting from disk only moves files to the Windows Recycle Bin.',
+  'trash.movedOn': 'Moved to Trash · {day}',
+  'trash.selectAll': 'Select all',
+  'trash.selectDay': 'Select everything moved to the Trash on {day}',
+  'trash.clearDay': 'Clear the selection of {day}',
+  'trash.cell': '{name}, moved to the Trash on {day}',
+  'trash.details': 'Details of {name}',
   'trash.summary': {
     one: '1 item is in the Trash. Nothing is removed from your disk until you delete it from here.',
     other: '{n} items are in the Trash. Nothing is removed from your disk until you delete them from here.',

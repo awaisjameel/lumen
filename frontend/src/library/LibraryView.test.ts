@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { Device, engine, Filter, onLibraryChanged, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event, Progress } from '../bridge'
+import { bytes } from '../shared/format'
 import { t } from '../shared/i18n'
 import { mountInApp } from '../shared/testing'
 import LibraryView from './LibraryView.vue'
@@ -17,6 +18,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     event: vi.fn<typeof Bridge.engine.event>(),
     days: vi.fn<typeof Bridge.engine.days>().mockResolvedValue([]),
     trashSelection: vi.fn<typeof Bridge.engine.trashSelection>(),
+    focus: vi.fn<typeof Bridge.engine.focus>().mockResolvedValue(undefined),
   },
   onLibraryChanged: vi.fn<typeof Bridge.onLibraryChanged>(),
 }))
@@ -79,6 +81,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 async function mountedTimeline() {
@@ -166,6 +169,77 @@ it('puts the Trash actions and its files on disk in the header, with no photo se
   expect(header.find('[data-trash-restore-all]').exists()).toBe(true)
   expect(wrapper.find('search-box-stub').exists()).toBe(false)
   expect(wrapper.get('[data-trash-notice]').text()).toContain(t('trash.summary', { n: 3 }))
+  wrapper.unmount()
+})
+
+/** A ResizeObserver that reports one fixed size, so the virtual grid draws rows. */
+class SizedResizeObserver implements ResizeObserver {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe(target: Element) {
+    const size: ResizeObserverSize = { inlineSize: 900, blockSize: 600 }
+    const entry = {
+      target,
+      contentRect: new DOMRect(0, 0, 900, 600),
+      borderBoxSize: [size],
+      contentBoxSize: [size],
+      devicePixelContentBoxSize: [size],
+    }
+    this.callback([entry], this)
+  }
+  unobserve = vi.fn()
+  disconnect = vi.fn()
+}
+
+it('groups the Trash by the day items were moved there and names each by its file', async () => {
+  vi.stubGlobal('ResizeObserver', SizedResizeObserver)
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(900)
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(900)
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600)
+  vi.mocked(engine.timeline).mockResolvedValueOnce([{ day: '2026-10-15', count: 2 }])
+  vi.mocked(engine.days).mockResolvedValueOnce([
+    {
+      day: '2026-10-15',
+      items: [
+        { id: 1, w: 4, h: 3, t: 1, name: 'IMG_2469.JPG', size: 6_500_000, files: 1 },
+        { id: 2, w: 4, h: 3, t: 1, v: true, name: 'VID_2490.MP4', size: 2048, files: 2 },
+      ],
+    },
+  ])
+  vi.mocked(engine.trashSelection).mockResolvedValue({ assets: [1, 2], files: 3 })
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/trash', name: 'trash', component: LibraryView, meta: { filter: Filter.FilterTrash } }],
+  })
+  await router.push('/trash')
+  const wrapper = mountInApp(LibraryView, {
+    plugins: [createPinia(), router],
+    stubs: { SearchBox: true, VideoThumb: true, LibraryThumb: true },
+  })
+  await flushPromises()
+  await vi.advanceTimersByTimeAsync(50)
+  await flushPromises()
+  expect(wrapper.get('.day-header h2').text()).toBe(t('trash.movedOn', { day: '15 October 2026' }))
+  const captions = wrapper.findAll('[data-trash-caption]').map((c) => c.text())
+  expect(captions[0]).toContain('IMG_2469.JPG')
+  expect(captions[0]).toContain('6.2 MB · Photo')
+  expect(captions[1]).toContain('VID_2490.MP4')
+  expect(captions[1]).toContain(`${bytes(2048)} · Video · 2 files`)
+  expect(wrapper.get('[role="option"]').attributes('aria-label')).toBe(
+    t('trash.cell', { name: 'IMG_2469.JPG', day: '15 October 2026' }),
+  )
+  // The day's selection is offered in words, and taken back the same way.
+  const lib = useLibrary()
+  await wrapper.get('[data-trash-select-day]').trigger('click')
+  await flushPromises()
+  expect([...lib.selectedIDs]).toEqual([1, 2])
+  expect(wrapper.get('[data-trash-select-day]').text()).toBe(t('selection.clear'))
+  // The details button shows that item in the details panel.
+  await wrapper.findAll('[data-trash-caption] button')[1]?.trigger('click')
+  await flushPromises()
+  expect(lib.selected?.id).toBe(2)
+  expect(lib.showDetails).toBe(true)
+  expect(engine.focus).not.toHaveBeenCalled()
   wrapper.unmount()
 })
 

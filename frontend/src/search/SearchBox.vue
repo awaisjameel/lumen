@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The one search box: type a description and press Enter to search by what's
 // in the photos (names of people narrow it to them), or pick a matching
-// person or Thing. Ctrl+F or / focuses it.
+// person, Thing or recent search. Ctrl+F or / focuses it.
 import IconButton from '../shared/IconButton.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
@@ -11,16 +11,19 @@ import { engine } from '../bridge'
 import type { Person, Tag } from '../bridge'
 import { logError } from '../shared/errors'
 import { formatNumber, t } from '../shared/i18n'
+import type { MessageKey } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { icons } from '../design/icons'
 import { altKeysOf, keyCaps, keysOf, useCommands } from '../shared/commands'
 import { useSuggestionState } from '../shared/suggest'
 import { useLibrary } from '../library/store'
 import FaceThumb from '../people/FaceThumb.vue'
+import { useRecentSearches } from './recent'
 
 const route = useRoute()
 const router = useRouter()
 const lib = useLibrary()
+const recent = useRecentSearches()
 
 const id = useId()
 // UInput exposes its <input>; the box is focused and blurred through it.
@@ -37,15 +40,24 @@ const prepareFailed = ref(false)
 let mounted = true
 const root = ref<HTMLElement | null>(null)
 
-/** What the menu offers: searching for the text, then people, then Things. */
-type Option = { kind: 'search' } | { kind: 'person'; person: Person } | { kind: 'thing'; tag: Tag }
+/**
+ * What the menu offers: searching for the text, then people, then Things,
+ * then recent searches. An empty box offers its recent searches alone.
+ */
+type Option =
+  | { kind: 'search' }
+  | { kind: 'person'; person: Person }
+  | { kind: 'thing'; tag: Tag }
+  | { kind: 'recent'; query: string }
+const recentOptions = computed(() => recent.matching(text.value).map((query): Option => ({ kind: 'recent', query })))
 const options = computed<Option[]>(() => {
-  if (!text.value.trim()) return []
+  if (!text.value.trim()) return recentOptions.value
   const [people, things] = found.value
   return [
     { kind: 'search' },
     ...people.map((person): Option => ({ kind: 'person', person })),
     ...things.map((tag): Option => ({ kind: 'thing', tag })),
+    ...recentOptions.value,
   ]
 })
 
@@ -80,6 +92,7 @@ function prepare() {
 function onFocus() {
   open.value = true
   prepare()
+  void recent.load()
 }
 function retry() {
   suggestions.retry()
@@ -113,6 +126,7 @@ function search() {
   const q = text.value.trim()
   if (!q) return
   close()
+  void recent.remember(q)
   if (route.name === 'search' && route.query.q === q) {
     void lib.setScope({ kind: 'search', query: q }).catch(logError) // search again
   } else {
@@ -124,6 +138,7 @@ function choose(o: Option | undefined) {
   if (!o) return
   if (o.kind === 'person') text.value = o.person.name
   else if (o.kind === 'thing') text.value = o.tag.name
+  else if (o.kind === 'recent') text.value = o.query
   search()
 }
 
@@ -180,13 +195,32 @@ const focusTitle = computed(() =>
 )
 
 function optionKey(o: Option): string {
-  return o.kind === 'person' ? `p${o.person.id}` : o.kind === 'thing' ? `t${o.tag.id}` : 's'
+  return o.kind === 'person'
+    ? `p${o.person.id}`
+    : o.kind === 'thing'
+      ? `t${o.tag.id}`
+      : o.kind === 'recent'
+        ? `r${o.query}`
+        : 's'
 }
 
+const headings: Record<Option['kind'], MessageKey | null> = {
+  search: null,
+  person: 'search.peopleHeading',
+  thing: 'search.thingsHeading',
+  recent: 'search.recentHeading',
+}
 /** The first option of each kind gets a heading above it. */
 function heading(o: Option, i: number): string {
   if (o.kind === options.value[i - 1]?.kind) return ''
-  return o.kind === 'person' ? t('search.peopleHeading') : o.kind === 'thing' ? t('search.thingsHeading') : ''
+  const key = headings[o.kind]
+  return key ? t(key) : ''
+}
+
+/** Forgets the recent searches; the box keeps its focus. */
+async function clearRecent() {
+  await recent.clear()
+  active.value = 0
 }
 </script>
 
@@ -253,7 +287,7 @@ function heading(o: Option, i: number): string {
             :id="`${id}-${i}`"
             role="option"
             :aria-selected="active === i"
-            :class="{ active: active === i, thing: o.kind === 'thing' }"
+            :class="{ active: active === i, thing: o.kind === 'thing', recent: o.kind === 'recent' }"
             @mouseenter="active = i"
             @click="choose(o)"
           >
@@ -265,6 +299,9 @@ function heading(o: Option, i: number): string {
               ><FaceThumb :face="o.person.cover" :size="32" round /><span class="ellipsis">{{ o.person.name }}</span
               ><span class="count">{{ formatNumber(o.person.count) }}</span></template
             >
+            <template v-else-if="o.kind === 'recent'"
+              ><Icon name="history" :size="16" /><span class="ellipsis">{{ o.query }}</span></template
+            >
             <template v-else
               ><Icon name="tag" :size="16" /><span class="ellipsis">{{ o.tag.name }}</span></template
             >
@@ -275,12 +312,25 @@ function heading(o: Option, i: number): string {
         <span>{{ t('search.suggestionError') }}</span
         ><UButton color="neutral" variant="ghost" size="xs" @click="retry">{{ t('common.retry') }}</UButton>
       </div>
-      <p v-else-if="text.trim() && !loading && !found[0].length && !found[1].length" class="status" role="status">
+      <p
+        v-else-if="text.trim() && !loading && !found[0].length && !found[1].length && !recentOptions.length"
+        class="status"
+        role="status"
+      >
         {{ t('search.noSuggestions') }}
       </p>
       <div v-if="options.length" class="foot">
         <span><kbd class="lumen-kbd">↑</kbd> <kbd class="lumen-kbd">↓</kbd> {{ t('commands.move') }}</span
         ><span><kbd class="lumen-kbd">Enter</kbd> {{ t('search.run') }}</span
+        ><UButton
+          v-if="recentOptions.length"
+          class="forget"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          data-search-forget
+          @click="clearRecent"
+          >{{ t('search.recentClear') }}</UButton
         ><UButton color="neutral" variant="ghost" size="xs" @click="open = false"
           ><kbd class="lumen-kbd">Esc</kbd>{{ t('common.close') }}</UButton
         >
@@ -372,6 +422,9 @@ li .lumen-kbd {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
+li.recent {
+  min-height: 2.5rem;
+}
 li.thing {
   width: auto;
   min-height: 2rem;
@@ -414,8 +467,12 @@ li.thing {
   font-size: 0.75rem;
   color: var(--ui-text-dimmed);
 }
+.foot > .forget,
 .foot > :last-child {
   margin-inline-start: auto;
+}
+.foot > .forget + :last-child {
+  margin-inline-start: 0;
 }
 @media (forced-colors: active) {
   li.active {
