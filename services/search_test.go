@@ -624,3 +624,69 @@ func TestLoweringTheTagConfidenceQueuesPhotosThatBecomeScreenshots(t *testing.T)
 		t.Fatalf("pending after lowering the confidence = %d, %v; want the photo queued", n, err)
 	}
 }
+
+func TestRecentSearchesLeaveOutThoseThatNameSomethingBlocked(t *testing.T) {
+	ctx := t.Context()
+	st, err := store.Open(filepath.Join(t.TempDir(), "library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Ingest(ctx, []store.IngestItem{{SourceID: src.ID, Path: `C:\Photos\ali.jpg`, Size: 1, Hash: []byte("ali"),
+		Kind: core.KindPhoto, Ext: ".jpg", TakenAt: 100}}); err != nil {
+		t.Fatal(err)
+	}
+	days, err := st.DayItems(ctx, "1970-01-01", "1970-01-01", core.View{}, 0)
+	if err != nil || len(days) != 1 {
+		t.Fatalf("days: %+v, %v", days, err)
+	}
+	if err := st.SaveFaces(ctx, "f", "f", []store.FaceResult{{AssetID: days[0].Items[0].ID, Faces: []store.DetectedFace{
+		{X: 0.1, Y: 0.1, W: 0.2, H: 0.2, Score: 0.9, Sharpness: 50, Vec: []float32{1, 0}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	faces, err := st.AssetFaces(ctx, days[0].Items[0].ID)
+	if err != nil || len(faces) != 1 {
+		t.Fatalf("faces: %v, %v", faces, err)
+	}
+	person, err := st.NameFaces(ctx, []int64{faces[0].ID}, "Ali")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewSearchService(st, nil, true, nil)
+	for _, q := range []string{"sunset", "Ali at the beach"} {
+		if _, err := s.RememberSearch(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := s.RecentSearches(ctx); err != nil || !slices.Equal(got, []string{"Ali at the beach", "sunset"}) {
+		t.Fatalf("recent = %q, %v", got, err)
+	}
+	block, err := st.SetBlock(ctx, core.BlockPerson, person, "", core.BlockLabel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.RecentSearches(ctx); err != nil || !slices.Equal(got, []string{"sunset"}) {
+		t.Fatalf("recent while Ali is blocked = %q, %v", got, err)
+	}
+	if got, err := s.RememberSearch(ctx, "beach"); err != nil || !slices.Equal(got, []string{"beach", "sunset"}) {
+		t.Fatalf("recent after another search = %q, %v", got, err)
+	}
+	// Unblocking brings the search back: it was hidden, not forgotten.
+	if err := st.RemoveBlock(ctx, block); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.RecentSearches(ctx); err != nil || !slices.Equal(got, []string{"beach", "Ali at the beach", "sunset"}) {
+		t.Fatalf("recent after unblocking = %q, %v", got, err)
+	}
+	if err := s.ClearRecentSearches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.RecentSearches(ctx); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("recent after clearing = %#v, %v", got, err)
+	}
+}

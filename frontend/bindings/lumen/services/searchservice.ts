@@ -22,6 +22,13 @@ export function AssetTags(assetID: number): $CancellablePromise<core$0.AssetTag[
 }
 
 /**
+ * ClearRecentSearches forgets the recent searches.
+ */
+export function ClearRecentSearches(): $CancellablePromise<void> {
+    return $Call.ByID(3290120210);
+}
+
+/**
  * CreateLabel adds a Thing for the AI to look for, and finds it across the
  * library straight away. It returns the tag's id; if a Thing by that name
  * already exists, that one's id (the caller shows it either way).
@@ -52,6 +59,23 @@ export function Hits(ids: number[] | null): $CancellablePromise<core$0.GridItem[
  */
 export function PrepareSearch(): $CancellablePromise<void> {
     return $Call.ByID(2637945223);
+}
+
+/**
+ * RecentSearches lists the searches the user ran last, newest first. One that
+ * names something blocked is left out: the list must not say what the
+ * Blocked screen hides.
+ */
+export function RecentSearches(): $CancellablePromise<string[] | null> {
+    return $Call.ByID(3539596719);
+}
+
+/**
+ * RememberSearch keeps query as the most recent search the user ran and
+ * returns the recent searches as RecentSearches does.
+ */
+export function RememberSearch(query: string): $CancellablePromise<string[] | null> {
+    return $Call.ByID(3235427283, query);
 }
 
 /**

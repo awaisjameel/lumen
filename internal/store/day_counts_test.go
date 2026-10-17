@@ -127,6 +127,20 @@ func TestDayBucketsUseKeptCountsOnlyForTheThreeWholeTimelineFilters(t *testing.T
 			view.Filter = filter
 			got, err := st.DayBuckets(ctx, view, core.TagConfidenceDefault)
 			want, wantErr := st.dayBucketsCounted(ctx, view, core.TagConfidenceDefault)
+			if view == (core.View{Filter: core.FilterTrash}) {
+				// The Trash's days are those its items were trashed on, not
+				// taken on (trash_test.go): the same items, regrouped.
+				total := func(buckets []core.DayBucket) (n int) {
+					for _, b := range buckets {
+						n += b.Count
+					}
+					return n
+				}
+				if !errors.Is(err, wantErr) || total(got) != total(want) {
+					t.Fatalf("view %+v: by trashed day %v (%v), counted %v (%v)", view, got, err, want, wantErr)
+				}
+				continue
+			}
 			if !errors.Is(err, wantErr) || !slices.Equal(got, want) {
 				t.Fatalf("view %+v: kept %v (%v), counted %v (%v)", view, got, err, want, wantErr)
 			}

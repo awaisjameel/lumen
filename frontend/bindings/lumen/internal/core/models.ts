@@ -214,6 +214,20 @@ export interface Block {
     "path": string;
     "mode": BlockMode;
     "name": string;
+
+    /**
+     * Count is how many photos and videos the rule covers now, in either
+     * mode; Cover (0 = none) is the newest of them, with a thumbnail where one
+     * has been made, and CoverThumb its thumbnail version.
+     */
+    "count": number;
+    "cover": number;
+    "coverThumb": number;
+
+    /**
+     * Face is the face a person or face rule is shown by (ID 0 = none).
+     */
+    "face": Face;
 }
 
 /**
@@ -484,6 +498,15 @@ export interface CoveredItem {
      * search results: the best-matching moment of a video, ms
      */
     "at"?: number;
+
+    /**
+     * The Trash names each item by its file and says what deleting it from
+     * disk takes: the first file's name, and the size and number of all its
+     * files. Other views leave them empty.
+     */
+    "name"?: string;
+    "size"?: number;
+    "files"?: number;
     "hiddenBy": BlockRef[] | null;
 }
 
@@ -1070,6 +1093,15 @@ export interface GridItem {
      * search results: the best-matching moment of a video, ms
      */
     "at"?: number;
+
+    /**
+     * The Trash names each item by its file and says what deleting it from
+     * disk takes: the first file's name, and the size and number of all its
+     * files. Other views leave them empty.
+     */
+    "name"?: string;
+    "size"?: number;
+    "files"?: number;
 }
 
 /**

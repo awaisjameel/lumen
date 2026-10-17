@@ -84,6 +84,9 @@ const (
 	// SettingFormatsExcluded lists the photo formats indexing leaves out, as
 	// comma-separated families (none by default).
 	SettingFormatsExcluded = "formats_excluded"
+	// SettingRecentSearches holds the searches the user ran last, newest
+	// first, as a JSON list (see NormalisedRecentSearches).
+	SettingRecentSearches = "recent_searches"
 )
 
 // DefaultOn reports whether an on/off setting is on until the user turns it
@@ -329,6 +332,14 @@ type Block struct {
 	Path     string    `json:"path"`
 	Mode     BlockMode `json:"mode"`
 	Name     string    `json:"name"`
+	// Count is how many photos and videos the rule covers now, in either
+	// mode; Cover (0 = none) is the newest of them, with a thumbnail where one
+	// has been made, and CoverThumb its thumbnail version.
+	Count      int   `json:"count"`
+	Cover      int64 `json:"cover"`
+	CoverThumb int   `json:"coverThumb"`
+	// Face is the face a person or face rule is shown by (ID 0 = none).
+	Face Face `json:"face"`
 }
 
 // BlockChange identifies a saved block and whether it was just created.
@@ -363,6 +374,12 @@ type GridItem struct {
 	Favourite bool  `json:"f,omitempty"`
 	Thumb     int   `json:"t"`            // thumbnail version; 0 = not made yet
 	At        int64 `json:"at,omitempty"` // search results: the best-matching moment of a video, ms
+	// The Trash names each item by its file and says what deleting it from
+	// disk takes: the first file's name, and the size and number of all its
+	// files. Other views leave them empty.
+	Name  string `json:"name,omitempty"`
+	Size  int64  `json:"size,omitempty"`
+	Files int    `json:"files,omitempty"`
 }
 
 // CoveredItem is a photo a block covers, as the Blocked screen's browser

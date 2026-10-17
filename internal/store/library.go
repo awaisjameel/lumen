@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"time"
 
 	"lumen/internal/core"
@@ -58,6 +59,9 @@ var recountDayCountsSQL = `DELETE FROM day_counts;
 // The grid builds its entire layout, and the timeline scrubber, from this
 // list. AI tags count from minScore up.
 func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float64) ([]core.DayBucket, error) {
+	if trashView(v) {
+		return s.trashDayBuckets(ctx, v, minScore)
+	}
 	if v.Tag == 0 && v.Person == 0 && v.Album == 0 && v.Place == 0 && v.Event == 0 &&
 		(v.Filter == core.FilterAll || v.Filter == core.FilterPhotos || v.Filter == core.FilterFavourites || v.Filter == core.FilterVideos) {
 		return keptDayBuckets(ctx, s.r, v.Filter)
@@ -93,6 +97,99 @@ func (s *Store) dayBucketsCounted(ctx context.Context, v core.View, minScore flo
 		return b, err
 	}, `SELECT `+calendarDaySQL+` AS day, count(*)
 		FROM assets WHERE `+where+` GROUP BY day ORDER BY day DESC`, args...)
+}
+
+// The Trash is grouped by the day each item was moved there, in this PC's
+// time zone, newest first; inside a day the most recently trashed comes
+// first. trashed_at is a moment (Unix seconds), so its day is found here
+// rather than by SQLite, whose idea of local time need not be Go's.
+
+// trashView reports whether v is the Trash itself, the one view grouped so.
+func trashView(v core.View) bool {
+	return v.Filter == core.FilterTrash && v.Tag == 0 && v.Person == 0 && v.Album == 0 && v.Place == 0 && v.Event == 0
+}
+
+// trashDay is the day, YYYY-MM-DD, that the moment at falls on.
+func (s *Store) trashDay(at int64) string {
+	return time.Unix(at, 0).In(s.zone).Format(time.DateOnly)
+}
+
+// trashDayBuckets counts the Trash's items per day they were trashed on.
+// Items trashed together share a second, so the rows read are few.
+func (s *Store) trashDayBuckets(ctx context.Context, v core.View, minScore float64) ([]core.DayBucket, error) {
+	where, args, err := s.viewSQL(ctx, v, minScore)
+	if err != nil {
+		return nil, err
+	}
+	type moment struct {
+		at    int64
+		count int
+	}
+	moments, err := queryAll(ctx, s.r, func(r *sql.Rows) (m moment, err error) {
+		err = r.Scan(&m.at, &m.count)
+		return m, err
+	}, `SELECT trashed_at, count(*) FROM assets WHERE `+where+` GROUP BY trashed_at ORDER BY trashed_at DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := []core.DayBucket{}
+	for _, m := range moments {
+		day := s.trashDay(m.at)
+		if n := len(out); n > 0 && out[n-1].Day == day {
+			out[n-1].Count += m.count
+		} else {
+			out = append(out, core.DayBucket{Day: day, Count: m.count})
+		}
+	}
+	return out, nil
+}
+
+// trashColumns name a Trash item by its files, in trashFields order: the
+// first file's path (in the order Delete from disk reads them), and the size
+// and number of all of them.
+const trashColumns = `COALESCE((SELECT path FROM files WHERE asset_id = assets.id ORDER BY path, id LIMIT 1), ''),
+	(SELECT COALESCE(sum(size), 0) FROM files WHERE asset_id = assets.id),
+	(SELECT count(*) FROM files WHERE asset_id = assets.id)`
+
+// trashDayItems is DayItems for the Trash, whose days are those items were
+// trashed on.
+func (s *Store) trashDayItems(ctx context.Context, from, to time.Time, v core.View, minScore float64) ([]core.DayItems, error) {
+	where, args, err := s.viewSQL(ctx, v, minScore)
+	if err != nil {
+		return nil, err
+	}
+	start := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, s.zone).Unix()
+	end := time.Date(to.Year(), to.Month(), to.Day()+1, 0, 0, 0, 0, s.zone).Unix()
+	rows, err := s.r.QueryContext(ctx, `SELECT id, trashed_at, `+gridColumns+`, `+trashColumns+`
+		FROM assets WHERE `+where+` AND trashed_at >= ? AND trashed_at < ?
+		ORDER BY trashed_at DESC, id DESC`, append(args, start, end)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []core.DayItems{}
+	for rows.Next() {
+		var it core.GridItem
+		var at int64
+		if err := rows.Scan(append(append([]any{&it.ID, &at}, gridFields(&it)...), &it.Name, &it.Size, &it.Files)...); err != nil {
+			return nil, err
+		}
+		it.Name = filepath.Base(it.Name)
+		day := s.trashDay(at)
+		if n := len(out); n == 0 || out[n-1].Day != day {
+			out = append(out, core.DayItems{Day: day})
+		}
+		out[len(out)-1].Items = append(out[len(out)-1].Items, it)
+	}
+	return out, rows.Err()
+}
+
+// viewOrder is the order a view's grid shows its assets in.
+func viewOrder(v core.View) string {
+	if trashView(v) {
+		return "trashed_at DESC, id DESC"
+	}
+	return "taken_at DESC, id DESC"
 }
 
 // viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
@@ -257,6 +354,9 @@ func (s *Store) DayItems(ctx context.Context, from, to string, v core.View, minS
 	}
 	if a.After(b) {
 		a, b = b, a
+	}
+	if trashView(v) {
+		return s.trashDayItems(ctx, a, b, v, minScore)
 	}
 	where, args, err := s.viewSQL(ctx, v, minScore)
 	if err != nil {
