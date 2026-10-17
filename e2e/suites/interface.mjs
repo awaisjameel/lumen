@@ -293,6 +293,40 @@ await guard('keyboard', async () => {
   )
 })
 
+// --- 3. Several selected: the details panel shows one at a time --------------------
+await guard('selection details', async () => {
+  await go('/')
+  await gridReady()
+  const cells = await page.$$('.scroller .cell[role="option"]')
+  // The item clicked last is the one in focus, so the panel starts on the first.
+  await cells[1]?.click()
+  await page.keyboard.down('Control')
+  await cells[0]?.click()
+  await page.keyboard.up('Control')
+  await sleep(300)
+  const opened = !(await page.$('[data-selection-step]'))
+  if (opened) await page.keyboard.press('i')
+  await page.waitForSelector('[data-selection-step]', { timeout: 5000 })
+  const first = await page.$eval('[data-selection-step]', (e) => e.textContent.trim())
+  const firstFile = await page.$eval('.inspector-body h3', (e) => e.textContent.trim())
+  check('the details panel says how many are selected and which it shows', /2 items selected.*Showing 1 of 2/.test(first), first)
+  await page.click('[data-step="next"]')
+  await sleep(800)
+  const second = await page.$eval('[data-selection-step]', (e) => e.textContent.trim())
+  const secondFile = await page.$eval('.inspector-body h3', (e) => e.textContent.trim())
+  check(
+    'the panel steps to the next selected item, whose date and place can be corrected alone',
+    /Showing 2 of 2/.test(second) && secondFile !== firstFile && !!(await page.$('[data-edit-date]')),
+    `${firstFile} -> ${secondFile}`,
+  )
+  check('stepping keeps the selection', (await page.$$('.scroller .cell[aria-selected="true"]')).length === 2)
+  await shot('selection-details')
+  await page.focus('.scroller')
+  await page.keyboard.press('Escape')
+  if (opened) await page.keyboard.press('i')
+  await sleep(400)
+})
+
 // --- 3a. The Trash: grouped by the day items were moved there, named by file ------
 await guard('trash grid', async () => {
   await go('/trash')
