@@ -14,8 +14,12 @@ const app = await launch({ exe: s.exe, dataDir: await libraryCopy(join(s.run, 'd
 const { page } = app
 const report = { screens: [], requests: { local: 0, externalBlocked: [] }, consoleErrors: [], checks: {} }
 
-page.on('response', (r) => {
-  if (r.status() >= 400) report.consoleErrors.push(`${r.status()} ${r.url()}`)
+page.on('response', async (r) => {
+  if (r.status() < 400) return
+  // A read the page cancels on leaving a screen (a card's preview) is answered
+  // 422 "context canceled", as the bridge's isCancelled expects: not an error.
+  if (r.status() === 422 && /"message":"context canceled"/.test(await r.text().catch(() => ''))) return
+  report.consoleErrors.push(`${r.status()} ${r.url()}`)
 })
 
 // Every request: local ones go on, anything else is refused and recorded.
