@@ -50,9 +50,17 @@ runs:
         { echo CGO_ENABLED=1; echo CC=clang; echo CXX=clang++; } >>"$GITHUB_ENV"
 
     # The CLI at the version go.mod already pins, so there is one source.
+    # The module proxy sometimes drops a download mid-stream, so retry.
     - name: Install the Wails CLI
       shell: bash
-      run: go install "github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
+      run: |
+        version=$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)
+        for attempt in 1 2 3; do
+          go install "github.com/wailsapp/wails/v3/cmd/wails3@$version" && exit 0
+          echo "::warning::go install failed (attempt $attempt of 3)"
+          sleep $((attempt * 15))
+        done
+        exit 1
 
     # Everything scripts/deps.sh fetches is pinned by hash, so the key is the
     # scripts and sources that decide what it builds. The downloads also
