@@ -303,6 +303,18 @@ func (s *LibraryService) Places(ctx context.Context) ([]core.Place, error) {
 	return s.store.Places(ctx)
 }
 
+// topPlaces is how many places a collection's page names.
+const topPlaces = 3
+
+// TopPlaces names the places where most of the view's items were taken, most first.
+func (s *LibraryService) TopPlaces(ctx context.Context, view core.View) ([]core.NamedPlace, error) {
+	minScore, err := tagConfidence(ctx, s.store)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.TopPlaces(ctx, view, minScore, topPlaces)
+}
+
 // Place returns one city and its current visible count.
 func (s *LibraryService) Place(ctx context.Context, id int64) (core.Place, error) {
 	return s.store.Place(ctx, id)

@@ -77,6 +77,14 @@ export function PersonFaces(id: number): $CancellablePromise<core$0.Face[] | nul
 }
 
 /**
+ * PersonFacts returns how many faces a person has and who is most often in
+ * photos with them.
+ */
+export function PersonFacts(id: number): $CancellablePromise<core$0.PersonFacts> {
+    return $Call.ByID(1982754469, id);
+}
+
+/**
  * RejectFaces says faces are not this person. The AI never puts them back.
  */
 export function RejectFaces(person: number, faces: number[] | null): $CancellablePromise<void> {

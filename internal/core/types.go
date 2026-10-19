@@ -450,6 +450,12 @@ type Place struct {
 	CoverThumb int     `json:"coverThumb"`
 }
 
+// NamedPlace is a place by name, for linking to it.
+type NamedPlace struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 // AlbumRule is a conjunction of optional filters, saved for a smart album.
 // Dates are inclusive camera-clock calendar days (YYYY-MM-DD).
 type AlbumRule struct {
@@ -611,6 +617,12 @@ type Person struct {
 	Name  string `json:"name"`  // "" until the user names them
 	Count int    `json:"count"` // visible photos they appear in
 	Cover Face   `json:"cover"` // the face to show; ID 0 = none
+}
+
+// PersonFacts is what a person's page says about them beside their photos.
+type PersonFacts struct {
+	Faces      int      `json:"faces"`      // their faces the Faces tab lists
+	Companions []Person `json:"companions"` // named people most often in photos with them, most first
 }
 
 // DayBucket is how many visible assets were taken on one calendar day.

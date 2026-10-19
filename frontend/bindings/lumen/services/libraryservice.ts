@@ -704,6 +704,13 @@ export function Timeline(view: core$0.View): $CancellablePromise<core$0.DayBucke
 }
 
 /**
+ * TopPlaces names the places where most of the view's items were taken, most first.
+ */
+export function TopPlaces(view: core$0.View): $CancellablePromise<core$0.NamedPlace[] | null> {
+    return $Call.ByID(429354692, view);
+}
+
+/**
  * TrashAssets moves assets to Lumen's Trash: they leave every view, and
  * their files are untouched.
  */

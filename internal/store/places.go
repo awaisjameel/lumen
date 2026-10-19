@@ -97,6 +97,23 @@ func (s *Store) Places(ctx context.Context) ([]core.Place, error) {
 		ORDER BY g.n DESC, `+byName("g.name")+`, g.id`)
 }
 
+// TopPlaces names up to n places where most of the view's items were taken,
+// most first. A place whose name is blocked is left out, as it names no day.
+func (s *Store) TopPlaces(ctx context.Context, v core.View, minScore float64, n int) ([]core.NamedPlace, error) {
+	where, args, err := s.viewSQL(ctx, v, minScore)
+	if err != nil {
+		return nil, err
+	}
+	return queryAll(ctx, s.r, func(r *sql.Rows) (p core.NamedPlace, err error) {
+		err = r.Scan(&p.ID, &p.Name)
+		return p, err
+	}, `SELECT p.id, p.name
+		FROM (SELECT place_id, count(*) AS n FROM assets WHERE `+where+` AND place_id IS NOT NULL GROUP BY place_id) c
+		JOIN places p ON p.id = c.place_id
+		WHERE NOT `+placeBlocked("p.id")+`
+		ORDER BY c.n DESC, `+byName("p.name")+`, p.id LIMIT ?`, append(args, n)...)
+}
+
 // Place returns a visible city, or ErrNotFound for an unknown or empty one.
 func (s *Store) Place(ctx context.Context, id int64) (core.Place, error) {
 	var p core.Place

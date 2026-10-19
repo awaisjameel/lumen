@@ -1268,6 +1268,14 @@ export enum Motion {
 };
 
 /**
+ * NamedPlace is a place by name, for linking to it.
+ */
+export interface NamedPlace {
+    "id": number;
+    "name": string;
+}
+
+/**
  * OrganiseMove is one file's move, planned or made.
  */
 export interface OrganiseMove {
@@ -1446,6 +1454,21 @@ export interface Person {
      * the face to show; ID 0 = none
      */
     "cover": Face;
+}
+
+/**
+ * PersonFacts is what a person's page says about them beside their photos.
+ */
+export interface PersonFacts {
+    /**
+     * their faces the Faces tab lists
+     */
+    "faces": number;
+
+    /**
+     * named people most often in photos with them, most first
+     */
+    "companions": Person[] | null;
 }
 
 /**
