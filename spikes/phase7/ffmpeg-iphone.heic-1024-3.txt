@@ -1,4 +1,4 @@
-Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\Downloads\Lumen\spikes\.cache\heic\iphone.heic':
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'spikes\.cache\heic\iphone.heic':
   Metadata:
     major_brand     : heic
     minor_version   : 0
@@ -58,7 +58,7 @@ Stream mapping:
   Stream #0:47 (hevc) -> xstack (graph 1)
   scale:default (graph 0) -> Stream #0:0 (mjpeg)
 [swscaler @ 00000295ba246900] deprecated pixel format used, make sure you did set range correctly
-Output #0, image2, to 'D:\Downloads\Lumen\spikes\phase7\ffmpeg-iphone.heic-1024.jpg':
+Output #0, image2, to 'spikes\phase7\ffmpeg-iphone.heic-1024.jpg':
   Metadata:
     major_brand     : heic
     minor_version   : 0
@@ -71,7 +71,7 @@ Output #0, image2, to 'D:\Downloads\Lumen\spikes\phase7\ffmpeg-iphone.heic-1024.
       ICC Profile: (3144 bytes)
       EXIF metadata: (66 bytes)
       CPB properties: bitrate max/min/avg: 0/0/200000 buffer size: 0 vbv_delay: N/A
-[image2 @ 00000295b9fee200] The specified filename 'D:\Downloads\Lumen\spikes\phase7\ffmpeg-iphone.heic-1024.jpg' does not contain an image sequence pattern or a pattern is invalid.
+[image2 @ 00000295b9fee200] The specified filename 'spikes\phase7\ffmpeg-iphone.heic-1024.jpg' does not contain an image sequence pattern or a pattern is invalid.
 [image2 @ 00000295b9fee200] Use a pattern such as %03d for an image sequence or use the -update option (with -frames:v 1 if needed) to write a single image.
 [out#0/image2 @ 00000295ba12eb00] video:266KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
 frame=    1 fps=0.0 q=2.0 Lsize=N/A time=00:00:01.00 bitrate=N/A speed=11.3x elapsed=0:00:00.08    
