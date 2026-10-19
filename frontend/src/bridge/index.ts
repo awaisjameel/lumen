@@ -93,7 +93,9 @@ import type {
   GridItem,
   LegacyPreferences,
   MediaCaps,
+  NamedPlace,
   Person,
+  PersonFacts as RawPersonFacts,
   Place,
   Preferences as RawPreferences,
   CustomisationPreview as RawCustomisationPreview,
@@ -183,6 +185,7 @@ export type {
   DayBucket,
   Face,
   GridItem,
+  NamedPlace,
   Person,
   Event,
   FailedFile,
@@ -220,6 +223,8 @@ export type AssetDetail = NonNullLists<RawAssetDetail, 'paths'>
 export type DayItems = NonNullLists<RawDayItems, 'items'>
 /** A search's results, best first. */
 export type SearchResults = NonNullLists<SearchResult, 'items' | 'people'>
+
+export type PersonFacts = NonNullLists<RawPersonFacts, 'companions'>
 /** One asset in a duplicate group, with all its file paths (and each one's mtime). */
 export type DuplicateItem = NonNullLists<RawDuplicateItem, 'paths' | 'mtimes'>
 /** Exact copies or similar photos to review. */
@@ -605,6 +610,7 @@ export const engine = {
     })),
   places: async (): Promise<Place[]> => (await LibraryService.Places()) ?? [],
   place: (id: number): Promise<Place> => LibraryService.Place(id),
+  topPlaces: async (view: View): Promise<NamedPlace[]> => (await LibraryService.TopPlaces(view)) ?? [],
   events: async (): Promise<Event[]> => (await LibraryService.Events()) ?? [],
   event: (id: number): Promise<Event> => LibraryService.Event(id),
   /** How many events a time gap would make, without saving it; a newer preview cancels this one. */
@@ -757,6 +763,10 @@ export const engine = {
 
   people: async (): Promise<Person[]> => (await PeopleService.People()) ?? [],
   person: (id: number): Promise<Person> => PeopleService.Person(id),
+  personFacts: async (id: number): Promise<PersonFacts> => {
+    const r = await PeopleService.PersonFacts(id)
+    return { ...r, companions: r.companions ?? [] }
+  },
   personFaces: async (id: number): Promise<Face[]> => (await PeopleService.PersonFaces(id)) ?? [],
   assetFaces: async (id: number): Promise<Face[]> => (await PeopleService.AssetFaces(id)) ?? [],
   suggestPeople: async (text: string): Promise<Person[]> => (await PeopleService.SuggestPeople(text)) ?? [],

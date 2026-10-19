@@ -549,17 +549,23 @@ describe('choosing the copy to keep', () => {
     expect(checked()).toEqual([false, true, false])
   })
 
-  it('shows the keep choice and removal count together before opening confirmation', async () => {
+  it('marks the copy kept, where the others go and how many before opening confirmation', async () => {
+    // Each copy says whether it is kept or where it would go.
+    const marks = () =>
+      (wrapper?.findAll('[data-duplicate-group] .copy-choice') ?? []).map((c) =>
+        c.find('[data-kept]').exists() ? 'Keep' : c.get('[data-removed]').text(),
+      )
     await mountWith(similar(2))
+    expect(marks()).toEqual(['To Trash', 'Keep', 'To Trash'])
     const summary = wrapper?.get('[data-duplicate-group] [role="toolbar"]')
-    expect(summary?.text()).toContain('Keep: p2.jpg')
-    expect(summary?.text()).toContain('2 other photos will go to the Trash after confirmation.')
+    expect(summary?.text()).toContain('2 other photos → Lumen’s Trash, after confirmation')
     await radios()[0]?.trigger('click')
-    expect(summary?.text()).toContain('Keep: p1.jpg')
+    expect(marks()).toEqual(['Keep', 'To Trash', 'To Trash'])
     expect(engine.trashAssets).not.toHaveBeenCalled()
     await mountWith(exact)
+    expect(marks()).toEqual(['To Recycle Bin', 'Keep'])
     expect(wrapper?.get('[data-duplicate-group] [role="toolbar"]').text()).toContain(
-      '1 extra file will go to the Recycle Bin after confirmation.',
+      '1 extra file → Windows Recycle Bin, after confirmation',
     )
     expect(engine.deleteCopies).not.toHaveBeenCalled()
   })

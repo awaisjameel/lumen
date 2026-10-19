@@ -6,6 +6,7 @@
 // exact copies to the Recycle Bin.
 import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
+import UBadge from '@nuxt/ui/components/Badge.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import ViewBar from '../shared/ViewBar.vue'
@@ -100,6 +101,15 @@ const space = computed(() =>
     0,
   ),
 )
+// What the shown kind holds: the space exact copies take, or the photos to compare.
+const summary = computed(() =>
+  tab.value === DuplicateKind.DuplicateExact
+    ? t('duplicates.exactSummary', { n: exact.value.length, size: bytes(space.value) })
+    : t('duplicates.similarSummary', {
+        n: similar.value.length,
+        photos: similar.value.reduce((n, group) => n + group.items.length, 0),
+      }),
+)
 const queue = ref(false)
 const queueIDs = ref<string[]>([])
 const position = ref(0)
@@ -133,8 +143,7 @@ function advanceQueue(skip = false) {
 
 interface Row {
   key: string
-  kind: DuplicateGroup['kind']
-  group: DuplicateGroup | null
+  group: DuplicateGroup
 }
 const scroller = ref<HTMLElement | null>(null)
 const intro = ref<HTMLElement | null>(null)
@@ -149,8 +158,7 @@ function updateMargin() {
 const rows = computed<Row[]>(() => {
   const result: Row[] = []
   const shown = completed.value ? [] : queue.value ? (queueGroup.value ? [queueGroup.value] : []) : groups.value
-  if (shown.length) result.push({ key: `${tab.value}-heading`, kind: tab.value, group: null })
-  for (const group of shown) result.push({ key: groupKey(group), kind: group.kind, group })
+  for (const group of shown) result.push({ key: groupKey(group), group })
   return result
 })
 const virtualizer = useVirtualizer(
@@ -158,7 +166,7 @@ const virtualizer = useVirtualizer(
     count: rows.value.length,
     getScrollElement: () => scroller.value,
     getItemKey: (index: number) => rows.value[index]?.key ?? index,
-    estimateSize: (index: number) => (rows.value[index]?.group ? 250 : 88),
+    estimateSize: () => 250,
     overscan: 3,
     useAnimationFrameWithResizeObserver: true,
     scrollMargin: scrollMargin.value,
@@ -331,10 +339,7 @@ useCommands([
 <template>
   <Page :scroll="false">
     <template #header>
-      <PageHeader
-        :title="t('nav.duplicates')"
-        :subtitle="t('duplicates.caption', { n: duplicates.list.length, size: bytes(space) })"
-      >
+      <PageHeader :title="t('nav.duplicates')" :subtitle="groups.length ? summary : undefined">
         <UButton
           v-if="!settled"
           :icon="icons.refresh"
@@ -364,9 +369,24 @@ useCommands([
     </template>
     <div ref="scroller" class="duplicates-scroll" data-duplicates-scroll>
       <div ref="intro" class="guidance">
-        <p class="text-toned">
-          {{ t(tab === DuplicateKind.DuplicateExact ? 'duplicates.exactGuidance' : 'duplicates.bestHint') }}
-        </p>
+        <template v-if="groups.length && !completed">
+          <div class="section-head">
+            <div>
+              <h2>{{ summary }}</h2>
+              <p>
+                {{ t(tab === DuplicateKind.DuplicateExact ? 'duplicates.exactHint' : 'duplicates.similarHint') }}
+              </p>
+            </div>
+            <UBadge :icon="icons.lock" color="neutral" variant="soft">{{ t('duplicates.onDevice') }}</UBadge>
+          </div>
+          <UAlert
+            :icon="tab === DuplicateKind.DuplicateExact ? icons.info : icons.smart"
+            :description="t(tab === DuplicateKind.DuplicateExact ? 'duplicates.exactGuidance' : 'duplicates.bestHint')"
+            :color="tab === DuplicateKind.DuplicateExact ? 'neutral' : 'primary'"
+            :variant="tab === DuplicateKind.DuplicateExact ? 'outline' : 'soft'"
+            data-duplicates-guidance
+          />
+        </template>
         <UAlert
           v-if="keptPaths.length"
           color="warning"
@@ -429,23 +449,16 @@ useCommands([
           :data-index="virtual.index"
           class="virtual-row"
           :style="{ transform: `translateY(${virtual.start - scrollMargin}px)` }"
-          :role="row.group ? 'listitem' : undefined"
+          role="listitem"
         >
-          <template v-if="!row.group">
-            <h2>{{ t(row.kind === DuplicateKind.DuplicateExact ? 'duplicates.exact' : 'duplicates.similar') }}</h2>
-            <p class="text-muted">
-              {{ t(row.kind === DuplicateKind.DuplicateExact ? 'duplicates.exactHint' : 'duplicates.similarHint') }}
-            </p>
-          </template>
           <DuplicateGroupCard
-            v-else
             :group="row.group"
             :busy="acting"
             @review="startReview"
             @preview="openPreview"
             @show-path="showPath"
           />
-          <div v-if="queue && row.group" class="queue-actions">
+          <div v-if="queue" class="queue-actions">
             <UButton color="neutral" variant="ghost" :disabled="acting" data-queue-skip @click="advanceQueue(true)">{{
               t('duplicates.skip')
             }}</UButton>
@@ -535,14 +548,33 @@ useCommands([
   overflow-y: auto;
   padding: 0.25rem var(--lumen-page-x) 1.5rem;
 }
-.guidance p {
-  margin: 0.5rem 0 1rem;
+.guidance {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding-block: 1rem 0.5rem;
+}
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.section-head > div {
+  flex: 1;
+  min-width: 0;
 }
 h2 {
-  margin: 1.5rem 0 0.25rem;
+  margin: 0;
   color: var(--ui-text-highlighted);
-  font-size: 1.125rem;
-  font-weight: 600;
+  font: 600 1.125rem/1.3 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+.section-head p {
+  max-width: 70ch;
+  margin: 0.5rem 0 0;
+  color: var(--ui-text-toned);
+  font-size: 0.8125rem;
 }
 .virtual-list {
   position: relative;

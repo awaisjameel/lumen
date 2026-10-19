@@ -374,15 +374,12 @@ useCommands([
   margin-left: auto;
 }
 .people-grid {
-  grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
   gap: 1.5rem;
   margin-bottom: 1.5rem;
 }
-.people-grid:has(> :only-child) {
-  grid-template-columns: 6rem;
-}
 .unnamed-grid {
-  grid-template-columns: repeat(auto-fit, minmax(8.75rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(8.75rem, 1fr));
 }
 .people-grid :deep(.cover) {
   width: 6rem;

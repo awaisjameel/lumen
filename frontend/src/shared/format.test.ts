@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { dateLabel, dayLabel, daySpan, spanOfDays } from './format'
+import { dateLabel, dateTime, dayLabel, daySpan, spanOfDays, takenDay } from './format'
 import { t } from './i18n'
 
 beforeEach(() => {
@@ -13,6 +13,12 @@ it('names grid days in full, adding the year only outside this one and without a
   expect(dayLabel('2026-10-16')).toBe('Yesterday')
   expect(dayLabel('2026-10-03')).toBe('Saturday 3 October')
   expect(dayLabel('2021-01-03')).toBe('Sunday 3 January 2021')
+})
+
+it('dates a photo without its weekday, as on the camera clock', () => {
+  const taken = Date.UTC(2026, 9, 3, 18, 42) / 1000
+  expect(dateTime(taken)).toBe('3 October 2026 at 18:42')
+  expect(takenDay(taken)).toBe('3 October 2026')
 })
 
 it('spans a collection by month and an event by day', () => {

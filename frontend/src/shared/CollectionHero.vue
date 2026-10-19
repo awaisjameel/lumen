@@ -3,12 +3,13 @@
 // place, an event, an album or Favourites. It says what kind of collection
 // this is, its name (which #name replaces with an inline editor while
 // renaming), what it holds and when, and offers the kind's own actions
-// (#actions: the primary one first). The cover is the collection's photo,
+// (#actions: the primary one first); #facts adds more about it under what it
+// holds (who a person is often with). The cover is the collection's photo,
 // a mosaic, or a person's portrait (round). On a short or narrow page the
 // cover gives way so the photos keep their room.
 defineProps<{
-  /** What kind of collection it is ("Album", "Thing"). */
-  kind: string
+  /** What kind of collection it is ("Album", "Thing"); a person's page names none. */
+  kind?: string
   name: string
   /** What it holds and when, already worded ("248 photos · 2019–2026"). */
   meta?: string
@@ -23,7 +24,7 @@ defineProps<{
       <slot name="cover" />
     </div>
     <div class="copy">
-      <span class="kind">{{ kind }}</span>
+      <span v-if="kind" class="kind">{{ kind }}</span>
       <slot name="name">
         <h2 class="name" :title="name">
           <bdi>{{ name }}</bdi>
@@ -32,6 +33,7 @@ defineProps<{
       <slot name="meta">
         <span v-if="meta" class="meta">{{ meta }}</span>
       </slot>
+      <slot name="facts" />
     </div>
     <div v-if="$slots.actions" class="actions">
       <slot name="actions" />
@@ -75,6 +77,9 @@ defineProps<{
   flex: 1 1 16rem;
   gap: 0.25rem;
   min-width: 0;
+}
+.round .copy {
+  gap: 0.75rem;
 }
 .kind {
   color: var(--ui-text-dimmed);

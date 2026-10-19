@@ -3,14 +3,20 @@ import { createPinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { reactive } from 'vue'
-import { engine } from '../bridge'
+import { engine, Filter } from '../bridge'
 import type * as Bridge from '../bridge'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import CollectionHead from './CollectionHead.vue'
 
 vi.mock('../bridge', async (original) => ({
   ...(await original<typeof Bridge>()),
-  engine: { setEventName: vi.fn(), setEventPinned: vi.fn(), things: vi.fn(), albums: vi.fn() },
+  engine: {
+    setEventName: vi.fn(),
+    setEventPinned: vi.fn(),
+    things: vi.fn(),
+    albums: vi.fn(),
+    topPlaces: vi.fn().mockResolvedValue([]),
+  },
 }))
 beforeEach(() => {
   vi.mocked(engine.setEventName).mockReset().mockResolvedValue(undefined)
@@ -95,5 +101,28 @@ it('retains a failed rename draft for retry', async () => {
   await flushPromises()
   expect(wrapper.get('[role="alert"]').text()).toContain('read only')
   expect(wrapper.get('input').element.value).toBe('Retained')
+  wrapper.unmount()
+})
+it('says where most of the collection was taken after what it holds, and asks again as that changes', async () => {
+  vi.mocked(engine.topPlaces).mockResolvedValue([
+    { id: 7, name: 'Karachi' },
+    { id: 8, name: 'Skardu' },
+  ])
+  const { wrapper, props } = await mountHead()
+  await flushPromises()
+  expect(engine.topPlaces).toHaveBeenLastCalledWith({ filter: Filter.FilterAll, event: 1 })
+  expect(wrapper.text()).toMatch(/248 items · Karachi · Skardu/)
+  props.count = 249
+  await flushPromises()
+  expect(engine.topPlaces).toHaveBeenCalledTimes(2)
+  wrapper.unmount()
+})
+it('offers a kind’s own action as the primary button and Block as one that asks first', async () => {
+  const { wrapper, props } = await mountHead()
+  Object.assign(props, { kind: 'place', id: 7 })
+  await flushPromises()
+  const map = wrapper.findAll('a').find((b) => b.text() === 'Open on map')
+  expect(map?.classes()).toContain('bg-primary')
+  expect(wrapper.findAll('button').some((b) => b.text() === 'Block…')).toBe(true)
   wrapper.unmount()
 })

@@ -13,9 +13,9 @@ import type { AssetDetail, GridItem } from '../bridge'
 import { icons } from '../design/icons'
 import { capsOf, commandById, dispatchKey, menuItems, runCommand, useCommands } from '../shared/commands'
 import { compressionCommand } from '../shared/compression'
-import { errorText, reportError } from '../shared/errors'
+import { errorText, orFallback, reportError } from '../shared/errors'
 import FeatureState from '../shared/FeatureState.vue'
-import { dateTime, fileName } from '../shared/format'
+import { fileName, takenDay } from '../shared/format'
 import { formatNumber, t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import { isTyping, ownsArrows } from '../shared/keys'
@@ -77,6 +77,22 @@ const menuOpen = ref(false)
 const zoomOpen = ref(false)
 const isFullscreen = ref(false)
 const title = computed(() => fileName(detail.value?.paths[0] ?? '') || t('viewer.title'))
+// The heading says when and where the photo was taken; a place whose name is
+// blocked is not found, so it names none.
+const placeName = ref('')
+let placeAsked = 0
+watch(
+  () => detail.value?.placeId ?? 0,
+  async (id) => {
+    const asked = ++placeAsked
+    placeName.value = ''
+    const place = id ? await orFallback(engine.place(id), null) : null
+    if (asked === placeAsked) placeName.value = place?.name ?? ''
+  },
+)
+const heading = computed(() =>
+  detail.value ? [takenDay(detail.value.takenAt), placeName.value].filter(Boolean).join(' · ') : t('viewer.title'),
+)
 const neighbourIndex = computed(() => neighbours.value.findIndex((entry) => entry.id === src.value.id))
 const canPrevious = computed(() => !src.value.window || neighbourIndex.value !== 0)
 const canNext = computed(
@@ -693,7 +709,7 @@ onBeforeUnmount(() => {
       role="dialog"
       aria-modal="true"
       :aria-busy="loading"
-      :aria-label="detail ? dateTime(detail.takenAt) : t('viewer.title')"
+      :aria-label="heading"
       tabindex="-1"
       @pointermove="activity"
       @pointerdown="activity"
@@ -713,7 +729,7 @@ onBeforeUnmount(() => {
           />
           <img class="brand" src="/lumen.png" alt="" />
           <div class="identity">
-            <h1>{{ detail ? dateTime(detail.takenAt) : t('viewer.title') }}</h1>
+            <h1>{{ heading }}</h1>
             <span class="date" :title="title">{{ title }}</span>
           </div>
           <IconButton

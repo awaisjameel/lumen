@@ -4,9 +4,10 @@ import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { BlockKind, engine, ErrorCode, errorCode, Filter } from '../bridge'
-import type { Person } from '../bridge'
+import type { NamedPlace, Person, PersonFacts } from '../bridge'
 import { icons } from '../design/icons'
 import { block, onBlocksChanged } from '../shared/block'
+import Chip from '../shared/Chip.vue'
 import CollectionHero from '../shared/CollectionHero.vue'
 import { useCommands } from '../shared/commands'
 import { errorText, logError } from '../shared/errors'
@@ -27,6 +28,8 @@ const router = useRouter()
 const people = usePeople()
 const person = ref<Person | null>(null)
 const dates = ref('')
+const facts = ref<PersonFacts | null>(null)
+const places = ref<NamedPlace[]>([])
 const rename = useRename<true>()
 const { editing } = rename
 const error = ref('')
@@ -37,6 +40,13 @@ onBeforeUnmount(() => {
   alive = false
   request++
 })
+/** Forgets what was shown, so nothing of someone lingers once they are gone or blocked. */
+function clear() {
+  person.value = null
+  dates.value = ''
+  facts.value = null
+  places.value = []
+}
 async function load() {
   const asked = ++request
   const id = props.id
@@ -47,9 +57,16 @@ async function load() {
     person.value = got
     emit('loaded', got)
     error.value = ''
-    // Dates come from the same visible timeline as the person's photos.
-    const days = await engine.timeline({ filter: Filter.FilterAll, person: id, tag: 0, album: 0, place: 0, event: 0 })
+    // Dates and places come from the same visible timeline as the person's photos.
+    const view = { filter: Filter.FilterAll, person: id }
+    const [days, gotFacts, top] = await Promise.all([
+      engine.timeline(view),
+      engine.personFacts(id),
+      engine.topPlaces(view),
+    ])
     if (asked !== request) return
+    facts.value = gotFacts
+    places.value = top
     const years = days
       .map((d) => d.day.slice(0, 4))
       .filter((year) => /^\d{4}$/.test(year))
@@ -68,8 +85,7 @@ async function load() {
 watch(
   () => props.id,
   () => {
-    person.value = null
-    dates.value = ''
+    clear()
     error.value = ''
     void rename.close(false)
     void load()
@@ -79,12 +95,13 @@ watch(
 useLiveReload(load, (c) => c.people || c.assets || c.thumbs)
 onBeforeUnmount(
   onBlocksChanged(async () => {
-    person.value = null
-    dates.value = ''
+    clear()
     await load()
   }),
 )
 const name = computed(() => person.value?.name || t('person.unnamed'))
+const faces = computed(() => props.faceCount ?? facts.value?.faces)
+const companions = computed(() => facts.value?.companions ?? [])
 const meta = computed(
   () => `${t('person.photos', { n: person.value?.count ?? 0 })}${dates.value ? ` · ${dates.value}` : ''}`,
 )
@@ -112,8 +129,7 @@ async function blockPerson(hide = false) {
   if (await block(BlockKind.BlockPerson, id, name.value, true, '', !hide)) {
     // Remove cached identity before navigating, including its portrait.
     if (!alive || id !== props.id) return
-    person.value = null
-    dates.value = ''
+    clear()
     await router.push({ name: 'people' })
   }
 }
@@ -160,7 +176,7 @@ useCommands([
 
 <template>
   <div class="person-header">
-    <CollectionHero v-if="person" :kind="t('person.kind')" :name="name" :meta="meta" round>
+    <CollectionHero v-if="person" :name="name" :meta="meta" round>
       <template #cover><FaceThumb :face="person.cover" :size="128" fill round /></template>
       <template #name>
         <PersonNameEditor v-if="editing" :key="person.id" :person="person" @cancel="rename.close()" @saved="saved" />
@@ -177,6 +193,33 @@ useCommands([
             ><Icon name="pencil" :size="16"
           /></UButton>
         </h2>
+      </template>
+      <template #facts>
+        <div v-if="companions.length || places.length" class="facts" data-person-facts>
+          <template v-if="companions.length">
+            <span class="caption">{{ t('person.oftenWith') }}</span>
+            <Chip
+              v-for="p in companions"
+              :key="p.id"
+              class="companion"
+              :to="{ name: 'person', params: { id: p.id } }"
+              data-person-companion
+            >
+              <FaceThumb v-if="p.cover.id" :face="p.cover" :size="20" round />
+              <Icon v-else name="people" :size="14" />
+              <bdi>{{ p.name }}</bdi>
+            </Chip>
+          </template>
+          <template v-if="places.length">
+            <span class="caption"><Icon name="places" :size="14" />{{ t('person.topPlaces') }}</span>
+            <template v-for="(p, i) in places" :key="p.id">
+              <span v-if="i" class="caption" aria-hidden="true">·</span>
+              <RouterLink class="place" :to="{ name: 'place', params: { id: p.id } }" data-person-place
+                ><bdi>{{ p.name }}</bdi></RouterLink
+              >
+            </template>
+          </template>
+        </div>
       </template>
       <template #actions>
         <UButton
@@ -210,7 +253,7 @@ useCommands([
         class="tab"
         :class="{ active: reviewing }"
         :aria-current="reviewing ? 'page' : undefined"
-        >{{ t('person.facesTab') }}<span v-if="faceCount !== undefined">{{ formatNumber(faceCount) }}</span></RouterLink
+        >{{ t('person.facesTab') }}<span v-if="faces !== undefined">{{ formatNumber(faces) }}</span></RouterLink
       >
     </nav>
     <div v-else-if="!error" class="hero-skeleton" role="status" :aria-label="t('person.loading')">
@@ -250,6 +293,30 @@ useCommands([
   color: var(--ui-text-dimmed);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
+}
+.facts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+}
+.caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--ui-text-dimmed);
+  font-size: 0.75rem;
+}
+.companion {
+  min-height: 1.75rem;
+  padding-left: 0.25rem;
+}
+.place {
+  color: var(--ui-text-highlighted);
+  font-size: 0.8125rem;
+}
+.place:hover {
+  text-decoration: underline;
 }
 .heading {
   margin: 0;
@@ -300,6 +367,9 @@ useCommands([
 @container (max-width: 47.5rem) {
   .name {
     font-size: 1.875rem;
+  }
+  .facts {
+    display: none;
   }
   .person-header :deep(.round .cover) {
     display: block;

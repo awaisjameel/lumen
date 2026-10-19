@@ -1,19 +1,28 @@
 <script setup lang="ts">
 // A pill-shaped button: a filter that is on or off (Favourites), one of a row
 // of choices (a country), a part of a search that can be taken away, or a
-// search to try. On, it takes the accent's soft colour. Everything given to
-// it reaches the button, so it can open a menu or a popover.
+// search to try. On, it takes the accent's soft colour. Given somewhere to
+// go (a person someone is often with), it is a link instead. Everything
+// given to it reaches the element, so it can open a menu or a popover.
+import { RouterLink } from 'vue-router'
+import type { RouteLocationRaw } from 'vue-router'
+
 withDefaults(
   defineProps<{
     /** Whether it is on; left out for a chip that only acts. */
     pressed?: boolean
+    /** Where it leads, which makes it a link. */
+    to?: RouteLocationRaw
   }>(),
-  { pressed: undefined },
+  { pressed: undefined, to: undefined },
 )
 </script>
 
 <template>
-  <button type="button" class="chip" :aria-pressed="pressed">
+  <RouterLink v-if="to" :to="to" class="chip">
+    <slot />
+  </RouterLink>
+  <button v-else type="button" class="chip" :aria-pressed="pressed">
     <slot />
   </button>
 </template>

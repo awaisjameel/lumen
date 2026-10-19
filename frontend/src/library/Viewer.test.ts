@@ -21,6 +21,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   engine: {
     asset: vi.fn(),
+    place: vi.fn(),
     albums: vi.fn().mockResolvedValue([]),
     inspect: vi.fn().mockResolvedValue({ tracks: [] }),
     render: vi.fn().mockRejectedValue(new Error('Not available')),
@@ -95,6 +96,25 @@ it('shows the video without a still image covering playback', async () => {
   expect(view().get('video').attributes('controls')).toBeUndefined()
   expect(view().findAll('[role="slider"][aria-label="Seek video"]')).toHaveLength(1)
   expect(view().find('button[aria-label="Play"]').exists()).toBe(true)
+})
+
+it('heads the photo with the day and place it was taken, not the weekday or time', async () => {
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, takenAt: Date.UTC(2026, 9, 3, 18, 42) / 1000, placeId: 7 })
+  vi.mocked(engine.place).mockResolvedValue({
+    id: 7,
+    name: 'Karachi',
+    region: 'Sindh',
+    country: 'Pakistan',
+    lat: 24.86,
+    lon: 67.01,
+    count: 1,
+    cover: 0,
+    coverThumb: 0,
+  })
+  wrapper = mountViewer()
+  await flushPromises()
+  expect(view().get('.identity h1').text()).toBe('3 October 2026 · Karachi')
+  expect(engine.place).toHaveBeenCalledWith(7)
 })
 
 it('says so when videos cannot play at all', async () => {

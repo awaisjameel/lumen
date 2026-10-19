@@ -10,7 +10,7 @@ const monthSpanFmt = new Intl.DateTimeFormat(LOCALE, { month: 'short', year: 'nu
 const daySpanFmt = new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'short', year: 'numeric', timeZone: UTC })
 const dateFmt = new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'long', year: 'numeric', timeZone: UTC })
 const monthFmt = new Intl.DateTimeFormat(LOCALE, { month: 'long', year: 'numeric', timeZone: UTC })
-const fullFmt = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'full', timeStyle: 'short', timeZone: UTC })
+const dateTimeFmt = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'long', timeStyle: 'short', timeZone: UTC })
 
 /** "YYYY-MM-DD" -> Date at midnight UTC. */
 function parseDay(day: string): Date {
@@ -58,9 +58,14 @@ export function monthLabel(day: string): string {
   return monthFmt.format(parseDay(day))
 }
 
-/** Full date and time for the details panel, from wall-clock seconds. */
+/** Date and time from wall-clock seconds: "3 October 2026 at 18:42". */
 export function dateTime(wallClockSeconds: number): string {
-  return fullFmt.format(new Date(wallClockSeconds * 1000))
+  return dateTimeFmt.format(new Date(wallClockSeconds * 1000))
+}
+
+/** The day of wall-clock seconds, without its weekday: "3 October 2026". */
+export function takenDay(wallClockSeconds: number): string {
+  return dateFmt.format(new Date(wallClockSeconds * 1000))
 }
 
 // Sizes in the locale's words for units ("3.2 MB"), one decimal below ten.

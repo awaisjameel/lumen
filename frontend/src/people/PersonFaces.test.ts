@@ -26,6 +26,8 @@ vi.mock('../bridge', async (importOriginal) => ({
     rejectFaces: vi.fn(),
     people: vi.fn(),
     timeline: vi.fn().mockResolvedValue([]),
+    personFacts: vi.fn().mockResolvedValue({ faces: 0, companions: [] }),
+    topPlaces: vi.fn().mockResolvedValue([]),
     setPersonCover: vi.fn().mockResolvedValue(undefined),
   },
 }))

@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import UButton from '@nuxt/ui/components/Button.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlbumKind, BlockKind, engine, Filter, TagKind, thumbUrl } from '../bridge'
-import type { Event, Place } from '../bridge'
+import type { Event, NamedPlace, Place, View } from '../bridge'
 import { useAlbums } from '../albums/store'
 import CoverMosaic from '../shared/CoverMosaic.vue'
 import { useThings } from '../things/store'
 import CollectionHero from '../shared/CollectionHero.vue'
 import Icon from '../shared/Icon.vue'
-import { block } from '../shared/block'
-import { errorText, reportError } from '../shared/errors'
+import { block, onBlocksChanged } from '../shared/block'
+import { errorText, logError, reportError } from '../shared/errors'
 import { spanOfDays } from '../shared/format'
 import { t } from '../shared/i18n'
 import { nameTooLong, trimName } from '../shared/names'
@@ -47,6 +47,32 @@ const resettable = computed(
   () => props.kind === 'event' || (props.kind === 'thing' && thing.value?.kind === TagKind.TagBuiltin),
 )
 const pinned = computed(() => (props.kind === 'thing' ? thing.value?.pinned : event.value?.pinned))
+
+// Where most of an album's, a Thing's or an event's photos were taken; a
+// place is itself one, and Favourites says what it is instead.
+const view = computed((): View | null => {
+  if (props.kind === 'thing') return { filter: Filter.FilterAll, tag: props.id }
+  if (props.kind === 'album' || props.kind === 'smart') return { filter: Filter.FilterAll, album: props.id }
+  if (props.kind === 'event') return { filter: Filter.FilterAll, event: props.id }
+  return null
+})
+const places = shallowRef<NamedPlace[]>([])
+let placesAsked = 0
+async function loadPlaces() {
+  const asked = ++placesAsked
+  const scope = view.value
+  try {
+    const top = scope ? await engine.topPlaces(scope) : []
+    if (asked === placesAsked) places.value = top
+  } catch (e) {
+    if (asked === placesAsked) places.value = []
+    logError(e)
+  }
+}
+// The count changes whenever what the collection holds does.
+watch([view, () => props.count], () => void loadPlaces(), { immediate: true })
+onBeforeUnmount(onBlocksChanged(loadPlaces))
+
 const meta = computed(() => {
   return [
     spanOfDays(props.days, props.kind === 'event'),
@@ -56,6 +82,7 @@ const meta = computed(() => {
       : props.kind === 'favourites'
         ? t('collection.favouritesHint')
         : '',
+    ...places.value.map((p) => p.name),
   ]
     .filter(Boolean)
     .join(' · ')
@@ -228,15 +255,27 @@ defineExpose({ addPhotos, editRule })
       <UButton v-if="resettable" color="neutral" variant="ghost" :disabled="busy" @click="saveName(true)">{{
         t('collection.resetName')
       }}</UButton>
-      <UButton v-if="kind === 'album' && album?.kind === AlbumKind.AlbumManual" :icon="icons.plus" @click="addPhotos">{{
-        t('collection.addPhotos')
+      <UButton
+        v-if="kind === 'album' && album?.kind === AlbumKind.AlbumManual"
+        :icon="icons.plus"
+        color="primary"
+        variant="solid"
+        @click="addPhotos"
+        >{{ t('collection.addPhotos') }}</UButton
+      >
+      <UButton v-if="kind === 'smart'" color="primary" variant="solid" @click="editRule">{{
+        t('collection.editRule')
       }}</UButton>
-      <UButton v-if="kind === 'smart'" @click="editRule">{{ t('collection.editRule') }}</UButton>
-      <UButton v-if="kind === 'place'" :icon="icons.map" :to="{ name: 'places', query: { place: id } }">{{
-        t('collection.openMap')
-      }}</UButton>
+      <UButton
+        v-if="kind === 'place'"
+        :icon="icons.map"
+        color="primary"
+        variant="solid"
+        :to="{ name: 'places', query: { place: id } }"
+        >{{ t('collection.openMap') }}</UButton
+      >
       <UButton v-if="kind !== 'favourites'" color="neutral" variant="ghost" :disabled="busy" @click="blockCollection">{{
-        t('blocked.block')
+        t('collection.block')
       }}</UButton>
     </template>
   </CollectionHero>

@@ -23,6 +23,8 @@ vi.mock('../bridge', async (importOriginal) => ({
     namePerson: vi.fn(),
     people: vi.fn(),
     timeline: vi.fn().mockResolvedValue([]),
+    personFacts: vi.fn().mockResolvedValue({ faces: 0, companions: [] }),
+    topPlaces: vi.fn().mockResolvedValue([]),
     suggestPeople: vi.fn().mockResolvedValue([]),
   },
 }))
@@ -174,6 +176,33 @@ it('derives the date range from visible photo days and clears the old portrait b
   await refreshing
   await flushPromises()
   expect(wrapper.text()).toContain('Current name')
+})
+
+it('names who is most often in photos with them and where most were taken, and counts their faces', async () => {
+  setActivePinia(createPinia())
+  vi.mocked(engine.person).mockReset().mockResolvedValue(person(1, 'Ali'))
+  vi.mocked(engine.personFacts).mockResolvedValue({ faces: 36, companions: [person(2, 'Omar'), person(3, 'Sara')] })
+  vi.mocked(engine.topPlaces).mockResolvedValue([
+    { id: 7, name: 'Karachi' },
+    { id: 8, name: 'Lahore' },
+  ])
+  wrapper = mountHeader()
+  await flushPromises()
+  expect(engine.topPlaces).toHaveBeenCalledWith(expect.objectContaining({ person: 1 }))
+  expect(wrapper.findAll('[data-person-companion]').map((c) => [c.text(), c.attributes('href')])).toEqual([
+    ['Omar', '/person/2'],
+    ['Sara', '/person/3'],
+  ])
+  expect(wrapper.findAll('[data-person-place]').map((p) => [p.text(), p.attributes('href')])).toEqual([
+    ['Karachi', '/place/7'],
+    ['Lahore', '/place/8'],
+  ])
+  expect(wrapper.get('.person-tabs').text()).toContain('Faces36')
+  // Blocking someone takes what was said about them away at once.
+  vi.mocked(engine.person).mockReturnValue(new Promise(() => undefined))
+  void showBlocksChanged()
+  await nextTick()
+  expect(wrapper.find('[data-person-facts]').exists()).toBe(false)
 })
 
 const headerId = ref(1)

@@ -48,12 +48,7 @@ const description = computed(() =>
     ? t('duplicates.groupExact', { n: first.value.paths.length, size: bytes(first.value.size * removalCount.value) })
     : t('duplicates.groupSimilar', { n: props.group.items.length }),
 )
-const summary = computed(() =>
-  t('duplicates.selection', {
-    name: keeper.value ? (exact.value ? keeper.value.path : fileName(keeper.value.item.paths[0] ?? '')) : '',
-  }),
-)
-const hint = computed(() =>
+const outcome = computed(() =>
   t(exact.value ? 'duplicates.recycleSummary' : 'duplicates.trashSummary', {
     n: exact.value ? (review.value?.recycle.length ?? 0) : (review.value?.trash.length ?? 0),
   }),
@@ -93,7 +88,7 @@ function chooseCopy(value: unknown) {
       :ui="{
         fieldset: 'copy-grid',
         item: 'copy-choice',
-        wrapper: 'min-w-0 flex-1',
+        wrapper: 'min-w-0 flex-1 items-stretch text-start',
         label: 'sr-only',
         legend: 'sr-only',
       }"
@@ -112,23 +107,34 @@ function chooseCopy(value: unknown) {
             @click="chooseCopy(item.value)"
           >
             <MediaTile :id="item.photo.id" :thumb="item.photo.thumb" />
-            <span v-if="item.value === selected" class="kept-badge">{{ t('duplicates.keeping') }}</span>
           </button>
-          <strong class="copy-name">{{ item.label }}</strong>
+          <div class="badges">
+            <UBadge v-if="item.suggested" variant="soft" color="neutral" data-suggested>{{
+              t('duplicates.suggested')
+            }}</UBadge>
+            <UBadge v-if="item.value === selected" variant="soft" color="primary" :icon="icons.check" data-kept>{{
+              t('duplicates.keep')
+            }}</UBadge>
+            <UBadge v-else variant="soft" color="neutral" data-removed>{{
+              t(exact ? 'duplicates.toRecycle' : 'duplicates.toTrash')
+            }}</UBadge>
+          </div>
+          <strong class="copy-name" :title="item.label">{{ item.label }}</strong>
           <span class="copy-spec">{{
             t('duplicates.photoSize', { w: item.photo.width, h: item.photo.height, size: bytes(item.photo.size) })
           }}</span>
           <span v-if="item.photo.takenAt" class="copy-spec">{{ dateTime(item.photo.takenAt) }}</span>
-          <UBadge v-if="item.suggested" variant="outline" color="neutral" size="sm" data-suggested>{{
-            t('duplicates.suggested')
-          }}</UBadge>
-          <span v-for="path in exact ? [item.path] : item.photo.paths" :key="path" class="copy-path lumen-selectable">{{
-            path
-          }}</span>
+          <span
+            v-for="path in exact ? [item.path] : item.photo.paths"
+            :key="path"
+            class="copy-path lumen-selectable"
+            :title="path"
+            >{{ path }}</span
+          >
           <div class="copy-actions">
             <UButton
               class="preview-button"
-              :icon="icons.aperture"
+              :icon="icons.maximize"
               :aria-label="t('duplicates.preview', { name: item.label })"
               color="neutral"
               variant="ghost"
@@ -137,17 +143,8 @@ function chooseCopy(value: unknown) {
               @click="emit('preview', item.photo, item.path)"
               >{{ t('duplicates.previewAction') }}</UButton
             >
-            <UButton
-              :disabled="busy"
-              :variant="item.value === selected ? 'soft' : 'ghost'"
-              :icon="item.value === selected ? icons.check : undefined"
-              size="sm"
-              :aria-label="t('duplicates.keepNamed', { name: item.path })"
-              @click="chooseCopy(item.value)"
-              >{{ t(item.value === selected ? 'duplicates.keeping' : 'duplicates.keepThis') }}</UButton
-            >
             <IconButton
-              :icon="icons['folder-open']"
+              :icon="icons.folder"
               :label="t('duplicates.showFile', { name: item.path })"
               size="sm"
               color="neutral"
@@ -155,21 +152,28 @@ function chooseCopy(value: unknown) {
               data-show-file
               @click="emit('showPath', item.photo, item.path)"
             />
+            <UButton
+              class="keep-action"
+              :disabled="busy"
+              :color="item.value === selected ? 'primary' : 'neutral'"
+              :variant="item.value === selected ? 'soft' : 'ghost'"
+              size="sm"
+              :aria-label="t('duplicates.keepNamed', { name: item.path })"
+              @click="chooseCopy(item.value)"
+              >{{ t(item.value === selected ? 'duplicates.keeping' : 'duplicates.keepThis') }}</UButton
+            >
           </div>
         </div>
       </template>
     </URadioGroup>
     <div class="group-summary" role="toolbar" :aria-label="t('duplicates.reviewTitle')">
-      <div class="outcome">
-        <span>{{ summary }}</span
-        ><span>{{ hint }}</span>
-      </div>
+      <span class="outcome">{{ outcome }}</span>
       <UButton
-        :icon="icons['chevron-right']"
+        :trailing-icon="icons['chevron-right']"
         :aria-label="t('duplicates.reviewNamed', { name: fileName(first?.paths[0] ?? '') })"
         :disabled="busy || !review"
-        color="primary"
-        variant="solid"
+        color="neutral"
+        variant="outline"
         data-review
         @click="runCommand(commandId)"
         >{{ t('duplicates.review') }}</UButton
@@ -223,9 +227,8 @@ h3 {
 .copy-card {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 0.5rem;
-  margin-top: 0.5rem;
+  min-width: 0;
 }
 .keep-button {
   position: relative;
@@ -243,27 +246,28 @@ h3 {
   outline: 2px solid var(--ui-primary);
   outline-offset: 2px;
 }
-.kept-badge {
-  position: absolute;
-  left: 0.5rem;
-  top: 0.5rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: var(--lumen-r-sm);
-  background: var(--ui-primary);
-  color: var(--lumen-on-primary);
-  font-size: 0.75rem;
-  font-weight: 600;
+.badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-height: 1.5rem;
 }
 .copy-spec {
   color: var(--ui-text-toned);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
+.copy-name,
+.copy-path {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .copy-path {
   color: var(--ui-text-dimmed);
   font-family: var(--font-mono);
   font-size: 0.6875rem;
-  overflow-wrap: anywhere;
 }
 .copy-actions,
 .group-summary {
@@ -278,19 +282,21 @@ h3 {
   padding-top: 1rem;
   border-top: 1px solid var(--ui-border);
 }
-.outcome {
-  display: flex;
-  flex-direction: column;
+.copy-actions {
   gap: 0.25rem;
+}
+.keep-action {
+  margin-left: auto;
+}
+.outcome {
+  flex: 1;
   min-width: 0;
   color: var(--ui-text-toned);
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
+  font-size: 0.8125rem;
 }
 .copy-name {
   color: var(--ui-text-highlighted);
   font-size: 0.8125rem;
-  overflow-wrap: anywhere;
 }
 :deep(.copy-choice:focus-within) .keep-button {
   outline: 2px solid var(--ui-primary);
