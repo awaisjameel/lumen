@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# The checks that need the whole tree, before anything leaves this machine:
+# the frontend's type check, lint and formatting, Go vet on the named
+# packages, and the documentation's links. About a minute; scripts/lint.sh
+# and CI stay the full gate.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+# Each line on stdin is one ref being pushed; a deletion pushes no commits.
+pushing=0
+while read -r _ local_sha _ _; do
+  [[ $local_sha =~ ^0+$ ]] || pushing=1
+done
+[ "$pushing" -eq 1 ] || exit 0
+
+[ -d frontend/node_modules ] || { echo "pre-push: run npm ci in frontend/ first" >&2; exit 1; }
+echo "pre-push: frontend check"
+npm --prefix frontend run -s check
+echo "pre-push: go vet"
+# shellcheck source=scripts/env.sh
+source scripts/env.sh
+go vet . ./internal/... ./services/... ./cmd/... ./scripts/...
+echo "pre-push: documentation links"
+python scripts/check_links.py

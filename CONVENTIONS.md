@@ -17,6 +17,11 @@ written.
 - **Comments say why, in plain full sentences and British English** (the
   linter checks UK spelling). Match the density of the surrounding code. No
   commented-out code, no `TODO` without an owner or a plan, no debug output.
+- **Commit messages** are Conventional Commits, `type(scope): summary`
+  (feat, fix, perf, refactor, docs, test, build, ci, chore, style or
+  revert), with a body that says why. No message credits or mentions an AI
+  assistant. `scripts/check-commit-msg.sh` checks both, as the commit-msg
+  hook and in CI.
 - **One source of truth per rule.** Before writing a helper, search for one.
   If two copies exist, keep the one in the lower layer (`core` before
   `store` before `services`; `shared` before a feature folder) and delete

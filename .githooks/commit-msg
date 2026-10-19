@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Conventional Commit subjects, and no AI assistant credited or mentioned.
+exec bash "$(git rev-parse --show-toplevel)/scripts/check-commit-msg.sh" "$1"
