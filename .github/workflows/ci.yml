@@ -1,0 +1,100 @@
+# The checks every change passes: scripts/lint.sh (static checks, frontend
+# tests, documentation links), the Go race tests, a production build that
+# must leave the bindings and go.mod as committed, and the large-library
+# latency gate. Hosted runners are slower than the machine the latency
+# budgets were set on, so here that gate reports without failing;
+# scripts/lint.sh on a developer's machine stays the binding gate.
+# The release workflow calls this one, so a release passes the same checks.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow_ref }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  commits:
+    name: Commit messages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the pull request's commit messages
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/check-commit-msg.sh --range "$BASE..$HEAD"
+
+  checks:
+    name: Checks (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+
+      - name: Static checks, frontend tests and links
+        shell: bash
+        run: scripts/lint.sh --no-bench
+
+      - name: Go tests (race detector)
+        shell: bash
+        run: |
+          source scripts/env.sh
+          go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/...
+
+      - name: Production build
+        shell: bash
+        run: wails3 build
+      # The build regenerates the bindings and tidies go.mod: both must
+      # already be committed as it leaves them.
+      - name: Bindings and modules are current
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            git diff --stat
+            echo "::error::the build changed tracked files: regenerate the bindings (README, Commands) and commit them"
+            exit 1
+          fi
+
+      - name: Large-library latency (reported, not enforced)
+        id: bench
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          scripts/bench.sh 2>&1 | tee "$RUNNER_TEMP/bench.log"
+      - name: Report the latency gate
+        if: always() && steps.bench.outcome != 'skipped'
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.bench.outcome }}
+        run: |
+          {
+            echo "## Large-library latency: $OUTCOME"
+            echo
+            echo "Reported, not enforced: the budgets were set on an i7-13700H, and \`scripts/lint.sh\` there is the binding gate."
+            echo
+            echo '```text'
+            sed -n '/^benchmark /,$p' "$RUNNER_TEMP/bench.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          if [ "$OUTCOME" = failure ]; then
+            echo "::warning title=Latency budgets::a figure exceeded its budget on this runner; check it on a developer machine with scripts/bench.sh"
+          fi

@@ -1,0 +1,156 @@
+# Builds a pushed version tag (scripts/version.sh tag) into a draft GitHub
+# release: the offline installer, the runtime archive, the third-party
+# notices and SHA256SUMS.txt, with signed build provenance once the
+# repository is public. Publishing the draft stays the owner's decision
+# (docs/production-signing.md), and published files are never replaced.
+#
+# Signing switches on when the repository variables SIGN_THUMBPRINT and
+# TIMESTAMP_SERVER are set and a provider's setup step (below) has made that
+# certificate available. Until then the release is unsigned and marked as a
+# pre-release. This workflow never touches the updater's trust configuration:
+# update metadata needs the offline keys and stays a separate, local step.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Checks
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Draft release
+    needs: checks
+    runs-on: windows-2025
+    timeout-minutes: 120
+    permissions:
+      contents: write # create the draft release
+      id-token: write # sign the build provenance
+      attestations: write # store the build provenance
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SIGN_THUMBPRINT: ${{ vars.SIGN_THUMBPRINT }}
+      TIMESTAMP_SERVER: ${{ vars.TIMESTAMP_SERVER }}
+      ATTEST: ${{ github.event.repository.visibility == 'public' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the tag
+        shell: bash
+        run: |
+          version=$(sed -n 's/^  version: "\([^"]*\)".*/\1/p' build/config.yml)
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::the tag $TAG does not match build/config.yml's version $version (scripts/version.sh tag)"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$TAG is not on main: releases are tagged from main"
+            exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::a release for $TAG already exists, and published files are never replaced: bump the version"
+            exit 1
+          fi
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup
+
+      # A signing provider's own setup step goes here, before the check
+      # below: it must make the certificate SIGN_THUMBPRINT names available
+      # in Cert:\CurrentUser\My with its private key, as a hardware token's
+      # or a cloud signing service's certificate appears
+      # (docs/production-signing.md, "Signing in the release workflow").
+
+      - name: Check the signing set-up
+        if: env.SIGN_THUMBPRINT != ''
+        shell: pwsh
+        run: |
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'The Windows SDK signtool is missing from this runner.' }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $signtool.DirectoryName
+          $certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$env:SIGN_THUMBPRINT" -ErrorAction SilentlyContinue
+          if (-not $certificate -or -not $certificate.HasPrivateKey) {
+            throw 'SIGN_THUMBPRINT names no certificate with a private key in Cert:\CurrentUser\My: add the provider setup step.'
+          }
+          if (-not $env:TIMESTAMP_SERVER.StartsWith('https://')) { throw 'TIMESTAMP_SERVER must be an HTTPS RFC 3161 service.' }
+
+      - name: Build the installer
+        shell: bash
+        run: wails3 task package "SIGN_THUMBPRINT=$SIGN_THUMBPRINT" "TIMESTAMP_SERVER=$TIMESTAMP_SERVER"
+
+      - name: Verify the signatures
+        if: env.SIGN_THUMBPRINT != ''
+        shell: pwsh
+        run: |
+          foreach ($name in @('Lumen.exe', 'Lumen-launcher.exe', 'lumen-update.exe', "Lumen-$env:VERSION-x64-setup.exe")) {
+            $path = Join-Path 'bin' $name
+            $signature = Get-AuthenticodeSignature -LiteralPath $path
+            if ($signature.Status -ne 'Valid' -or $null -eq $signature.TimeStamperCertificate) {
+              throw "A valid timestamped signature is required: $name"
+            }
+            if ($signature.SignerCertificate.Thumbprint -ne $env:SIGN_THUMBPRINT.ToUpperInvariant()) {
+              throw "$name is signed by another certificate"
+            }
+            & signtool verify /pa /all /tw $path
+            if ($LASTEXITCODE -ne 0) { throw "signtool rejected $name" }
+          }
+
+      - name: Collect the release files
+        shell: bash
+        run: |
+          out=$(cygpath -u "$RUNNER_TEMP")/release
+          mkdir -p "$out"
+          cp "bin/Lumen-$VERSION-x64-setup.exe" "bin/Lumen-$VERSION-windows-amd64-runtime.zip" bin/THIRD_PARTY_NOTICES.txt "$out/"
+          (cd "$out" && sha256sum -b Lumen-* THIRD_PARTY_NOTICES.txt | sed 's/ \*/  /' >SHA256SUMS.txt && cat SHA256SUMS.txt)
+          echo "RELEASE_DIR=$out" >>"$GITHUB_ENV"
+
+      - name: Attest the build provenance
+        if: env.ATTEST == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/release/Lumen-*
+            ${{ runner.temp }}/release/THIRD_PARTY_NOTICES.txt
+
+      - name: Create the draft release
+        shell: bash
+        run: |
+          installer="Lumen-$VERSION-x64-setup.exe"
+          notes=$(cygpath -u "$RUNNER_TEMP")/notes.md
+          {
+            echo "Lumen $VERSION for Windows 10 and 11 (64-bit)."
+            echo
+            echo "**Install:** run \`$installer\`. It installs for you alone, with no administrator prompt and no internet connection, and installing over an earlier version keeps your library. Testers, please read [the beta guide](https://github.com/$GH_REPO/blob/$TAG/docs/beta-testing.md)."
+            echo
+            if [ -z "$SIGN_THUMBPRINT" ]; then
+              echo "> [!NOTE]"
+              echo "> This build is not code-signed yet, so Windows SmartScreen warns before running it: check the file as below, then choose **More info**, then **Run anyway**."
+              echo
+            fi
+            echo "**Verify the download** against \`SHA256SUMS.txt\`, in PowerShell: \`(Get-FileHash $installer).Hash\`, or in Git Bash: \`sha256sum -c SHA256SUMS.txt --ignore-missing\`."
+            if [ "$ATTEST" = true ]; then
+              echo "Its build provenance is signed too: \`gh attestation verify $installer --repo $GH_REPO\`."
+            fi
+            echo
+            echo "\`Lumen-$VERSION-windows-amd64-runtime.zip\` is the runtime the in-app updater installs; installing needs only the setup file."
+          } >"$notes"
+          prerelease=()
+          if [ -z "$SIGN_THUMBPRINT" ] || [[ $VERSION == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$TAG" --draft --verify-tag --title "Lumen $VERSION" \
+            --notes-file "$notes" --generate-notes "${prerelease[@]}" "$RELEASE_DIR"/*
+          echo "Draft release created: review it, then publish it at https://github.com/$GH_REPO/releases" >>"$GITHUB_STEP_SUMMARY"

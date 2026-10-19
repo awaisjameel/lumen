@@ -23,7 +23,7 @@ Settings → Updates and about → About Lumen links to the releases page, which
 
 ## Status
 
-Lumen is in beta. The owner accepted beta 0.11.0 on 12 October 2026; 0.12.0 is the current candidate. Signed installers will be published on the [releases page](https://github.com/awaisjameel/lumen/releases). Until then, build the installer from source (below).
+Lumen is in beta. The owner accepted beta 0.11.0 on 12 October 2026; 0.12.0 is the current candidate. Installers are published on the [releases page](https://github.com/awaisjameel/lumen/releases) as pre-releases, unsigned until a code-signing certificate is in place ([Releasing](#releasing)); you can also build one from source (below).
 
 | Phase | Scope | State | Record |
 | --- | --- | --- | --- |
@@ -55,7 +55,7 @@ Every record, audit and plan is listed in [the history index](docs/history/READM
 
 ## Installing
 
-Run `Lumen-<version>-x64-setup.exe`. It installs Lumen for the current user in `%LOCALAPPDATA%\Programs\Lumen` with no administrator prompt, and carries Microsoft's WebView2 runtime for PCs without one, so installing needs no internet either. The library lives in `%LOCALAPPDATA%\Lumen`. The uninstaller asks whether to remove the library (no by default). Testers should read [the beta guide](docs/beta-testing.md).
+Download `Lumen-<version>-x64-setup.exe` from the [releases page](https://github.com/awaisjameel/lumen/releases), check it against the release's `SHA256SUMS.txt`, and run it. It installs Lumen for the current user in `%LOCALAPPDATA%\Programs\Lumen` with no administrator prompt, and carries Microsoft's WebView2 runtime for PCs without one, so installing needs no internet either. The library lives in `%LOCALAPPDATA%\Lumen`. The uninstaller asks whether to remove the library (no by default). Testers should read [the beta guide](docs/beta-testing.md).
 
 ## Building from source (Windows)
 
@@ -77,6 +77,8 @@ Compression adds pinned libjpeg-turbo 3.1.2 and libjxl 0.12.0 tools in `deps/run
 
 Check the setup with `wails3 doctor`. Line endings are pinned to LF by `.gitattributes` (gofmt and Bash need it), whatever `core.autocrlf` says.
 
+Then turn on the repository's git hooks, once per clone, with `scripts/install-hooks.sh`. **commit-msg** holds messages to Conventional Commits (`type(scope): summary`) and refuses any that credit or mention an AI assistant. **pre-commit** checks the staged files' formatting (gofmt, Prettier, Ruff) and refuses this machine's absolute paths. **pre-push** runs the frontend check, Go vet and the documentation's links.
+
 ## Commands
 
 ```sh
@@ -84,7 +86,7 @@ wails3 dev                    # run with hot reload
 wails3 build                  # production build -> bin/Lumen.exe
 wails3 task package           # build + NSIS installer -> bin/Lumen-<version>-x64-setup.exe
 source scripts/env.sh         # before go test / vet / run: puts deps/runtime (libvips) on PATH
-go test -race -count=1 -timeout 900s . ./internal/... ./services/...   # wiring, engine and service tests
+go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/...   # wiring, engine, service and release-tool tests
 scripts/lint.sh               # static checks, frontend tests and large-library latency (--fix applies fixes first)
 scripts/bench.sh              # 100,000-photo store latency gate alone (one to two minutes)
 cd frontend && npm run check  # the frontend's alone: vue-tsc, ESLint, Prettier
@@ -96,7 +98,7 @@ Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates
 
 The frontend must finish building before Go embeds `frontend/dist`; never run the frontend and Go production builds concurrently. After changing an exported service method or a wire type, regenerate the bindings with `wails3 generate bindings -f '-tags production' -clean=true -ts -i` (as the build does) and check `git diff -- frontend/bindings`.
 
-`wails3 task package` writes `bin\THIRD_PARTY_NOTICES.txt` (generated from the build by `scripts/notices.py`) and builds the installer from `build/windows/nsis/project.nsi` with the NSIS that `deps.sh` pins. To sign Lumen.exe, the installer and the uninstaller, pass `SIGN_THUMBPRINT=` (a code-signing certificate in the Windows certificate store, where a hardware token's or a signing service's appears) and `TIMESTAMP_SERVER=`, with the Windows SDK's `signtool` on `PATH`. The version and the copyright are set once, in `build/config.yml`; after changing either, run `wails3 task common:update:build-assets` (`TestVersionsAgree` fails until then), then restore `license: "PolyForm-Noncommercial-1.0.0"` in `build/linux/nfpm/nfpm.yaml`, which that task resets to the template's (`TestLicenceAndCopyrightAgree` checks both). The template's Docker, server and MSIX tasks are left out of `Taskfile.yml`: Lumen needs cgo with the Windows libvips, and its installer must carry the runtime folder.
+`wails3 task package` writes `bin\THIRD_PARTY_NOTICES.txt` (generated from the build by `scripts/notices.py`) and builds the installer from `build/windows/nsis/project.nsi` with the NSIS that `deps.sh` pins. To sign Lumen.exe, the installer and the uninstaller, pass `SIGN_THUMBPRINT=` (a code-signing certificate in the Windows certificate store, where a hardware token's or a signing service's appears) and `TIMESTAMP_SERVER=`, with the Windows SDK's `signtool` on `PATH`. The version and the copyright are set once, in `build/config.yml`. `scripts/version.sh bump` changes the version (see [Releasing](#releasing)); after changing the copyright, run `wails3 task common:update:build-assets` and restore `license: "PolyForm-Noncommercial-1.0.0"` in `build/linux/nfpm/nfpm.yaml`, which that task resets to the template's (`TestVersionsAgree` and `TestLicenceAndCopyrightAgree` check both). The template's Docker, server and MSIX tasks are left out of `Taskfile.yml`: Lumen needs cgo with the Windows libvips, and its installer must carry the runtime folder.
 
 Component tests run in jsdom. Codec playback, native full screen and files moving on disk are checked by the end-to-end suites in [e2e/](e2e/README.md), which drive the built app over the DevTools protocol on scratch libraries with fixtures they generate themselves, one suite per use case: onboarding, a tour of every screen, interface, collections, organise, viewer, file tools, branding, formats, customisation, compression and updates. Installer acceptance is in [e2e/installer](e2e/installer/README.md).
 
@@ -108,9 +110,28 @@ Handy environment variables:
 - `LUMEN_FACE_PHOTOS` (tests only): a folder of real photos of people. The face tests run on it and skip without it; keep such photos out of the repository.
 - `LUMEN_RAW_SAMPLES` (tests only): a folder of real camera RAW files. The RAW tests run on it and skip without it; `e2e/fixtures/fetch_raw.py` downloads a pinned CC0 set into `e2e/.cache/raw`.
 
+## Releasing
+
+A release is a version bump merged into `main`, then a tag that the release workflow builds into a draft for review:
+
+1. On an up-to-date `main`, run `scripts/version.sh bump 0.13.0`. It moves to a `release/v0.13.0` branch, sets the version in `build/config.yml`, regenerates the build assets (restoring the nfpm licence), runs `TestVersionsAgree` and `TestLicenceAndCopyrightAgree`, and commits `chore(release): Lumen 0.13.0`. Push the branch, open a pull request and merge it once CI passes.
+2. On `main`, with that merge pulled, run `scripts/version.sh tag`. It refuses unless `main` matches `origin/main` and the version is untagged, then pushes the annotated tag `v0.13.0`.
+3. The tag starts [the release workflow](.github/workflows/release.yml), which:
+   - checks the tag matches `build/config.yml` and sits on `main`;
+   - runs CI's checks;
+   - builds the installer, signed when signing is configured;
+   - creates a **draft** release with the installer, the runtime archive, `THIRD_PARTY_NOTICES.txt`, `SHA256SUMS.txt` and, once the repository is public, signed build provenance (`gh attestation verify`).
+
+   An unsigned build is marked as a pre-release, and its notes tell users how to check the download.
+4. Review the draft: the generated notes, the files, and the installer on a test PC. Then publish it. Published files are never replaced: a fix is a new version. Turning on GitHub's immutable releases (Settings → General → Releases) enforces that.
+
+Signing in the workflow switches on with the repository variables `SIGN_THUMBPRINT` and `TIMESTAMP_SERVER`, once a signing provider's setup step is added ([production signing](docs/production-signing.md#signing-in-the-release-workflow)). The updater's authenticated feed is a separate, local step with offline keys, described in the same document; the release workflow never changes the updater's trust configuration.
+
 ## Code quality
 
-`scripts/lint.sh` runs the static checks, the frontend tests and the large-library latency gate. It runs every step and reports all failures at the end; `scripts/lint.sh --fix` first applies every automatic fix. Each tool is pinned and configured in the repository:
+`scripts/lint.sh` runs the static checks, the frontend tests, the documentation's links and the large-library latency gate. It runs every step and reports all failures at the end; `scripts/lint.sh --fix` first applies every automatic fix.
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every pull request and every push to `main`, on GitHub's Windows runners, with the toolchain and `deps/` set up as [Building from source](#building-from-source-windows) describes ([.github/actions/setup](.github/actions/setup/action.yml)). It checks the pull request's commit messages, runs `scripts/lint.sh --no-bench` and the Go race tests, and makes a production build, which must leave the bindings and `go.mod` as committed. It also runs the latency gate, but only reports it in the job summary: the runners are slower than the machine the budgets were set on, so `scripts/lint.sh` on a developer's machine stays the binding gate. Each tool is pinned and configured in the repository:
 
 | Code     | Formatting       | Linting                                                                                                                                                       | Config                                                                             |
 | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -163,7 +184,9 @@ frontend/src/{people,things,places,events,albums}   the collections
 frontend/src/{duplicates,compression,trash,organise}   the tools
 frontend/src/{settings,onboarding,about,updates}   Settings, first run, About Lumen and crash notice, application updates
 e2e/                 end-to-end suites on the built app, their fixture generators, installer acceptance and perf scripts
-scripts/             deps.sh and its parts, prepare_models.py, env.sh, lint.sh, bench.sh, notices.py, installer and update payloads, release.ps1, data builders
+scripts/             deps.sh and its parts, prepare_models.py, env.sh, lint.sh, bench.sh, version.sh, the hook checks, notices.py, installer and update payloads, release.ps1, data builders
+.github/             CI and release workflows, and the shared toolchain set-up they use
+.githooks/           commit-msg, pre-commit and pre-push (scripts/install-hooks.sh turns them on)
 build/               Wails build config (config.yml holds the version), icons, the NSIS installer in build/windows/nsis
 docs/                the feature tour, beta guide, production signing, branding, GeoNames provenance, the original plan; docs/history holds the dated records
 spikes/              Phase 0 experiments and later feasibility probes (own Go module; models in spikes/.cache)

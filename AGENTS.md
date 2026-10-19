@@ -31,12 +31,16 @@ wails3 build                                # production build -> bin/Lumen.exe
 wails3 task package                         # build + NSIS installer -> bin/Lumen-<version>-x64-setup.exe
 
 source scripts/env.sh                       # REQUIRED before go test / vet / run: puts deps/runtime (libvips DLL) on PATH
-go test -race -count=1 -timeout 900s . ./internal/... ./services/...
+go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/...
 go test -race -timeout 900s -run TestTagByNameRefusesABlockedThing ./internal/store   # one test
 
-scripts/lint.sh                             # static checks, frontend tests and large-library latency; must stay at zero
+scripts/lint.sh                             # static checks, frontend tests, doc links and large-library latency; must stay at zero
 scripts/lint.sh --fix                       # apply automatic fixes first
+scripts/lint.sh --no-bench                  # everything but the latency gate (CI runs that as a reported step)
 scripts/bench.sh                            # large-library latency gate alone (one to two minutes; sources env.sh)
+scripts/install-hooks.sh                    # once per clone: commit-msg, pre-commit and pre-push hooks (.githooks)
+scripts/version.sh bump 0.13.0              # release: bump on a release/ branch, regenerate assets, commit
+scripts/version.sh tag                      # on main after the merge: push v<version>, which drafts the release
 
 cd frontend
 npm run check                               # vue-tsc, ESLint (zero warnings), Prettier
@@ -62,7 +66,8 @@ because a run failed.
 - **Always pass `-timeout`** to `go test`; the race run is slow.
 - Tests that need real models go through `internal/testenv` and skip cleanly without `deps/runtime`. Face and RAW tests also skip unless `LUMEN_FACE_PHOTOS` / `LUMEN_RAW_SAMPLES` name a folder (see `e2e/README.md`).
 - The frontend must finish building before Go embeds `frontend/dist`; never run the frontend and Go production builds concurrently.
-- The version and the copyright are set once in `build/config.yml`; after changing either, run `wails3 task common:update:build-assets` (`TestVersionsAgree` fails until then) and restore the PolyForm licence it resets in `build/linux/nfpm/nfpm.yaml` (`TestLicenceAndCopyrightAgree`).
+- The version and the copyright are set once in `build/config.yml`. Change the version only with `scripts/version.sh bump`. After changing the copyright, run `wails3 task common:update:build-assets` and restore the PolyForm licence it resets in `build/linux/nfpm/nfpm.yaml` (`TestVersionsAgree`, `TestLicenceAndCopyrightAgree`).
+- CI (`.github/workflows/ci.yml`) and the release workflow (`release.yml`, on a `v*` tag) run on Windows runners set up by `.github/actions/setup`. A release is only ever drafted; the owner publishes it (README, "Releasing"). Pin every action to a full commit SHA with its version in a comment.
 - After changing an exported service method or a wire type, regenerate the bindings and check `git diff -- frontend/bindings`. Bindings are never edited by hand.
 
 ### Running the real app for a check
@@ -130,3 +135,4 @@ Import direction, enforced by ESLint: `bridge` ← `design` ← `shared` ← fea
 ## Git rules
 
 - Never add an AI assistant as a co-author, and never mention one anywhere: commit messages, pull requests, issues, comments.
+- Commit subjects are Conventional Commits (`type(scope): summary`). `scripts/check-commit-msg.sh` enforces both rules, as the commit-msg hook and in CI.

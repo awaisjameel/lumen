@@ -3,6 +3,8 @@
 The production process is implemented by `scripts/release.ps1`,
 `cmd/lumen-trust`, `cmd/lumen-feed`, and the signed NSIS package task.
 It prepares local artifacts; none of these commands publishes automatically.
+Offline installers are also built by the release workflow, which drafts a
+GitHub release for the owner to publish ([below](#signing-in-the-release-workflow)).
 The checkout's `internal/update/release-config.json` is deliberately empty.
 There is no production trust root, signing identity or public feed in this
 checkout. Fixture signing keys are not a production bootstrap.
@@ -92,6 +94,34 @@ The booleans summarise attached native/VM evidence; they are not instructions
 to manufacture a passing report. The signing process refuses feed preparation
 without matching hashes and both accepted results.
 
+## Signing in the release workflow
+
+`.github/workflows/release.yml` turns a version tag into a draft release
+(README, "Releasing"). It signs Lumen.exe, the stable launcher, the helper,
+the installer and the uninstaller when two repository variables are set:
+`SIGN_THUMBPRINT`, the certificate's thumbprint, and `TIMESTAMP_SERVER`, an
+HTTPS RFC 3161 service. The certificate and its private key must then be
+available in the runner's `Cert:\CurrentUser\My`. Without the variables the
+release is unsigned and marked as a pre-release.
+
+GitHub's runners cannot reach a USB hardware token, so signing there needs a
+cloud signing service whose Windows integration presents its certificate in
+the certificate store. Add the provider's documented setup step where
+`release.yml` marks it, keep its credentials in repository secrets, and
+protect them with a deployment environment that requires the owner's
+approval. Never export a private key to a PFX for CI. The workflow checks the
+certificate before building, then verifies each signature, its timestamp and
+its signer's thumbprint before drafting the release. A hardware token can
+still sign locally with `release.ps1 -Mode Package`, and those artifacts can
+be uploaded to the release instead.
+
+The workflow never writes `internal/update/release-config.json`, so its
+builds keep the updater inert. Once the public root and publisher pins exist,
+commit that file as `release.ps1 -Mode Package` writes it: it holds only
+public trust data, and every later build, the workflow's included, is then
+updater-capable. Preparing and publishing the feed stays local, because it
+needs the offline keys.
+
 ## Prepare and publish authenticated metadata
 
 `bin/update-target.json` is generated from the complete runtime. Review its
@@ -139,8 +169,10 @@ Targets expiry requires the targets quorum; online refresh cannot extend it.
 
 Publication is a separate owner-authorised operation:
 
-1. Upload the immutable signed installer and runtime ZIP to release tag
-   `v<version>` in `awaisjameel/lumen`. Never replace bytes at an existing URL.
+1. Publish the immutable signed installer and runtime ZIP at release tag
+   `v<version>` in `awaisjameel/lumen`: the release workflow drafts that
+   release from the tag, or upload the artifacts `release.ps1` built.
+   Never replace bytes at an existing URL.
 2. Configure static metadata hosting at the reviewed `MetadataUrl` (default
    `https://awaisjameel.github.io/lumen/updates`). This URL is a proposed endpoint;
    no Pages deployment or hosted feed was created in this implementation.
