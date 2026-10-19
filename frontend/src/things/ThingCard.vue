@@ -5,19 +5,19 @@ import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
-import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Filter, MAX_NAME_LEN, TagKind, thumbUrl } from '../bridge'
 import type { Tag } from '../bridge'
 import { icons } from '../design/icons'
 import type { IconName } from '../design/icons'
 import CollectionCard from '../shared/CollectionCard.vue'
+import CoverMosaic from '../shared/CoverMosaic.vue'
 import Icon from '../shared/Icon.vue'
 import { menuItems, useCommands } from '../shared/commands'
 import type { Command } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { nameTooLong } from '../shared/names'
 import { useRename } from '../shared/rename'
-import { useCollectionPreview } from '../shared/collectionPreview'
 
 const props = defineProps<{
   tag: Tag
@@ -36,30 +36,6 @@ const emit = defineEmits<{ pin: []; block: []; remove: []; editing: [open: boole
 const editor = useRename<number>()
 const { editing, draft } = editor
 const saving = ref(false)
-const root = useTemplateRef<HTMLElement>('root')
-const preview = useCollectionPreview(() => ({ filter: Filter.FilterAll, tag: props.tag.id }))
-const images = computed(() => preview.items.value.filter((item) => item.t).slice(0, 3))
-let observer: IntersectionObserver | undefined
-let visible = false
-onMounted(() => {
-  observer = new IntersectionObserver((entries) => {
-    if (entries.some((entry) => entry.isIntersecting)) {
-      visible = true
-      void preview.load()
-      observer?.disconnect()
-    }
-  })
-  if (root.value) observer.observe(root.value)
-})
-onBeforeUnmount(() => observer?.disconnect())
-watch(
-  () => `${props.tag.cover}:${props.tag.coverThumb}:${props.tag.count}`,
-  () => {
-    if (!visible) return
-    preview.clear()
-    void preview.load()
-  },
-)
 const renameFrom = ref<'title' | 'menu'>('menu')
 watch(editing, (id) => emit('editing', id !== null))
 
@@ -146,7 +122,7 @@ function renameTitle() {
 </script>
 
 <template>
-  <div ref="root">
+  <div>
     <CollectionCard
       class="thing-card"
       :data-collection="tag.id"
@@ -155,10 +131,15 @@ function renameTitle() {
       :cover="tag.cover && tag.coverThumb ? thumbUrl(tag.cover, tag.coverThumb) : undefined"
       :icon="icon"
     >
-      <template v-if="images.length > 1" #cover>
-        <div class="mosaic">
-          <img v-for="item in images" :key="item.id" :src="thumbUrl(item.id, item.t)" alt="" loading="lazy" />
-        </div>
+      <template #cover>
+        <CoverMosaic
+          class="card-mosaic"
+          :view="{ filter: Filter.FilterAll, tag: tag.id }"
+          :count="tag.count"
+          :cover="tag.cover"
+          :cover-thumb="tag.coverThumb"
+          :icon="icon"
+        />
       </template>
       <template #title>
         <div class="title-row">
@@ -249,22 +230,9 @@ function renameTitle() {
 </template>
 
 <style scoped>
-.mosaic {
+.card-mosaic {
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  grid-template-rows: 1fr 1fr;
-  gap: 0.25rem;
-}
-.mosaic img {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  object-fit: cover;
-}
-.mosaic img:first-child {
-  grid-row: span 2;
 }
 .title-row {
   display: flex;

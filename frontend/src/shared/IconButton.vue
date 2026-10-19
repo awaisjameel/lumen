@@ -4,7 +4,7 @@
 // is left to be guessed. Everything else given to it reaches the button.
 import UButton from '@nuxt/ui/components/Button.vue'
 import UTooltip from '@nuxt/ui/components/Tooltip.vue'
-import { useTemplateRef } from 'vue'
+import { computed, getCurrentInstance, useAttrs, useTemplateRef } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 
 defineProps<{
@@ -20,6 +20,12 @@ defineProps<{
   side?: 'top' | 'right' | 'bottom' | 'left'
 }>()
 defineOptions({ inheritAttrs: false })
+// The tooltip, not the button, is this component's root, and Vue gives a
+// parent's scoped-style attribute only to a root element: without it here a
+// parent's scoped rules for a class it puts on the button would never match.
+const scope = getCurrentInstance()?.vnode.scopeId
+const attrs = useAttrs()
+const buttonAttrs = computed(() => (scope ? { ...attrs, [scope]: '' } : attrs))
 const button = useTemplateRef<ComponentPublicInstance>('button')
 defineExpose({
   /** Focuses the button: a parent's ref to this component is not the element. */
@@ -32,7 +38,7 @@ defineExpose({
 
 <template>
   <UTooltip :text="tip ?? label" :kbds="kbds" :content="side ? { side } : undefined">
-    <UButton ref="button" v-bind="$attrs" :icon="icon" :aria-label="label" square>
+    <UButton ref="button" v-bind="buttonAttrs" :icon="icon" :aria-label="label" square>
       <template v-if="$slots.default" #default><slot /></template>
     </UButton>
   </UTooltip>

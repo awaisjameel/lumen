@@ -351,6 +351,14 @@ function renameTitle() {
 .mosaic > img:nth-child(4) {
   grid-column: span 2;
 }
+/* Fewer photos fill the cover too: three stand side by side, two halve it. */
+.mosaic > img:first-child:nth-last-child(3) ~ img {
+  grid-row: span 2;
+}
+.mosaic > img:first-child:nth-last-child(2) ~ img {
+  grid-row: span 2;
+  grid-column: span 2;
+}
 .mosaic .alternate {
   position: absolute;
   inset: 0;
