@@ -135,6 +135,11 @@ record still documents its Sandbox limitation; it is historical evidence,
 separate from that owner acceptance:
 [packaged beta acceptance](docs/beta-package-acceptance-2026-10-10.md).
 
+**The interface redesign** (October 2026) is merged: every screen rebuilt to
+its approved design board, with the engine support the new screens need.
+Boards, decisions and the deliberate departures from them:
+[redesign record](docs/redesign-2026-10-19.md).
+
 **Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
 
 ## Setup (Windows)
