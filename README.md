@@ -75,7 +75,7 @@ It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, F
 
 Compression adds pinned libjpeg-turbo 3.1.2 and libjxl 0.12.0 tools in `deps/runtime/compress/`. OxiPNG 9.1.5 is built from its locked source with a pinned portable Rust 1.99.0 GNU toolchain and the same clang. The Rust compiler and Cargo cache stay in `deps/`; only the encoder ships.
 
-Check the setup with `wails3 doctor`. Line endings are pinned to LF by `.gitattributes` (gofmt and Bash need it), whatever `core.autocrlf` says.
+Check the setup with `wails3 doctor`, then run `wails3 build` once: `Lumen.exe` embeds the built frontend (`frontend/dist`), so on a fresh clone no Go package compiles, and `go test` and `scripts/lint.sh` fail, until it exists. Line endings are pinned to LF by `.gitattributes` (gofmt and Bash need it), whatever `core.autocrlf` says.
 
 Then turn on the repository's git hooks, once per clone, with `scripts/install-hooks.sh`. **commit-msg** holds messages to Conventional Commits (`type(scope): summary`) and refuses any that credit or mention an AI assistant. **pre-commit** checks the staged files' formatting (gofmt, Prettier, Ruff) and refuses this machine's absolute paths. **pre-push** runs the frontend check, Go vet and the documentation's links.
 

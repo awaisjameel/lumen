@@ -65,7 +65,7 @@ because a run failed.
 - **Name the Go packages, never `./...`**: `build/` holds Wails' mobile templates, which only build on their own platforms. `spikes/` is its own Go module.
 - **Always pass `-timeout`** to `go test`; the race run is slow.
 - Tests that need real models go through `internal/testenv` and skip cleanly without `deps/runtime`. Face and RAW tests also skip unless `LUMEN_FACE_PHOTOS` / `LUMEN_RAW_SAMPLES` name a folder (see `e2e/README.md`).
-- The frontend must finish building before Go embeds `frontend/dist`; never run the frontend and Go production builds concurrently.
+- The frontend must finish building before Go embeds `frontend/dist`; never run the frontend and Go production builds concurrently. On a fresh clone, run `wails3 build` once before `go test` or `scripts/lint.sh`: without `frontend/dist` no Go package compiles.
 - The version and the copyright are set once in `build/config.yml`. Change the version only with `scripts/version.sh bump`. After changing the copyright, run `wails3 task common:update:build-assets` and restore the PolyForm licence it resets in `build/linux/nfpm/nfpm.yaml` (`TestVersionsAgree`, `TestLicenceAndCopyrightAgree`).
 - CI (`.github/workflows/ci.yml`) and the release workflow (`release.yml`, on a `v*` tag) run on Windows runners set up by `.github/actions/setup`. A release is only ever drafted; the owner publishes it (README, "Releasing"). Pin every action to a full commit SHA with its version in a comment.
 - After changing an exported service method or a wire type, regenerate the bindings and check `git diff -- frontend/bindings`. Bindings are never edited by hand.

@@ -48,16 +48,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
 
-      - name: Static checks, frontend tests and links
-        shell: bash
-        run: scripts/lint.sh --no-bench
-
-      - name: Go tests (race detector)
-        shell: bash
-        run: |
-          source scripts/env.sh
-          go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/...
-
+      # First, because Lumen.exe embeds frontend/dist, which a fresh clone
+      # lacks: no Go package compiles before the frontend is built.
       - name: Production build
         shell: bash
         run: wails3 build
@@ -72,6 +64,16 @@ jobs:
             echo "::error::the build changed tracked files: regenerate the bindings (README, Commands) and commit them"
             exit 1
           fi
+
+      - name: Static checks, frontend tests and links
+        shell: bash
+        run: scripts/lint.sh --no-bench
+
+      - name: Go tests (race detector)
+        shell: bash
+        run: |
+          source scripts/env.sh
+          go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/...
 
       - name: Large-library latency (reported, not enforced)
         id: bench
