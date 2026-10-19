@@ -4,7 +4,8 @@
 // and nothing on disk is touched. Turning it on again has the folders
 // checked, so its files are found. Videos have their own switch.
 import { computed } from 'vue'
-import USwitch from '@nuxt/ui/components/Switch.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
+import { icons } from '../design/icons'
 import { EXCLUDABLE_FAMILIES } from '../bridge'
 import { useLibrary } from '../library/store'
 import { t } from '../shared/i18n'
@@ -20,30 +21,44 @@ const off = computed(() => lib.settings.excludedFormats.length)
 <template>
   <PrefRow
     :label="t('settings.formats')"
+    :modified="off > 0"
     :description="t('settings.formatsHint')"
     :hint="hint('excludedFormats', off ? t('settings.formatsOff', { n: off }) : '')"
     :error="lib.settingErrors.excludedFormats"
   >
     <template #default>
       <div class="formats">
-        <USwitch
+        <UButton
           v-for="format in formats"
           :key="format.family"
           :data-format="format.family"
-          :label="format.label"
-          :model-value="!lib.settings.excludedFormats.includes(format.family)"
-          @update:model-value="
-            (on: boolean) => save('excludedFormats', () => lib.saveFormatExcluded(format.family, !on))
+          role="switch"
+          variant="outline"
+          :aria-checked="!lib.settings.excludedFormats.includes(format.family)"
+          :icon="!lib.settings.excludedFormats.includes(format.family) ? icons.check : undefined"
+          @click="
+            save('excludedFormats', () =>
+              lib.saveFormatExcluded(format.family, !lib.settings.excludedFormats.includes(format.family)),
+            )
           "
-        />
+          >{{ format.label }}</UButton
+        >
       </div>
     </template>
   </PrefRow>
 </template>
 <style scoped>
 .formats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, max-content));
-  gap: 0.5rem 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.formats :deep(button) {
+  border-radius: var(--lumen-r-xl);
+}
+.formats :deep([aria-checked='true']) {
+  color: var(--lumen-primary-text);
+  background: var(--lumen-primary-soft);
 }
 </style>

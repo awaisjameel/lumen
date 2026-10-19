@@ -16,11 +16,13 @@ defineProps<{
   indeterminate?: boolean
   /** It stopped on a failure: the bar turns to the error colour. */
   failed?: boolean
+  /** Lumen’s own background activity uses the light token. */
+  activity?: boolean
 }>()
 </script>
 
 <template>
-  <div class="work-progress" role="status">
+  <div class="work-progress" :class="{ activity: activity && !failed }" role="status">
     <div class="line">
       <span class="label">{{ label }}</span>
       <div v-if="$slots.default" class="actions">
@@ -33,6 +35,7 @@ defineProps<{
       :color="failed ? 'error' : 'primary'"
       size="xs"
       :aria-label="label"
+      :get-value-label="() => label"
     />
     <span v-if="detail" class="detail">{{ detail }}</span>
   </div>
@@ -42,12 +45,13 @@ defineProps<{
 .work-progress {
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
+  gap: 0.75rem;
   min-width: 0;
 }
 .line {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
   min-width: 0;
 }
@@ -55,10 +59,11 @@ defineProps<{
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: var(--ui-text);
+  color: var(--ui-text-highlighted);
   font-weight: 600;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .actions {
   display: flex;
@@ -67,5 +72,9 @@ defineProps<{
 .detail {
   color: var(--ui-text-dimmed);
   font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.activity :deep([data-slot='indicator']) {
+  background: var(--lumen-light);
 }
 </style>

@@ -3,18 +3,29 @@
 // widened by a margin, fills a square. The small thumbnail is used when it
 // has enough pixels for the size shown, else the large one. An <img>, not a
 // CSS background, so faces off screen load only when scrolled to.
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { t } from '../shared/i18n'
 import { frameUrl, THUMB_LARGE, THUMB_SMALL, thumbUrl } from '../bridge'
 import type { Face } from '../bridge'
 import Icon from '../shared/Icon.vue'
 
-const props = withDefaults(defineProps<{ face: Face; size: number; round?: boolean }>(), { round: false })
+const props = withDefaults(defineProps<{ face: Face; size: number; round?: boolean; fill?: boolean }>(), {
+  round: false,
+})
+
+const failed = ref(false)
+watch(
+  () => props.face,
+  () => {
+    failed.value = false
+  },
+)
 
 const MARGIN = 1.6 // the square shows this many face widths
 
 const image = computed(() => {
   const f = props.face
-  if (!f.id || !f.thumb) return null
+  if (!f.id || !f.thumb || f.w <= 0 || f.h <= 0) return null
   const w = f.assetW || 1
   const h = f.assetH || 1
   const side = Math.max(f.w * w, f.h * h) * MARGIN // in photo pixels
@@ -26,19 +37,28 @@ const image = computed(() => {
   return {
     src: f.video ? frameUrl(f.assetId, f.frame) : `${thumbUrl(f.assetId, f.thumb, thumb)}&canonical=1`,
     style: {
-      width: `${w * scale}px`,
-      height: `${h * scale}px`,
-      left: `${props.size / 2 - cx}px`,
-      top: `${props.size / 2 - cy}px`,
+      width: `${((w * scale) / props.size) * 100}%`,
+      height: `${((h * scale) / props.size) * 100}%`,
+      left: `${((props.size / 2 - cx) / props.size) * 100}%`,
+      top: `${((props.size / 2 - cy) / props.size) * 100}%`,
     },
   }
 })
 </script>
 
 <template>
-  <span class="face" :class="{ round }" :style="{ width: size + 'px', height: size + 'px' }">
-    <img v-if="image" :src="image.src" :style="image.style" alt="" loading="lazy" decoding="async" draggable="false" />
-    <Icon v-else name="user" :size="Math.round(size / 2)" />
+  <span class="face" :class="{ round, fill }" :style="fill ? undefined : { width: size + 'px', height: size + 'px' }">
+    <img
+      v-if="image && !failed"
+      :src="image.src"
+      :style="image.style"
+      alt=""
+      loading="lazy"
+      decoding="async"
+      draggable="false"
+      @error="failed = true"
+    />
+    <Icon v-else name="user" :size="Math.round(size / 2)" :title="t('person.previewUnavailable')" />
   </span>
 </template>
 
@@ -59,5 +79,9 @@ const image = computed(() => {
 }
 .round {
   border-radius: 50%;
+}
+.fill {
+  width: 100%;
+  height: 100%;
 }
 </style>

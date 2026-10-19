@@ -10,6 +10,7 @@ import {
   Accent,
   Density,
   FocusRing,
+  Family,
   Motion,
   PrefCategory,
   RENDER_SIDE_STANDARD,
@@ -50,6 +51,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     setEventGapHours: vi.fn<(hours: number) => Promise<void>>(),
     setThumbCacheMB: vi.fn<(mb: number) => Promise<void>>(),
     setCPUThreads: vi.fn<(n: number) => Promise<void>>(),
+    setFormatExcluded: vi.fn<typeof Bridge.engine.setFormatExcluded>(),
     exportXMPNow: vi.fn<() => Promise<Bridge.XMPExport>>(),
     setPreferences: vi.fn<(prefs: Bridge.Preferences) => Promise<Bridge.Preferences>>(),
     thumbCacheBytes: vi.fn<() => Promise<number>>(),
@@ -83,6 +85,7 @@ beforeEach(() => {
   vi.mocked(engine.setIdleOnly).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setThumbCacheMB).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setCPUThreads).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setFormatExcluded).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.exportXMPNow).mockReset().mockResolvedValue({ written: 0, unchanged: 0, skipped: 0 })
   vi.mocked(engine.thumbCacheBytes).mockReset().mockResolvedValue(0)
   vi.mocked(engine.viewingCacheBytes).mockReset().mockResolvedValue(0)
@@ -587,7 +590,7 @@ it('offers the real theme, six named accents and two densities without enum zero
         .get('[data-appearance="accent"]')
         .findAll('label')
         .map((label) => label.text()),
-    ).toEqual(['Blue', 'Teal', 'Green', 'Violet', 'Rose', 'Amber'])
+    ).toEqual(['Cobalt', 'Teal', 'Green', 'Violet', 'Rose', 'Amber'])
     expect(wrapper.get('[data-appearance="density"]').findAll('[role="radio"]')).toHaveLength(2)
     await chooseAppearance(wrapper, 'theme', 2)
     await flushPromises()
@@ -618,7 +621,9 @@ it('uses the text scale bounds and step and restores the default with its reset'
       .find((component) => component.attributes('data-appearance') === 'textScale')
     if (!slider) throw new Error('missing text size slider')
     expect(slider.props()).toEqual(expect.objectContaining({ min: TEXT_SCALE_MIN, max: TEXT_SCALE_MAX, step: 5 }))
-    const reset = wrapper.findAll('button').find((button) => button.text() === t('settings.resetText'))
+    const reset = wrapper
+      .findAll('button')
+      .find((button) => button.attributes('aria-label') === t('settings.resetText'))
     if (!reset) throw new Error('missing text size reset')
     expect(reset.attributes('disabled')).toBeDefined()
     slider.vm.$emit('update:modelValue', TEXT_SCALE_DEFAULT + 5)
@@ -674,10 +679,11 @@ it('applies appearance at once, shows saving, queues newer choices and rolls a f
   }
 })
 
-it('filters by descriptions and categories and recovers from a search with no matches', async () => {
+it('searches every category and restores the selected category when cleared', async () => {
   setActivePinia(createPinia())
   const wrapper = mountSettings()
   try {
+    expect(wrapper.get('[data-category="appearance"]').isVisible()).toBe(true)
     await wrapper.get('input[type="search"]').setValue('processor busy')
     expect(
       wrapper
@@ -685,21 +691,18 @@ it('filters by descriptions and categories and recovers from a search with no ma
         .filter((row) => row.isVisible())
         .map((row) => row.attributes('data-pref')),
     ).toEqual([t('settings.pauseBusy')])
-    const appearance = wrapper
-      .get('nav')
-      .findAll('button')
-      .find((button) => button.text() === t('settings.appearance'))
-    if (!appearance) throw new Error('missing appearance category')
-    await appearance.trigger('click')
+    await wrapper.get('input[type="search"]').setValue('no-such-setting')
     expect(wrapper.text()).toContain(t('settings.noResults'))
-    const reset = wrapper.findAll('button').find((button) => button.text() === t('settings.clearSearch'))
-    if (!reset) throw new Error('missing clear search action')
-    await reset.trigger('click')
-    expect(wrapper.findAll('[data-category]')).toHaveLength(13)
-    expect(
-      wrapper.get('input[type="search"]').element instanceof HTMLInputElement &&
-        wrapper.get<HTMLInputElement>('input[type="search"]').element.value,
-    ).toBe('')
+    const clear = wrapper.findAll('button').find((button) => button.text() === t('settings.clearSearch'))
+    if (!clear) throw new Error('missing clear search action')
+    await clear.trigger('click')
+    expect(wrapper.get('[data-category="appearance"]').isVisible()).toBe(true)
+    await wrapper.get('[data-settings-category="library"]').trigger('click')
+    expect(wrapper.get('[data-category="library"]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-category="appearance"]').isVisible()).toBe(false)
+    await wrapper.get('input[type="search"]').setValue('captions')
+    expect(wrapper.get('[data-category="video"]').isVisible()).toBe(true)
+    expect(wrapper.get(`[data-pref="${t('viewer.subtitles')}"]`).isVisible()).toBe(true)
   } finally {
     wrapper.unmount()
   }
@@ -846,7 +849,7 @@ it('hides thumbnail badges and shows whole pictures through the page, not throug
   }
 })
 
-it('resets one section after asking, and reads engine settings again for a section that has them', async () => {
+it('resets the visible category without changing controls moved into other categories', async () => {
   setActivePinia(createPinia())
   const prefs = usePreferences()
   const lib = useLibrary()
@@ -854,7 +857,11 @@ it('resets one section after asking, and reads engine settings again for a secti
   const reset = (id: string) => wrapper.get(`[data-category="${id}"] [data-reset-section]`)
   try {
     await flushPromises()
-    await prefs.set({ theme: Theme.ThemeDark })
+    await prefs.set({
+      theme: Theme.ThemeDark,
+      motion: Motion.MotionReduced,
+      viewerBackground: ViewerBackground.ViewerBackgroundBlack,
+    })
     vi.mocked(engine.preferences).mockResolvedValue(defaultPreferences())
 
     await reset('appearance').trigger('click')
@@ -867,20 +874,26 @@ it('resets one section after asking, and reads engine settings again for a secti
     await reset('appearance').trigger('click')
     question.value?.answer(true)
     await flushPromises()
-    expect(engine.resetPreferences).toHaveBeenCalledExactlyOnceWith([PrefCategory.PrefAppearance])
+    expect(engine.resetPreferences).not.toHaveBeenCalled()
     expect(prefs.prefs.theme).toBe(Theme.ThemeSystem)
+    expect(prefs.prefs.motion).toBe(Motion.MotionReduced)
+    expect(prefs.prefs.viewerBackground).toBe(ViewerBackground.ViewerBackgroundBlack)
     expect(engine.settings).not.toHaveBeenCalled()
     expect(wrapper.get('[data-category="appearance"]').text()).toContain(
       t('settings.resetDone', { section: t('settings.appearance') }),
     )
 
     lib.settings.pauseBusy = false
+    lib.settings.thumbCacheMB = 8192
+    lib.settings.excludedFormats = [Family.FamilyPNG]
     vi.mocked(engine.settings).mockResolvedValue({ ...lib.settings, pauseBusy: true })
     await reset('indexing').trigger('click')
     question.value?.answer(true)
     await flushPromises()
-    expect(engine.resetPreferences).toHaveBeenLastCalledWith([PrefCategory.PrefIndexing])
+    expect(engine.resetPreferences).not.toHaveBeenCalled()
     expect(lib.settings.pauseBusy).toBe(true)
+    expect(lib.settings.thumbCacheMB).toBe(8192)
+    expect(lib.settings.excludedFormats).toEqual([Family.FamilyPNG])
     // Privacy, the presets and About have nothing of their own to reset.
     for (const id of ['privacy', 'presets', 'about'])
       expect(wrapper.find(`[data-category="${id}"] [data-reset-section]`).exists()).toBe(false)
@@ -906,6 +919,91 @@ it('counts the viewing copies apart from thumbnails and clears only them', async
     expect(engine.setThumbCacheMB).not.toHaveBeenCalled()
     expect(rowOf().text()).toContain('Freed')
     expect(wrapper.get('[data-viewing-cache-clear]').attributes('disabled')).toBeDefined()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('resets Library storage and formats while keeping indexing politeness', async () => {
+  setActivePinia(createPinia())
+  const lib = useLibrary()
+  lib.settings.thumbCacheMB = 8192
+  lib.settings.excludedFormats = [Family.FamilyPNG]
+  lib.settings.pauseBusy = false
+  vi.mocked(engine.preferences).mockResolvedValue(defaultPreferences())
+  const wrapper = mountSettings()
+  try {
+    await wrapper.get('[data-category="library"] [data-reset-section]').trigger('click')
+    question.value?.answer(true)
+    await flushPromises()
+    expect(engine.resetPreferences).toHaveBeenCalledExactlyOnceWith([PrefCategory.PrefLibrary])
+    expect(lib.settings.thumbCacheMB).toBe(THUMB_CACHE_DEFAULT_MB)
+    expect(lib.settings.excludedFormats).toEqual([])
+    expect(lib.settings.pauseBusy).toBe(false)
+    expect(engine.setFormatExcluded).toHaveBeenCalledExactlyOnceWith(Family.FamilyPNG, false)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('keeps opt-ins when resetting AI and reports a partially refused indexing reset', async () => {
+  setActivePinia(createPinia())
+  const lib = useLibrary()
+  lib.settings.ocr = true
+  lib.settings.aiOnBattery = true
+  lib.settings.eventGapHours = 36
+  const wrapper = mountSettings()
+  try {
+    await wrapper.get('[data-category="search"] [data-reset-section]').trigger('click')
+    question.value?.answer(true)
+    await flushPromises()
+    expect(lib.settings.ocr).toBe(true)
+    expect(lib.settings.aiOnBattery).toBe(true)
+    expect(lib.settings.eventGapHours).toBe(12)
+    lib.settings.pauseBusy = false
+    vi.mocked(engine.setPauseBusy).mockRejectedValueOnce(new Error('Library is busy.'))
+    await wrapper.get('[data-category="indexing"] [data-reset-section]').trigger('click')
+    question.value?.answer(true)
+    await flushPromises()
+    expect(wrapper.text()).toContain(t('settings.resetIncomplete', { error: lib.settingErrors.pauseBusy ?? '' }))
+    expect(lib.settings.pauseBusy).toBe(false)
+    expect(lib.settings.aiOnBattery).toBe(false)
+    expect(lib.settings.ocr).toBe(true)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('previews appearance without changing a real favourite and marks changed preferences', async () => {
+  setActivePinia(createPinia())
+  const wrapper = mountSettings()
+  try {
+    await chooseAppearance(wrapper, 'theme', 2)
+    await flushPromises()
+    expect(wrapper.find(`[data-pref="${t('settings.theme')}"] [aria-label="${t('settings.modified')}"]`).exists()).toBe(
+      true,
+    )
+    const preview = wrapper.get('[data-settings-preview] button')
+    await preview.trigger('click')
+    expect(preview.attributes('aria-pressed')).toBe('true')
+    expect(preview.text()).toBe(t('settings.previewFavourited'))
+    expect(usePreferences().prefs.theme).toBe(Theme.ThemeDark)
+    expect(wrapper.get('[data-appearance="theme"] img').attributes('src')).toBeTruthy()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('asks with a danger confirmation before resetting all settings from the top bar', async () => {
+  setActivePinia(createPinia())
+  const wrapper = mountSettings()
+  try {
+    await wrapper.get('[data-settings-reset-all]').trigger('click')
+    expect(question.value?.danger).toBe(true)
+    expect(question.value?.title).toBe(t('settings.resetAllTitle'))
+    question.value?.answer(false)
+    await flushPromises()
+    expect(engine.resetPreferences).not.toHaveBeenCalled()
   } finally {
     wrapper.unmount()
   }

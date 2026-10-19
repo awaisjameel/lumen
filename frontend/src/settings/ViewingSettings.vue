@@ -50,6 +50,7 @@ function setSide(value: unknown) {
     <PrefRow
       v-if="shows('viewer.open', 'viewer.openHint')"
       :label="t('viewer.open')"
+      :modified="viewing.open !== defaults.open"
       :description="t('viewer.openHint')"
     >
       <template #default="{ labelledBy, describedBy }">
@@ -67,6 +68,7 @@ function setSide(value: unknown) {
     <PrefRow
       v-if="shows('viewer.wheel', 'viewer.wheelHint')"
       :label="t('viewer.wheel')"
+      :modified="viewing.wheel !== defaults.wheel"
       :description="t('viewer.wheelHint')"
     >
       <template #default="{ labelledBy, describedBy }">
@@ -81,19 +83,28 @@ function setSide(value: unknown) {
         />
       </template>
     </PrefRow>
-    <PrefRow v-if="shows('viewer.filmstrip')" :label="t('viewer.filmstrip')"
+    <PrefRow
+      v-if="shows('viewer.filmstrip')"
+      :label="t('viewer.filmstrip')"
+      :modified="viewing.filmstrip !== defaults.filmstrip"
       ><USwitch
         :model-value="viewing.filmstrip"
         :aria-label="t('viewer.filmstrip')"
         @update:model-value="prefs.setViewer({ filmstrip: $event })"
     /></PrefRow>
-    <PrefRow v-if="shows('viewer.autoHide')" :label="t('viewer.autoHide')"
+    <PrefRow
+      v-if="shows('viewer.autoHide')"
+      :label="t('viewer.autoHide')"
+      :modified="viewing.autoHide !== defaults.autoHide"
       ><USwitch
         :model-value="viewing.autoHide"
         :aria-label="t('viewer.autoHide')"
         @update:model-value="prefs.setViewer({ autoHide: $event })"
     /></PrefRow>
-    <PrefRow v-if="shows('viewer.interval')" :label="t('viewer.interval')"
+    <PrefRow
+      v-if="shows('viewer.interval')"
+      :label="t('viewer.interval')"
+      :modified="viewing.slideshowSeconds !== defaults.slideshowSeconds"
       ><UInput
         type="number"
         :min="SLIDESHOW_SECONDS_MIN"
@@ -102,7 +113,10 @@ function setSide(value: unknown) {
         :aria-label="t('viewer.interval')"
         @update:model-value="prefs.setViewer({ slideshowSeconds: Number($event) || defaults.slideshowSeconds })"
     /></PrefRow>
-    <PrefRow v-if="shows('viewer.slideshowLoop')" :label="t('viewer.slideshowLoop')"
+    <PrefRow
+      v-if="shows('viewer.slideshowLoop')"
+      :label="t('viewer.slideshowLoop')"
+      :modified="viewing.loop !== defaults.loop"
       ><USwitch
         :model-value="viewing.loop"
         :aria-label="t('viewer.slideshowLoop')"
@@ -111,6 +125,7 @@ function setSide(value: unknown) {
     <PrefRow
       v-if="shows('viewer.animations', 'viewer.animationsHint')"
       :label="t('viewer.animations')"
+      :modified="viewing.stillAnimations !== defaults.stillAnimations"
       :description="t('viewer.animationsHint')"
     >
       <template #default="{ labelledBy, describedBy }">
@@ -126,6 +141,7 @@ function setSide(value: unknown) {
     <PrefRow
       v-if="shows('viewer.renderSide', 'viewer.renderSideHint')"
       :label="t('viewer.renderSide')"
+      :modified="viewing.renderSide !== defaults.renderSide"
       :description="t('viewer.renderSideHint')"
     >
       <template #default="{ labelledBy, describedBy }">

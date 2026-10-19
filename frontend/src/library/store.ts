@@ -19,6 +19,7 @@ import type {
   DayBucket,
   Family,
   GridItem,
+  LibraryCounts,
   Progress,
   SearchResults,
   Selection,
@@ -35,6 +36,8 @@ import { deleteFromDisk } from '../trash/actions'
 import { showTrashUndo } from '../trash/undo'
 import { usePreferences } from '../shared/preferences'
 import { turns } from '../shared/turns'
+import { notify } from '../shared/notify'
+import { t } from '../shared/i18n'
 
 /** The settings sections whose reset changes engine settings (core.PrefCategory), which are then read again. */
 const ENGINE_CATEGORIES: readonly PrefCategory[] = [
@@ -43,16 +46,49 @@ const ENGINE_CATEGORIES: readonly PrefCategory[] = [
   PrefCategory.PrefFiles,
 ]
 
-/** The single group search results live in (they have no days). */
+/**
+ * The groups search results live in, as they have no days: the few best
+ * matches lead, then the rest, both best first.
+ */
+export const BEST = 'best'
 export const RESULTS = 'results'
+/** How many results lead as the best match. */
+export const BEST_MATCHES = 4
+
+/** Whether a group is one of a search's, not a day. */
+export function isResults(group: string): boolean {
+  return group === BEST || group === RESULTS
+}
+
+/** Search results, best first, as their groups. */
+function resultGroups(items: GridItem[]): { buckets: DayBucket[]; days: Map<string, GridItem[]> } {
+  const groups = [
+    [BEST, items.slice(0, BEST_MATCHES)],
+    [RESULTS, items.slice(BEST_MATCHES)],
+  ] as const
+  const kept = groups.filter(([, part]) => part.length)
+  return {
+    buckets: kept.map(([day, part]) => ({ day, count: part.length })),
+    days: new Map(kept),
+  }
+}
 
 /** What the grid shows: part of the timeline, or search results (best first). */
-export type Scope = { kind: 'timeline'; view: View } | { kind: 'search'; query: string }
+export type Scope =
+  | { kind: 'timeline'; view: View; media?: Filter }
+  | { kind: 'search'; query: string; media?: Filter; favourites?: boolean; from?: string; to?: string; place?: number }
 
 export function scopeKey(s: Scope): string {
-  return s.kind === 'search'
-    ? `search:${s.query}`
-    : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}:${s.view.album ?? 0}:${s.view.place ?? 0}:${s.view.event ?? 0}`
+  const refine =
+    s.kind === 'search'
+      ? `:${s.media ?? Filter.FilterAll}:${s.favourites ?? false}:${s.from ?? ''}:${s.to ?? ''}:${s.place ?? 0}`
+      : `:${s.media ?? Filter.FilterAll}`
+  return (
+    (s.kind === 'search'
+      ? `search:${s.query}`
+      : `view:${s.view.filter}:${s.view.tag ?? 0}:${s.view.person ?? 0}:${s.view.album ?? 0}:${s.view.place ?? 0}:${s.view.event ?? 0}`) +
+    refine
+  )
 }
 
 /** Whether a change in the library can change which days and assets a timeline view shows. */
@@ -68,7 +104,7 @@ export interface Sel {
 }
 
 /** What a search found beyond its items. */
-type SearchInfo = Omit<SearchResults, 'items'>
+export type SearchInfo = Omit<SearchResults, 'items'>
 
 /**
  * Library state: the groups (days, or one group of search results) for the
@@ -226,10 +262,13 @@ export const useLibrary = defineStore('library', () => {
   /** Why the newest load of days failed: their cells wait until retryDays, a scroll or a library change. */
   const daysError = ref('')
   const searchInfo = ref<SearchInfo | null>(null)
+  const searchLoading = ref(false)
 
   // day -> items. A shallowRef keeps big maps cheap; notifyDays tells
   // everything shown from it that it changed.
   const days = shallowRef(new Map<string, GridItem[]>())
+  // day -> where most of its items were taken, for its heading; set with days.
+  const dayPlaces = shallowRef(new Map<string, string>())
   /**
    * Tells the views days changed (or its items did, in place). A new Map, not
    * triggerRef: a watcher of () => days skips its callback when the value is
@@ -268,8 +307,12 @@ export const useLibrary = defineStore('library', () => {
   async function resultSelection() {
     const current = scope.value
     if (current.kind === 'search') {
-      const ids = (days.value.get(RESULTS) ?? []).map((item) => item.id)
+      const ids = resultItems().map((item) => item.id)
       return engine.selection({ filter: Filter.FilterAll }, ids, true)
+    }
+    if (current.media && (current.view.album || current.view.filter === Filter.FilterFavourites)) {
+      const ids = [...days.value.values()].flatMap((items) => items.map((item) => item.id))
+      return engine.selection(current.view, ids, true)
     }
     const kept = timelineIDs?.scope === current ? timelineIDs.result : null
     if (kept) {
@@ -329,6 +372,28 @@ export const useLibrary = defineStore('library', () => {
     }
   }
 
+  /** Toggle a whole day without discarding selections made in other days. */
+  async function selectDay(day: string) {
+    const mine = ++selectionRequest
+    const current = generation
+    await ensureDays([day])
+    if (mine !== selectionRequest || current !== generation || daysError.value) return
+    const items = days.value.get(day) ?? []
+    if (!items.length) return
+    const ids = new Set(selectedIDs.value)
+    const all = items.every((item) => ids.has(item.id))
+    for (const item of items) {
+      if (all) ids.delete(item.id)
+      else ids.add(item.id)
+    }
+    selectedIDs.value = ids
+    selectionSnapshot.value = null
+    const focused = [...days.value].flatMap(([key, rows]) =>
+      rows.filter((item) => ids.has(item.id)).map((item) => ({ day: key, id: item.id })),
+    )[0]
+    selected.value = focused ?? null
+  }
+
   function clearSelection() {
     selectionAnchor = null
     selectionRequest++
@@ -345,10 +410,26 @@ export const useLibrary = defineStore('library', () => {
 
   const total = computed(() => buckets.value.reduce((n, b) => n + b.count, 0))
   const selectedItem = computed(() => itemAt(selected.value))
+  /**
+   * The selected items whose days are loaded, in the grid's order: what the
+   * details panel steps through when several are selected. A selection of
+   * every result can hold more than is loaded; those are left out.
+   */
+  const selectedLoaded = computed<Sel[]>(() => {
+    const ids = selectedIDs.value
+    if (ids.size < 2) return []
+    const out: Sel[] = []
+    for (const { day } of buckets.value) {
+      for (const item of days.value.get(day) ?? []) if (ids.has(item.id)) out.push({ day, id: item.id })
+    }
+    return out
+  })
   const viewerItem = computed(() => itemAt(viewer.value))
   const isSearch = computed(() => scope.value.kind === 'search')
   const inTrash = computed(() => scope.value.kind === 'timeline' && scope.value.view.filter === Filter.FilterTrash)
-  const trashCount = ref(0) // for the sidebar
+  const counts = shallowRef<LibraryCounts>({ photos: 0, videos: 0, favourites: 0, people: 0, trash: 0 })
+  const countsLoaded = ref(false)
+  const trashCount = computed(() => counts.value.trash)
 
   function itemAt(p: Sel | null): GridItem | null {
     if (!p) return null
@@ -398,10 +479,13 @@ export const useLibrary = defineStore('library', () => {
     stopProgress ??= onProgress((p) => (progress.value = p))
     stopChanges ??= onLibraryChanged((c) => {
       void refresh(c).catch(logError)
-      if (c.assets) void loadTrashCount()
+      if (c.assets || c.people) void loadCounts()
+      // A folder became reachable or not (or the list changed): the
+      // Library's notice follows.
+      if (c.sources) void reloadSources().catch(logError)
     })
     await initialise()
-    void loadTrashCount()
+    void loadCounts()
   }
   const stopBlocks = onBlocksChanged(() => refreshVisibility())
   onScopeDispose(() => {
@@ -431,10 +515,13 @@ export const useLibrary = defineStore('library', () => {
     loadAbort = new AbortController()
     const { signal } = loadAbort
     loadError.value = ''
+    searchLoading.value = s.kind === 'search'
     stale = false
     try {
       if (s.kind === 'search') {
-        const r = await engine.search(s.query, signal)
+        const r = s.query
+          ? await engine.search(s.query, signal)
+          : { items: [], people: [], description: '', pending: 0, complete: true, noAI: false, blocked: false }
         if (current !== generation || request !== loadRequest) return
         let items = r.items
         // A pre-change answer must be read again before any of its hits
@@ -444,6 +531,15 @@ export const useLibrary = defineStore('library', () => {
           items = await currentHits(items, signal)
           if (current !== generation || request !== loadRequest) return
         }
+        if (s.media || s.favourites || s.from || s.to || s.place) {
+          items = await refineHits(items, s, signal)
+          if (current !== generation || request !== loadRequest) return
+          while (revision !== resultsRevision) {
+            revision = resultsRevision
+            items = await refineHits(await currentHits(items, signal), s, signal)
+            if (current !== generation || request !== loadRequest) return
+          }
+        }
         // A refresh of the previous results must not replace these hits.
         resultsAbort.abort()
         resultsRequest++
@@ -451,14 +547,35 @@ export const useLibrary = defineStore('library', () => {
           pending: r.pending,
           complete: r.complete,
           people: r.people,
+          description: r.description,
           noAI: r.noAI,
           blocked: r.blocked,
         }
-        buckets.value = items.length ? [{ day: RESULTS, count: items.length }] : []
-        days.value = new Map(items.length ? [[RESULTS, items]] : [])
-        fresh.add(RESULTS)
+        showResults(items)
       } else {
-        const b = await engine.timeline(s.view, signal)
+        let b = await engine.timeline(s.view, signal)
+        if (s.media && (s.view.album || s.view.filter === Filter.FilterFavourites)) {
+          const projected = new Map<string, GridItem[]>()
+          const placed = new Map<string, string>()
+          const counts: DayBucket[] = []
+          for (const bucket of b) {
+            const rows = await engine.days(bucket.day, bucket.day, s.view, signal)
+            if (current !== generation || request !== loadRequest) return
+            const items = rows
+              .flatMap((row) => row.items)
+              .filter((item) => (s.media === Filter.FilterVideos ? !!item.v : !item.v))
+            if (items.length) {
+              projected.set(bucket.day, items)
+              const place = rows[0]?.place
+              if (place) placed.set(bucket.day, place)
+              counts.push({ day: bucket.day, count: items.length })
+              fresh.add(bucket.day)
+            }
+          }
+          days.value = projected
+          dayPlaces.value = placed
+          b = counts
+        }
         if (current !== generation || request !== loadRequest) return
         buckets.value = b
         const present = new Set(b.map((bucket) => bucket.day))
@@ -471,7 +588,29 @@ export const useLibrary = defineStore('library', () => {
       if (current !== generation || request !== loadRequest || isCancelled(e)) return
       loadError.value = errorText(e)
       throw e
+    } finally {
+      if (request === loadRequest) searchLoading.value = false
     }
+  }
+
+  /** A search's results, best first. */
+  function resultItems(): GridItem[] {
+    return [...(days.value.get(BEST) ?? []), ...(days.value.get(RESULTS) ?? [])]
+  }
+
+  function showResults(items: GridItem[]) {
+    const groups = resultGroups(items)
+    buckets.value = groups.buckets
+    days.value = groups.days
+    for (const { day } of groups.buckets) fresh.add(day)
+  }
+
+  /** Stop a search while keeping any already visible, revalidated results. */
+  function cancelSearch() {
+    loadAbort.abort()
+    loadRequest++
+    searchLoading.value = false
+    timelineLoaded.value = true
   }
 
   /** Every loaded day is stale: reads of them under way are cancelled. */
@@ -495,18 +634,41 @@ export const useLibrary = defineStore('library', () => {
     })
   }
 
+  /** Refine only the engine's visible hits, preserving their relevance order. */
+  async function refineHits(items: GridItem[], s: Extract<Scope, { kind: 'search' }>, signal: AbortSignal) {
+    let result = items.filter(
+      (item) =>
+        (!s.favourites || item.f) &&
+        (s.media === Filter.FilterPhotos ? !item.v : s.media === Filter.FilterVideos ? !!item.v : true),
+    )
+    if (s.from || s.to || s.place) {
+      const view = { filter: Filter.FilterAll, place: s.place ?? 0 }
+      const buckets = (await engine.timeline(view, signal)).filter(
+        (bucket) => (!s.from || bucket.day >= s.from) && (!s.to || bucket.day <= s.to),
+      )
+      const allowed = new Set<number>()
+      const wanted = new Set(result.map((item) => item.id))
+      for (const bucket of buckets) {
+        const rows = await engine.days(bucket.day, bucket.day, view, signal)
+        for (const row of rows) for (const item of row.items) if (wanted.has(item.id)) allowed.add(item.id)
+      }
+      result = result.filter((item) => allowed.has(item.id))
+    }
+    return result
+  }
+
   async function refreshResults() {
     const current = generation
     const load = loadRequest
     const request = ++resultsRequest
     resultsAbort.abort()
     resultsAbort = new AbortController()
-    const items = days.value.get(RESULTS) ?? []
+    const items = resultItems()
     try {
-      const kept = await currentHits(items, resultsAbort.signal)
+      const updated = await currentHits(items, resultsAbort.signal)
+      const kept = scope.value.kind === 'search' ? await refineHits(updated, scope.value, resultsAbort.signal) : updated
       if (current !== generation || load !== loadRequest || request !== resultsRequest) return
-      buckets.value = kept.length ? [{ day: RESULTS, count: kept.length }] : []
-      days.value = new Map(kept.length ? [[RESULTS, kept]] : [])
+      showResults(kept)
       if (selected.value && !itemAt(selected.value)) selected.value = movedOn(selected.value)
       if (viewer.value && !itemAt(viewer.value)) viewer.value = movedOn(viewer.value)
       stale = false
@@ -576,13 +738,20 @@ export const useLibrary = defineStore('library', () => {
   /** A privacy change must remove covered search hits immediately. */
   async function refreshVisibility() {
     clearSelection()
-    if (scope.value.kind === 'search') await setScope(scope.value)
-    else {
+    void loadCounts()
+    if (scope.value.kind === 'search') {
+      timelineLoaded.value = false
+      days.value = new Map()
+      dayPlaces.value = new Map()
+      buckets.value = []
+      await setScope(scope.value)
+    } else {
       generation++
       staleDays()
       inflight.clear()
       fresh.clear()
       days.value = new Map()
+      dayPlaces.value = new Map()
       selected.value = null
       viewer.value = null
       await refresh({ assets: true, thumbs: false, tags: true, people: true })
@@ -626,17 +795,29 @@ export const useLibrary = defineStore('library', () => {
       const got = await engine.days(from, to, view, daysAbort.signal)
       if (current !== generation || revision !== dayRevision) return
       const next = new Map(days.value)
+      const nextPlaces = new Map(dayPlaces.value)
       const inSpan = new Set(missing)
       for (const d of got) {
         if (!inSpan.has(d.day)) continue // another request owns intervening days
-        next.set(d.day, d.items)
+        const currentScope = scope.value
+        const items =
+          currentScope.kind === 'timeline' &&
+          currentScope.media &&
+          (view.album || view.filter === Filter.FilterFavourites)
+            ? d.items.filter((item) => (currentScope.media === Filter.FilterVideos ? !!item.v : !item.v))
+            : d.items
+        next.set(d.day, items)
+        if (d.place) nextPlaces.set(d.day, d.place)
+        else nextPlaces.delete(d.day)
         fresh.add(d.day)
         inSpan.delete(d.day)
       }
       for (const d of inSpan) {
         next.delete(d) // the day emptied (e.g. files deleted)
+        nextPlaces.delete(d)
         fresh.add(d)
       }
+      dayPlaces.value = nextPlaces
       days.value = next
       daysError.value = ''
       // A filter edit or source removal can remove the selected item while
@@ -683,6 +864,7 @@ export const useLibrary = defineStore('library', () => {
       if (stale) await refresh()
       return
     }
+    const refreshingSearch = s.kind === 'search' && scopeKey(s) === scopeKey(scope.value) && timelineLoaded.value
     scope.value = s
     generation++
     staleDays()
@@ -690,9 +872,12 @@ export const useLibrary = defineStore('library', () => {
     selected.value = null
     clearSelection()
     viewer.value = null
-    searchInfo.value = null
-    days.value = new Map()
-    buckets.value = []
+    if (!refreshingSearch) {
+      searchInfo.value = null
+      days.value = new Map()
+      dayPlaces.value = new Map()
+      buckets.value = []
+    }
     fresh.clear()
     timelineLoaded.value = false
     await load()
@@ -715,7 +900,7 @@ export const useLibrary = defineStore('library', () => {
    * refuses. Clicks on one asset take turns, so the flag always ends as the
    * engine has it.
    */
-  const favouriting = new Map<number, LatestSave<boolean>>()
+  const favouriting = new Map<number, { save: LatestSave<boolean>; refused: boolean; revision: number }>()
   async function toggleFavourite(p: Sel | null) {
     const it = itemAt(p)
     if (!p || !it) return
@@ -727,23 +912,53 @@ export const useLibrary = defineStore('library', () => {
         notifyDays()
       }
     }
-    let save = favouriting.get(it.id)
-    if (!save) {
-      save = latestSave((value) => engine.setFavourite(it.id, value), it.f ?? false, {
+    let status = favouriting.get(it.id)
+    if (!status) {
+      const state = { refused: false, revision: 0 }
+      const save = latestSave((value) => engine.setFavourite(it.id, value), it.f ?? false, {
         rollback: set,
-        failed: reportError,
+        failed: (e) => {
+          state.refused = true
+          reportError(e)
+        },
         saved: async () => {
+          await loadCounts()
           const s = scope.value
           if (s.kind === 'timeline' && (s.view.filter === Filter.FilterFavourites || !!s.view.album))
             await refresh().catch(logError)
         },
       })
-      favouriting.set(it.id, save)
+      status = Object.assign(state, { save })
+      favouriting.set(it.id, status)
     }
+    const current = status
+    const succeeded = () => !current.refused
+    const revision = ++status.revision
+    status.refused = false
     set(fav)
-    const saving = save(fav)
-    await saving
-    if (favouriting.get(it.id) === save) favouriting.delete(it.id)
+    await status.save(fav)
+    if (revision !== status.revision) return
+    if (succeeded())
+      notify({
+        id: 'library.favourite',
+        kind: 'success',
+        title: t(fav ? 'library.favourited' : 'library.unfavourited'),
+        actions: [
+          {
+            label: t('settings.undo'),
+            run: () => {
+              void engine
+                .setFavourite(it.id, !fav)
+                .then(async () => {
+                  set(!fav)
+                  await Promise.all([refresh(), loadCounts()])
+                })
+                .catch(reportError)
+            },
+          },
+        ],
+      })
+    if (favouriting.get(it.id) === status) favouriting.delete(it.id)
   }
 
   /**
@@ -763,11 +978,15 @@ export const useLibrary = defineStore('library', () => {
     return pauseSave(paused)
   }
 
-  const readTrashCount = coalescedLoad(engine.trashCount, (n) => (trashCount.value = n))
+  const readCounts = coalescedLoad(engine.counts, (value) => {
+    if (disposed) return
+    counts.value = value
+    countsLoaded.value = true
+  })
   /** Read how many assets the Trash holds; a failure is logged, the count stays. */
-  async function loadTrashCount() {
+  async function loadCounts() {
     try {
-      await readTrashCount()
+      await readCounts()
     } catch (e) {
       logError(e)
     }
@@ -775,7 +994,7 @@ export const useLibrary = defineStore('library', () => {
 
   /** The Trash changed: the grid and the Trash's count show it now. */
   async function trashChanged() {
-    await Promise.all([refresh().catch(logError), loadTrashCount()])
+    await Promise.all([refresh().catch(logError), loadCounts()])
   }
 
   /**
@@ -856,6 +1075,9 @@ export const useLibrary = defineStore('library', () => {
     loadError,
     daysError,
     searchInfo,
+    searchLoading,
+    dayPlaces,
+    cancelSearch,
     days,
     selected,
     selectedIDs,
@@ -863,11 +1085,13 @@ export const useLibrary = defineStore('library', () => {
     selectVisible,
     selectItems,
     selectAllResults,
+    selectDay,
     clearSelection,
     viewer,
     showDetails,
     total,
     selectedItem,
+    selectedLoaded,
     viewerItem,
     isSearch,
     inTrash,
@@ -888,7 +1112,10 @@ export const useLibrary = defineStore('library', () => {
     toggleFavourite,
     setPaused,
     sourcesChanged,
-    loadTrashCount,
+    loadCounts,
+    loadTrashCount: loadCounts,
+    counts,
+    countsLoaded,
     trashChanged,
     removeFromView,
     moveToTrash,

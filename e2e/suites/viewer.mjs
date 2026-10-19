@@ -42,6 +42,16 @@ const clickText = async (text) => {
   await button.asElement().click()
   await sleep(250)
 }
+// Opens the menu behind a labelled button and picks one of its items.
+const menuItem = async (label, text) => {
+  await page.click(`button[aria-label="${label}"]`)
+  await page.waitForSelector('[role="menuitem"]')
+  await page.evaluate(
+    (text) => [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent.trim().startsWith(text))?.click(),
+    text,
+  )
+  await sleep(250)
+}
 const dialogAction = async (text) => {
   const button = await page.evaluateHandle((text) => {
     const dialog = [...document.querySelectorAll('[role=dialog]')].at(-1)
@@ -128,6 +138,7 @@ try {
   await page.waitForSelector('.viewer .image-surface .original')
   await sleep(500)
   const fitted = await page.$eval('.image-controls [role=status]', (e) => e.textContent)
+  await clickLabel('Zoom level')
   await clickText('Actual size')
   check(
     'actual size and effective zoom',
@@ -161,7 +172,12 @@ try {
     'plus key zoom uses the shared command',
     await page.$eval('.image-controls [role=status]', (e, n) => parseInt(e.textContent) > n, beforeKey),
   )
-  await clickText('Fit to window')
+  // Fit to window lives in the zoom level's menu.
+  await clickLabel('Zoom level')
+  await page.evaluate(() =>
+    [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent.trim() === 'Fit to window')?.click(),
+  )
+  await sleep(250)
   await clickLabel('Rotate clockwise')
   const adjusted = await lib(page, 'Asset', photo.id)
   await page.waitForFunction(() => {
@@ -180,7 +196,7 @@ try {
   await page.hover('.viewer button[aria-label="Close"]')
   await page.waitForFunction(() => document.fullscreenElement?.querySelector('[role="tooltip"]'), { timeout: 5000 })
   check('image fullscreen retains visible tooltips inside its native tree', true)
-  await clickLabel('Fullscreen')
+  await clickLabel('Exit fullscreen')
   await page.waitForFunction(() => !document.fullscreenElement)
   check('image viewer native fullscreen exits', true)
   await clickLabel('Filmstrip')
@@ -232,27 +248,27 @@ try {
   await cells[1].click()
   await page.keyboard.up('Control')
   check('Ctrl-click keeps two selections', (await page.$$('.cell[aria-selected=true]')).length === 2)
-  await clickText('Select all results')
+  await menuItem('Selection options', 'Select all results')
   await page.waitForFunction(
-    (n) => document.querySelector('.selection-bar .summary')?.textContent.includes(String(n)),
+    (n) => document.querySelector('.selection-dock [aria-live]')?.textContent.includes(String(n)),
     { timeout: 5000 },
     details.length,
   )
   check(
     'select-all uses honest count',
-    await page.$eval('.selection-bar .summary', (e, n) => e.textContent.includes(String(n)), details.length),
+    await page.$eval('.selection-dock [aria-live]', (e, n) => e.textContent.includes(String(n)), details.length),
   )
-  await clickText('Clear selection')
+  await clickLabel('Clear selection')
   const batchCells = await page.$$('.scroller .cell[role=option]')
   await batchCells[0].click()
   await page.keyboard.down('Control')
   await batchCells[1].click()
   await page.keyboard.up('Control')
-  await clickText('Selection actions')
+  await menuItem('More actions', 'Selection actions')
   await page.waitForSelector('[role=dialog] [role=combobox]')
-  await dialogAction('Apply action')
-  await page.waitForSelector('button[data-confirm="ok"]')
-  await page.click('button[data-confirm="ok"]')
+  // The apply button names the chosen action; adding a favourite needs no
+  // confirmation (only deleting from disk asks).
+  await page.click('[role=dialog] [data-batch-apply]')
   await page.waitForFunction(
     () =>
       [...document.querySelectorAll('[role=dialog] [role=status]')].some((e) =>
@@ -262,7 +278,7 @@ try {
   )
   check('native bulk action reports per-item success and stable count', true)
   await page.keyboard.press('Escape')
-  await clickText('Clear selection')
+  await clickLabel('Clear selection')
   const exportPlan = await lib(page, 'PlanExport', [photo.id], destination, {
     format: 'png',
     side: 2048,
@@ -333,6 +349,7 @@ try {
     await page.waitForSelector('video')
     await page.waitForFunction(() => document.querySelector('video')?.readyState >= 2, { timeout: 30000 })
     check(`native playback ready ${d.ext}`, true)
+    await clickLabel('Playback settings')
     await page.waitForSelector('select[aria-label="Audio track (uses conversion)"]', { timeout: 15000 })
     await page.select('select[aria-label="Audio track (uses conversion)"]', '2')
     await page.waitForFunction(
@@ -369,6 +386,7 @@ try {
         initialCues,
       ),
     )
+    await clickLabel('Close playback settings')
     await clickLabel('Play')
     await page.waitForFunction(() => document.querySelector('video').currentTime > 0.25, { timeout: 10000 })
     check(
@@ -382,8 +400,21 @@ try {
       await page.waitForFunction(() => document.fullscreenElement?.classList.contains('video-player'))
       check('video native fullscreen enters before frame saving', true)
     }
+    // The controls settle after fullscreen and fade when idle: wake them and
+    // click once the button itself takes the pointer. The viewer is a dialog
+    // too, so wait for the export dialog's own field.
+    const player = await (await page.$('.video-player')).boundingBox()
+    await page.mouse.move(player.x + player.width / 2, player.y + player.height / 2)
+    await page.waitForFunction(
+      () => {
+        const b = document.querySelector('.video-player button[aria-label="Save current frame"]'),
+          r = b?.getBoundingClientRect()
+        return !!r && b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))
+      },
+      { timeout: 5000 },
+    )
     await clickLabel('Save current frame')
-    await page.waitForSelector('[role=dialog]')
+    await page.waitForSelector('input[aria-label="Destination folder"]')
     if (d === direct)
       check(
         'fullscreen frame dialog is inside the visible native tree',
@@ -405,16 +436,15 @@ try {
     await page.waitForFunction(() => document.querySelector('.outcomes')?.textContent.includes('Planned'), {
       timeout: 10000,
     })
-    await dialogAction('Apply preview')
-    await page.waitForSelector('button[data-confirm="ok"]')
+    // The preview is the confirmation: its commit button runs the export.
     if (d === direct) {
       check(
-        'fullscreen export confirmation is inside the visible native tree',
-        await page.evaluate(() => !!document.fullscreenElement?.querySelector('button[data-confirm="ok"]')),
+        'fullscreen export action is inside the visible native tree',
+        await page.evaluate(() => !!document.fullscreenElement?.querySelector('button[data-files-commit]')),
       )
       await page.screenshot({ path: join(root, 'fullscreen-confirmation.png') })
     }
-    await page.click('button[data-confirm="ok"]')
+    await page.click('button[data-files-commit]')
     await page.waitForFunction(() => document.querySelector('.outcomes')?.textContent.includes('Done'), {
       timeout: 20000,
     })
@@ -422,12 +452,7 @@ try {
       `native frame UI publishes its confirmed export ${d.ext}`,
       existsSync(join(frameDestination, 'tracks-frame.jpg')),
     )
-    await page.waitForSelector('button[data-confirm="ok"]', { hidden: true })
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll('[role=dialog] button')].some(
-        (b) => b.textContent.trim() === 'Preview paths' && !b.disabled,
-      ),
-    )
+    await page.waitForSelector('button[data-files-commit]', { hidden: true })
     await page.click('[role="dialog"][data-state="open"] button[aria-label="Close"]')
     await page.waitForSelector('.outcomes', { hidden: true })
     if (d === direct) {

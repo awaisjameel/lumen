@@ -6,18 +6,22 @@
 import { computed } from 'vue'
 import URadioGroup from '@nuxt/ui/components/RadioGroup.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
+import UButton from '@nuxt/ui/components/Button.vue'
 import USwitch from '@nuxt/ui/components/Switch.vue'
-import { START_VIEWS, ThumbFit } from '../bridge'
+import { START_VIEWS, StartView, ThumbFit } from '../bridge'
 import { t } from '../shared/i18n'
-import { usePreferences } from '../shared/preferences'
+import { defaultPreferences, usePreferences } from '../shared/preferences'
 import PrefRow from '../shared/PrefRow.vue'
 import { useRowFilter } from './rowFilter'
 
 const props = withDefaults(defineProps<{ query?: string }>(), { query: '' })
 const shows = useRowFilter(() => props.query)
 const prefs = usePreferences()
+const defaults = defaultPreferences()
 
-const startItems = computed(() => START_VIEWS.map((value) => ({ value, label: t(`nav.${value}`) })))
+const startItems = computed(() =>
+  START_VIEWS.filter((value) => value !== StartView.StartVideos).map((value) => ({ value, label: t(`nav.${value}`) })),
+)
 function setStart(value: unknown) {
   for (const startView of START_VIEWS) if (startView === value) void prefs.set({ startView })
 }
@@ -33,13 +37,14 @@ function setFit(value: unknown) {
     <PrefRow
       v-if="shows('settings.startView', 'settings.startViewHint')"
       :label="t('settings.startView')"
+      :modified="prefs.prefs.startView !== defaults.startView"
       :description="t('settings.startViewHint')"
     >
       <template #default="{ labelledBy, describedBy }">
         <USelect
           data-library="startView"
           class="w-44"
-          :model-value="START_VIEWS.find((value) => value === prefs.prefs.startView)"
+          :model-value="startItems.find((item) => item.value === prefs.prefs.startView)?.value"
           :items="startItems"
           :aria-labelledby="labelledBy"
           :aria-describedby="describedBy"
@@ -50,6 +55,7 @@ function setFit(value: unknown) {
     <PrefRow
       v-if="shows('settings.thumbFit', 'settings.thumbFitHint')"
       :label="t('settings.thumbFit')"
+      :modified="prefs.prefs.thumbFit !== defaults.thumbFit"
       :description="t('settings.thumbFitHint')"
     >
       <template #default="{ labelledBy, describedBy }">
@@ -75,6 +81,7 @@ function setFit(value: unknown) {
         )
       "
       :label="t('settings.badges')"
+      :modified="prefs.prefs.hideFavouriteBadge || prefs.prefs.hideVideoBadge || prefs.prefs.hideDurationBadge"
       :description="t('settings.badgesHint')"
     >
       <template #default>
@@ -104,7 +111,8 @@ function setFit(value: unknown) {
       v-if="shows('settings.sort', 'settings.sortHint')"
       :label="t('settings.sort')"
       :description="t('settings.sortHint')"
-    />
+      ><UButton to="/" variant="outline">{{ t('settings.openLibrary') }}</UButton></PrefRow
+    >
   </div>
 </template>
 <style scoped>

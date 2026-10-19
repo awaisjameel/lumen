@@ -15,6 +15,7 @@ export interface Layout {
   rows: Row[]
   cols: number
   cell: number // square cell size in px
+  caption: number // height under each cell for its caption, px
   offsets: number[] // top of each row
   total: number
   headers: boolean // whether each day starts with a header row
@@ -22,17 +23,30 @@ export interface Layout {
   countOfDay: Map<string, number>
 }
 
-export function rowHeight(row: Row, cell: number): number {
-  return row.kind === 'header' ? HEADER_H : cell + GAP
+export function rowHeight(row: Row, layout: Pick<Layout, 'cell' | 'caption'>): number {
+  return row.kind === 'header' ? HEADER_H : layout.cell + layout.caption + GAP
+}
+
+export interface LayoutOptions {
+  /** Whether each group starts with a header row (search results have none). */
+  headers?: boolean
+  /** Room under every cell for a caption, px, so rows keep one height. */
+  caption?: number
 }
 
 /**
  * Lay out groups in square cells that fill the width exactly. Timeline groups
  * are days, each under a header; search results are one group without one.
  */
-export function buildLayout(buckets: DayBucket[], width: number, target: number, headers = true): Layout {
+export function buildLayout(
+  buckets: DayBucket[],
+  width: number,
+  target: number,
+  { headers = true, caption = 0 }: LayoutOptions = {},
+): Layout {
   const cols = Math.max(1, Math.floor((width + GAP) / (target + GAP)))
   const cell = Math.max(40, Math.floor((width - GAP * (cols - 1)) / cols))
+  const sized = { cell, caption }
   const rows: Row[] = []
   const offsets: number[] = []
   const rowOfDay = new Map<string, number>()
@@ -41,7 +55,7 @@ export function buildLayout(buckets: DayBucket[], width: number, target: number,
   const push = (r: Row) => {
     rows.push(r)
     offsets.push(y)
-    y += rowHeight(r, cell)
+    y += rowHeight(r, sized)
   }
   for (const b of buckets) {
     rowOfDay.set(b.day, rows.length)
@@ -51,7 +65,7 @@ export function buildLayout(buckets: DayBucket[], width: number, target: number,
       push({ kind: 'cells', day: b.day, start, n: Math.min(cols, b.count - start) })
     }
   }
-  return { rows, cols, cell, offsets, total: y, headers, rowOfDay, countOfDay }
+  return { rows, cols, cell, caption, offsets, total: y, headers, rowOfDay, countOfDay }
 }
 
 /** Index of the row containing y (binary search over offsets). */

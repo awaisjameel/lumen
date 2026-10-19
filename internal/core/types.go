@@ -84,6 +84,9 @@ const (
 	// SettingFormatsExcluded lists the photo formats indexing leaves out, as
 	// comma-separated families (none by default).
 	SettingFormatsExcluded = "formats_excluded"
+	// SettingRecentSearches holds the searches the user ran last, newest
+	// first, as a JSON list (see NormalisedRecentSearches).
+	SettingRecentSearches = "recent_searches"
 )
 
 // DefaultOn reports whether an on/off setting is on until the user turns it
@@ -250,6 +253,7 @@ type DateSource string
 
 // Where a date can come from.
 const (
+	DateFromUser     DateSource = "user" // a local correction; the metadata original is kept
 	DateFromEXIF     DateSource = "exif"
 	DateFromFilename DateSource = "filename"
 	DateFromFile     DateSource = "file" // the file's modified time
@@ -270,11 +274,22 @@ const (
 	SpriteRows = 4
 )
 
+// SourceAvailability is the last background check of a source's root.
+type SourceAvailability string
+
+// Source states are kept in memory; an unchecked source is not a missing one.
+const (
+	SourceChecking    SourceAvailability = "checking"
+	SourceAvailable   SourceAvailability = "available"
+	SourceUnavailable SourceAvailability = "unavailable"
+)
+
 // Source is a folder the user asked Lumen to watch.
 type Source struct {
-	ID      int64  `json:"id"`
-	Path    string `json:"path"`
-	Enabled bool   `json:"enabled"`
+	ID           int64              `json:"id"`
+	Path         string             `json:"path"`
+	Enabled      bool               `json:"enabled"`
+	Availability SourceAvailability `json:"availability,omitempty"`
 }
 
 // BlockKind is the kind of item excluded from browsing.
@@ -317,6 +332,14 @@ type Block struct {
 	Path     string    `json:"path"`
 	Mode     BlockMode `json:"mode"`
 	Name     string    `json:"name"`
+	// Count is how many photos and videos the rule covers now, in either
+	// mode; Cover (0 = none) is the newest of them, with a thumbnail where one
+	// has been made, and CoverThumb its thumbnail version.
+	Count      int   `json:"count"`
+	Cover      int64 `json:"cover"`
+	CoverThumb int   `json:"coverThumb"`
+	// Face is the face a person or face rule is shown by (ID 0 = none).
+	Face Face `json:"face"`
 }
 
 // BlockChange identifies a saved block and whether it was just created.
@@ -351,6 +374,12 @@ type GridItem struct {
 	Favourite bool  `json:"f,omitempty"`
 	Thumb     int   `json:"t"`            // thumbnail version; 0 = not made yet
 	At        int64 `json:"at,omitempty"` // search results: the best-matching moment of a video, ms
+	// The Trash names each item by its file and says what deleting it from
+	// disk takes: the first file's name, and the size and number of all its
+	// files. Other views leave them empty.
+	Name  string `json:"name,omitempty"`
+	Size  int64  `json:"size,omitempty"`
+	Files int    `json:"files,omitempty"`
 }
 
 // CoveredItem is a photo a block covers, as the Blocked screen's browser
@@ -372,6 +401,7 @@ type Filter string
 // The grid filters.
 const (
 	FilterAll        Filter = ""
+	FilterPhotos     Filter = "photos"
 	FilterFavourites Filter = "favourites"
 	FilterVideos     Filter = "videos"
 	// FilterTrash is the app-level Trash: trashed assets that are still on
@@ -392,17 +422,19 @@ type View struct {
 
 // Event is a consecutive run of visible media, separated by time or distance.
 type Event struct {
-	ID         int64  `json:"id"` // oldest asset in the run
-	Name       string `json:"name"`
-	StartAt    int64  `json:"startAt"`
-	EndAt      int64  `json:"endAt"`
-	Count      int    `json:"count"`
-	Cover      int64  `json:"cover"`
-	CoverThumb int    `json:"coverThumb"`
-	PlaceID    int64  `json:"placeId"`
-	Pinned     bool   `json:"pinned"` // the user pinned it: it sorts first
-	FirstID    int64  `json:"-"`      // boundary among equal timestamps; engine only
-	LastID     int64  `json:"-"`
+	ID           int64  `json:"id"` // oldest asset in the run
+	Name         string `json:"name"`
+	NameOverride string `json:"nameOverride,omitempty"` // empty when the date/place title is automatic
+	StartAt      int64  `json:"startAt"`
+	EndAt        int64  `json:"endAt"`
+	Count        int    `json:"count"`
+	Videos       int    `json:"videos,omitempty"` // included in Count
+	Cover        int64  `json:"cover"`
+	CoverThumb   int    `json:"coverThumb"`
+	PlaceID      int64  `json:"placeId"`
+	Pinned       bool   `json:"pinned"` // the user pinned it: it sorts first
+	FirstID      int64  `json:"-"`      // boundary among equal timestamps; engine only
+	LastID       int64  `json:"-"`
 }
 
 // Place is a city near one or more visible GPS-tagged assets.
@@ -416,6 +448,12 @@ type Place struct {
 	Count      int     `json:"count"`
 	Cover      int64   `json:"cover"`
 	CoverThumb int     `json:"coverThumb"`
+}
+
+// NamedPlace is a place by name, for linking to it.
+type NamedPlace struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // AlbumRule is a conjunction of optional filters, saved for a smart album.
@@ -538,12 +576,20 @@ type NamedTarget struct {
 
 // SearchResult is the answer to a natural-language search, best match first.
 type SearchResult struct {
-	Items    []GridItem `json:"items"`
-	People   []string   `json:"people"`   // people named in the query: results show all of them
-	Pending  int        `json:"pending"`  // photos not yet understood, so not searchable yet
-	Complete bool       `json:"complete"` // false: more matched than are shown
-	NoAI     bool       `json:"noAI"`     // the description could not be searched: the AI isn't available (see AI.Error)
-	Blocked  bool       `json:"blocked"`  // a blocked named entity occurred in the query
+	Items       []GridItem     `json:"items"`
+	People      []SearchPerson `json:"people"`      // people named in the query: results show all of them
+	Description string         `json:"description"` // the rest of the query, searched for; empty if it only names people
+	Pending     int            `json:"pending"`     // photos not yet understood, so not searchable yet
+	Complete    bool           `json:"complete"`    // false: more matched than are shown
+	NoAI        bool           `json:"noAI"`        // the description could not be searched: the AI isn't available (see AI.Error)
+	Blocked     bool           `json:"blocked"`     // a blocked named entity occurred in the query
+}
+
+// SearchPerson is a person a search named, spelled as the query spelled them,
+// so the query can be written again without them.
+type SearchPerson struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // Face is one face in a photo or video: where it is, and who it is.
@@ -573,6 +619,12 @@ type Person struct {
 	Cover Face   `json:"cover"` // the face to show; ID 0 = none
 }
 
+// PersonFacts is what a person's page says about them beside their photos.
+type PersonFacts struct {
+	Faces      int      `json:"faces"`      // their faces the Faces tab lists
+	Companions []Person `json:"companions"` // named people most often in photos with them, most first
+}
+
 // DayBucket is how many visible assets were taken on one calendar day.
 // The grid builds its whole layout from these before loading any items.
 type DayBucket struct {
@@ -584,27 +636,32 @@ type DayBucket struct {
 type DayItems struct {
 	Day   string     `json:"day"`
 	Items []GridItem `json:"items"`
+	Place string     `json:"place,omitempty"` // where most of the day's items were taken; "" if nowhere known or its name is blocked
 }
 
 // AssetDetail is everything the details panel shows.
 type AssetDetail struct {
-	Adjustment *DisplayAdjustment `json:"adjustment,omitempty"`
-	ID         int64              `json:"id"`
-	Kind       Kind               `json:"kind"`
-	TakenAt    int64              `json:"takenAt"` // wall-clock seconds, see WallClock
-	DateFrom   DateSource         `json:"dateFrom"`
-	Width      int                `json:"width"`
-	Height     int                `json:"height"`
-	Camera     string             `json:"camera"`
-	Lat        *float64           `json:"lat"`
-	Lon        *float64           `json:"lon"`
-	PlaceID    int64              `json:"placeId"` // resolved nearby city; 0 if unknown
-	Favourite  bool               `json:"favourite"`
-	Paths      []string           `json:"paths"`
-	Size       int64              `json:"size"`
-	Ext        string             `json:"ext"`
-	Caps       MediaCaps          `json:"caps"`  // what can be done with it (see CapsOf)
-	Video      *Video             `json:"video"` // nil for photos
+	// OriginalDate and OriginalLocation are present only while corrected.
+	// They follow the latest metadata read, so restoring never revives stale metadata.
+	OriginalDate     *OriginalDate      `json:"originalDate,omitempty"`
+	OriginalLocation *OriginalLocation  `json:"originalLocation,omitempty"`
+	Adjustment       *DisplayAdjustment `json:"adjustment,omitempty"`
+	ID               int64              `json:"id"`
+	Kind             Kind               `json:"kind"`
+	TakenAt          int64              `json:"takenAt"` // wall-clock seconds, see WallClock
+	DateFrom         DateSource         `json:"dateFrom"`
+	Width            int                `json:"width"`
+	Height           int                `json:"height"`
+	Camera           string             `json:"camera"`
+	Lat              *float64           `json:"lat"`
+	Lon              *float64           `json:"lon"`
+	PlaceID          int64              `json:"placeId"` // resolved nearby city; 0 if unknown
+	Favourite        bool               `json:"favourite"`
+	Paths            []string           `json:"paths"`
+	Size             int64              `json:"size"`
+	Ext              string             `json:"ext"`
+	Caps             MediaCaps          `json:"caps"`  // what can be done with it (see CapsOf)
+	Video            *Video             `json:"video"` // nil for photos
 }
 
 // Video is what the details panel and the player need to know about a video.
@@ -758,10 +815,11 @@ func FailReasonOf(msg string) FailReason {
 // so each view reloads only for what it shows. While the AI works through a
 // big library, tags and people change for hours after the timeline settles.
 type Changes struct {
-	Assets bool `json:"assets"` // assets came, went, were blocked or unblocked, or their dates or sizes changed
-	Thumbs bool `json:"thumbs"` // only thumbnails (and the perceptual hashes made with them) changed
-	Tags   bool `json:"tags"`   // the AI tagged assets
-	People bool `json:"people"` // faces were found or grouped into people
+	Sources bool `json:"sources,omitempty"` // source availability or the source list changed
+	Assets  bool `json:"assets"`            // assets came, went, were blocked or unblocked, or their dates or sizes changed
+	Thumbs  bool `json:"thumbs"`            // only thumbnails (and the perceptual hashes made with them) changed
+	Tags    bool `json:"tags"`              // the AI tagged assets
+	People  bool `json:"people"`            // faces were found or grouped into people
 }
 
 // AI is the state of the on-device models.

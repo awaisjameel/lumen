@@ -83,6 +83,37 @@ func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 	return people[0], nil
 }
 
+// PersonFacts says how many faces a visible person has, and names up to n
+// people most often in photos with them, from the kept faces that counts
+// and covers are made of.
+func (s *Store) PersonFacts(ctx context.Context, id int64, n int) (core.PersonFacts, error) {
+	var facts core.PersonFacts
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		err = tx.QueryRowContext(ctx, `SELECT count(f.face_id) FROM people p
+			LEFT JOIN person_counts_faces f ON f.person_id = p.id
+			WHERE p.id = ? AND NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND NOT `+personCovered("p.id")+`
+			GROUP BY p.id`, id).Scan(&facts.Faces)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		facts.Companions, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, p.name, c.count
+			FROM (SELECT o.person_id, count(DISTINCT o.asset_id) AS shared
+				FROM person_counts_faces m JOIN person_counts_faces o ON o.asset_id = m.asset_id AND o.person_id <> m.person_id
+				WHERE m.person_id = ? GROUP BY o.person_id) s
+			JOIN people p ON p.id = s.person_id JOIN person_counts c ON c.person_id = p.id
+			WHERE p.name IS NOT NULL AND NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND NOT `+personCovered("p.id")+`
+			ORDER BY s.shared DESC, `+byName("p.name")+`, p.id LIMIT ?`, id, n)
+		if err != nil {
+			return err
+		}
+		return addKeptCovers(ctx, tx, facts.Companions)
+	})
+	return facts, err
+}
+
 // peopleKept reads the counts in the caller's snapshot; covers use it too.
 func peopleKept(ctx context.Context, tx *sql.Tx) ([]core.Person, error) {
 	return queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), c.count

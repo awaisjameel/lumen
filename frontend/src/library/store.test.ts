@@ -1,7 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, watch } from 'vue'
-import { Device, engine, ErrorCode, Filter, onLibraryChanged, onProgress, startMedia, WaitReason } from '../bridge'
+import {
+  Device,
+  engine,
+  ErrorCode,
+  Filter,
+  onLibraryChanged,
+  onProgress,
+  SourceAvailability,
+  startMedia,
+  WaitReason,
+} from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Errors from '../shared/errors'
 import type { Changes, DayBucket, DayItems, GridItem, Progress, SearchResults, Selection } from '../bridge'
@@ -25,7 +35,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     progress: vi.fn(),
     setFavourite: vi.fn(),
     setPaused: vi.fn(),
-    trashCount: vi.fn(),
+    counts: vi.fn(),
     selection: vi.fn(),
     validateSelection: vi.fn(),
   },
@@ -105,8 +115,127 @@ beforeEach(() => {
   vi.mocked(onLibraryChanged).mockReset().mockReturnValue(vi.fn())
   vi.mocked(engine.setFavourite).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setPaused).mockReset().mockResolvedValue(undefined)
-  vi.mocked(engine.trashCount).mockReset().mockResolvedValue(0)
+  vi.mocked(engine.counts).mockReset().mockResolvedValue({ photos: 0, videos: 0, favourites: 0, people: 0, trash: 0 })
   vi.mocked(reportError).mockClear()
+})
+
+it('selects a partial day completely and then clears just that day', async () => {
+  const lib = shownLibrary()
+  vi.mocked(engine.days).mockResolvedValue([{ day, items: hits(1, 2, 3) }])
+  await lib.setScope(all)
+  await lib.selectItems({ day, id: 1 }, false, false)
+  await lib.selectDay(day)
+  expect([...lib.selectedIDs]).toEqual([1, 2, 3])
+  await lib.selectDay(day)
+  expect(lib.selectedIDs.size).toBe(0)
+  expect(lib.selected).toBeNull()
+})
+
+it('does not apply a pending day selection after the scope changes', async () => {
+  const lib = shownLibrary()
+  const pending = deferred<DayItems[]>()
+  vi.mocked(engine.days).mockReturnValue(pending.promise)
+  await lib.setScope(all)
+  const selecting = lib.selectDay(day)
+  await lib.setScope(favourites)
+  pending.resolve([{ day, items: hits(1, 2) }])
+  await selecting
+  expect(lib.selectedIDs.size).toBe(0)
+})
+
+it('intersects media with Favourites and binds select-all to only those results', async () => {
+  const lib = shownLibrary()
+  vi.mocked(engine.days).mockResolvedValue([
+    {
+      day,
+      items: [
+        { id: 1, w: 1, h: 1, t: 1, f: true },
+        { id: 2, w: 1, h: 1, t: 1, f: true, v: true },
+      ],
+    },
+  ])
+  vi.mocked(engine.selection).mockResolvedValue({ ids: [1], revision: 5 })
+  await lib.setScope({ ...favourites, media: Filter.FilterPhotos })
+  expect(lib.total).toBe(1)
+  expect(lib.days.get(day)?.map((item) => item.id)).toEqual([1])
+  await lib.selectAllResults()
+  expect(engine.selection).toHaveBeenCalledWith({ filter: Filter.FilterFavourites }, [1], true)
+  expect([...lib.selectedIDs]).toEqual([1])
+})
+
+it('refines search hits by media and favourites while preserving relevance', async () => {
+  const lib = shownLibrary()
+  vi.mocked(engine.search).mockResolvedValue({
+    items: [
+      { id: 3, w: 1, h: 1, t: 1, f: true },
+      { id: 2, w: 1, h: 1, t: 1, v: true, f: true },
+      { id: 1, w: 1, h: 1, t: 1, f: false },
+      { id: 4, w: 1, h: 1, t: 1, f: true },
+    ],
+    complete: true,
+    noAI: false,
+    pending: 0,
+    people: [],
+    description: '',
+    blocked: false,
+  })
+  await lib.setScope({ kind: 'search', query: 'sea', media: Filter.FilterPhotos, favourites: true })
+  expect(lib.days.get('best')?.map((item) => item.id)).toEqual([3, 4])
+  expect(lib.total).toBe(2)
+})
+
+it('leads search results with the four best matches, then the rest, best first', async () => {
+  const lib = shownLibrary()
+  vi.mocked(engine.search).mockResolvedValue({
+    items: [6, 5, 4, 3, 2, 1].map((id) => ({ id, w: 1, h: 1, t: 1 })),
+    complete: true,
+    noAI: false,
+    pending: 0,
+    people: [],
+    description: 'sea',
+    blocked: false,
+  })
+  await lib.setScope({ kind: 'search', query: 'sea' })
+  expect(lib.buckets).toEqual([
+    { day: 'best', count: 4 },
+    { day: 'results', count: 2 },
+  ])
+  expect(lib.days.get('best')?.map((item) => item.id)).toEqual([6, 5, 4, 3])
+  expect(lib.days.get('results')?.map((item) => item.id)).toEqual([2, 1])
+  await lib.selectAllResults()
+  expect(engine.selection).toHaveBeenLastCalledWith({ filter: Filter.FilterAll }, [6, 5, 4, 3, 2, 1], true)
+})
+
+it('leaves first-use search empty without loading the text model', async () => {
+  const lib = shownLibrary()
+  await lib.setScope({ kind: 'search', query: '' })
+  expect(engine.search).not.toHaveBeenCalled()
+  expect(lib.total).toBe(0)
+})
+
+it('keeps existing results during a repeated search and ignores its answer after cancellation', async () => {
+  const lib = shownLibrary()
+  const answer: SearchResults = {
+    items: hits(1, 2),
+    complete: true,
+    noAI: false,
+    pending: 0,
+    people: [],
+    description: '',
+    blocked: false,
+  }
+  vi.mocked(engine.search).mockResolvedValueOnce(answer)
+  await lib.setScope({ kind: 'search', query: 'sea', media: Filter.FilterAll })
+  const pending = deferred<SearchResults>()
+  vi.mocked(engine.search).mockReturnValueOnce(pending.promise)
+  const refreshing = lib.setScope({ kind: 'search', query: 'sea' })
+  expect(lib.searchLoading).toBe(true)
+  expect(lib.total).toBe(2)
+  lib.cancelSearch()
+  expect(lib.searchLoading).toBe(false)
+  pending.resolve({ ...answer, items: hits(3) })
+  await refreshing
+  expect(lib.days.get('best')?.map((item) => item.id)).toEqual([1, 2])
 })
 
 it('drops stale selected IDs before binding an additive range to a newer snapshot', async () => {
@@ -213,6 +342,18 @@ describe('library lifetime', () => {
   })
 })
 
+it('keeps where each loaded day was taken for its heading, and forgets it with the day', async () => {
+  const lib = shownLibrary()
+  await lib.setScope(all)
+  vi.mocked(engine.days).mockResolvedValueOnce(result(1).map((d) => ({ ...d, place: 'Lahore' })))
+  await lib.ensureDays([day])
+  expect(lib.dayPlaces.get(day)).toBe('Lahore')
+  await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
+  vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+  await lib.ensureDays([day])
+  expect(lib.dayPlaces.has(day)).toBe(false)
+})
+
 describe('optimistic actions', () => {
   it('restores the persisted favourite when two queued toggles both fail', async () => {
     const lib = shownLibrary()
@@ -277,6 +418,7 @@ describe('library requests', () => {
     search.resolve({
       items: result(1)[0]?.items ?? [],
       people: [],
+      description: '',
       pending: 0,
       complete: true,
       noAI: false,
@@ -303,6 +445,7 @@ describe('library requests', () => {
     search.resolve({
       items: result(1)[0]?.items ?? [],
       people: [],
+      description: '',
       pending: 0,
       complete: true,
       noAI: false,
@@ -327,16 +470,17 @@ describe('library requests', () => {
     search.resolve({
       items: result(1)[0]?.items ?? [],
       people: [],
+      description: '',
       pending: 0,
       complete: true,
       noAI: false,
       blocked: false,
     })
     await loading
-    expect(lib.days.get('results')?.[0]?.id).toBe(1)
+    expect(lib.days.get('best')?.[0]?.id).toBe(1)
     oldPrune.resolve([])
     await refreshing
-    expect(lib.days.get('results')?.[0]?.id).toBe(1)
+    expect(lib.days.get('best')?.[0]?.id).toBe(1)
   })
 
   it('runs a queued timeline refresh even when the older read fails', async () => {
@@ -365,21 +509,29 @@ describe('library requests', () => {
     const lib = shownLibrary()
     vi.mocked(engine.search).mockResolvedValueOnce({
       items: [3, 1, 2].map((id) => ({ id, w: 100, h: 100, t: 1 })),
-      people: ['Ali'],
+      people: [{ id: 7, name: 'Ali' }],
+      description: '',
       pending: 5,
       complete: false,
       noAI: false,
       blocked: false,
     })
     await lib.setScope({ kind: 'search', query: 'Ali' })
-    lib.selected = { day: 'results', id: 1 }
-    lib.viewer = { day: 'results', id: 1 }
+    lib.selected = { day: 'best', id: 1 }
+    lib.viewer = { day: 'best', id: 1 }
     vi.mocked(engine.searchHits).mockResolvedValueOnce(hits(3, 2))
     await lib.refresh({ assets: true, thumbs: false, tags: false, people: false })
-    expect(lib.days.get('results')?.map((item) => item.id)).toEqual([3, 2])
+    expect(lib.days.get('best')?.map((item) => item.id)).toEqual([3, 2])
     expect(lib.total).toBe(2)
-    expect(lib.buckets).toEqual([{ day: 'results', count: 2 }])
-    expect(lib.searchInfo).toEqual({ people: ['Ali'], pending: 5, complete: false, noAI: false, blocked: false })
+    expect(lib.buckets).toEqual([{ day: 'best', count: 2 }])
+    expect(lib.searchInfo).toEqual({
+      people: [{ id: 7, name: 'Ali' }],
+      description: '',
+      pending: 5,
+      complete: false,
+      noAI: false,
+      blocked: false,
+    })
     expect(lib.selected).toBeNull()
     expect(lib.viewer).toBeNull()
     expect(engine.search).toHaveBeenCalledTimes(1)
@@ -393,6 +545,7 @@ describe('library requests', () => {
         { id: 1, w: 100, h: 100, t: 1 },
       ],
       people: [],
+      description: '',
       pending: 0,
       complete: true,
       noAI: false,
@@ -402,7 +555,7 @@ describe('library requests', () => {
     vi.mocked(engine.searchHits).mockResolvedValueOnce([{ id: 2, w: 100, h: 100, t: 3, v: true }, ...hits(1)])
     await lib.refresh({ assets: false, thumbs: true, tags: false, people: false })
     expect(engine.searchHits).toHaveBeenCalledWith([2, 1], expect.any(AbortSignal))
-    expect(lib.days.get('results')).toEqual([{ id: 2, w: 100, h: 100, t: 3, v: true, at: 4000 }, ...hits(1)])
+    expect(lib.days.get('best')).toEqual([{ id: 2, w: 100, h: 100, t: 3, v: true, at: 4000 }, ...hits(1)])
     expect(engine.search).toHaveBeenCalledTimes(1)
     await lib.refresh({ assets: false, thumbs: false, tags: true, people: true })
     expect(engine.searchHits).toHaveBeenCalledOnce()
@@ -413,6 +566,7 @@ describe('library requests', () => {
     vi.mocked(engine.search).mockResolvedValueOnce({
       items: [1, 2, 3].map((id) => ({ id, w: 100, h: 100, t: 1 })),
       people: [],
+      description: '',
       pending: 0,
       complete: true,
       noAI: false,
@@ -427,7 +581,7 @@ describe('library requests', () => {
     expect(signal?.aborted).toBe(true)
     old.resolve(hits(1))
     await first
-    expect(lib.days.get('results')?.map((item) => item.id)).toEqual([2, 3])
+    expect(lib.days.get('best')?.map((item) => item.id)).toEqual([2, 3])
   })
 
   it('clears the search bucket when no current hits remain visible', async () => {
@@ -435,6 +589,7 @@ describe('library requests', () => {
     vi.mocked(engine.search).mockResolvedValueOnce({
       items: result(1)[0]?.items ?? [],
       people: [],
+      description: '',
       pending: 0,
       complete: true,
       noAI: false,
@@ -453,6 +608,7 @@ describe('library requests', () => {
     vi.mocked(engine.search).mockResolvedValue({
       items: [],
       people: [],
+      description: '',
       pending: 0,
       complete: true,
       noAI: false,
@@ -477,6 +633,7 @@ describe('library requests', () => {
     pending.resolve({
       items: result(1)[0]?.items ?? [],
       people: [],
+      description: '',
       pending: 0,
       complete: true,
       noAI: false,
@@ -619,6 +776,7 @@ describe('library requests', () => {
       .mockResolvedValueOnce({
         items: result(2)[0]?.items ?? [],
         people: [],
+        description: '',
         pending: 0,
         complete: true,
         noAI: false,
@@ -630,13 +788,14 @@ describe('library requests', () => {
     old.resolve({
       items: result(1)[0]?.items ?? [],
       people: [],
+      description: '',
       pending: 0,
       complete: true,
       noAI: false,
       blocked: false,
     })
     await pending
-    expect(lib.days.get('results')?.[0]?.id).toBe(2)
+    expect(lib.days.get('best')?.[0]?.id).toBe(2)
   })
 
   it('removes blocked search hits immediately after a visibility change', async () => {
@@ -645,16 +804,25 @@ describe('library requests', () => {
       .mockResolvedValueOnce({
         items: result(1)[0]?.items ?? [],
         people: [],
+        description: '',
         pending: 0,
         complete: true,
         noAI: false,
         blocked: false,
       })
-      .mockResolvedValueOnce({ items: [], people: [], pending: 0, complete: true, noAI: false, blocked: true })
+      .mockResolvedValueOnce({
+        items: [],
+        people: [],
+        description: '',
+        pending: 0,
+        complete: true,
+        noAI: false,
+        blocked: true,
+      })
     await lib.setScope({ kind: 'search', query: 'Ali' })
-    expect(lib.days.get('results')?.[0]?.id).toBe(1)
+    expect(lib.days.get('best')?.[0]?.id).toBe(1)
     await lib.refreshVisibility()
-    expect(lib.days.get('results')).toBeUndefined()
+    expect(lib.days.get('best')).toBeUndefined()
     expect(lib.searchInfo?.blocked).toBe(true)
   })
 
@@ -800,13 +968,30 @@ describe('the Trash count', () => {
       changed = callback
       return vi.fn()
     })
-    vi.mocked(engine.trashCount).mockResolvedValue(3)
+    vi.mocked(engine.counts).mockResolvedValue({ photos: 10, videos: 2, favourites: 3, people: 1, trash: 3 })
     const lib = useLibrary()
     await lib.init()
     await vi.waitFor(() => expect(lib.trashCount).toBe(3))
-    vi.mocked(engine.trashCount).mockResolvedValue(5)
+    vi.mocked(engine.counts).mockResolvedValue({ photos: 12, videos: 3, favourites: 4, people: 2, trash: 5 })
     changed({ assets: false, thumbs: true, tags: false, people: false })
     changed({ assets: true, thumbs: false, tags: false, people: false })
     await vi.waitFor(() => expect(lib.trashCount).toBe(5))
+  })
+})
+
+describe('the folders', () => {
+  it('are read again when the engine says one became reachable or not', async () => {
+    let changed!: (c: Changes) => void
+    vi.mocked(onLibraryChanged).mockImplementation((callback) => {
+      changed = callback
+      return vi.fn()
+    })
+    const folder = { id: 1, path: 'E:\\Camera', enabled: true, availability: SourceAvailability.SourceAvailable }
+    vi.mocked(engine.sources).mockResolvedValue([folder])
+    const lib = useLibrary()
+    await lib.init()
+    vi.mocked(engine.sources).mockResolvedValue([{ ...folder, availability: SourceAvailability.SourceUnavailable }])
+    changed({ assets: false, thumbs: false, tags: false, people: false, sources: true })
+    await vi.waitFor(() => expect(lib.sources[0]?.availability).toBe(SourceAvailability.SourceUnavailable))
   })
 })

@@ -50,7 +50,7 @@ const restart = async () => {
 const prefs = () => lib(page, 'Preferences')
 const root = (name) => page.evaluate((name) => document.documentElement.dataset[name] ?? null, name)
 const settings = async (category = '') => {
-  await go(page, '/settings', 700)
+  await go(page, `/settings?section=${category || 'appearance'}`, 700)
   await page.waitForSelector('[data-category="appearance"]')
   if (category) {
     await page.evaluate((category) => {
@@ -117,9 +117,9 @@ const waitScanned = async (total) => {
 }
 /** The grid's first loaded photo (the newest day's first). */
 const firstPhoto = async () => {
-  const days = await lib(page, 'Timeline', { filter: 'all' })
+  const days = await lib(page, 'Timeline', { filter: '' })
   const day = days[0].day
-  const [items] = await lib(page, 'Days', day, day, { filter: 'all' })
+  const [items] = await lib(page, 'Days', day, day, { filter: '' })
   return items.items.find((it) => !it.v)
 }
 
@@ -166,7 +166,7 @@ await guard('sections', async () => {
 })
 
 await guard('appearance', async () => {
-  await settings('appearance')
+  await settings('accessibility')
   await choose('[data-appearance="motion"]', 1)
   const duration = await page.evaluate(() => {
     const probe = document.createElement('div')
@@ -192,7 +192,9 @@ await guard('appearance', async () => {
   })
   check('Full motion lets transitions run', (await root('motion')) === 'full' && full === '2s', full)
 
+  await settings('viewing')
   await choose('[data-appearance="viewerBackground"]', 1)
+  await settings('accessibility')
   await choose('[data-accessibility="focusRing"]', 1)
   const stored = await prefs()
   check(
@@ -369,7 +371,7 @@ await guard('formats', async () => {
   total = (await waitScanned(base + 3)).total
   check('the PNG, JPEG and GIF of a new folder are indexed', total === base + 3, `${base} -> ${total}`)
 
-  await settings('indexing')
+  await settings('library')
   await click('[data-format="png"]')
   // Scanner ownership can delay the durable write beyond the click feedback.
   const savedBy = Date.now() + 10_000
@@ -403,8 +405,8 @@ await guard('formats', async () => {
 
 await guard('animations', async () => {
   if (!total) throw new Error('needs the formats section')
-  const days = await lib(page, 'Timeline', { filter: 'all' })
-  const [today] = await lib(page, 'Days', days[0].day, days[0].day, { filter: 'all' })
+  const days = await lib(page, 'Timeline', { filter: '' })
+  const [today] = await lib(page, 'Days', days[0].day, days[0].day, { filter: '' })
   let gif
   for (const it of today.items) {
     if ((await lib(page, 'Asset', it.id)).ext.toLowerCase() === '.gif') gif = it
@@ -430,7 +432,7 @@ await guard('animations', async () => {
   await closeViewer()
 
   const thumbs = await media(page, 'ThumbCacheBytes')
-  await settings('indexing')
+  await settings('library')
   await click('[data-viewing-cache-clear]')
   await sleep(600)
   check(
@@ -443,6 +445,7 @@ await guard('animations', async () => {
 
 await guard('presets', async () => {
   await settings('files')
+  await click('[data-preset-new]')
   await page.type('[data-preset-name]', 'Web 2K')
   await click('[data-preset-add]')
   const saved = (await prefs()).exportPresets ?? []
@@ -467,8 +470,8 @@ await guard('reset', async () => {
   const one = await prefs()
   check(
     'resetting Appearance restores it and leaves the other sections',
-    one.motion === 'system' &&
-      one.viewerBackground === 'dark' &&
+    one.motion === 'full' &&
+      one.viewerBackground === 'black' &&
       one.focusRing === 'strong' &&
       one.exportPresets?.length === 1,
     JSON.stringify({
@@ -478,7 +481,7 @@ await guard('reset', async () => {
       presets: one.exportPresets?.length,
     }),
   )
-  check('the page follows the reset at once', (await root('viewerBg')) === 'dark')
+  check('resetting Appearance keeps the viewer background', (await root('viewerBg')) === 'black')
 
   await settings('presets')
   await click('[data-reset-all]')

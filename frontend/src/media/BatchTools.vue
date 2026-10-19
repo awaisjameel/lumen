@@ -11,6 +11,7 @@ import { useAlbums } from '../albums/store'
 import { confirm } from '../shared/confirm'
 import { errorText, failureText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
+import { nameTooLong, trimName } from '../shared/names'
 import { showTrashUndo } from '../trash/undo'
 import { blockAssets } from '../shared/block'
 import OutcomeList from './OutcomeList.vue'
@@ -22,7 +23,12 @@ interface Result {
   state: 'done' | 'failed' | 'cancelled'
 }
 
-const props = defineProps<{ ids: number[]; selection?: Selection | null; trash: boolean }>()
+const props = defineProps<{
+  ids: number[]
+  selection?: Selection | null
+  trash: boolean
+  initialOperation?: Operation
+}>()
 const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>('open', { default: false })
 // How many assets one call to the engine takes: few enough that Cancel and the
@@ -78,42 +84,55 @@ watch(
   open,
   (value) => {
     if (!value) {
+      busy.value = false
       generation++
       stopped.value = true
     }
     if (value) {
-      operation.value = props.trash ? BatchAction.BatchRestore : BatchAction.BatchFavourite
+      operation.value = props.initialOperation ?? (props.trash ? BatchAction.BatchRestore : BatchAction.BatchFavourite)
       results.value = []
       void albums.load().catch(logError)
     }
   },
   { immediate: true, flush: 'sync' },
 )
+watch(inputKey, () => {
+  if (!busy.value) results.value = []
+})
 const cancelled = (ids: number[]): Result[] => ids.map((id) => ({ id, error: '', state: 'cancelled' }))
-async function apply() {
-  const ids = [...props.ids]
+const actionLabel = computed(
+  () => options.value.find((option) => option.value === operation.value)?.label ?? t('files.applyBatch'),
+)
+const invalid = computed(
+  () =>
+    !props.ids.length ||
+    (operation.value === 'tag' && (!trimName(tag.value) || nameTooLong(tag.value))) ||
+    (needsAlbum.value && !album.value),
+)
+const failedIDs = computed(() => results.value.filter((result) => result.state === 'failed').map((result) => result.id))
+async function apply(retryIDs?: number[]) {
+  const ids = [...(retryIDs ?? props.ids)]
   const selectedOperation = operation.value
-  const name = tag.value.trim(),
+  const name = trimName(tag.value),
     albumID = album.value
   if (
     busy.value ||
     !open.value ||
     !ids.length ||
-    (selectedOperation === 'tag' && !name) ||
+    (selectedOperation === 'tag' && (!name || nameTooLong(name))) ||
     (needsAlbum.value && !albumID)
   )
     return
   const mine = ++generation
-  const isStopped = () => stopped.value || mine !== generation
   const key = inputKey.value
+  const isStopped = () => stopped.value || mine !== generation || key !== inputKey.value
   const selection = props.selection
   busy.value = true
-  batchTotal.value = ids.length
+  batchTotal.value = retryIDs ? batchTotal.value : ids.length
   stopped.value = false
   error.value = ''
-  results.value = []
+  results.value = retryIDs ? results.value.filter((result) => !retryIDs.includes(result.id)) : []
   try {
-    if (!(await confirm(t('files.batch'), t('files.batchConfirm', { n: ids.length }), t('files.applyBatch')))) return
     if (mine !== generation || key !== inputKey.value) return
     if (selection) await engine.validateSelection(selection)
     if (mine !== generation || key !== inputKey.value || isStopped()) return
@@ -204,8 +223,10 @@ async function apply() {
   } catch (e) {
     if (mine === generation) error.value = errorText(e)
   } finally {
-    busy.value = false
-    if (mine === generation) emit('changed')
+    if (mine === generation) {
+      busy.value = false
+      emit('changed')
+    }
   }
 }
 </script>
@@ -231,13 +252,43 @@ async function apply() {
           })
         }}
       </p>
+      <progress
+        v-if="busy"
+        class="w-full"
+        :value="results.filter((result) => result.state !== 'cancelled').length"
+        :max="Math.max(1, batchTotal)"
+        :aria-label="t('files.working')"
+      />
       <OutcomeList v-slot="{ item: result }" :items="results">
         <p :key="result.id">{{ result.id }}: {{ t(`files.outcome.${result.state}`) }} {{ result.error }}</p>
       </OutcomeList>
     </template>
     <template #footer>
-      <UButton :disabled="busy" @click="apply">{{ t('files.applyBatch') }}</UButton>
-      <UButton v-if="busy" variant="outline" @click="stopped = true">{{ t('common.cancel') }}</UButton>
+      <div class="w-full flex flex-wrap justify-end gap-2">
+        <UButton v-if="!busy" color="neutral" variant="ghost" @click="open = false">{{ t('common.close') }}</UButton>
+        <UButton v-if="busy" color="neutral" variant="outline" :disabled="stopped" @click="stopped = true">{{
+          t('files.cancelRemaining')
+        }}</UButton>
+        <UButton v-if="failedIDs.length" :disabled="busy || invalid" @click="apply(failedIDs)">{{
+          t('files.retry')
+        }}</UButton>
+        <UButton
+          v-else
+          color="primary"
+          variant="solid"
+          data-batch-apply
+          :disabled="busy || invalid"
+          :loading="busy"
+          @click="apply()"
+          >{{ actionLabel }}</UButton
+        >
+      </div>
     </template>
   </UModal>
 </template>
+
+<style scoped>
+progress {
+  accent-color: var(--ui-primary);
+}
+</style>

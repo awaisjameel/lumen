@@ -4,41 +4,72 @@
 // value out of range). The control is labelled by the name and described by
 // the description, so a screen reader hears both. On a narrow window the
 // control drops below the text.
-import { useId } from 'vue'
+import { computed, inject, useId } from 'vue'
+import type { Ref } from 'vue'
+import { t } from './i18n'
 
-defineProps<{
+const props = defineProps<{
   label: string
   description?: string
   /** Why the last change was not saved, or the value was refused. */
   error?: string
   /** A quiet note under the control: the range, the current state. */
   hint?: string
+  modified?: boolean
 }>()
 
 const id = useId()
+// Settings supplies its search once so nested controls retain their own state.
+const query = inject<Readonly<Ref<string>> | undefined>('settings-query', undefined)
+function parts(text: string) {
+  const needle = query?.value.trim() ?? ''
+  const at = needle ? text.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase()) : -1
+  return at < 0
+    ? { before: text, hit: '', after: '' }
+    : { before: text.slice(0, at), hit: text.slice(at, at + needle.length), after: text.slice(at + needle.length) }
+}
+const title = computed(() => parts(props.label))
+const detail = computed(() => parts(props.description ?? ''))
 </script>
 
 <template>
   <div class="pref-row" :data-pref="label">
     <div class="text">
-      <span :id="`${id}-label`" class="label">{{ label }}</span>
-      <span v-if="description" :id="`${id}-desc`" class="description">{{ description }}</span>
+      <span :id="`${id}-label`" class="label"
+        ><span
+          >{{ title.before }}<mark v-if="title.hit">{{ title.hit }}</mark
+          >{{ title.after }}</span
+        ><span
+          v-if="modified"
+          class="modified-dot"
+          :title="t('settings.modified')"
+          :aria-label="t('settings.modified')"
+      /></span>
+      <span v-if="description" :id="`${id}-desc`" class="description"
+        >{{ detail.before }}<mark v-if="detail.hit">{{ detail.hit }}</mark
+        >{{ detail.after }}</span
+      >
     </div>
     <div class="control">
-      <slot :labelled-by="`${id}-label`" :described-by="description ? `${id}-desc` : undefined" />
+      <slot
+        :labelled-by="`${id}-label`"
+        :described-by="
+          [description ? `${id}-desc` : '', error || hint ? `${id}-message` : ''].filter(Boolean).join(' ') || undefined
+        "
+      />
     </div>
-    <p v-if="error" class="message failed" role="alert">{{ error }}</p>
-    <p v-else-if="hint" class="message">{{ hint }}</p>
+    <p v-if="error" :id="`${id}-message`" class="message failed" role="alert">{{ error }}</p>
+    <p v-else-if="hint" :id="`${id}-message`" class="message">{{ hint }}</p>
   </div>
 </template>
 
 <style scoped>
 .pref-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   align-items: center;
   gap: 0.25rem 1.5rem;
-  padding: 0.75rem 0;
+  padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--ui-border-muted);
 }
 .pref-row:last-child {
@@ -51,12 +82,27 @@ const id = useId()
   min-width: 0;
 }
 .label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
   color: var(--ui-text-highlighted);
   font-weight: 600;
 }
 .description {
-  color: var(--ui-text-muted);
+  color: var(--ui-text-dimmed);
   font-size: 0.8125rem;
+}
+.modified-dot {
+  flex: none;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: var(--ui-primary);
+}
+mark {
+  background: var(--lumen-primary-soft-2);
+  color: var(--ui-text-highlighted);
 }
 .control {
   display: flex;

@@ -71,6 +71,37 @@ func (f *coverFixture) covered(t *testing.T, block int64) []string {
 	return f.names(ids...)
 }
 
+// listed is the block as Blocks lists it.
+func (f *coverFixture) listed(t *testing.T, block int64) core.Block {
+	t.Helper()
+	blocks, err := f.st.Blocks(f.ctx)
+	check(t, err)
+	for _, b := range blocks {
+		if b.ID == block {
+			return b
+		}
+	}
+	t.Fatalf("block %d is not listed", block)
+	return core.Block{}
+}
+
+// checkListed checks that Blocks counts what the block covers and shows the
+// newest of it; with no thumbnails made, that is the first covered.
+func (f *coverFixture) checkListed(t *testing.T, block int64, covered []string) {
+	t.Helper()
+	b := f.listed(t, block)
+	if b.Count != len(covered) {
+		t.Errorf("block %d is listed covering %d, want %d", block, b.Count, len(covered))
+	}
+	if len(covered) > 0 {
+		if got := f.names(b.Cover); !slices.Equal(got, covered[:1]) {
+			t.Errorf("block %d is shown by %v, want %s", block, got, covered[0])
+		}
+	} else if b.Cover != 0 {
+		t.Errorf("block %d covers nothing but is shown by %d", block, b.Cover)
+	}
+}
+
 func (f *coverFixture) exec(t *testing.T, query string, args ...any) {
 	t.Helper()
 	check(t, errOf(f.st.w.ExecContext(f.ctx, query, args...)))
@@ -147,6 +178,14 @@ func TestBlockCoverageIsExactlyWhatThePhotoModeBlockHides(t *testing.T) {
 			f.exec(t, "UPDATE assets SET place_id = 7 WHERE id IN (?, ?)", f.ids["b"], f.ids["d"])
 			return core.BlockPlace, 7, ""
 		}},
+		{"a smart album", []string{"c", "b"}, func(t *testing.T, f *coverFixture) (core.BlockKind, int64, string) {
+			t.Helper()
+			check(t, f.st.SetFavourite(f.ctx, f.ids["b"], true))
+			check(t, f.st.SetFavourite(f.ctx, f.ids["c"], true))
+			album, err := f.st.CreateAlbum(f.ctx, "Loved", core.AlbumSmart, core.AlbumRule{Favourites: true}, nil)
+			check(t, err)
+			return core.BlockAlbum, album, ""
+		}},
 		{"a manual album", []string{"d", "a"}, func(t *testing.T, f *coverFixture) (core.BlockKind, int64, string) {
 			t.Helper()
 			album, err := f.st.CreateAlbum(f.ctx, "Trip", core.AlbumManual, core.AlbumRule{}, []int64{f.ids["a"], f.ids["d"]})
@@ -164,6 +203,7 @@ func TestBlockCoverageIsExactlyWhatThePhotoModeBlockHides(t *testing.T) {
 				if got := f.covered(t, label); !slices.Equal(got, c.want) {
 					t.Fatalf("label-only block covers %v, want %v", got, c.want)
 				}
+				f.checkListed(t, label, c.want)
 				if n, _ := f.st.CountVisible(f.ctx); n != 4 {
 					t.Fatalf("label-only block hid %d photos", 4-n)
 				}
@@ -173,6 +213,7 @@ func TestBlockCoverageIsExactlyWhatThePhotoModeBlockHides(t *testing.T) {
 			if got := f.covered(t, block); !slices.Equal(got, c.want) {
 				t.Fatalf("photo block covers %v, want %v", got, c.want)
 			}
+			f.checkListed(t, block, c.want)
 			for name, id := range f.ids {
 				visible, err := f.st.AssetVisible(f.ctx, id, false)
 				check(t, err)
@@ -204,6 +245,8 @@ func TestBlockCoverageOfAnEventOrFaceBlockReadsItsMembers(t *testing.T) {
 	if got, want := f.covered(t, 21), []string{"c"}; !slices.Equal(got, want) {
 		t.Fatalf("face block covers %v, want %v", got, want)
 	}
+	f.checkListed(t, 20, []string{"d", "a"})
+	f.checkListed(t, 21, []string{"c"})
 	if n, _ := f.st.CountVisible(f.ctx); n != 4 {
 		t.Fatalf("label-only blocks hid %d photos", 4-n)
 	}
@@ -231,6 +274,50 @@ func TestBlockCoverageLeavesOutPhotosThatAreHiddenTrashedOrGone(t *testing.T) {
 	f.exec(t, "UPDATE assets SET missing_since = 5 WHERE id = ?", f.ids["b"])
 	if got := f.covered(t, block); len(got) != 0 {
 		t.Fatalf("with one missing: %v, want none", got)
+	}
+	f.checkListed(t, block, nil)
+}
+
+func TestABlockIsShownByItsNewestPhotoWithAThumbnail(t *testing.T) {
+	f := newCoverFixture(t)
+	block, err := f.st.SetBlock(f.ctx, core.BlockFolder, 0, `C:\Photos\private`, core.BlockPhotos)
+	check(t, err)
+	// a is the newest of the folder's photos, but only c has a thumbnail.
+	check(t, f.st.SaveThumbnails(f.ctx, "t1", []ThumbResult{{AssetID: f.ids["c"]}, {AssetID: f.ids["d"]}}))
+	b := f.listed(t, block)
+	if b.Count != 3 || b.Cover != f.ids["c"] || b.CoverThumb == 0 {
+		t.Fatalf("listed as %+v, want three photos shown by c's thumbnail", b)
+	}
+	if b.Face.ID != 0 {
+		t.Fatalf("a folder is shown by a face: %+v", b.Face)
+	}
+}
+
+func TestPersonAndFaceBlocksAreShownByTheirFace(t *testing.T) {
+	f := newCoverFixture(t)
+	check(t, f.st.SaveFaces(f.ctx, "f1", "f1", []FaceResult{
+		{AssetID: f.ids["a"], Faces: []DetectedFace{face(0.1, 1)}},
+		{AssetID: f.ids["d"], Faces: []DetectedFace{face(0.3, 2)}},
+	}))
+	check(t, f.st.SaveThumbnails(f.ctx, "t1", []ThumbResult{{AssetID: f.ids["a"]}, {AssetID: f.ids["d"]}}))
+	aFace, dFace := facesOf(t, f.st, f.ids["a"])[0].ID, facesOf(t, f.st, f.ids["d"])[0].ID
+	person, err := f.st.NameFaces(f.ctx, []int64{aFace}, "Ali")
+	check(t, err)
+	personBlock, err := f.st.SetBlock(f.ctx, core.BlockPerson, person, "", core.BlockLabel)
+	check(t, err)
+	if got := f.listed(t, personBlock); got.Face.ID != aFace || got.Face.AssetID != f.ids["a"] || got.Face.Thumb == 0 || got.Count != 1 {
+		t.Fatalf("person block listed as %+v, want shown by face %d", got, aFace)
+	}
+	f.exec(t, "INSERT INTO face_blocks(id, asset_id, at_ms, x, y, w, h, face_id, lookalikes) VALUES (6, ?, 0, 0.3, 0.2, 0.2, 0.3, ?, 0)", f.ids["d"], dFace)
+	f.exec(t, "INSERT INTO face_block_faces(face_block_id, face_id, asset_id) VALUES (6, ?, ?)", dFace, f.ids["d"])
+	f.exec(t, "INSERT INTO blocks(id, kind, target_id, mode, name, created_at) VALUES (21, 'face', 6, 'label', 'A face', 1)")
+	if got := f.listed(t, 21); got.Face.ID != dFace || got.Count != 1 || got.Cover != f.ids["d"] {
+		t.Fatalf("face block listed as %+v, want shown by face %d", got, dFace)
+	}
+	// Once the box holds no face (a re-analysis), the photo stands in.
+	f.exec(t, "UPDATE face_blocks SET face_id = NULL WHERE id = 6")
+	if got := f.listed(t, 21); got.Face.ID != 0 || got.Cover != f.ids["d"] {
+		t.Fatalf("face block without its face listed as %+v", got)
 	}
 }
 

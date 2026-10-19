@@ -5,14 +5,23 @@ package places
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"compress/gzip"
+	"context"
 	_ "embed"
 	"encoding/csv"
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
+
+	"lumen/internal/core"
 )
 
 // City is the nearest populated place in the offline index.
@@ -29,9 +38,10 @@ type City struct {
 var compressed []byte
 
 var index struct {
-	once  sync.Once
-	cells map[[2]int][]City
-	err   error
+	once   sync.Once
+	cells  map[[2]int][]City
+	cities []searchableCity
+	err    error
 }
 
 func load() {
@@ -47,6 +57,12 @@ func load() {
 	for {
 		row, err := r.Read()
 		if err == io.EOF {
+			slices.SortFunc(index.cities, func(a, b searchableCity) int {
+				if order := cmp.Compare(a.key, b.key); order != 0 {
+					return order
+				}
+				return cmp.Compare(a.city.ID, b.city.ID)
+			})
 			return
 		}
 		if err != nil {
@@ -67,7 +83,90 @@ func load() {
 		city := City{ID: id, Name: row[1], Lat: lat, Lon: lon, Region: row[4], Country: row[5]}
 		key := [2]int{int(math.Floor(lat)), int(math.Floor(lon))}
 		index.cells[key] = append(index.cells[key], city)
+		index.cities = append(index.cities, searchableCity{city: city, key: searchKey(city.Name)})
 	}
+}
+
+type searchableCity struct {
+	city City
+	key  string
+}
+
+// searchKey extends the common case-folding rule only for city discovery:
+// accent-insensitive suggestions must not change name or path identities.
+func searchKey(s string) string {
+	return core.Fold(strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Mn, r) {
+			return -1
+		}
+		return r
+	}, norm.NFD.String(strings.TrimSpace(s))))
+}
+
+// FindCities searches immutable pre-folded names. Exact and prefix matches
+// precede substring matches. The reduced catalogue has no population column;
+// ties use name, country, region and GeoNames ID for stable suggestions.
+func FindCities(ctx context.Context, query string, limit int) ([]core.CityMatch, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	key := searchKey(query)
+	if key == "" {
+		return []core.CityMatch{}, nil
+	}
+	if limit == 0 {
+		limit = 20
+	}
+	limit = min(max(limit, 1), 50)
+	index.once.Do(load)
+	if index.err != nil {
+		return nil, index.err
+	}
+	start, _ := slices.BinarySearchFunc(index.cities, key, func(c searchableCity, key string) int {
+		return cmp.Compare(c.key, key)
+	})
+	var matches []searchableCity
+	for i := start; i < len(index.cities) && strings.HasPrefix(index.cities[i].key, key); i++ {
+		matches = append(matches, index.cities[i])
+	}
+	if len(matches) < limit {
+		for i, city := range index.cities {
+			if i%256 == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
+			if !strings.HasPrefix(city.key, key) && strings.Contains(city.key, key) {
+				matches = append(matches, city)
+			}
+		}
+	}
+	rank := func(s string) int {
+		if s == key {
+			return 0
+		}
+		if strings.HasPrefix(s, key) {
+			return 1
+		}
+		return 2
+	}
+	slices.SortFunc(matches, func(a, b searchableCity) int {
+		if order := cmp.Compare(rank(a.key), rank(b.key)); order != 0 {
+			return order
+		}
+		for _, pair := range [][2]string{{a.city.Name, b.city.Name}, {a.city.Country, b.city.Country}, {a.city.Region, b.city.Region}} {
+			if order := core.CompareNames(pair[0], pair[1]); order != 0 {
+				return order
+			}
+		}
+		return cmp.Compare(a.city.ID, b.city.ID)
+	})
+	out := make([]core.CityMatch, 0, min(limit, len(matches)))
+	for _, match := range matches[:min(limit, len(matches))] {
+		city := match.city
+		out = append(out, core.CityMatch{ID: city.ID, Name: city.Name, Region: city.Region, Country: city.Country, Lat: city.Lat, Lon: city.Lon})
+	}
+	return out, ctx.Err()
 }
 
 // Lookup returns the nearest city within 75 km. Remote GPS points stay

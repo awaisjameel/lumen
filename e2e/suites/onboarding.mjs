@@ -28,11 +28,11 @@ await guard('welcome', async () => {
   check('the Welcome screen fits the window', state.overflow <= 0, `overflow=${state.overflow}`)
   await page.screenshot({ path: join(s.out, 'welcome.png') })
 
-  await resize(page, 560, 700)
+  await resize(page, 720, 480)
   await sleep(600)
   const narrow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
-  check('the Welcome screen fits a narrow window', narrow <= 0, `overflow=${narrow}`)
-  await page.screenshot({ path: join(s.out, 'welcome-narrow.png') })
+  check('the Welcome screen fits the minimum window', narrow <= 0, `overflow=${narrow}`)
+  await page.screenshot({ path: join(s.out, 'welcome-minimum.png') })
 
   check('no folder was added by opening Lumen', ((await lib(page, 'Sources')) ?? []).length === 0)
   const progress = await lib(page, 'Progress')

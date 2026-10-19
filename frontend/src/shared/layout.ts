@@ -1,13 +1,14 @@
 // The shell's three layouts, from the window's width (design tokens name the
 // same breakpoints for container queries). Wide: a resizable sidebar and an
-// inline inspector. Medium: navigation collapsed to icons, the inspector
-// optional. Narrow: a navigation drawer, overflow actions and the inspector
-// as a sheet.
+// inline inspector. Medium: the sidebar is a rail of icons and the
+// inspector floats over the content as a sheet. Narrow (below Lumen's
+// minimum window, so only when the window manager forces it): navigation
+// opens as a drawer.
 import { onScopeDispose, readonly, ref } from 'vue'
 import type { Ref } from 'vue'
 
-const WIDE_PX = 1200
-const MEDIUM_PX = 900
+const WIDE_PX = 1024
+const MEDIUM_PX = 720
 
 export type LayoutMode = 'wide' | 'medium' | 'narrow'
 

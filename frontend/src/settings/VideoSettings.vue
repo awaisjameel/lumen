@@ -40,13 +40,16 @@ async function clearHistory() {
 </script>
 <template>
   <div>
-    <PrefRow v-if="shows('viewer.autoplay')" :label="t('viewer.autoplay')"
+    <PrefRow
+      v-if="shows('viewer.autoplay')"
+      :label="t('viewer.autoplay')"
+      :modified="viewing.autoplay !== defaults.autoplay"
       ><USwitch
         :model-value="viewing.autoplay"
         :aria-label="t('viewer.autoplay')"
         @update:model-value="prefs.setViewer({ autoplay: $event })"
     /></PrefRow>
-    <PrefRow v-if="shows('viewer.volume')" :label="t('viewer.volume')"
+    <PrefRow v-if="shows('viewer.volume')" :label="t('viewer.volume')" :modified="viewing.volume !== defaults.volume"
       ><USlider
         :min="0"
         :max="100"
@@ -54,14 +57,17 @@ async function clearHistory() {
         :aria-label="t('viewer.volume')"
         @update:model-value="prefs.setViewer({ volume: ($event ?? 100) / 100 })"
     /></PrefRow>
-    <PrefRow v-if="shows('viewer.startMuted')" :label="t('viewer.startMuted')"
+    <PrefRow
+      v-if="shows('viewer.startMuted')"
+      :label="t('viewer.startMuted')"
+      :modified="viewing.muted !== defaults.muted"
       ><USwitch
         data-video="muted"
         :model-value="viewing.muted"
         :aria-label="t('viewer.startMuted')"
         @update:model-value="prefs.setViewer({ muted: $event })"
     /></PrefRow>
-    <PrefRow v-if="shows('viewer.speed')" :label="t('viewer.speed')"
+    <PrefRow v-if="shows('viewer.speed')" :label="t('viewer.speed')" :modified="viewing.speed !== defaults.speed"
       ><UInput
         type="number"
         :min="PLAYBACK_SPEED_MIN"
@@ -71,7 +77,10 @@ async function clearHistory() {
         :aria-label="t('viewer.speed')"
         @update:model-value="prefs.setViewer({ speed: Number($event) || defaults.speed })"
     /></PrefRow>
-    <PrefRow v-if="shows('viewer.skipInterval')" :label="t('viewer.skipInterval')"
+    <PrefRow
+      v-if="shows('viewer.skipInterval')"
+      :label="t('viewer.skipInterval')"
+      :modified="viewing.skipSeconds !== defaults.skipSeconds"
       ><UInput
         type="number"
         :min="SKIP_SECONDS_MIN"
@@ -80,7 +89,10 @@ async function clearHistory() {
         :aria-label="t('viewer.skipInterval')"
         @update:model-value="prefs.setViewer({ skipSeconds: Number($event) || defaults.skipSeconds })"
     /></PrefRow>
-    <PrefRow v-if="shows('viewer.videoLoop')" :label="t('viewer.videoLoop')"
+    <PrefRow
+      v-if="shows('viewer.videoLoop')"
+      :label="t('viewer.videoLoop')"
+      :modified="viewing.videoLoop !== defaults.videoLoop"
       ><USwitch
         data-video="loop"
         :model-value="viewing.videoLoop"
@@ -90,6 +102,7 @@ async function clearHistory() {
     <PrefRow
       v-if="shows('viewer.subtitles', 'viewer.subtitlesHint')"
       :label="t('viewer.subtitles')"
+      :modified="viewing.subtitles !== defaults.subtitles"
       :description="t('viewer.subtitlesHint')"
     >
       <template #default="{ labelledBy, describedBy }">
@@ -105,6 +118,7 @@ async function clearHistory() {
     <PrefRow
       v-if="shows('viewer.subtitleLanguage', 'viewer.subtitleLanguageHint')"
       :label="t('viewer.subtitleLanguage')"
+      :modified="viewing.subtitleLanguage !== defaults.subtitleLanguage"
       :description="t('viewer.subtitleLanguageHint')"
     >
       <template #default="{ labelledBy, describedBy }">
@@ -123,6 +137,7 @@ async function clearHistory() {
     <PrefRow
       v-if="shows('viewer.resume', 'viewer.resumeHint')"
       :label="t('viewer.resume')"
+      :modified="viewing.resume !== defaults.resume"
       :description="t('viewer.resumeHint')"
       ><USwitch
         :model-value="viewing.resume"

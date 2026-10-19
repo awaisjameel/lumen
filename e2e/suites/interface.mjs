@@ -5,7 +5,7 @@
 // with what was observed. SECTIONS=themes,video runs only those sections.
 //   node suites/interface.mjs
 import { join } from 'node:path'
-import { close, launch, lib, resize, sleep } from '../lib/app.mjs'
+import { close, launch, lib, resize, search, sleep } from '../lib/app.mjs'
 import { fixture, libraryCopy } from '../lib/fixtures.mjs'
 import { suite } from '../lib/suite.mjs'
 
@@ -52,6 +52,39 @@ const byText = (selector, text) =>
     text,
   )
 
+// --- 0. Recent searches: kept in the library, offered by the empty box -----------
+await guard('recent searches', async () => {
+  await search(page, 'ClearRecentSearches')
+  await go('/')
+  const box = 'input[role="combobox"]'
+  await page.click(box)
+  await page.type(box, 'sunset over the sea')
+  await page.keyboard.press('Enter')
+  await sleep(1500)
+  const kept = await search(page, 'RecentSearches')
+  check('a search run from the box is kept', kept?.[0] === 'sunset over the sea', JSON.stringify(kept))
+  await go('/')
+  await page.click(box)
+  await page.waitForFunction(() => document.querySelectorAll('li[role="option"]').length > 0, { timeout: 5000 })
+  const offered = await page.evaluate(() => ({
+    options: [...document.querySelectorAll('li[role="option"]')].map((o) => o.textContent.trim()),
+    heading: [...document.querySelectorAll('.heading')].map((h) => h.textContent.trim()),
+  }))
+  check(
+    'the empty box offers the recent searches',
+    offered.heading.includes('Recent searches') && offered.options.includes('sunset over the sea'),
+    JSON.stringify(offered),
+  )
+  await shot('recent-searches')
+  const forget = await page.$('[data-search-forget]')
+  await forget?.click()
+  await sleep(600)
+  check('Forget recent searches empties them', ((await search(page, 'RecentSearches')) ?? []).length === 0)
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await go('/')
+})
+
 // --- 1. Themes, accent, density, text scale --------------------------------------
 await guard('themes', async () => {
   await gridReady()
@@ -77,7 +110,8 @@ await guard('themes', async () => {
   await page.keyboard.down('Control')
   await page.keyboard.press('k')
   await page.keyboard.up('Control')
-  await sleep(600)
+  await page.waitForSelector('[role="dialog"]', { timeout: 3000 }).catch(() => {})
+  await sleep(300)
   const portal = await page.evaluate(() => {
     const d = document.querySelector('[role="dialog"]')
     return d ? { bg: getComputedStyle(d).backgroundColor, inDark: !!d.closest('.dark') } : null
@@ -96,7 +130,8 @@ await guard('themes', async () => {
   }))
   check(
     'light theme applies',
-    !light.dark && light.rootFont === '16px' && light.bg === 'rgb(255, 255, 255)',
+    // The window behind the inset sheet is the light base colour.
+    !light.dark && light.rootFont === '16px' && light.bg === 'rgb(236, 238, 243)',
     JSON.stringify(light),
   )
   await shot('theme-light')
@@ -256,6 +291,63 @@ await guard('keyboard', async () => {
     after.selected && after.selected === after.active,
     JSON.stringify(after),
   )
+})
+
+// --- 3. Several selected: the details panel shows one at a time --------------------
+await guard('selection details', async () => {
+  await go('/')
+  await gridReady()
+  const cells = await page.$$('.scroller .cell[role="option"]')
+  // The item clicked last is the one in focus, so the panel starts on the first.
+  await cells[1]?.click()
+  await page.keyboard.down('Control')
+  await cells[0]?.click()
+  await page.keyboard.up('Control')
+  await sleep(300)
+  const opened = !(await page.$('[data-selection-step]'))
+  if (opened) await page.keyboard.press('i')
+  await page.waitForSelector('[data-selection-step]', { timeout: 5000 })
+  const first = await page.$eval('[data-selection-step]', (e) => e.textContent.trim())
+  const firstFile = await page.$eval('.inspector-body h3', (e) => e.textContent.trim())
+  check('the details panel says how many are selected and which it shows', /2 items selected.*Showing 1 of 2/.test(first), first)
+  await page.click('[data-step="next"]')
+  await sleep(800)
+  const second = await page.$eval('[data-selection-step]', (e) => e.textContent.trim())
+  const secondFile = await page.$eval('.inspector-body h3', (e) => e.textContent.trim())
+  check(
+    'the panel steps to the next selected item, whose date and place can be corrected alone',
+    /Showing 2 of 2/.test(second) && secondFile !== firstFile && !!(await page.$('[data-edit-date]')),
+    `${firstFile} -> ${secondFile}`,
+  )
+  check('stepping keeps the selection', (await page.$$('.scroller .cell[aria-selected="true"]')).length === 2)
+  await shot('selection-details')
+  await page.focus('.scroller')
+  await page.keyboard.press('Escape')
+  if (opened) await page.keyboard.press('i')
+  await sleep(400)
+})
+
+// --- 3a. The Trash: grouped by the day items were moved there, named by file ------
+await guard('trash grid', async () => {
+  await go('/trash')
+  await page.waitForFunction(() => document.querySelectorAll('[data-trash-caption]').length > 0, { timeout: 20000 })
+  const seen = await page.evaluate(() => ({
+    heading: document.querySelector('.day-header h2')?.textContent?.trim() ?? '',
+    caption: document.querySelector('[data-trash-caption]')?.textContent?.trim() ?? '',
+    select: document.querySelector('[data-trash-select-day]')?.textContent?.trim() ?? '',
+  }))
+  check(
+    'the Trash groups its items by the day they were moved there',
+    /^Moved to Trash · \d{1,2} \p{L}+ \d{4}$/u.test(seen.heading),
+    seen.heading,
+  )
+  check(
+    'each Trash item is named by its file, with its size and kind',
+    /\.\w+.+ · (Photo|Video)/.test(seen.caption),
+    seen.caption,
+  )
+  check('each Trash day offers its selection in words', seen.select === 'Select all', seen.select)
+  await shot('trash-grid')
 })
 
 // --- 3b. Escape ownership: a confirmation above the viewer -----------------------
@@ -476,7 +568,11 @@ await guard('narrow', async () => {
   }))
   check(
     'the navigation drawer opens with every destination and holds the focus',
-    drawer.open && drawer.links.includes('People') && drawer.links.includes('Settings') && drawer.focusInside,
+    // A link's text ends with its count ("People0").
+    drawer.open &&
+      drawer.links.some((l) => l.startsWith('People')) &&
+      drawer.links.includes('Settings') &&
+      drawer.focusInside,
     JSON.stringify(drawer),
   )
   await shot('narrow-drawer')
@@ -614,6 +710,12 @@ await guard('privacy', async () => {
     /Unblock|Switch mode|Photo or video/.test(unlockedText),
     unlockedText.slice(0, 160),
   )
+  const row = await page.evaluate(() => ({
+    meta: document.querySelector('[data-block-row] .item-name small')?.textContent?.trim() ?? '',
+    cover: !!document.querySelector('[data-block-row] [data-block-cover] img'),
+  }))
+  check('each block says how many photos it covers', /· \d[\d,]* photos?$/.test(row.meta), row.meta)
+  check('a block is shown by what it hides while unlocked', row.cover, JSON.stringify(row))
 
   // Open the covered media of the block.
   const browse = await byText('main button', 'Show')

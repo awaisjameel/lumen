@@ -41,3 +41,11 @@ it('drops a waiting notification that is dismissed before the shell mounts', () 
   setPresenter(p.presenter)
   expect(p.show).not.toHaveBeenCalled()
 })
+
+it('calls the closed callback exactly once when a queued notice is dismissed', () => {
+  const closed = vi.fn()
+  notify({ ...failure, id: 'queued', closed })
+  dismiss('queued')
+  dismiss('queued')
+  expect(closed).toHaveBeenCalledOnce()
+})

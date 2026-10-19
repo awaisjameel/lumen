@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"lumen/internal/core"
 )
@@ -217,18 +218,16 @@ func TestEveryReaderDropsATrashedPhotoAndRestoreBringsItBack(t *testing.T) {
 	}
 }
 
-func TestTrashShowsTrashedPhotosNewestCaptureFirstWithDaysAndItems(t *testing.T) {
+func TestTrashShowsTrashedPhotosMostRecentlyTrashedFirstWithDaysAndItems(t *testing.T) {
 	f := newTrashFixture(t)
-	check(t, errOf(f.st.w.ExecContext(f.ctx, "UPDATE assets SET taken_at = 1700000000 + id * 86400 WHERE id IN (?, ?)", f.a, f.b)))
-	older, newer := f.a, f.b
-	if older > newer {
-		older, newer = newer, older
-	}
 	trash := core.View{Filter: core.FilterTrash}
 	if buckets, err := f.st.DayBuckets(f.ctx, trash, core.TagConfidenceDefault); err != nil || len(buckets) != 0 {
 		t.Fatalf("empty Trash buckets = %+v, %v", buckets, err)
 	}
-	f.trash(t, older, newer)
+	f.trash(t, f.a, f.b)
+	// b was trashed a day after a, so it comes first, on a day of its own,
+	// although both were taken together.
+	check(t, errOf(f.st.w.ExecContext(f.ctx, "UPDATE assets SET trashed_at = trashed_at + 86400 WHERE id = ?", f.b)))
 
 	buckets, err := f.st.DayBuckets(f.ctx, trash, core.TagConfidenceDefault)
 	check(t, err)
@@ -237,8 +236,8 @@ func TestTrashShowsTrashedPhotosNewestCaptureFirstWithDaysAndItems(t *testing.T)
 	}
 	days, err := f.st.DayItems(f.ctx, buckets[1].Day, buckets[0].Day, trash, core.TagConfidenceDefault)
 	check(t, err)
-	if len(days) != 2 || days[0].Items[0].ID != newer || days[1].Items[0].ID != older {
-		t.Fatalf("Trash items = %+v, want the newer capture first", days)
+	if len(days) != 2 || days[0].Items[0].ID != f.b || days[1].Items[0].ID != f.a {
+		t.Fatalf("Trash items = %+v, want the more recently trashed first", days)
 	}
 	if n, err := f.st.TrashCount(f.ctx); err != nil || n != 2 {
 		t.Fatalf("TrashCount = %d, %v", n, err)
@@ -533,5 +532,66 @@ func TestEveryStoreWriteThatChangesTheTrashGoesThroughATransaction(t *testing.T)
 	check(t, err)
 	if strings.Contains(string(src), "s.w.") {
 		t.Fatal("trash.go writes with the bare writer: Store.tx must wrap every write that changes trashed_at")
+	}
+}
+
+func TestTheTrashGroupsItemsByTheDayTheyWereMovedThereInThePCsTimeZone(t *testing.T) {
+	f := newTrashFixture(t)
+	// Five hours east of UTC: 20:00 UTC on the 15th is already the 16th here.
+	f.st.zone = time.FixedZone("UTC+5", 5*3600)
+	f.trash(t, f.a, f.b)
+	late := time.Date(2026, time.October, 15, 20, 0, 0, 0, time.UTC).Unix()
+	early := time.Date(2026, time.October, 15, 10, 0, 0, 0, time.UTC).Unix()
+	check(t, errOf(f.st.w.ExecContext(f.ctx, "UPDATE assets SET trashed_at = ? WHERE id = ?", late, f.a)))
+	// b was taken later than a, but moved to the Trash earlier.
+	check(t, errOf(f.st.w.ExecContext(f.ctx, "UPDATE assets SET trashed_at = ?, taken_at = taken_at + 60 WHERE id = ?", early, f.b)))
+	trash := core.View{Filter: core.FilterTrash}
+
+	buckets, err := f.st.DayBuckets(f.ctx, trash, core.TagConfidenceDefault)
+	check(t, err)
+	if want := []core.DayBucket{{Day: "2026-10-16", Count: 1}, {Day: "2026-10-15", Count: 1}}; !slices.Equal(buckets, want) {
+		t.Fatalf("buckets = %+v, want %+v", buckets, want)
+	}
+	days, err := f.st.DayItems(f.ctx, "2026-10-15", "2026-10-16", trash, core.TagConfidenceDefault)
+	check(t, err)
+	if len(days) != 2 || days[0].Day != "2026-10-16" || days[1].Day != "2026-10-15" ||
+		len(days[0].Items) != 1 || days[0].Items[0].ID != f.a || len(days[1].Items) != 1 || days[1].Items[0].ID != f.b {
+		t.Fatalf("days = %+v, want a on the 16th and b on the 15th", days)
+	}
+	one, err := f.st.DayItems(f.ctx, "2026-10-15", "2026-10-15", trash, core.TagConfidenceDefault)
+	check(t, err)
+	if len(one) != 1 || len(one[0].Items) != 1 || one[0].Items[0].ID != f.b {
+		t.Fatalf("the 15th alone = %+v, want b", one)
+	}
+	sel, err := f.st.Selection(f.ctx, trash, nil, false)
+	check(t, err)
+	if want := []int64{f.a, f.b}; !slices.Equal(sel.IDs, want) {
+		t.Fatalf("selection order = %v, want the grid's %v", sel.IDs, want)
+	}
+}
+
+func TestTrashItemsAreNamedByTheirFirstFileAndCountEveryFile(t *testing.T) {
+	f := newTrashFixture(t)
+	f.trash(t, f.a, f.b)
+	day := time.Now().In(f.st.zone).Format(time.DateOnly)
+	days, err := f.st.DayItems(f.ctx, day, day, core.View{Filter: core.FilterTrash}, core.TagConfidenceDefault)
+	check(t, err)
+	got := map[int64]core.GridItem{}
+	for _, d := range days {
+		for _, it := range d.Items {
+			got[it.ID] = it
+		}
+	}
+	// a has a copy, which comes first in path order as Delete from disk reads them.
+	if a := got[f.a]; a.Name != "a-copy.jpg" || a.Files != 2 || a.Size != 2 {
+		t.Errorf("a = %+v, want named a-copy.jpg with 2 files of 2 bytes", a)
+	}
+	if b := got[f.b]; b.Name != "b.jpg" || b.Files != 1 || b.Size != 1 {
+		t.Errorf("b = %+v, want named b.jpg with 1 file of 1 byte", b)
+	}
+	library, err := f.st.DayItems(f.ctx, "2023-11-14", "2023-11-14", core.View{}, core.TagConfidenceDefault)
+	check(t, err)
+	if len(library) != 0 {
+		t.Fatalf("the library still shows trashed items: %+v", library)
 	}
 }

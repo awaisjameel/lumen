@@ -114,6 +114,12 @@ export interface AlbumRule {
  * AssetDetail is everything the details panel shows.
  */
 export interface AssetDetail {
+    /**
+     * OriginalDate and OriginalLocation are present only while corrected.
+     * They follow the latest metadata read, so restoring never revives stale metadata.
+     */
+    "originalDate"?: OriginalDate | null;
+    "originalLocation"?: OriginalLocation | null;
     "adjustment"?: DisplayAdjustment | null;
     "id": number;
     "kind": Kind;
@@ -208,6 +214,20 @@ export interface Block {
     "path": string;
     "mode": BlockMode;
     "name": string;
+
+    /**
+     * Count is how many photos and videos the rule covers now, in either
+     * mode; Cover (0 = none) is the newest of them, with a thumbnail where one
+     * has been made, and CoverThumb its thumbnail version.
+     */
+    "count": number;
+    "cover": number;
+    "coverThumb": number;
+
+    /**
+     * Face is the face a person or face rule is shown by (ID 0 = none).
+     */
+    "face": Face;
 }
 
 /**
@@ -280,6 +300,11 @@ export interface BlockRef {
  */
 export interface Changes {
     /**
+     * source availability or the source list changed
+     */
+    "sources"?: boolean;
+
+    /**
      * assets came, went, were blocked or unblocked, or their dates or sizes changed
      */
     "assets": boolean;
@@ -298,6 +323,19 @@ export interface Changes {
      * faces were found or grouped into people
      */
     "people": boolean;
+}
+
+/**
+ * CityMatch is a city in the bundled offline catalogue, including cities
+ * that have no photos yet. ID is its GeoNames identity, not an asset ID.
+ */
+export interface CityMatch {
+    "id": number;
+    "name": string;
+    "region": string;
+    "country": string;
+    "lat": number;
+    "lon": number;
 }
 
 /**
@@ -460,6 +498,15 @@ export interface CoveredItem {
      * search results: the best-matching moment of a video, ms
      */
     "at"?: number;
+
+    /**
+     * The Trash names each item by its file and says what deleting it from
+     * disk takes: the first file's name, and the size and number of all its
+     * files. Other views leave them empty.
+     */
+    "name"?: string;
+    "size"?: number;
+    "files"?: number;
     "hiddenBy": BlockRef[] | null;
 }
 
@@ -492,7 +539,10 @@ export enum DateSource {
 
     /**
      * Where a date can come from.
+     *
+     * a local correction; the metadata original is kept
      */
+    DateFromUser = "user",
     DateFromEXIF = "exif",
     DateFromFilename = "filename",
 
@@ -520,6 +570,11 @@ export interface DayBucket {
 export interface DayItems {
     "day": string;
     "items": GridItem[] | null;
+
+    /**
+     * where most of the day's items were taken; "" if nowhere known or its name is blocked
+     */
+    "place"?: string;
 }
 
 /**
@@ -683,9 +738,19 @@ export interface Event {
      */
     "id": number;
     "name": string;
+
+    /**
+     * empty when the date/place title is automatic
+     */
+    "nameOverride"?: string;
     "startAt": number;
     "endAt": number;
     "count": number;
+
+    /**
+     * included in Count
+     */
+    "videos"?: number;
     "cover": number;
     "coverThumb": number;
     "placeId": number;
@@ -981,6 +1046,7 @@ export enum Filter {
      * The grid filters.
      */
     FilterAll = "",
+    FilterPhotos = "photos",
     FilterFavourites = "favourites",
     FilterVideos = "videos",
 
@@ -1032,6 +1098,15 @@ export interface GridItem {
      * search results: the best-matching moment of a video, ms
      */
     "at"?: number;
+
+    /**
+     * The Trash names each item by its file and says what deleting it from
+     * disk takes: the first file's name, and the size and number of all its
+     * files. Other views leave them empty.
+     */
+    "name"?: string;
+    "size"?: number;
+    "files"?: number;
 }
 
 /**
@@ -1058,6 +1133,19 @@ export enum Kind {
 export interface LegacyPreferences {
     "theme": Theme;
     "tileSize": number;
+}
+
+/**
+ * LibraryCounts supplies sidebar totals and the Library caption. People
+ * counts named, unblocked people with visible photos. Duplicates are omitted:
+ * their page counts computed similarity groups, which cannot be read cheaply.
+ */
+export interface LibraryCounts {
+    "photos": number;
+    "videos": number;
+    "favourites": number;
+    "people": number;
+    "trash": number;
 }
 
 /**
@@ -1178,6 +1266,14 @@ export enum Motion {
     MotionReduced = "reduced",
     MotionFull = "full",
 };
+
+/**
+ * NamedPlace is a place by name, for linking to it.
+ */
+export interface NamedPlace {
+    "id": number;
+    "name": string;
+}
 
 /**
  * OrganiseMove is one file's move, planned or made.
@@ -1318,6 +1414,26 @@ export enum OrganiseRunState {
 };
 
 /**
+ * OriginalDate is the metadata date underneath a local correction.
+ */
+export interface OriginalDate {
+    /**
+     * wall-clock seconds, including dates before 1970
+     */
+    "takenAt": number;
+    "from": DateSource;
+}
+
+/**
+ * OriginalLocation is the metadata location underneath a local correction.
+ * Both coordinates are nil when the file supplies no location.
+ */
+export interface OriginalLocation {
+    "lat": number | null;
+    "lon": number | null;
+}
+
+/**
  * Person is someone who appears in the photos: a group of faces the AI
  * found, or the user made, named or not.
  */
@@ -1338,6 +1454,21 @@ export interface Person {
      * the face to show; ID 0 = none
      */
     "cover": Face;
+}
+
+/**
+ * PersonFacts is what a person's page says about them beside their photos.
+ */
+export interface PersonFacts {
+    /**
+     * their faces the Faces tab lists
+     */
+    "faces": number;
+
+    /**
+     * named people most often in photos with them, most first
+     */
+    "companions": Person[] | null;
 }
 
 /**
@@ -1593,6 +1724,15 @@ export interface RenderInfo {
 }
 
 /**
+ * SearchPerson is a person a search named, spelled as the query spelled them,
+ * so the query can be written again without them.
+ */
+export interface SearchPerson {
+    "id": number;
+    "name": string;
+}
+
+/**
  * SearchResult is the answer to a natural-language search, best match first.
  */
 export interface SearchResult {
@@ -1601,7 +1741,12 @@ export interface SearchResult {
     /**
      * people named in the query: results show all of them
      */
-    "people": string[] | null;
+    "people": SearchPerson[] | null;
+
+    /**
+     * the rest of the query, searched for; empty if it only names people
+     */
+    "description": string;
 
     /**
      * photos not yet understood, so not searchable yet
@@ -1713,7 +1858,25 @@ export interface Source {
     "id": number;
     "path": string;
     "enabled": boolean;
+    "availability"?: SourceAvailability;
 }
+
+/**
+ * SourceAvailability is the last background check of a source's root.
+ */
+export enum SourceAvailability {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * Source states are kept in memory; an unchecked source is not a missing one.
+     */
+    SourceChecking = "checking",
+    SourceAvailable = "available",
+    SourceUnavailable = "unavailable",
+};
 
 /**
  * StartView is the screen Lumen opens on.

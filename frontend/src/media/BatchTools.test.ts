@@ -26,6 +26,20 @@ const done = (ids: number[]): BatchOutcome[] => ids.map((id) => ({ id, code: '',
 const range = (n: number) => Array.from({ length: n }, (_, i) => i + 1)
 const body = () => new DOMWrapper(document.body)
 
+it('opens the action chosen by the selection dock', async () => {
+  const wrapper = mountInApp(BatchTools, {
+    props: { open: true, ids: [1], trash: false, initialOperation: 'tag' },
+    plugins: [createPinia()],
+  })
+  await flushPromises()
+  expect(
+    body()
+      .find(`[aria-label="${t('details.addTag')}"]`)
+      .exists(),
+  ).toBe(true)
+  wrapper.unmount()
+})
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.mocked(engine.albums).mockReset().mockResolvedValue([])
@@ -42,7 +56,7 @@ beforeEach(() => {
 async function apply() {
   const button = body()
     .findAll('button')
-    .find((b) => b.text() === t('files.applyBatch'))
+    .find((b) => b.attributes('data-batch-apply') !== undefined)
   if (!button) throw new Error('No apply button')
   await button.trigger('click')
   await flushPromises()
@@ -110,7 +124,7 @@ it('leaves the parts not yet sent alone when the action is stopped', async () =>
     await apply()
     const cancel = body()
       .findAll('button')
-      .find((b) => b.text() === t('common.cancel'))
+      .find((b) => b.text() === t('files.cancelRemaining'))
     if (!cancel) throw new Error('No cancel button while a batch runs')
     await cancel.trigger('click')
     release(done(range(200)))
@@ -139,22 +153,27 @@ it('fails every photo of a part whose call the engine refuses', async () => {
   }
 })
 
-it('does not start a confirmed batch after its owning dialog unmounts', async () => {
-  let answer: (value: boolean) => void = () => {
+it('does not start a batch after its owning dialog unmounts during validation', async () => {
+  let answer: () => void = () => {
     throw new Error('Missing confirmation')
   }
-  vi.mocked(confirm).mockImplementation(
+  vi.mocked(engine.validateSelection).mockImplementation(
     () =>
-      new Promise<boolean>((resolve) => {
+      new Promise<void>((resolve) => {
         answer = resolve
       }),
   )
-  const wrapper = mountBatch([1, 2])
+  const wrapper = mountBatch([1, 2], false, {
+    open: true,
+    ids: [1, 2],
+    trash: false,
+    selection: { ids: [1, 2], revision: 1 },
+  })
   try {
     await flushPromises()
     await apply()
     wrapper.unmount()
-    answer(true)
+    answer()
     await flushPromises()
     expect(engine.applyBatch).not.toHaveBeenCalled()
   } finally {
@@ -162,15 +181,15 @@ it('does not start a confirmed batch after its owning dialog unmounts', async ()
   }
 })
 
-it('invalidates a confirmation when the dialog closes and reopens', async () => {
-  let answer: (value: boolean) => void = () => undefined
-  vi.mocked(confirm).mockImplementationOnce(
+it('invalidates pending validation when the dialog closes and reopens', async () => {
+  let answer: () => void = () => undefined
+  vi.mocked(engine.validateSelection).mockImplementationOnce(
     () =>
-      new Promise((resolve) => {
+      new Promise<void>((resolve) => {
         answer = resolve
       }),
   )
-  const props = reactive({ open: true, ids: [1, 2], trash: false })
+  const props = reactive({ open: true, ids: [1, 2], trash: false, selection: { ids: [1, 2], revision: 1 } })
   const wrapper = mountBatch(props.ids, false, props)
   try {
     await flushPromises()
@@ -179,7 +198,7 @@ it('invalidates a confirmation when the dialog closes and reopens', async () => 
     await flushPromises()
     props.open = true
     await flushPromises()
-    answer(true)
+    answer()
     await flushPromises()
     expect(engine.applyBatch).not.toHaveBeenCalled()
     await apply()
@@ -208,6 +227,31 @@ it('does not mutate assets after its owner closes while selection validation is 
     validated()
     await flushPromises()
     expect(engine.applyBatch).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('runs reversible selection actions without a confirmation and retries only failed items', async () => {
+  vi.mocked(engine.applyBatch).mockResolvedValueOnce([
+    { id: 1, code: '', error: '' },
+    { id: 2, code: ErrorCode.NotFound, error: 'gone' },
+  ])
+  const wrapper = mountBatch([1, 2])
+  try {
+    await flushPromises()
+    await apply()
+    expect(confirm).not.toHaveBeenCalled()
+    const retry = body()
+      .findAll('button')
+      .find((button) => button.text() === t('files.retry'))
+    if (!retry) throw new Error('Missing retry')
+    await retry.trigger('click')
+    await flushPromises()
+    expect(engine.applyBatch).toHaveBeenLastCalledWith([2], BatchAction.BatchFavourite, 0)
+    expect(body().text()).toContain(t('files.batchProgress', { n: 2, total: 2, failed: 0 }))
+    expect(body().text()).toContain(`1: ${t('files.outcome.done')}`)
+    expect(body().text()).toContain(`2: ${t('files.outcome.done')}`)
   } finally {
     wrapper.unmount()
   }

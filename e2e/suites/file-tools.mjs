@@ -22,6 +22,15 @@ const choose = async (text) => {
   await option.asElement().click()
   await sleep(150)
 }
+// Opens the operation list once the last one has finished closing: a click
+// during its exit animation lands on the closing list instead.
+const openList = async () => {
+  await page.waitForFunction(() => !document.querySelector('[role="listbox"][data-state="open"]'))
+  await sleep(400)
+  await page.click('[aria-label="File operation"]')
+  await page.waitForSelector('[role="listbox"][data-state="open"]')
+  await sleep(250)
+}
 const listVisible = async (name, count) => {
   await page.waitForSelector('[role="listbox"][data-state="open"]')
   await sleep(250)
@@ -58,10 +67,13 @@ try {
   await page.reload()
   await page.waitForSelector('[id^="cell-"]')
   await page.click('[id^="cell-"]')
-  const fileButton = await page.evaluateHandle(() =>
-    [...document.querySelectorAll('button')].find((e) => e.textContent.trim() === 'File tools'),
+  // File tools is in the selection dock's More menu.
+  await page.click('.selection-dock button[aria-label="More actions"]')
+  await page.waitForSelector('[role="menuitem"]')
+  const fileItem = await page.evaluateHandle(() =>
+    [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent.trim().startsWith('File tools')),
   )
-  await fileButton.asElement().click()
+  await fileItem.asElement().click()
   await page.waitForSelector('[aria-label="File operation"]')
   await page.click('[aria-label="File operation"]')
   await sleep(500)
@@ -95,37 +107,44 @@ try {
     'Rename selected copy',
     'Copy originals',
   ]) {
-    if (!(await page.$('[role="listbox"][data-state="open"]'))) await page.click('[aria-label="File operation"]')
+    if (!(await page.$('[role="listbox"][data-state="open"]'))) await openList()
     await choose(option)
     check(
       `select ${option}`,
       await page.$eval('[aria-label="File operation"]', (e, text) => e.textContent.includes(text), option),
     )
   }
-  await page.click('[aria-label="File operation"]')
+  await openList()
   await resize(page, 1040, 720)
   await listVisible('dropdown stays above the modal after window resizing', 5)
   await resize(page, 520, 720)
   await listVisible('all file operations remain visible at a narrow window width', 5)
   await resize(page, 1040, 720)
+  // A window resize closes the list (as Reka's Select does); the keyboard
+  // check starts from a freshly opened one.
+  await page.keyboard.press('Escape')
+  await openList()
   await page.keyboard.press('End')
   await page.keyboard.press('Enter')
-  await sleep(200)
-  check(
-    'keyboard selection chooses rename and changes the input',
-    !!(await page.$('input[aria-label="New file name, including extension"]')),
-  )
-  await page.click('[aria-label="File operation"]')
+  const renamed = await page
+    .waitForSelector('input[aria-label="New file name, including extension"]', { timeout: 3000 })
+    .catch(() => null)
+  check('keyboard selection chooses rename and changes the input', !!renamed, await page.$eval('[aria-label="File operation"]', (e) => e.textContent))
+  await openList()
   await page.keyboard.press('Escape')
-  await sleep(200)
+  // Focus goes back to the trigger once the list's exit animation ends.
+  await page
+    .waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'File operation', { timeout: 2000 })
+    .catch(() => {})
+  const escaped = await page.evaluate(() => ({
+    list: !!document.querySelector('[role="listbox"][data-state="open"]'),
+    dialog: !!document.querySelector('[role="dialog"][data-state="open"]'),
+    focus: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName,
+  }))
   check(
     'Escape closes only the list and restores trigger focus',
-    await page.evaluate(
-      () =>
-        !document.querySelector('[role="listbox"][data-state="open"]') &&
-        !!document.querySelector('[role="dialog"][data-state="open"]') &&
-        document.activeElement?.getAttribute('aria-label') === 'File operation',
-    ),
+    !escaped.list && escaped.dialog && escaped.focus === 'File operation',
+    escaped,
   )
   await page.keyboard.press('Escape')
   await sleep(250)
@@ -151,8 +170,25 @@ try {
     'fullscreen PNG selection updates operation',
     await page.$eval('[aria-label="File operation"]', (e) => e.textContent.includes('Export PNG')),
   )
+  // An Escape while the chosen list is still closing goes to the list.
+  await page.waitForFunction(() => !document.querySelector('[role="listbox"]'), { timeout: 3000 }).catch(() => {})
+  await sleep(400)
   await page.keyboard.press('Escape')
-  await sleep(300)
+  // The dialog fades out over the player, and idle player controls fade
+  // too: move the pointer over the player, then wait until the button
+  // itself takes the click.
+  await page.waitForSelector('[role="dialog"][data-state="open"]', { hidden: true })
+  const player = await page.$('.video-player')
+  const box = await player.boundingBox()
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.waitForFunction(
+    () => {
+      const b = document.querySelector('.video-player button[aria-label="Exit fullscreen"]'),
+        r = b?.getBoundingClientRect()
+      return !!r && b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))
+    },
+    { timeout: 5000 },
+  )
   await page.click('.video-player button[aria-label="Exit fullscreen"]')
   await page.waitForFunction(() => !document.fullscreenElement)
   // Resizing the window under an open menu makes WebView2 report "ResizeObserver

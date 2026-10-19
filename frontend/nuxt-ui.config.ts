@@ -4,6 +4,10 @@
 import type { NuxtUIOptions } from '@nuxt/ui/unplugin'
 import { bundledIcons } from './src/design/icons.ts'
 
+// Every floating surface (dialogs, sheets, menus, popovers, lists) is one
+// raised overlay: its background, shadow and arrival come from tokens.css.
+const overlay = { slots: { content: 'lumen-overlay' } }
+
 export const uiOptions: NuxtUIOptions = {
   // Lumen's own preference store owns the theme (src/design/appearance.ts):
   // Nuxt UI's colour-mode integration would be a second owner writing to
@@ -19,14 +23,27 @@ export const uiOptions: NuxtUIOptions = {
   // build rather than being fetched when it is first shown.
   icon: { clientBundle: { icons: bundledIcons } },
   ui: {
-    colors: { primary: 'blue', neutral: 'zinc' },
+    colors: { primary: 'blue', neutral: 'slate' },
     // Lumen's decisions about Nuxt UI's controls, in one place. Sizes come
     // from the density tokens (src/design/tokens.css), not from here.
-    button: { defaultVariants: { color: 'neutral', variant: 'subtle' } },
-    modal: { slots: { content: 'lumen-overlay' } },
-    slideover: { slots: { content: 'lumen-overlay' } },
-    // A notice's reason goes on its own line.
-    toast: { slots: { description: 'whitespace-pre-line' } },
+    // Buttons are semibold and give a little under the pointer.
+    button: {
+      slots: {
+        base: 'font-semibold active:not-disabled:scale-[0.97] transition-[color,background-color,box-shadow,transform]',
+      },
+      defaultVariants: { color: 'neutral', variant: 'subtle' },
+    },
+    modal: { slots: { content: 'lumen-overlay rounded-(--lumen-r-xl)', footer: 'lumen-dialog-foot' } },
+    slideover: overlay,
+    drawer: overlay,
+    popover: overlay,
+    dropdownMenu: overlay,
+    contextMenu: overlay,
+    select: overlay,
+    selectMenu: overlay,
+    inputMenu: overlay,
+    // A notice is the dark pill of either theme; its reason goes on its own line.
+    toast: { slots: { root: 'lumen-toast', description: 'whitespace-pre-line' } },
     tooltip: { slots: { content: 'lumen-tooltip' } },
   },
 }

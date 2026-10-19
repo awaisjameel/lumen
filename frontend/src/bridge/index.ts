@@ -40,6 +40,7 @@ import {
   Playback,
   PrefCategory,
   SidecarState,
+  SourceAvailability,
   StartView,
   TagKind,
   TagSource,
@@ -55,6 +56,10 @@ import {
   UpdatePhase,
 } from '../../bindings/lumen/internal/core'
 import type {
+  CityMatch,
+  LibraryCounts,
+  OriginalDate,
+  OriginalLocation,
   About,
   Album,
   BatchOutcome,
@@ -88,7 +93,9 @@ import type {
   GridItem,
   LegacyPreferences,
   MediaCaps,
+  NamedPlace,
   Person,
+  PersonFacts as RawPersonFacts,
   Place,
   Preferences as RawPreferences,
   CustomisationPreview as RawCustomisationPreview,
@@ -102,6 +109,7 @@ import type {
   ExportOptions,
   ExportJob,
   ExportPreset,
+  SearchPerson,
   SearchResult,
   Settings as RawSettings,
   Source,
@@ -143,6 +151,7 @@ export {
   Playback,
   PrefCategory,
   SidecarState,
+  SourceAvailability,
   StartView,
   TagKind,
   TagSource,
@@ -155,6 +164,10 @@ export {
   WaitReason,
 }
 export type {
+  CityMatch,
+  LibraryCounts,
+  OriginalDate,
+  OriginalLocation,
   UpdateStatus,
   UpdatePolicy,
   About,
@@ -172,6 +185,7 @@ export type {
   DayBucket,
   Face,
   GridItem,
+  NamedPlace,
   Person,
   Event,
   FailedFile,
@@ -183,6 +197,7 @@ export type {
   Place,
   Progress,
   RenderInfo,
+  SearchPerson,
   DisplayAdjustment,
   ViewerPreferences,
   MediaTrack,
@@ -208,6 +223,8 @@ export type AssetDetail = NonNullLists<RawAssetDetail, 'paths'>
 export type DayItems = NonNullLists<RawDayItems, 'items'>
 /** A search's results, best first. */
 export type SearchResults = NonNullLists<SearchResult, 'items' | 'people'>
+
+export type PersonFacts = NonNullLists<RawPersonFacts, 'companions'>
 /** One asset in a duplicate group, with all its file paths (and each one's mtime). */
 export type DuplicateItem = NonNullLists<RawDuplicateItem, 'paths' | 'mtimes'>
 /** Exact copies or similar photos to review. */
@@ -280,10 +297,10 @@ export const TILE_SIZE_MAX = 320 // core.TileSizeMax
 export const TILE_SIZE_DEFAULT = 168 // core.TileSizeDefault
 export const SIDEBAR_WIDTH_MIN = 200 // core.SidebarWidthMin
 export const SIDEBAR_WIDTH_MAX = 360 // core.SidebarWidthMax
-export const SIDEBAR_WIDTH_DEFAULT = 232 // core.SidebarWidthDefault
+export const SIDEBAR_WIDTH_DEFAULT = 248 // core.SidebarWidthDefault
 export const INSPECTOR_WIDTH_MIN = 280 // core.InspectorWidthMin
 export const INSPECTOR_WIDTH_MAX = 480 // core.InspectorWidthMax
-export const INSPECTOR_WIDTH_DEFAULT = 320 // core.InspectorWidthDefault
+export const INSPECTOR_WIDTH_DEFAULT = 340 // core.InspectorWidthDefault
 export const SLIDESHOW_SECONDS_MIN = 1 // core.SlideshowSecondsMin
 export const SLIDESHOW_SECONDS_MAX = 60 // core.SlideshowSecondsMax
 export const SKIP_SECONDS_MIN = 1 // core.SkipSecondsMin
@@ -380,6 +397,10 @@ export type ThumbSize = typeof THUMB_SMALL | typeof THUMB_LARGE
  * (services.ErrorCode). Other failures carry only a message.
  */
 export const ErrorCode = {
+  CorrectionSelection: 'correction_selection',
+  CorrectionDate: 'correction_date',
+  CorrectionLocation: 'correction_location',
+  InvalidFilter: 'invalid_filter',
   UpdateUnavailable: 'update_unavailable',
   UpdateBusy: 'update_busy',
   UpdateInvalid: 'update_invalid',
@@ -544,6 +565,7 @@ export const engine = {
   render: (id: number, signal?: AbortSignal, page = 0, side = RENDER_SIDE): Promise<RenderInfo> =>
     cancellable(MediaService.RenderPage(id, side, page), signal),
   sources: async (): Promise<Source[]> => (await LibraryService.Sources()) ?? [],
+  recheckSources: (): Promise<void> => LibraryService.RecheckSources(),
   suggestedFolders: async (): Promise<string[]> => (await LibraryService.SuggestedFolders()) ?? [],
   sourcePathKey: (path: string): Promise<string> => LibraryService.SourcePathKey(path),
   /** The folder the user picked, or "" if they closed the picker. */
@@ -563,6 +585,20 @@ export const engine = {
     })),
   focus: (from: string, to: string): Promise<void> => LibraryService.Focus(from, to),
 
+  /** Kept sidebar/caption totals; refresh after mutations and onLibraryChanged. */
+  counts: (): Promise<LibraryCounts> => LibraryService.Counts(),
+  /** Correct wall-clock seconds atomically; reload detail and timeline after success. */
+  setTakenAt: (ids: number[], takenAt: number): Promise<void> => LibraryService.SetTakenAt(ids, takenAt),
+  /** Restore the latest metadata date, including changes read since correction. */
+  restoreTakenAt: (ids: number[]): Promise<void> => LibraryService.RestoreTakenAt(ids),
+  /** Correct GPS and resolve its offline place; matching blocks apply immediately. */
+  setLocation: (ids: number[], lat: number, lon: number): Promise<void> => LibraryService.SetLocation(ids, lat, lon),
+  /** Restore the latest metadata GPS, including restoring a file with no GPS. */
+  restoreLocation: (ids: number[]): Promise<void> => LibraryService.RestoreLocation(ids),
+  /** Offline city suggestions, exact/prefix first; cancellation supersedes old typing. */
+  findCities: async (query: string, limit = 20, signal?: AbortSignal): Promise<CityMatch[]> =>
+    (await cancellable(LibraryService.FindCities(query, limit), signal)) ?? [],
+
   asset: async (id: number): Promise<AssetDetail> => {
     const d = await LibraryService.Asset(id)
     return { ...d, paths: d.paths ?? [] }
@@ -574,8 +610,12 @@ export const engine = {
     })),
   places: async (): Promise<Place[]> => (await LibraryService.Places()) ?? [],
   place: (id: number): Promise<Place> => LibraryService.Place(id),
+  topPlaces: async (view: View): Promise<NamedPlace[]> => (await LibraryService.TopPlaces(view)) ?? [],
   events: async (): Promise<Event[]> => (await LibraryService.Events()) ?? [],
   event: (id: number): Promise<Event> => LibraryService.Event(id),
+  /** How many events a time gap would make, without saving it; a newer preview cancels this one. */
+  eventCount: (hours: number, signal?: AbortSignal): Promise<number> =>
+    cancellable(LibraryService.EventCount(hours), signal),
   setEventName: (id: number, name: string): Promise<void> => LibraryService.SetEventName(id, name),
   setEventPinned: (id: number, pinned: boolean): Promise<void> => LibraryService.SetEventPinned(id, pinned),
   setFavourite: (id: number, fav: boolean): Promise<void> => LibraryService.SetFavourite(id, fav),
@@ -654,7 +694,6 @@ export const engine = {
   trashAssets: (ids: number[]): Promise<void> => LibraryService.TrashAssets(ids),
   restoreAssets: (ids: number[]): Promise<void> => LibraryService.RestoreAssets(ids),
   restoreAllTrash: (): Promise<void> => LibraryService.RestoreAllTrash(),
-  trashCount: (): Promise<number> => LibraryService.TrashCount(),
   /** What Delete from disk would take for these trashed assets (none given: all of the Trash), to confirm. */
   trashSelection: async (ids: number[]): Promise<TrashSelection> => {
     const r = await LibraryService.TrashSelection(ids)
@@ -678,6 +717,10 @@ export const engine = {
   /** Changes what a block hides, by the block's own id (SetBlock's target is not that for events and faces). */
   setBlockMode: (blockID: number, mode: BlockMode): Promise<void> => LibraryService.SetBlockMode(blockID, mode),
   removeBlock: (id: number): Promise<void> => LibraryService.RemoveBlock(id),
+  /** Unblocks while unlocked, returning an opaque receipt for undoUnblock (not a block ID). */
+  unblock: (id: number): Promise<number> => LibraryService.Unblock(id),
+  /** Re-block the last unblocked rule during its Undo window, even after relocking. */
+  undoUnblock: (receipt: number): Promise<void> => LibraryService.UndoUnblock(receipt),
   undoBlock: (id: number): Promise<void> => LibraryService.UndoBlock(id),
   /** Blocks one face, and with lookalikes the faces like it too. */
   blockFace: (faceID: number, mode: BlockMode, lookalikes: boolean): Promise<BlockChange> =>
@@ -701,6 +744,11 @@ export const engine = {
     (await cancellable(SearchService.Hits(ids), signal)) ?? [],
   suggestTags: async (text: string): Promise<Tag[]> => (await SearchService.SuggestTags(text)) ?? [],
   prepareSearch: (): Promise<void> => SearchService.PrepareSearch(),
+  /** The searches run last, newest first, without any that name something blocked. */
+  recentSearches: async (): Promise<string[]> => (await SearchService.RecentSearches()) ?? [],
+  /** Keeps a search the user ran; returns the recent searches as recentSearches does. */
+  rememberSearch: async (query: string): Promise<string[]> => (await SearchService.RememberSearch(query)) ?? [],
+  clearRecentSearches: (): Promise<void> => SearchService.ClearRecentSearches(),
   things: async (): Promise<Tag[]> => (await SearchService.Things()) ?? [],
   createLabel: (name: string): Promise<number> => SearchService.CreateLabel(name),
   deleteTag: (id: number): Promise<void> => SearchService.DeleteTag(id),
@@ -715,6 +763,10 @@ export const engine = {
 
   people: async (): Promise<Person[]> => (await PeopleService.People()) ?? [],
   person: (id: number): Promise<Person> => PeopleService.Person(id),
+  personFacts: async (id: number): Promise<PersonFacts> => {
+    const r = await PeopleService.PersonFacts(id)
+    return { ...r, companions: r.companions ?? [] }
+  },
   personFaces: async (id: number): Promise<Face[]> => (await PeopleService.PersonFaces(id)) ?? [],
   assetFaces: async (id: number): Promise<Face[]> => (await PeopleService.AssetFaces(id)) ?? [],
   suggestPeople: async (text: string): Promise<Person[]> => (await PeopleService.SuggestPeople(text)) ?? [],
@@ -764,7 +816,8 @@ export function onProgress(cb: (p: Progress) => void): () => void {
 
 /**
  * Fires (at most once a second) when the library changed, saying what:
- * assets, their tags, or who is in them. Returns an unsubscribe function.
+ * assets, their tags, who is in them, or cached source availability (sources).
+ * Read engine.sources() when sources is true. Returns an unsubscribe function.
  */
 export function onLibraryChanged(cb: (c: Changes) => void): () => void {
   return Events.On(EVENT_LIBRARY_CHANGED, (e) => cb(e.data))

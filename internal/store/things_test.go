@@ -23,7 +23,7 @@ func downgradeToV18(t *testing.T, st *Store) {
 	st.w.execContext = st.w.DB.ExecContext
 	// The kept counts (migration 0037) read tables this version lacks, so they
 	// go with their triggers.
-	for _, table := range []string{"day_counts", "tag_counts", "person_counts_faces", "person_counts", "job_counts", "count_rebuild"} {
+	for _, table := range []string{"day_counts", "tag_counts", "person_counts_faces", "person_counts", "job_counts", "count_rebuild", "trash_count"} {
 		triggers, err := queryAll(ctx, st.r, func(r *sql.Rows) (name string, err error) { err = r.Scan(&name); return name, err }, "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE ? || '_%'", table)
 		check(t, err)
 		for _, name := range triggers {
@@ -41,11 +41,11 @@ func downgradeToV18(t *testing.T, st *Store) {
 		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER "+name)))
 	}
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE selection_revision")))
-	for _, trigger := range []string{"duplicate_asset_changed", "duplicate_file_added", "duplicate_file_deleted", "duplicate_file_changed"} {
+	for _, trigger := range []string{"duplicate_asset_changed", "duplicate_file_added", "duplicate_file_deleted", "duplicate_file_changed", "duplicate_original_date_changed"} {
 		check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER "+trigger)))
 	}
 	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE event_revision DROP COLUMN duplicate_value")))
-	for _, column := range []string{"display_rotation", "display_flip", "display_version"} {
+	for _, column := range []string{"display_rotation", "display_flip", "display_version", "original_taken_at", "original_date_from", "location_corrected", "original_lat", "original_lon", "original_place_id"} {
 		check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE assets DROP COLUMN "+column)))
 	}
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TABLE playback_history")))

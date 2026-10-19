@@ -32,6 +32,15 @@ func (s *PeopleService) Person(ctx context.Context, id int64) (core.Person, erro
 	return s.store.Person(ctx, id)
 }
 
+// companions is how many people a person's page names as most often with them.
+const companions = 3
+
+// PersonFacts returns how many faces a person has and who is most often in
+// photos with them.
+func (s *PeopleService) PersonFacts(ctx context.Context, id int64) (core.PersonFacts, error) {
+	return s.store.PersonFacts(ctx, id, companions)
+}
+
 // PersonFaces lists a person's faces for review, the least alike first, so
 // a face that isn't them is easy to spot.
 func (s *PeopleService) PersonFaces(ctx context.Context, id int64) ([]core.Face, error) {

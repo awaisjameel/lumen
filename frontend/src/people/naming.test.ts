@@ -58,3 +58,8 @@ it('sends the name Go saves: a byte-order mark stays, next-line whitespace goes'
   await expect(namePerson(1, '\u0085\uFEFFAli ')).resolves.toBe(1)
   expect(engine.namePerson).toHaveBeenCalledWith(1, '\uFEFFAli')
 })
+
+it('rejects more than eighty Unicode code points before calling the engine', async () => {
+  await expect(namePerson(1, '😀'.repeat(81))).rejects.toThrow('80')
+  expect(engine.namePerson).not.toHaveBeenCalled()
+})

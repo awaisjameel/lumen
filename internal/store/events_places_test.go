@@ -345,6 +345,96 @@ func TestBackfillPlacesUsesPendingIndexAndResumesBatches(t *testing.T) {
 	}
 }
 
+func TestEventCountPreviewsAGapWithoutReplacingTheCachedList(t *testing.T) {
+	st, ctx := openTest(t), context.Background()
+	src, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	paths := []string{`C:\Photos\a.jpg`, `C:\Photos\b.jpg`, `C:\Photos\c.jpg`}
+	items := make([]IngestItem, 0, len(paths))
+	for i, path := range paths {
+		items = append(items, item(src.ID, path, string(rune('a'+i))))
+	}
+	_, err = st.Ingest(ctx, items)
+	check(t, err)
+	ids := make([]int64, len(paths))
+	for i, path := range paths {
+		check(t, st.r.QueryRowContext(ctx, "SELECT asset_id FROM files WHERE path = ?", path).Scan(&ids[i]))
+	}
+	base := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC).Unix()
+	check(t, st.SaveMetadata(ctx, "m", []MetadataResult{
+		{AssetID: ids[0], TakenAt: base},
+		{AssetID: ids[1], TakenAt: base + 2*3600},
+		{AssetID: ids[2], TakenAt: base + 20*3600},
+	}))
+	events, err := st.Events(ctx, core.EventGapDefault)
+	check(t, err)
+	if len(events) != 2 {
+		t.Fatalf("events at the default gap = %+v", events)
+	}
+	for _, test := range []struct{ hours, want int }{{1, 3}, {core.EventGapDefault, 2}, {24, 1}} {
+		n, err := st.EventCount(ctx, test.hours)
+		check(t, err)
+		if n != test.want {
+			t.Errorf("EventCount(%d) = %d, want %d", test.hours, n, test.want)
+		}
+	}
+	// The preview neither saves the gap nor regroups the list the views read.
+	if gap, err := st.EventGapHours(ctx); err != nil || gap != core.EventGapDefault {
+		t.Fatalf("gap after preview = %d, %v", gap, err)
+	}
+	if st.eventsCache.gap != core.EventGapDefault || len(st.eventsCache.items) != 2 {
+		t.Fatalf("cache after preview = gap %d, %d events", st.eventsCache.gap, len(st.eventsCache.items))
+	}
+}
+
+func TestEventCardsKeepMediaCountsAndTheNameOverrideThroughRegrouping(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	f := newEventFixture(t, st)
+	photo := f.add(0)
+	video := f.addVideo(2)
+	event, err := st.Event(ctx, photo, core.EventGapDefault)
+	check(t, err)
+	if event.Count != 2 || event.Videos != 1 || event.NameOverride != "" {
+		t.Fatalf("automatic event = %+v", event)
+	}
+	check(t, st.SetEventName(ctx, photo, "Trip", core.EventGapDefault))
+	check(t, st.SetEventGapHours(ctx, 1))
+	for _, id := range []int64{photo, video} {
+		event, err = st.Event(ctx, id, 1)
+		check(t, err)
+		if event.Name != "Trip" || event.NameOverride != "Trip" || event.Count != 1 {
+			t.Fatalf("named split event = %+v", event)
+		}
+	}
+	if event.Videos != 1 {
+		t.Fatalf("video event = %+v", event)
+	}
+	check(t, st.SetEventName(ctx, video, "", 1))
+	event, err = st.Event(ctx, video, 1)
+	check(t, err)
+	if event.NameOverride != "" || event.Name == "Trip" {
+		t.Fatalf("automatic name was not restored: %+v", event)
+	}
+}
+
+func TestEventCountPreviewsRespectLabelAndPhotoBlocks(t *testing.T) {
+	for _, mode := range []core.BlockMode{core.BlockLabel, core.BlockPhotos} {
+		t.Run(string(mode), func(t *testing.T) {
+			st, ctx := openTest(t), t.Context()
+			f := newEventFixture(t, st)
+			a := f.add(0)
+			f.add(2)
+			f.add(24)
+			f.block(a, mode)
+			n, err := st.EventCount(ctx, core.EventGapDefault)
+			check(t, err)
+			if n != 1 {
+				t.Fatalf("preview includes a blocked event: %d", n)
+			}
+		})
+	}
+}
+
 func TestEventGapHoursUsesValidatedIntegerSettings(t *testing.T) {
 	st, ctx := openTest(t), context.Background()
 	for _, test := range []struct{ stored, want int }{{36, 36}, {0, core.EventGapDefault}, {100, core.EventGapDefault}} {

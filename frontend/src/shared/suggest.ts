@@ -1,6 +1,6 @@
 import { onBeforeUnmount, shallowRef, watch } from 'vue'
 import type { Ref, ShallowRef } from 'vue'
-import { logError } from './errors'
+import { errorText, logError } from './errors'
 
 /**
  * Suggestions for what is being typed: fetch runs once typing pauses for
@@ -14,25 +14,47 @@ export function useSuggestions<T>(
   none: T,
   delay = 120,
 ): Readonly<ShallowRef<T>> {
+  const state = useSuggestionState(text, fetch, none, delay)
+  watch(state.error, (error) => {
+    if (error) logError(error)
+  })
+  return state.found
+}
+
+/** Suggestions with recoverable feedback for fields that can show read failures. */
+export function useSuggestionState<T>(text: Ref<string>, fetch: (query: string) => Promise<T>, none: T, delay = 120) {
   const found = shallowRef(none)
+  const loading = shallowRef(false)
+  const error = shallowRef('')
   let timer = 0
   let asked = 0
-  watch(text, (v) => {
+  let disposed = false
+  function refresh() {
     clearTimeout(timer)
     const n = ++asked
+    const v = text.value.trim()
+    found.value = none
+    error.value = ''
+    loading.value = false
     if (!v.trim()) {
-      found.value = none
       return
     }
+    loading.value = true
     timer = window.setTimeout(async () => {
       try {
         const got = await fetch(v)
-        if (n === asked) found.value = got
+        if (!disposed && n === asked) found.value = got
       } catch (e) {
-        logError(e)
+        if (!disposed && n === asked) error.value = errorText(e)
+      } finally {
+        if (!disposed && n === asked) loading.value = false
       }
     }, delay)
+  }
+  watch(text, refresh, { immediate: true, flush: 'sync' })
+  onBeforeUnmount(() => {
+    disposed = true
+    clearTimeout(timer)
   })
-  onBeforeUnmount(() => clearTimeout(timer))
-  return found
+  return { found, loading, error, retry: refresh }
 }

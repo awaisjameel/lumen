@@ -9,9 +9,9 @@ import AppShell from './app/AppShell.vue'
 import UpdateNotice from './updates/UpdateNotice.vue'
 import { useLibrary } from './library/store'
 import { errorText, logError } from './shared/errors'
-import FeatureState from './shared/FeatureState.vue'
-import { t } from './shared/i18n'
+import StartupError from './onboarding/StartupError.vue'
 import { engine, StartView } from './bridge'
+import { notificationToaster } from './shared/notify'
 import { usePreferences } from './shared/preferences'
 import { useFullscreenPortal } from './shared/overlay'
 
@@ -22,6 +22,7 @@ const lib = useLibrary()
 const prefs = usePreferences()
 const portal = useFullscreenPortal()
 const failed = ref('')
+const onboarding = ref(false)
 const router = useRouter()
 // Whether the user has gone anywhere yet: the start view only ever replaces
 // the screen Lumen opened on.
@@ -38,39 +39,50 @@ async function openStartView() {
   if (router.hasRoute(view)) await router.replace({ name: view })
 }
 
-onMounted(async () => {
+const retrying = ref(false)
+async function initialise() {
+  if (retrying.value) return
+  retrying.value = true
+  failed.value = ''
   try {
     await engine.updateHealth()
   } catch (e) {
     failed.value = errorText(e)
+    retrying.value = false
     return
   }
   // The interface's look is not worth holding the library back for: without
   // it the last appearance applied (or the defaults) stays.
   void prefs.load().then(openStartView).catch(logError)
-  lib.init().catch((e: unknown) => (failed.value = errorText(e)))
-})
+  try {
+    await lib.init()
+  } catch (e) {
+    failed.value = errorText(e)
+  } finally {
+    retrying.value = false
+  }
+}
+onMounted(() => void initialise())
+
+async function finishOnboarding() {
+  await router.replace({ name: 'library' })
+  onboarding.value = false
+}
 </script>
 
 <template>
-  <UApp :portal="portal" :toaster="{ position: 'bottom-center', expand: false }" :tooltip="{ delayDuration: 400 }">
+  <UApp :portal="portal" :toaster="notificationToaster" :tooltip="{ delayDuration: 400 }">
     <AppNotifications>
       <template v-if="lib.ready">
-        <Welcome v-if="!lib.sources.length" />
+        <Welcome v-if="!lib.sources.length || onboarding" @starting="onboarding = true" @complete="finishOnboarding" />
         <AppShell v-else>
           <RouterView />
         </AppShell>
       </template>
-      <FeatureState v-else-if="failed" class="failed" kind="error" :title="t('app.failed')" :text="failed" />
+      <StartupError v-else-if="failed || retrying" :error="failed" :busy="retrying" @retry="initialise" />
       <AppOverlays />
       <UpdateNotice />
       <CrashNotice />
     </AppNotifications>
   </UApp>
 </template>
-
-<style scoped>
-.failed {
-  height: 100%;
-}
-</style>

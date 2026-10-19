@@ -249,8 +249,8 @@ func (s *Store) FinishCompression(ctx context.Context, j core.CompressionJob, ha
 			}
 			err = tx.QueryRowContext(ctx, "SELECT id FROM assets WHERE content_hash = ?", hash).Scan(&output)
 			if errors.Is(err, sql.ErrNoRows) {
-				res, err := tx.ExecContext(ctx, `INSERT INTO assets(content_hash, kind, ext, taken_at, date_from, added_at, favourite, display_rotation, display_flip, width, height, orientation, lat, lon, camera, place_id, place_checked)
-					SELECT ?, kind, ?, taken_at, date_from, ?, favourite, display_rotation, display_flip, width, height, orientation, lat, lon, camera, place_id, place_checked FROM assets WHERE id = ?`, hash, strings.ToLower(filepath.Ext(j.To)), time.Now().Unix(), j.AssetID)
+				res, err := tx.ExecContext(ctx, `INSERT INTO assets(content_hash, kind, ext, taken_at, date_from, added_at, favourite, display_rotation, display_flip, width, height, orientation, lat, lon, camera, place_id, place_checked, original_taken_at, original_date_from, location_corrected, original_lat, original_lon, original_place_id)
+					SELECT ?, kind, ?, taken_at, date_from, ?, favourite, display_rotation, display_flip, width, height, orientation, lat, lon, camera, place_id, place_checked, original_taken_at, original_date_from, location_corrected, original_lat, original_lon, original_place_id FROM assets WHERE id = ?`, hash, strings.ToLower(filepath.Ext(j.To)), time.Now().Unix(), j.AssetID)
 				if err != nil {
 					return err
 				}

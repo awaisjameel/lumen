@@ -21,35 +21,39 @@ type ErrorCode string
 
 // The error codes.
 const (
-	CodeNotFound        ErrorCode = "not_found"    // it was deleted, or its file is gone
-	CodeNoAI            ErrorCode = "no_ai"        // the on-device AI isn't available
-	CodeInvalidName     ErrorCode = "invalid_name" // empty, or too long
-	CodeAlbumExists     ErrorCode = "album_exists" // another album has that name
-	CodeInvalidAlbum    ErrorCode = "invalid_album"
-	CodeAlbumMediaKind  ErrorCode = "album_media_kind"
-	CodeAlbumSelection  ErrorCode = "album_selection"
-	CodeAlbumDate       ErrorCode = "album_date"
-	CodeAlbumDateOrder  ErrorCode = "album_date_order"
-	CodeAlbumSmartItems ErrorCode = "album_smart_items"
-	CodeAlbumKind       ErrorCode = "album_kind"
-	CodeAlbumReference  ErrorCode = "album_reference"
-	CodeAlbumManualOnly ErrorCode = "album_manual_only"
-	CodePersonExists    ErrorCode = "person_exists"   // someone else has that name
-	CodeBlockedName     ErrorCode = "blocked_name"    // a name belongs to a blocked person or Thing
-	CodeTagExists       ErrorCode = "tag_exists"      // another Thing has that name
-	CodeBuiltinTag      ErrorCode = "builtin_tag"     // built-in Things can be blocked, not deleted
-	CodeTagInAlbum      ErrorCode = "tag_in_album"    // a smart album's rule uses the Thing
-	CodeAlreadyCovered  ErrorCode = "already_covered" // the folder is already in the library
-	CodeFolderNotFound  ErrorCode = "folder_not_found"
-	CodeInvalidPIN      ErrorCode = "invalid_pin"      // not 6 to 12 digits, or not the PIN
-	CodePINExists       ErrorCode = "pin_exists"       // a PIN was already created
-	CodePINRateLimited  ErrorCode = "pin_rate_limited" // too many wrong PINs: wait a moment
-	CodeBlocksLocked    ErrorCode = "blocks_locked"    // the Blocked list needs the PIN first
-	CodeUndoExpired     ErrorCode = "undo_expired"     // too late to undo that block
-	CodeInvalidBlock    ErrorCode = "invalid_block"    // that can't be blocked
-	CodeDeleteFailed    ErrorCode = "delete_failed"    // the Recycle Bin could not be used
-	CodeTrashChanged    ErrorCode = "trash_changed"    // the Trash changed after Delete from disk was confirmed
-	CodeXMPOff          ErrorCode = "xmp_off"          // XMP sidecars were asked for while the setting is off
+	CodeCorrectionSelection ErrorCode = "correction_selection"
+	CodeCorrectionDate      ErrorCode = "correction_date"
+	CodeCorrectionLocation  ErrorCode = "correction_location"
+	CodeInvalidFilter       ErrorCode = "invalid_filter"
+	CodeNotFound            ErrorCode = "not_found"    // it was deleted, or its file is gone
+	CodeNoAI                ErrorCode = "no_ai"        // the on-device AI isn't available
+	CodeInvalidName         ErrorCode = "invalid_name" // empty, or too long
+	CodeAlbumExists         ErrorCode = "album_exists" // another album has that name
+	CodeInvalidAlbum        ErrorCode = "invalid_album"
+	CodeAlbumMediaKind      ErrorCode = "album_media_kind"
+	CodeAlbumSelection      ErrorCode = "album_selection"
+	CodeAlbumDate           ErrorCode = "album_date"
+	CodeAlbumDateOrder      ErrorCode = "album_date_order"
+	CodeAlbumSmartItems     ErrorCode = "album_smart_items"
+	CodeAlbumKind           ErrorCode = "album_kind"
+	CodeAlbumReference      ErrorCode = "album_reference"
+	CodeAlbumManualOnly     ErrorCode = "album_manual_only"
+	CodePersonExists        ErrorCode = "person_exists"   // someone else has that name
+	CodeBlockedName         ErrorCode = "blocked_name"    // a name belongs to a blocked person or Thing
+	CodeTagExists           ErrorCode = "tag_exists"      // another Thing has that name
+	CodeBuiltinTag          ErrorCode = "builtin_tag"     // built-in Things can be blocked, not deleted
+	CodeTagInAlbum          ErrorCode = "tag_in_album"    // a smart album's rule uses the Thing
+	CodeAlreadyCovered      ErrorCode = "already_covered" // the folder is already in the library
+	CodeFolderNotFound      ErrorCode = "folder_not_found"
+	CodeInvalidPIN          ErrorCode = "invalid_pin"      // not 6 to 12 digits, or not the PIN
+	CodePINExists           ErrorCode = "pin_exists"       // a PIN was already created
+	CodePINRateLimited      ErrorCode = "pin_rate_limited" // too many wrong PINs: wait a moment
+	CodeBlocksLocked        ErrorCode = "blocks_locked"    // the Blocked list needs the PIN first
+	CodeUndoExpired         ErrorCode = "undo_expired"     // too late to undo that block
+	CodeInvalidBlock        ErrorCode = "invalid_block"    // that can't be blocked
+	CodeDeleteFailed        ErrorCode = "delete_failed"    // the Recycle Bin could not be used
+	CodeTrashChanged        ErrorCode = "trash_changed"    // the Trash changed after Delete from disk was confirmed
+	CodeXMPOff              ErrorCode = "xmp_off"          // XMP sidecars were asked for while the setting is off
 
 	CodeInvalidTemplate  ErrorCode = "invalid_template"  // the folder scheme to organise by cannot be used
 	CodeOrganiseBusy     ErrorCode = "organise_busy"     // files are already being moved
@@ -93,6 +97,10 @@ var errorCodes = []struct {
 	err  error
 	code ErrorCode
 }{
+	{store.ErrCorrectionSelection, CodeCorrectionSelection},
+	{store.ErrCorrectionDate, CodeCorrectionDate},
+	{store.ErrCorrectionLocation, CodeCorrectionLocation},
+	{store.ErrInvalidFilter, CodeInvalidFilter},
 	{update.ErrUnavailable, CodeUpdateUnavailable},
 	{update.ErrBusy, CodeUpdateBusy},
 	{update.ErrInvalid, CodeUpdateInvalid},

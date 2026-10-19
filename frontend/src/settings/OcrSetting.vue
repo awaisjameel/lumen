@@ -12,6 +12,7 @@ const { save, hint } = useSaveFeedback(() => lib.settingErrors.ocr)
 <template>
   <PrefRow
     :label="t('settings.ocr')"
+    :modified="lib.settings.ocr"
     :description="t('settings.ocrHint')"
     :error="lib.settingErrors.ocr"
     :hint="hint('ocr')"

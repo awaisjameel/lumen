@@ -56,28 +56,42 @@ const shape = computed(() => props.layout ?? 'tile')
 <style scoped>
 .collection-card {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
   min-width: 0;
 }
 .cover {
+  position: relative;
   display: grid;
   place-items: center;
   overflow: hidden;
-  border-radius: calc(var(--ui-radius) * 1.5);
+  border-radius: var(--lumen-r-lg);
   background: var(--lumen-placeholder);
+  box-shadow: var(--lumen-shadow-1);
   color: var(--ui-text-dimmed);
+  transition:
+    transform var(--lumen-d-base) var(--lumen-ease-out),
+    box-shadow var(--lumen-d-base) var(--lumen-ease-out);
 }
 .cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform var(--lumen-motion-panel) var(--lumen-ease);
+  transition: transform var(--lumen-d-slow) var(--lumen-ease-out);
 }
-.cover:hover img {
+/* The card lifts toward the pointer, and its photo leans in. */
+.collection-card:hover .cover {
+  transform: translateY(-2px);
+  box-shadow: var(--lumen-shadow-2);
+}
+.collection-card:hover .cover img {
   transform: scale(1.04);
 }
 .meta {
   display: flex;
   flex-direction: column;
+  gap: 0.125rem;
   min-width: 0;
 }
 .name {
@@ -89,11 +103,11 @@ const shape = computed(() => props.layout ?? 'tile')
   white-space: nowrap;
 }
 .name:hover {
-  text-decoration: underline;
+  color: var(--lumen-primary-text);
 }
 .line {
   overflow: hidden;
-  color: var(--ui-text-muted);
+  color: var(--ui-text-toned);
   font-size: 0.8125rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -101,17 +115,25 @@ const shape = computed(() => props.layout ?? 'tile')
 .count {
   color: var(--ui-text-dimmed);
   font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Tile: People, Things, Albums. */
+/* Tile: Things, Albums, Places, Events (a 4:3 cover); People (round). */
 .tile .cover {
-  aspect-ratio: 1;
+  aspect-ratio: 4 / 3;
 }
 .tile.round .cover {
+  aspect-ratio: 1;
   border-radius: 50%;
 }
+.tile.round:hover .cover {
+  transform: scale(1.03);
+  box-shadow:
+    var(--lumen-shadow-2),
+    0 0 0 3px var(--lumen-primary-soft-2);
+}
 .tile .meta {
-  padding: 0.375rem 0.125rem 0;
+  padding: 0 0.125rem;
 }
 .tile.round .meta {
   align-items: center;
@@ -119,46 +141,59 @@ const shape = computed(() => props.layout ?? 'tile')
 }
 .tile .badge {
   position: absolute;
-  top: 0.375rem;
-  left: 0.375rem;
+  top: 0.5rem;
+  left: 0.5rem;
 }
 .tile .acts {
   position: absolute;
-  top: 0.375rem;
-  right: 0.375rem;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  gap: 0.25rem;
   opacity: 0;
-  transition: opacity var(--lumen-motion-control) var(--lumen-ease);
+  transform: translateY(-4px);
+  transition:
+    opacity var(--lumen-d-fast) var(--lumen-ease-out),
+    transform var(--lumen-d-base) var(--lumen-ease-out);
 }
 .tile:hover .acts,
 .tile:focus-within .acts {
   opacity: 1;
+  transform: none;
 }
 /* Touch has no hover: a card's actions are always there. */
 @media (pointer: coarse) {
   .tile .acts {
     opacity: 1;
+    transform: none;
   }
 }
 
-/* Row: Places, Events. */
+/* Row: a cover beside its text, for lists. */
 .row {
-  display: flex;
+  flex-direction: row;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.875rem;
   padding: 0.625rem;
   border: 1px solid var(--ui-border);
-  border-radius: calc(var(--ui-radius) * 2);
-  background: var(--ui-bg-muted);
+  border-radius: var(--lumen-r-lg);
+  background: var(--lumen-bg-raised);
+  box-shadow: var(--lumen-shadow-1);
 }
 .row .cover {
   flex: 0 0 5.5rem;
   width: 5.5rem;
   height: 5.5rem;
+  border-radius: var(--lumen-r-md);
+  box-shadow: none;
+}
+.row:hover .cover {
+  transform: none;
+  box-shadow: none;
 }
 .row .meta {
   flex: 1;
-  gap: 0.125rem;
 }
 .row .acts {
   display: flex;

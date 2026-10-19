@@ -16,7 +16,7 @@ withDefaults(defineProps<{ layout?: 'tile' | 'row' }>(), { layout: 'tile' })
 }
 .tile {
   grid-template-columns: repeat(auto-fill, minmax(var(--lumen-card-min), 1fr));
-  gap: 1.125rem 0.875rem;
+  gap: 1.25rem 1rem;
 }
 .row {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr));

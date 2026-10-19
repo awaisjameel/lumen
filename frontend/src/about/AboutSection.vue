@@ -93,7 +93,7 @@ useCommands([
         variant="link"
         :icon="icons.external"
         @click="run(() => engine.openLink(Link.LinkReleases))"
-        >{{ about.about.releasesURL }}</UButton
+        >{{ t('about.viewReleases') }}</UButton
       >
     </PrefRow>
     <PrefRow
@@ -151,6 +151,10 @@ useCommands([
   flex-direction: column;
   gap: 0.25rem;
 }
+.about-content > :deep(.meta-row),
+.about-brand {
+  margin-inline: 1.25rem;
+}
 
 .release-link {
   max-width: 100%;
@@ -163,7 +167,7 @@ useCommands([
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding-bottom: 0.75rem;
+  padding-block: 1.25rem 0.75rem;
   color: var(--ui-text-highlighted);
   font: 600 1.25rem var(--font-display);
 }

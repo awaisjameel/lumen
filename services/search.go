@@ -66,15 +66,15 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	}
 	matches := people.MatchNames(query, named)
 	if slices.ContainsFunc(matches, func(match people.NameMatch) bool { return match.Target.Blocked }) {
-		return core.SearchResult{Items: []core.GridItem{}, People: []string{}, Complete: true, Blocked: true}, nil
+		return core.SearchResult{Items: []core.GridItem{}, People: []core.SearchPerson{}, Complete: true, Blocked: true}, nil
 	}
 	personMatches := slices.DeleteFunc(matches, func(match people.NameMatch) bool { return match.Target.Kind != core.BlockPerson })
 	var who []int64
-	var names []string
+	spelled := []core.SearchPerson{}
 	for _, match := range personMatches {
 		if !slices.Contains(who, match.Target.ID) {
 			who = append(who, match.Target.ID)
-			names = append(names, query[match.Start:match.End])
+			spelled = append(spelled, core.SearchPerson{ID: match.Target.ID, Name: query[match.Start:match.End]})
 		}
 	}
 	text := people.RemainingQuery(query, personMatches)
@@ -152,10 +152,48 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	if names == nil {
-		names = []string{}
+	return core.SearchResult{Items: items, People: spelled, Description: text, Pending: pending, Complete: complete, NoAI: noAI}, nil
+}
+
+// RecentSearches lists the searches the user ran last, newest first. One that
+// names something blocked is left out: the list must not say what the
+// Blocked screen hides.
+func (s *SearchService) RecentSearches(ctx context.Context) ([]string, error) {
+	list, err := s.store.RecentSearches(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return core.SearchResult{Items: items, People: names, Pending: pending, Complete: complete, NoAI: noAI}, nil
+	return s.shownSearches(ctx, list)
+}
+
+// RememberSearch keeps query as the most recent search the user ran and
+// returns the recent searches as RecentSearches does.
+func (s *SearchService) RememberSearch(ctx context.Context, query string) ([]string, error) {
+	list, err := s.store.RememberSearch(ctx, search.BoundQuery(query))
+	if err != nil {
+		return nil, err
+	}
+	return s.shownSearches(ctx, list)
+}
+
+// ClearRecentSearches forgets the recent searches.
+func (s *SearchService) ClearRecentSearches(ctx context.Context) error {
+	return s.store.ClearRecentSearches(ctx)
+}
+
+// shownSearches is list without the searches that name something blocked.
+func (s *SearchService) shownSearches(ctx context.Context, list []string) ([]string, error) {
+	shown := []string{}
+	for _, query := range list {
+		named, err := s.store.SearchNames(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.ContainsFunc(people.MatchNames(query, named), func(match people.NameMatch) bool { return match.Target.Blocked }) {
+			shown = append(shown, query)
+		}
+	}
+	return shown, nil
 }
 
 // Hits gives current search results again as they are now, in the order

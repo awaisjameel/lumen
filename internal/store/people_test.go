@@ -228,3 +228,45 @@ func TestPeopleEdits(t *testing.T) {
 		t.Errorf("blocking nobody: %v", err)
 	}
 }
+
+func TestAPersonsFactsCountTheirFacesAndNameWhoIsMostOftenWithThem(t *testing.T) {
+	st, ctx, a, b, _ := peopleFixture(t)
+	fa, fb := facesOf(t, st, a), facesOf(t, st, b)
+	ali, err := st.NameFaces(ctx, []int64{fa[0].ID, fb[0].ID}, "Ali")
+	check(t, err)
+	check(t, st.ApplyClusters(ctx, ClusterChanges{NewPeople: [][]int64{{fa[1].ID}}}))
+	other := facesOf(t, st, a)[1].Person
+	companions := func() []string {
+		t.Helper()
+		facts, err := st.PersonFacts(ctx, ali, 3)
+		check(t, err)
+		if facts.Faces != 2 {
+			t.Fatalf("Ali has %d faces, want 2", facts.Faces)
+		}
+		var names []string
+		for _, p := range facts.Companions {
+			if p.Cover.ID == 0 {
+				t.Errorf("%s has no picture", p.Name)
+			}
+			names = append(names, p.Name)
+		}
+		return names
+	}
+	if got := companions(); len(got) != 0 {
+		t.Fatalf("an unnamed person is named as with Ali: %v", got)
+	}
+	check(t, st.NamePerson(ctx, other, "Bea"))
+	if got := companions(); len(got) != 1 || got[0] != "Bea" {
+		t.Fatalf("with Ali are %v, want [Bea]", got)
+	}
+	_, err = st.SetBlock(ctx, core.BlockPerson, other, "", core.BlockLabel)
+	check(t, err)
+	if got := companions(); len(got) != 0 {
+		t.Fatalf("a blocked person is named as with Ali: %v", got)
+	}
+	_, err = st.SetBlock(ctx, core.BlockPerson, ali, "", core.BlockLabel)
+	check(t, err)
+	if _, err := st.PersonFacts(ctx, ali, 3); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a blocked person's facts: %v, want ErrNotFound", err)
+	}
+}

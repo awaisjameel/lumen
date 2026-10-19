@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
-import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
+import UModal from '@nuxt/ui/components/Modal.vue'
 import USlideover from '@nuxt/ui/components/Slideover.vue'
 import { createReusableTemplate } from '@vueuse/core'
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
@@ -20,13 +20,18 @@ import {
   MAX_NAME_LEN,
   TagSource,
   TrackKind,
+  thumbUrl,
 } from '../bridge'
 import type { AssetDetail, AssetTag, Face, MediaInspection } from '../bridge'
 import { FileTools } from '../media/lazy'
-import { errorText, logError, orFallback } from '../shared/errors'
+import { errorText, logError, orFallback, reportError } from '../shared/errors'
 import { block } from '../shared/block'
-import { bytes, dateTime, duration, megapixels } from '../shared/format'
-import { t } from '../shared/i18n'
+import { bytes, dateTime, duration, megapixels, fileName } from '../shared/format'
+import { t, formatNumber } from '../shared/i18n'
+import { notify } from '../shared/notify'
+import DateDialog from './details/DateDialog.vue'
+import PlaceDialog from './details/PlaceDialog.vue'
+import AlbumPicker from './details/AlbumPicker.vue'
 import type { MessageKey } from '../shared/i18n'
 import { icons } from '../design/icons'
 import { runCommand, useCommands } from '../shared/commands'
@@ -55,6 +60,38 @@ const albums = useAlbums()
 const detail = ref<AssetDetail | null>(null)
 const inspection = ref<MediaInspection | null>(null)
 const filesOpen = ref(false)
+const dateOpen = ref(false)
+const placeOpen = ref(false)
+const tagOpen = ref(false)
+const albumOpen = ref(false)
+const createOpen = ref(false)
+const faceOpen = ref<Face | null>(null)
+const handoff = shallowRef<{ title: string; path: string; run: () => Promise<void> } | null>(null)
+const handoffError = ref('')
+const handoffBusy = ref(false)
+const faceBusy = ref(false)
+const tagBusy = ref(false)
+const multiple = computed(() => !lib.viewer && lib.selectedIDs.size > 1)
+// With several selected, the panel shows one of them at a time, and what is
+// changed here (a corrected date or place) changes that one only; the
+// selection dock acts on them all. Its place among the loaded selected items:
+const step = computed(() => lib.selectedLoaded.findIndex((sel) => sel.id === props.sel?.id))
+// Show a selected item when the focus is on none of them (Select all, a
+// whole day), so the panel never shows a photo outside the selection.
+watch(
+  [multiple, () => lib.selectedLoaded, () => props.sel?.id],
+  () => {
+    const first = lib.selectedLoaded[0]
+    if (multiple.value && first && (!props.sel || !lib.selectedIDs.has(props.sel.id))) lib.selected = first
+  },
+  { immediate: true },
+)
+/** Shows the selected item before or after this one, keeping the selection. */
+function stepTo(by: number) {
+  const next = lib.selectedLoaded[step.value + by]
+  if (next) lib.selected = next
+}
+const previewUrl = computed(() => (props.sel ? thumbUrl(props.sel.id, lib.itemAt(props.sel)?.t ?? 0) : undefined))
 const placeName = ref('') // the city near the photo, once known
 const tags = ref<AssetTag[]>([])
 const faces = ref<Face[]>([])
@@ -128,6 +165,9 @@ async function loadDetails(id: number | undefined) {
     if (request === detailRequest && !isCancelled(e)) {
       detail.value = null
       placeName.value = ''
+      tags.value = []
+      faces.value = []
+      albumIDs.value = []
       detailError.value = errorText(e)
     }
   } finally {
@@ -153,6 +193,15 @@ watch(
     albumIDs.value = []
     savingAlbums.value = new Set()
     newTag.value = ''
+    tagOpen.value = false
+    createOpen.value = false
+    dateOpen.value = false
+    placeOpen.value = false
+    albumOpen.value = false
+    faceOpen.value = null
+    faceBusy.value = false
+    tagBusy.value = false
+    handoff.value = null
     newAlbum.value = ''
     creatingAlbum.value = false // one still on its way no longer concerns this photo
     void loadExtras(id)
@@ -201,6 +250,23 @@ function toggleAlbum(albumID: number, checked: boolean | 'indeterminate') {
     // Another photo's boxes are its own: this one's outcome is not theirs.
     if (revision !== selectionRevision) return
     if (!ok) showInAlbum(albumID, !include)
+    else
+      notify({
+        id: `album-${assetID}-${albumID}`,
+        kind: 'success',
+        title: t('details.album.saved'),
+        actions: [
+          {
+            label: t('settings.undo'),
+            run: () =>
+              void engine
+                .setAlbumItem(assetID, albumID, !include)
+                .then(() => loadAlbums(assetID))
+                .then(() => albums.load())
+                .catch(reportError),
+          },
+        ],
+      })
     const saving = new Set(savingAlbums.value)
     saving.delete(albumID)
     savingAlbums.value = saving
@@ -216,7 +282,10 @@ async function createAlbumForItem() {
   error.value = ''
   try {
     await engine.createAlbum(name, AlbumKind.AlbumManual, emptyRule(), [assetID]) // with the photo in it, at once
-    if (revision === selectionRevision) newAlbum.value = ''
+    if (revision === selectionRevision) {
+      newAlbum.value = ''
+      createOpen.value = false
+    }
     await Promise.all([loadAlbums(assetID), albums.load()])
   } catch (e) {
     if (revision === selectionRevision) error.value = errorText(e)
@@ -277,7 +346,8 @@ async function edit(fn: () => Promise<unknown>, reload: () => Promise<void>): Pr
 async function addTag() {
   const name = trimName(newTag.value)
   const id = detail.value?.id
-  if (!name || nameTooLong(newTag.value) || !id) return
+  if (!name || nameTooLong(newTag.value) || !id || tagBusy.value) return
+  tagBusy.value = true
   const requested = selectionRevision
   // What was typed stays until the tag is on, so a failure loses nothing.
   if (
@@ -288,16 +358,36 @@ async function addTag() {
     requested === selectionRevision
   ) {
     newTag.value = ''
+    tagOpen.value = false
   }
+  if (requested === selectionRevision) tagBusy.value = false
 }
 
-function removeTag(tag: AssetTag) {
+async function removeTag(tag: AssetTag) {
   const id = detail.value?.id
-  if (id)
-    void edit(
+  if (!id) return
+  if (
+    await edit(
       () => engine.untagAsset(id, tag.id),
       () => loadTags(id),
     )
+  )
+    notify({
+      id: `tag-${id}-${tag.id}`,
+      kind: 'success',
+      title: t('details.tag.removed', { name: tag.name }),
+      actions: [
+        {
+          label: t('settings.undo'),
+          run: () =>
+            void engine
+              .tagAsset(id, tag.name)
+              .then(() => loadTags(id))
+              .then(() => lib.refresh())
+              .catch(reportError),
+        },
+      ],
+    })
 }
 
 async function blockAsset() {
@@ -347,25 +437,59 @@ async function blockFolder(path: string) {
   if (await block(BlockKind.BlockFolder, 0, folder, false, folder)) await loadExtras(props.sel?.id)
 }
 
-function nameFace(face: Face, name: string) {
+async function nameFace(face: Face, name: string) {
   const id = detail.value?.id
-  if (id)
-    void edit(
+  if (!id || faceBusy.value) return
+  const requested = selectionRevision
+  faceBusy.value = true
+  if (
+    (await edit(
       () => engine.nameFaces([face.id], name),
       () => loadFaces(id),
-    )
+    )) &&
+    requested === selectionRevision
+  )
+    faceOpen.value = null
+  if (requested === selectionRevision) faceBusy.value = false
 }
 
-function notThem(face: Face) {
+async function notThem(face: Face) {
   const id = detail.value?.id
-  if (id)
-    void edit(
+  if (!id) return
+  if (
+    await edit(
       () => engine.rejectFaces(face.person, [face.id]),
       () => loadFaces(id),
     )
+  )
+    notify({
+      id: `face-${face.id}`,
+      kind: 'success',
+      title: t('details.person.corrected', { name: face.name || t('person.unnamed') }),
+      actions: face.name
+        ? [
+            {
+              label: t('settings.undo'),
+              run: () =>
+                void engine
+                  .nameFaces([face.id], face.name)
+                  .then(() => loadFaces(id))
+                  .then(() => lib.refresh())
+                  .catch(reportError),
+            },
+          ]
+        : [],
+    })
+}
+
+async function correctionsChanged() {
+  await loadDetails(props.sel?.id)
+  if (detail.value) await loadExtras(props.sel?.id)
+  void lib.refresh().catch(logError)
 }
 
 const dateFromText: Record<DateSource, MessageKey> = {
+  [DateSource.DateFromUser]: 'details.dateFrom.user',
   [DateSource.DateFromEXIF]: 'details.dateFrom.exif',
   [DateSource.DateFromFilename]: 'details.dateFrom.filename',
   [DateSource.DateFromFile]: 'details.dateFrom.file',
@@ -383,24 +507,59 @@ function deleteThisFromDisk() {
 }
 
 function showInFolder(id: number, path = '') {
-  error.value = ''
-  engine.showInFolder(id, path).catch((e: unknown) => {
-    if (props.sel?.id === id) error.value = errorText(e)
-  })
+  handoff.value = {
+    title: t('common.showInFolder'),
+    path: path || detail.value?.paths[0] || '',
+    run: () => engine.showInFolder(id, path),
+  }
+  void runHandoff()
 }
-async function openCopy(id: number, path: string, choose: boolean) {
+function openCopy(id: number, path: string, choose: boolean) {
+  handoff.value = {
+    title: t(choose ? 'files.openWith' : 'files.open'),
+    path,
+    run: () => engine.openMedia(id, path, choose),
+  }
+  void runHandoff()
+}
+async function runHandoff() {
+  const request = handoff.value
+  if (!request || handoffBusy.value) return
+  handoffBusy.value = true
+  handoffError.value = ''
   try {
-    await engine.openMedia(id, path, choose)
+    await request.run()
   } catch (e) {
-    if (props.sel?.id === id) error.value = errorText(e)
+    if (handoff.value === request) handoffError.value = errorText(e)
+  } finally {
+    handoffBusy.value = false
   }
 }
-async function copyName(path: string) {
+async function copyText(value: string) {
   try {
-    await navigator.clipboard.writeText(path.split(/[\\/]/).at(-1) ?? path)
+    await navigator.clipboard.writeText(value)
+    notify({ id: 'details-copy', kind: 'success', title: t('details.copied') })
   } catch (e) {
     error.value = errorText(e)
   }
+}
+function copyName(path: string) {
+  return copyText(fileName(path))
+}
+function copyMetadata() {
+  const d = detail.value
+  if (!d) return
+  void copyText(
+    [
+      `${t('details.taken')}: ${dateTime(d.takenAt)}`,
+      `${t('details.dateSource')}: ${t(dateFromText[d.dateFrom])}`,
+      `${t('details.dimensionsLabel')}: ${d.width} × ${d.height}`,
+      `${t('details.size')}: ${bytes(d.size)}`,
+      `${t('details.type')}: ${d.ext}`,
+      ...metadata.value.map((row) => `${row.label}: ${row.value || t('details.missing')}`),
+      ...d.paths,
+    ].join(String.fromCharCode(10)),
+  )
 }
 
 function returnFocus(e: Event) {
@@ -418,8 +577,11 @@ const metadata = computed(() => {
   const d = detail.value
   if (!d) return []
   const i = inspection.value
-  const row = (label: MessageKey, value: string | number | undefined) => ({
-    key: label as string,
+  const row = (
+    label: MessageKey,
+    value: string | number | undefined,
+  ): { key: string; label: string; value: string } => ({
+    key: label,
     label: t(label),
     value: value ? String(value) : '',
   })
@@ -465,8 +627,8 @@ useCommands([
     title: () => t('files.open'),
     icon: 'external',
     available: editable,
-    run: async () => {
-      if (detail.value) await engine.openMedia(detail.value.id)
+    run: () => {
+      if (detail.value) openCopy(detail.value.id, detail.value.paths[0] || '', false)
     },
   },
   {
@@ -532,7 +694,41 @@ useCommands([
 
 <template>
   <InspectorContent>
-    <FeatureState v-if="!detail && shownError" kind="error" :title="shownError" />
+    <div v-if="multiple" class="selection-step" role="group" :aria-label="t('details.stepLabel')" data-selection-step>
+      <div class="step-head">
+        <strong>{{ t('details.multiple', { n: formatNumber(lib.selectedIDs.size) }) }}</strong>
+        <span v-if="step >= 0" class="step-position" aria-live="polite">{{
+          t('details.stepPosition', {
+            i: formatNumber(step + 1),
+            n: formatNumber(lib.selectedLoaded.length),
+          })
+        }}</span>
+        <IconButton
+          :icon="icons['chevron-left']"
+          :label="t('details.stepPrevious')"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          :disabled="step <= 0"
+          data-step="previous"
+          @click="stepTo(-1)"
+        />
+        <IconButton
+          :icon="icons['chevron-right']"
+          :label="t('details.stepNext')"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          :disabled="step < 0 || step >= lib.selectedLoaded.length - 1"
+          data-step="next"
+          @click="stepTo(1)"
+        />
+      </div>
+      <p>{{ t('details.multipleHint') }}</p>
+    </div>
+    <FeatureState v-if="!detail && shownError" kind="error" :title="t('details.error')" :text="shownError"
+      ><UButton @click="correctionsChanged">{{ t('common.retry') }}</UButton></FeatureState
+    >
     <FeatureState
       v-else-if="!detail"
       :kind="loading ? 'loading' : 'empty'"
@@ -540,36 +736,89 @@ useCommands([
       :title="loading ? t('details.loading') : t('details.none')"
     />
     <div v-else class="inspector-body">
+      <div class="preview">
+        <img v-if="previewUrl" :src="previewUrl" :alt="t('details.preview')" />
+        <div v-else class="lumen-skeleton" />
+      </div>
+      <div class="preview-caption">
+        <div>
+          <h3 :title="detail.paths[0] ? fileName(detail.paths[0]) : ''">
+            <bdi>{{ detail.paths[0] ? fileName(detail.paths[0]) : t('details.missing') }}</bdi>
+          </h3>
+          <span
+            >{{ t(detail.kind === Kind.KindVideo ? 'details.video' : 'details.photo') }} ·
+            {{ detail.ext.replace(/^\./, '').toUpperCase() }}</span
+          >
+        </div>
+        <IconButton
+          v-if="!lib.inTrash"
+          :icon="icons.heart"
+          :label="t(detail.favourite ? 'details.unfavourite' : 'details.favourite')"
+          :aria-pressed="detail.favourite"
+          variant="ghost"
+          @click="runCommand(lib.viewer ? 'viewer.favourite' : 'inspector.favourite')"
+        />
+      </div>
       <section :aria-label="t('details.overview')">
         <h3>{{ t('details.overview') }}</h3>
-        <MetaRow
-          :label="t('details.taken')"
-          icon="calendar"
-          :value="detail.takenAt ? dateTime(detail.takenAt) : t('details.missing')"
-        />
-        <MetaRow :label="t('details.dateSource')" :value="t(dateFromText[detail.dateFrom])" />
+        <div class="overview-row">
+          <div>
+            <b>{{ dateTime(detail.takenAt) }}</b
+            ><span>{{ t('details.taken') }} · {{ t(dateFromText[detail.dateFrom]) }}</span>
+          </div>
+          <UButton v-if="!lib.inTrash" data-edit-date variant="ghost" size="sm" @click="dateOpen = true">{{
+            t('details.editDate')
+          }}</UButton>
+        </div>
+        <div class="overview-row">
+          <div>
+            <b>{{ placeName || t('details.missing') }}</b
+            ><span
+              >{{ t('details.location') }} ·
+              {{
+                detail.lat !== null && detail.lon !== null
+                  ? t('details.coordinateValue', { lat: detail.lat.toFixed(5), lon: detail.lon.toFixed(5) })
+                  : t('details.missing')
+              }}</span
+            >
+          </div>
+          <UButton v-if="!lib.inTrash" data-edit-place variant="ghost" size="sm" @click="placeOpen = true">{{
+            t('details.editPlace')
+          }}</UButton>
+        </div>
+        <div v-if="!lib.inTrash" class="flex flex-wrap gap-2">
+          <UButton class="block-event" :icon="icons['eye-off']" variant="ghost" size="sm" @click="blockEvent">{{
+            t('blocked.blockEvent')
+          }}</UButton>
+          <UButton v-if="detail.placeId" :icon="icons['eye-off']" variant="ghost" size="sm" @click="blockPlace">{{
+            t('blocked.blockPlace')
+          }}</UButton>
+        </div>
+      </section>
+
+      <section :aria-label="t('details.metadata')">
+        <h3>{{ t('details.metadata') }}</h3>
         <MetaRow
           :label="t('details.dimensionsLabel')"
           icon="image"
           :value="
             detail.width && detail.height
-              ? t('details.dimensions', {
+              ? t('details.dimensionValue', {
                   w: detail.width,
                   h: detail.height,
                   mp: megapixels(detail.width, detail.height),
-                  size: bytes(detail.size),
                 })
               : t('details.missing')
           "
         />
         <MetaRow :label="t('details.size')" :value="detail.size ? bytes(detail.size) : t('details.missing')" />
         <MetaRow
-          :label="t('details.type')"
+          :label="t('details.format')"
           :icon="detail.kind === Kind.KindVideo ? 'video' : 'image'"
           :value="
             t('common.labelValue', {
               label: t(detail.kind === Kind.KindVideo ? 'details.video' : 'details.photo'),
-              value: detail.ext || t('details.missing'),
+              value: detail.ext.replace(/^\./, '').toUpperCase() || t('details.missing'),
             })
           "
         />
@@ -582,20 +831,7 @@ useCommands([
           <MetaRow :label="t('details.videoCodec')" :value="detail.video.codec || t('details.missing')" />
           <MetaRow :label="t('details.audioCodec')" :value="detail.video.audio || t('details.missing')" />
         </template>
-        <UButton
-          v-if="!lib.inTrash"
-          class="block-event"
-          :icon="icons['eye-off']"
-          variant="ghost"
-          size="sm"
-          @click="blockEvent"
-        >
-          {{ t('blocked.blockEvent') }}</UButton
-        >
-      </section>
 
-      <section :aria-label="t('details.metadata')">
-        <h3>{{ t('details.metadata') }}</h3>
         <MetaRow
           v-for="row in metadata"
           :key="row.key"
@@ -603,30 +839,9 @@ useCommands([
           :label="row.label"
           :value="row.value || t('details.missing')"
         />
-      </section>
-
-      <h3 v-if="!lib.inTrash">{{ t('details.organisation') }}</h3>
-
-      <section :aria-label="t('details.location')">
-        <h3>{{ t('details.location') }}</h3>
-        <MetaRow :label="t('details.location')" icon="places" :value="placeName || t('details.missing')" />
-        <MetaRow
-          :label="t('details.coordinates')"
-          :value="
-            detail.lat !== null && detail.lon !== null
-              ? t('details.coordinateValue', { lat: detail.lat.toFixed(5), lon: detail.lon.toFixed(5) })
-              : t('details.missing')
-          "
-        />
-        <UButton
-          v-if="detail.placeId && !lib.inTrash"
-          :icon="icons['eye-off']"
-          variant="ghost"
-          size="sm"
-          @click="blockPlace"
-        >
-          {{ t('blocked.blockPlace') }}</UButton
-        >
+        <UButton variant="ghost" size="sm" :icon="icons.copy" @click="copyMetadata">{{
+          t('details.copyMetadata')
+        }}</UButton>
       </section>
 
       <section v-if="!lib.inTrash" :aria-label="t('details.people')">
@@ -658,7 +873,7 @@ useCommands([
                 @click="blockPerson(f)"
               />
             </template>
-            <PersonPicker v-else class="who" :placeholder="t('details.whoIsThis')" @pick="(n) => nameFace(f, n)" />
+            <UButton v-else class="who" variant="outline" @click="faceOpen = f">{{ t('details.whoIsThis') }}</UButton>
             <UButton class="block-face" :icon="icons['eye-off']" variant="ghost" size="sm" @click="blockFace(f)">{{
               t('blocked.blockFace')
             }}</UButton>
@@ -670,7 +885,7 @@ useCommands([
       <section v-if="!lib.inTrash" :aria-label="t('details.tags')">
         <h3>{{ t('details.tags') }}</h3>
         <ul v-if="tags.length" class="tags">
-          <li v-for="tag in tags" :key="tag.id">
+          <li v-for="tag in tags" :key="tag.id" :data-source="tag.source">
             <UButton
               :to="{ name: 'thing', params: { id: tag.id } }"
               variant="link"
@@ -694,28 +909,11 @@ useCommands([
               size="xs"
               @click="blockThing(tag)"
             />
-            <UBadge color="neutral" variant="subtle" size="sm">{{
-              t(tag.source === TagSource.TagByAI ? 'details.byAI' : 'details.byYou')
-            }}</UBadge>
+            <span class="tag-source">{{ t(tag.source === TagSource.TagByAI ? 'details.byAI' : 'details.byYou') }}</span>
           </li>
         </ul>
         <p v-else class="text-sm text-muted">{{ t('details.noTags') }}</p>
-        <UInput
-          v-model="newTag"
-          class="w-full"
-          data-tag-draft
-          :placeholder="t('details.addTag')"
-          :aria-label="t('details.addTag')"
-          :aria-invalid="nameTooLong(newTag) || undefined"
-          @keydown.enter="addTag"
-        />
-        <UAlert
-          v-if="nameTooLong(newTag)"
-          role="alert"
-          color="error"
-          variant="subtle"
-          :title="t('error.invalidName', { max: MAX_NAME_LEN })"
-        />
+        <UButton variant="outline" size="sm" @click="tagOpen = true">{{ t('details.addTag') }}</UButton>
       </section>
 
       <section v-if="!lib.inTrash" :aria-label="t('nav.albums')">
@@ -731,29 +929,8 @@ useCommands([
           @update:model-value="toggleAlbum(album.id, $event)"
         />
         <p v-if="!manualAlbums.length" class="text-sm text-muted">{{ t('details.noAlbums') }}</p>
-        <form class="album-new" @submit.prevent="createAlbumForItem">
-          <UInput
-            v-model="newAlbum"
-            class="min-w-0 flex-1"
-            :placeholder="t('albums.createForItem')"
-            :aria-label="t('albums.createForItem')"
-            :aria-invalid="nameTooLong(newAlbum) || undefined"
-          />
-          <IconButton
-            type="submit"
-            :icon="icons.plus"
-            :label="t('albums.createForItem')"
-            :loading="creatingAlbum"
-            :disabled="creatingAlbum || !trimName(newAlbum) || nameTooLong(newAlbum)"
-          />
-        </form>
-        <UAlert
-          v-if="nameTooLong(newAlbum)"
-          role="alert"
-          color="error"
-          variant="subtle"
-          :title="t('error.invalidName', { max: MAX_NAME_LEN })"
-        />
+        <UButton variant="outline" size="sm" @click="albumOpen = true">{{ t('details.album.add') }}</UButton>
+        <UButton variant="ghost" size="sm" @click="createOpen = true">{{ t('albums.createForItem') }}</UButton>
       </section>
 
       <section :aria-label="t('details.files')">
@@ -771,7 +948,14 @@ useCommands([
           :value="p"
         >
           <template #action>
-            <div class="flex flex-col items-end gap-1">
+            <div class="file-actions">
+              <IconButton
+                :icon="icons.copy"
+                :label="t('details.copyPath')"
+                variant="ghost"
+                size="sm"
+                @click="copyText(p)"
+              />
               <IconButton
                 v-if="!lib.inTrash"
                 :icon="icons.external"
@@ -814,6 +998,14 @@ useCommands([
             </div>
           </template>
         </MetaRow>
+        <UButton
+          v-if="detail.paths.length > 1"
+          to="/duplicates"
+          color="neutral"
+          variant="soft"
+          :icon="icons.duplicates"
+          >{{ t('details.reviewCopies') }}</UButton
+        >
         <p v-if="!detail.paths.length" class="text-sm text-muted">{{ t('details.missing') }}</p>
       </section>
 
@@ -851,10 +1043,146 @@ useCommands([
       <UAlert v-if="shownError" role="alert" color="error" variant="subtle" :title="shownError" />
     </div>
   </InspectorContent>
+  <DateDialog v-if="detail && dateOpen" v-model:open="dateOpen" :assets="[detail]" @changed="correctionsChanged" />
+  <PlaceDialog v-if="detail && placeOpen" v-model:open="placeOpen" :assets="[detail]" @changed="correctionsChanged" />
+  <AlbumPicker
+    v-if="detail"
+    :id="detail.id"
+    v-model:open="albumOpen"
+    :membership="albumIDs"
+    @changed="loadAlbums(props.sel?.id)"
+  />
+  <UModal v-model:open="tagOpen" :title="t('details.tag.title')" :dismissible="!tagBusy" :close="!tagBusy">
+    <template #body>
+      <UInput
+        v-model="newTag"
+        class="w-full"
+        data-tag-draft
+        :placeholder="t('details.addTag')"
+        :aria-label="t('details.addTag')"
+        :aria-invalid="nameTooLong(newTag) || undefined"
+        @keydown.enter="addTag" />
+      <UAlert
+        v-if="nameTooLong(newTag)"
+        role="alert"
+        color="error"
+        variant="subtle"
+        :title="t('error.invalidName', { max: MAX_NAME_LEN })" /><UAlert
+        v-if="error"
+        color="error"
+        :title="error"
+        role="alert"
+    /></template>
+    <template #footer
+      ><div class="w-full flex justify-end gap-2">
+        <UButton color="neutral" variant="ghost" :disabled="tagBusy" @click="tagOpen = false">{{
+          t('common.cancel')
+        }}</UButton
+        ><UButton
+          color="primary"
+          variant="solid"
+          :loading="tagBusy"
+          :disabled="tagBusy || !trimName(newTag) || nameTooLong(newTag)"
+          @click="addTag"
+          >{{ t('details.tag.save') }}</UButton
+        >
+      </div></template
+    >
+  </UModal>
+  <UModal
+    v-model:open="createOpen"
+    :title="t('details.album.createTitle')"
+    :dismissible="!creatingAlbum"
+    :close="!creatingAlbum"
+  >
+    <template #body>
+      <form class="album-new" @submit.prevent="createAlbumForItem">
+        <UInput
+          v-model="newAlbum"
+          class="min-w-0 flex-1"
+          :placeholder="t('albums.createForItem')"
+          :aria-label="t('albums.createForItem')"
+          :aria-invalid="nameTooLong(newAlbum) || undefined"
+        />
+        <IconButton
+          type="submit"
+          :icon="icons.plus"
+          :label="t('albums.createForItem')"
+          :loading="creatingAlbum"
+          :disabled="creatingAlbum || !trimName(newAlbum) || nameTooLong(newAlbum)"
+        />
+      </form>
+      <UAlert
+        v-if="nameTooLong(newAlbum)"
+        role="alert"
+        color="error"
+        variant="subtle"
+        :title="t('error.invalidName', { max: MAX_NAME_LEN })" /><UAlert
+        v-if="error"
+        color="error"
+        :title="error"
+        role="alert"
+    /></template>
+    <template #footer
+      ><div class="w-full flex justify-end gap-2">
+        <UButton color="neutral" variant="ghost" :disabled="creatingAlbum" @click="createOpen = false">{{
+          t('common.cancel')
+        }}</UButton>
+      </div></template
+    >
+  </UModal>
+  <UModal
+    :open="!!faceOpen"
+    :title="t('details.whoIsThis')"
+    :dismissible="!faceBusy"
+    :close="!faceBusy"
+    @update:open="
+      (value) => {
+        if (!value) faceOpen = null
+      }
+    "
+    ><template #body
+      ><PersonPicker
+        v-if="faceOpen"
+        managed
+        :placeholder="t('details.whoIsThis')"
+        :busy="faceBusy"
+        :error="error"
+        @pick="
+          (name) => {
+            if (faceOpen) void nameFace(faceOpen, name)
+          }
+        "
+        @cancel="faceOpen = null" /></template
+  ></UModal>
+  <UModal
+    :open="!!handoff"
+    :title="handoff?.title"
+    :description="t('details.handoff.hint')"
+    @update:open="
+      (value) => {
+        if (!value) handoff = null
+      }
+    "
+  >
+    <template #body
+      ><p class="break-words font-mono text-sm">{{ handoff?.path }}</p>
+      <UAlert v-if="handoffError" class="mt-4" color="error" :title="handoffError" role="alert" />
+      <p v-else class="mt-4 text-sm text-muted" role="status">
+        {{ t(handoffBusy ? 'details.handoff.working' : 'details.handoff.sent') }}
+      </p></template
+    >
+    <template #footer
+      ><div class="w-full flex justify-end gap-2">
+        <UButton color="neutral" variant="ghost" @click="handoff = null">{{ t('common.close') }}</UButton
+        ><UButton :loading="handoffBusy" :disabled="handoffBusy" @click="runHandoff">{{ t('common.retry') }}</UButton>
+      </div></template
+    >
+  </UModal>
   <FileTools v-model:open="filesOpen" :ids="detail ? [detail.id] : []" @changed="loadDetails(props.sel?.id)" />
 
   <aside
-    v-if="mode !== 'narrow'"
+    v-if="mode === 'wide'"
     class="inspector lumen-surface"
     :aria-label="t('details.title')"
     :style="{ width: `${prefs.prefs.inspectorWidth}px` }"
@@ -880,20 +1208,20 @@ useCommands([
     :open="true"
     side="right"
     :title="t('details.title')"
-    :close="false"
+    :close="true"
     :content="{ onCloseAutoFocus: returnFocus }"
-    :ui="{ content: 'w-full max-w-md', body: 'p-0 sm:p-0' }"
+    :ui="{ content: 'max-w-none w-auto', body: 'p-0 sm:p-0' }"
     @update:open="
       (open) => {
         if (!open) lib.showDetails = false
       }
     "
   >
-    <template #close>
-      <IconButton :icon="icons.close" :label="t('common.close')" variant="ghost" />
-    </template>
     <template #body>
-      <ReuseInspectorContent />
+      <!-- The sheet keeps the width the user gave the inline inspector. -->
+      <div :style="{ width: `min(${prefs.prefs.inspectorWidth}px, calc(100vw - 2rem))` }">
+        <ReuseInspectorContent />
+      </div>
     </template>
   </USlideover>
 </template>
@@ -907,7 +1235,7 @@ useCommands([
   min-height: 0;
   max-width: 100%;
   border-left: 1px solid var(--ui-border);
-  background: var(--ui-bg);
+  background: var(--lumen-bg-raised);
   color: var(--ui-text);
   user-select: text;
 }
@@ -918,6 +1246,7 @@ useCommands([
   justify-content: space-between;
   flex-shrink: 0;
   min-height: var(--lumen-topbar-h);
+  border-bottom: 1px solid var(--ui-border);
   padding: 0.375rem 0.75rem 0.375rem 1.25rem;
 }
 
@@ -937,8 +1266,40 @@ h2 {
 .inspector-body {
   display: flex;
   flex-direction: column;
-  gap: 1.125rem;
-  padding: 0.5rem 1.25rem 1.25rem;
+  gap: 1.5rem;
+  padding: 1rem 1.25rem 2rem;
+}
+
+/* Several selected: which of them the panel shows, and how to move on. */
+.selection-step {
+  display: grid;
+  gap: 0.375rem;
+  margin: 1rem 1.25rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--lumen-r-md);
+  background: var(--lumen-primary-soft);
+}
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.step-head strong {
+  flex: 1;
+  min-width: 0;
+  color: var(--ui-text-highlighted);
+  font-size: 0.8125rem;
+}
+.step-position {
+  color: var(--ui-text-toned);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.selection-step p {
+  margin: 0;
+  color: var(--ui-text-toned);
+  font-size: 0.75rem;
 }
 
 section {
@@ -1025,5 +1386,107 @@ p {
   flex: 0 0 calc(100% - 2.625rem);
   margin-left: 2.625rem;
   justify-content: flex-start;
+}
+.preview {
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  border-radius: var(--lumen-r-lg);
+  background: var(--lumen-placeholder);
+}
+.preview img,
+.preview > div {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.preview-caption {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+.preview-caption > div {
+  min-width: 0;
+}
+.preview-caption h3 {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.875rem;
+}
+.preview-caption span,
+.tag-source {
+  font-size: 0.75rem;
+  color: var(--ui-text-dimmed);
+}
+section + section {
+  border-top: 1px solid var(--ui-border);
+  padding-top: 1rem;
+}
+section > h3 {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ui-text-dimmed);
+}
+.tags li[data-source='ai'] .tag-name {
+  border: 1px dashed var(--lumen-light);
+  color: var(--lumen-light);
+  background: var(--lumen-light-soft);
+  border-radius: var(--lumen-r-md);
+}
+.inspector-body {
+  font-variant-numeric: tabular-nums;
+}
+.file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.path {
+  flex-wrap: wrap;
+}
+.path :deep(.action) {
+  flex-basis: 100%;
+}
+section :deep(.meta-row) {
+  gap: 0.5rem;
+  padding: 0.125rem 0;
+}
+section :deep(.meta-row .text) {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+section :deep(.meta-row .value) {
+  font-variant-numeric: tabular-nums;
+}
+.path :deep(.text) {
+  display: flex;
+}
+.overview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-block: 0.375rem;
+}
+.overview-row > div {
+  min-width: 0;
+}
+.overview-row b {
+  display: block;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+.overview-row span {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--ui-text-dimmed);
+}
+.overview-row > button {
+  flex-shrink: 0;
 }
 </style>

@@ -46,11 +46,11 @@ const (
 
 	SidebarWidthMin     = 200 // CSS px
 	SidebarWidthMax     = 360
-	SidebarWidthDefault = 232
+	SidebarWidthDefault = 248
 
 	InspectorWidthMin     = 280 // CSS px
 	InspectorWidthMax     = 480
-	InspectorWidthDefault = 320
+	InspectorWidthDefault = 340
 )
 
 // Settings keys of the interface preferences (see Preferences).

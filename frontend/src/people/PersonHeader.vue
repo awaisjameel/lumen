@@ -1,113 +1,149 @@
 <script setup lang="ts">
-// The top of a person's page: their face, their name (click to change it),
-// how many photos, and what can be done about them.
-import IconButton from '../shared/IconButton.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
-import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { BlockKind, engine, MAX_NAME_LEN } from '../bridge'
-import type { Person } from '../bridge'
-import { errorText, logError } from '../shared/errors'
-import { block } from '../shared/block'
+import { RouterLink, useRouter } from 'vue-router'
+import { BlockKind, engine, ErrorCode, errorCode, Filter } from '../bridge'
+import type { NamedPlace, Person, PersonFacts } from '../bridge'
 import { icons } from '../design/icons'
+import { block, onBlocksChanged } from '../shared/block'
+import Chip from '../shared/Chip.vue'
+import CollectionHero from '../shared/CollectionHero.vue'
 import { useCommands } from '../shared/commands'
-import { t } from '../shared/i18n'
+import { errorText, logError } from '../shared/errors'
 import Icon from '../shared/Icon.vue'
+import IconButton from '../shared/IconButton.vue'
+import { formatNumber, t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
+import { notify } from '../shared/notify'
 import { useRename } from '../shared/rename'
-import { nameTooLong, trimName } from '../shared/names'
 import FaceThumb from './FaceThumb.vue'
-import { namePerson } from './naming'
+import { showNameSaved } from './naming'
+import PersonNameEditor from './PersonNameEditor.vue'
 import { usePeople } from './store'
 
-const props = defineProps<{ id: number }>()
+const props = defineProps<{ id: number; reviewing?: boolean; faceCount?: number }>()
+const emit = defineEmits<{ loaded: [person: Person] }>()
 const router = useRouter()
 const people = usePeople()
-
 const person = ref<Person | null>(null)
-const rename = useRename<true>() // one editor: the name
-const { editing, draft } = rename
+const dates = ref('')
+const facts = ref<PersonFacts | null>(null)
+const places = ref<NamedPlace[]>([])
+const rename = useRename<true>()
+const { editing } = rename
 const error = ref('')
-const actionError = ref('') // a rename's; the list's own reloads don't clear it
-const busy = ref(false)
-let revision = 0
-let loadRequest = 0
+const loading = ref(false)
+let request = 0
+let alive = true
 onBeforeUnmount(() => {
-  revision++
-  loadRequest++
+  alive = false
+  request++
 })
-
+/** Forgets what was shown, so nothing of someone lingers once they are gone or blocked. */
+function clear() {
+  person.value = null
+  dates.value = ''
+  facts.value = null
+  places.value = []
+}
 async function load() {
-  const request = ++loadRequest
+  const asked = ++request
+  const id = props.id
+  loading.value = true
   try {
-    const p = await engine.person(props.id)
-    if (request === loadRequest) {
-      person.value = p
-      error.value = ''
-    }
+    const got = await engine.person(id)
+    if (asked !== request) return
+    person.value = got
+    emit('loaded', got)
+    error.value = ''
+    // Dates and places come from the same visible timeline as the person's photos.
+    const view = { filter: Filter.FilterAll, person: id }
+    const [days, gotFacts, top] = await Promise.all([
+      engine.timeline(view),
+      engine.personFacts(id),
+      engine.topPlaces(view),
+    ])
+    if (asked !== request) return
+    facts.value = gotFacts
+    places.value = top
+    const years = days
+      .map((d) => d.day.slice(0, 4))
+      .filter((year) => /^\d{4}$/.test(year))
+      .sort()
+    const first = years[0],
+      last = years.at(-1)
+    dates.value = first && last ? (first === last ? first : `${first}–${last}`) : ''
   } catch (e) {
-    if (request === loadRequest) error.value = errorText(e)
+    if (asked !== request) return
+    if (errorCode(e) === ErrorCode.NotFound) person.value = null
+    error.value = errorText(e)
+  } finally {
+    if (asked === request) loading.value = false
   }
 }
 watch(
   () => props.id,
   () => {
-    revision++
-    person.value = null
-    void rename.close(false)
+    clear()
     error.value = ''
-    actionError.value = ''
+    void rename.close(false)
     void load()
   },
   { immediate: true },
 )
 useLiveReload(load, (c) => c.people || c.assets || c.thumbs)
-
+onBeforeUnmount(
+  onBlocksChanged(async () => {
+    clear()
+    await load()
+  }),
+)
+const name = computed(() => person.value?.name || t('person.unnamed'))
+const faces = computed(() => props.faceCount ?? facts.value?.faces)
+const companions = computed(() => facts.value?.companions ?? [])
+const meta = computed(
+  () => `${t('person.photos', { n: person.value?.count ?? 0 })}${dates.value ? ` · ${dates.value}` : ''}`,
+)
+const review = () => router.push({ name: 'personFaces', params: { id: props.id } })
 function edit() {
-  if (!busy.value) void rename.open(true, person.value?.name ?? '')
+  if (person.value) void rename.open(true, person.value.name)
 }
-
-/** Saves the name typed; with refocus (Enter), focus returns to the name. */
-async function save(refocus: boolean) {
-  if (!editing.value || nameTooLong(draft.value) || busy.value) return
-  void rename.close(refocus) // leaving the field (blur) leaves focus where it went
-  const name = trimName(draft.value)
-  if (name === (person.value?.name ?? '')) return
-  actionError.value = ''
-  busy.value = true
-  const requested = revision
+async function saved(shown: number, name: string) {
+  const previous = person.value
+  await rename.close()
+  if (!previous) return
+  if (shown === previous.id)
+    showNameSaved(previous.id, previous.name, name, async () => {
+      await Promise.all([load(), people.load()])
+    })
+  else notify({ id: 'people.merged', kind: 'success', title: t('person.merged', { name }) })
+  void people.load().catch(logError)
+  if (!alive || props.id !== previous.id) return
+  if (shown !== props.id) await router.replace({ name: 'person', params: { id: shown } })
+  else await load()
+}
+async function blockPerson(hide = false) {
+  if (!person.value) return
   const id = props.id
-  try {
-    const shown = await namePerson(id, name)
-    void people.load().catch(logError)
-    if (requested !== revision) return
-    if (shown !== null && shown !== props.id) await router.replace({ name: 'person', params: { id: shown } })
-    else await load()
-  } catch (e) {
-    if (requested === revision) actionError.value = errorText(e)
-  } finally {
-    busy.value = false
+  if (await block(BlockKind.BlockPerson, id, name.value, true, '', !hide)) {
+    // Remove cached identity before navigating, including its portrait.
+    if (!alive || id !== props.id) return
+    clear()
+    await router.push({ name: 'people' })
   }
 }
-
-async function blockPerson() {
-  if (!person.value) return
-  const requested = revision
-  if (
-    (await block(BlockKind.BlockPerson, props.id, person.value.name || t('person.unnamed'))) &&
-    requested === revision
-  )
-    await router.push({ name: 'people' }) // their page shows nothing now
-}
 const actions = computed(() => [
-  { label: t('person.review'), icon: icons.face, to: { name: 'personFaces', params: { id: props.id } } },
+  { label: t('person.rename'), icon: icons.pencil, onSelect: edit },
   {
-    label: t('blocked.confirmTitle', { name: person.value?.name || t('person.unnamed') }),
-    icon: icons['eye-off'],
-    onSelect: blockPerson,
+    label: t('person.changePicture'),
+    icon: icons.face,
+    to: { name: 'personFaces', params: { id: props.id }, query: { picture: '1' } },
   },
+  { label: t('person.review'), icon: icons.face, to: { name: 'personFaces', params: { id: props.id } } },
+  { label: t('person.mergeWith'), icon: icons.merge, onSelect: edit },
+  { label: t('people.hide'), icon: icons['eye-off'], onSelect: () => blockPerson(true) },
+  { label: t('people.block'), icon: icons.blocked, color: 'error' as const, onSelect: () => blockPerson() },
 ])
 useCommands([
   {
@@ -116,7 +152,7 @@ useCommands([
     title: () => t('person.rename'),
     icon: 'pencil',
     available: () => person.value !== null,
-    enabled: () => !busy.value,
+    enabled: () => !editing.value,
     run: edit,
   },
   {
@@ -125,108 +161,174 @@ useCommands([
     title: () => t('person.review'),
     icon: 'face',
     available: () => person.value !== null,
-    run: () => router.push({ name: 'personFaces', params: { id: props.id } }),
+    run: review,
   },
   {
     id: 'person.block',
     group: 'view',
-    title: () => t('blocked.block'),
-    icon: 'eye-off',
+    title: () => t('people.block'),
+    icon: 'blocked',
     available: () => person.value !== null,
-    run: blockPerson,
+    run: () => blockPerson(),
   },
 ])
-// Nuxt UI exposes the native input; rename keeps its focus and selection behaviour.
-function fieldRef(el: unknown) {
-  rename.fieldRef(
-    el && typeof el === 'object' && 'inputRef' in el && el.inputRef instanceof HTMLInputElement ? el.inputRef : null,
-  )
-}
-function triggerRef(el: unknown, key: true) {
-  rename.triggerRef(key)(el)
-}
 </script>
 
 <template>
-  <div v-if="person" class="person-header">
-    <FaceThumb :face="person.cover" :size="40" round />
-    <div class="identity">
-      <UInput
-        v-if="editing"
-        :ref="fieldRef"
-        v-model="draft"
-        class="name-input"
-        :aria-label="t('person.name')"
-        :placeholder="t('person.namePlaceholder')"
-        :aria-invalid="nameTooLong(draft) || undefined"
-        @keydown.enter="save(true)"
-        @keydown.esc.stop="rename.close()"
-        @blur="save(false)"
-      />
-      <h1 v-else class="heading">
+  <div class="person-header">
+    <CollectionHero v-if="person" :name="name" :meta="meta" round>
+      <template #cover><FaceThumb :face="person.cover" :size="128" fill round /></template>
+      <template #name>
+        <PersonNameEditor v-if="editing" :key="person.id" :person="person" @cancel="rename.close()" @saved="saved" />
+        <h2 v-else class="heading">
+          <UButton
+            :ref="rename.triggerRef(true)"
+            class="name"
+            data-action="rename"
+            color="neutral"
+            variant="ghost"
+            :title="t('person.rename')"
+            @click="edit"
+            ><bdi class="name-text" :title="name">{{ name }}</bdi
+            ><Icon name="pencil" :size="16"
+          /></UButton>
+        </h2>
+      </template>
+      <template #facts>
+        <div v-if="companions.length || places.length" class="facts" data-person-facts>
+          <template v-if="companions.length">
+            <span class="caption">{{ t('person.oftenWith') }}</span>
+            <Chip
+              v-for="p in companions"
+              :key="p.id"
+              class="companion"
+              :to="{ name: 'person', params: { id: p.id } }"
+              data-person-companion
+            >
+              <FaceThumb v-if="p.cover.id" :face="p.cover" :size="20" round />
+              <Icon v-else name="people" :size="14" />
+              <bdi>{{ p.name }}</bdi>
+            </Chip>
+          </template>
+          <template v-if="places.length">
+            <span class="caption"><Icon name="places" :size="14" />{{ t('person.topPlaces') }}</span>
+            <template v-for="(p, i) in places" :key="p.id">
+              <span v-if="i" class="caption" aria-hidden="true">·</span>
+              <RouterLink class="place" :to="{ name: 'place', params: { id: p.id } }" data-person-place
+                ><bdi>{{ p.name }}</bdi></RouterLink
+              >
+            </template>
+          </template>
+        </div>
+      </template>
+      <template #actions>
         <UButton
-          :ref="(el) => triggerRef(el, true)"
-          class="name"
-          color="neutral"
-          variant="ghost"
-          :aria-disabled="busy || undefined"
-          :title="t('person.rename')"
-          @click="edit"
+          v-if="!reviewing"
+          color="primary"
+          variant="solid"
+          :to="{ name: 'personFaces', params: { id } }"
+          :icon="icons.face"
+          >{{ t('person.review') }}</UButton
         >
-          <span class="name-text">{{ person.name || t('person.addName') }}</span
-          ><Icon name="pencil" :size="14" />
-        </UButton>
-      </h1>
-      <span v-if="editing && nameTooLong(draft)" class="validation" role="alert">{{
-        t('error.invalidName', { max: MAX_NAME_LEN })
+        <UDropdownMenu :items="actions"
+          ><IconButton
+            :icon="icons.more"
+            :label="t('person.actions')"
+            color="neutral"
+            variant="ghost"
+            :disabled="editing !== null"
+        /></UDropdownMenu>
+      </template>
+    </CollectionHero>
+    <nav v-if="person" class="person-tabs" :aria-label="t('person.view')">
+      <RouterLink
+        :to="{ name: 'person', params: { id } }"
+        class="tab"
+        :class="{ active: !reviewing }"
+        :aria-current="!reviewing ? 'page' : undefined"
+        >{{ t('person.photosTab') }}<span>{{ formatNumber(person.count) }}</span></RouterLink
+      >
+      <RouterLink
+        :to="{ name: 'personFaces', params: { id } }"
+        class="tab"
+        :class="{ active: reviewing }"
+        :aria-current="reviewing ? 'page' : undefined"
+        >{{ t('person.facesTab') }}<span v-if="faces !== undefined">{{ formatNumber(faces) }}</span></RouterLink
+      >
+    </nav>
+    <div v-else-if="!error" class="hero-skeleton" role="status" :aria-label="t('person.loading')">
+      <span class="lumen-skeleton portrait" /><span class="lumen-skeleton name-line" /><span class="sr-only">{{
+        t('person.loading')
       }}</span>
-      <span v-else-if="actionError || error" class="validation" role="alert">{{ actionError || error }}</span>
-      <span v-else class="text-xs text-dimmed">{{ t('status.items', { n: person.count }) }}</span>
     </div>
-    <UButton
-      class="review"
-      :to="{ name: 'personFaces', params: { id } }"
-      :icon="icons.face"
-      :title="t('person.review')"
-      >{{ t('person.review') }}</UButton
-    >
-    <UDropdownMenu :items="actions">
-      <IconButton :icon="icons.more" :label="t('person.actions')" color="neutral" variant="ghost" />
-    </UDropdownMenu>
+    <div v-if="error" class="load-error" role="alert">
+      <span>{{ error }}</span
+      ><UButton :disabled="loading" color="neutral" variant="outline" @click="load">{{ t('common.retry') }}</UButton>
+    </div>
   </div>
-  <p v-else-if="error" class="text-error" role="alert">{{ error }}</p>
-  <span v-else class="inline-flex min-w-0 items-center gap-2 text-sm text-muted" role="status">
-    <Icon name="loading" :size="16" />{{ t('person.loading') }}
-  </span>
 </template>
 
 <style scoped>
-.person-header {
+.person-tabs {
+  display: flex;
+  gap: 1rem;
+  margin: 1rem var(--lumen-page-x) 0;
+  border-bottom: 1px solid var(--ui-border);
+}
+.tab {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 100%;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--ui-text-toned);
+  font-size: 0.8125rem;
+  border-bottom: 2px solid transparent;
 }
-.identity {
+.tab.active {
+  border-bottom-color: var(--ui-primary);
+  color: var(--ui-text-highlighted);
+}
+.tab span {
+  color: var(--ui-text-dimmed);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.facts {
   display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1 1 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+}
+.caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--ui-text-dimmed);
+  font-size: 0.75rem;
+}
+.companion {
+  min-height: 1.75rem;
+  padding-left: 0.25rem;
+}
+.place {
+  color: var(--ui-text-highlighted);
+  font-size: 0.8125rem;
+}
+.place:hover {
+  text-decoration: underline;
 }
 .heading {
   margin: 0;
   min-width: 0;
-  font: inherit;
 }
 .name {
   max-width: 100%;
   min-width: 0;
   padding: 0;
-  font-size: 1.25rem;
-  line-height: 1.2;
-  font-weight: 600;
+  color: var(--ui-text-highlighted);
+  font: 600 2.25rem/1.2 var(--font-display);
+  letter-spacing: -0.02em;
   text-align: left;
 }
 .name-text {
@@ -234,20 +336,52 @@ function triggerRef(el: unknown, key: true) {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.name-input {
-  width: min(100%, 15rem);
+.name :deep(svg) {
+  flex: none;
+  color: var(--ui-text-dimmed);
 }
-.validation {
+.hero-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1rem var(--lumen-page-x);
+}
+.hero-skeleton .portrait {
+  width: 8rem;
+  height: 8rem;
+  border-radius: 50%;
+}
+.name-line {
+  width: min(16rem, 50%);
+  height: 2rem;
+}
+.load-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.5rem var(--lumen-page-x);
+  font-size: 0.8125rem;
   color: var(--ui-error);
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
 }
-.review {
-  flex-shrink: 0;
-}
-@container (max-width: 56.25rem) {
-  .review {
+@container (max-width: 47.5rem) {
+  .name {
+    font-size: 1.875rem;
+  }
+  .facts {
     display: none;
+  }
+  .person-header :deep(.round .cover) {
+    display: block;
+    width: 4rem;
+    height: 4rem;
+  }
+}
+@media (max-height: 600px) {
+  .person-header :deep(.round .cover) {
+    display: block;
+    width: 4rem;
+    height: 4rem;
   }
 }
 </style>

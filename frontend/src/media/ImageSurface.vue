@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UButton from '@nuxt/ui/components/Button.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   engine,
@@ -67,6 +68,8 @@ const playing = ref(false)
 const loadedSource = ref('')
 const info = ref<RenderInfo | null>(null)
 const originalFailed = ref(false)
+const previewFailed = ref(false)
+const previewLoaded = ref(false)
 const failed = ref('')
 // A file that holds several pages (a TIFF) is turned through with the
 // viewer's controls; the grid, the details and the models know its first.
@@ -93,6 +96,8 @@ const original = computed(() =>
 const full = computed(() => (playing.value && original.value ? original.value : (rendered.value ?? original.value)))
 const ready = computed(() => !!full.value && loadedSource.value === full.value)
 const scale = computed(() => Math.round(viewport.value.scale * 100))
+const canZoomIn = computed(() => viewport.value.scale < 8)
+const canZoomOut = computed(() => viewport.value.scale > Math.min(fitScale(viewport.value), 0.1))
 const placed = computed(
   () => `translate(-50%, -50%) translate(${viewport.value.x}px, ${viewport.value.y}px) scale(${viewport.value.scale})`,
 )
@@ -184,6 +189,12 @@ function turnPage(by: number) {
   failed.value = ''
   void renderCopy(current)
 }
+function retryCopy() {
+  abort?.abort()
+  abort = new AbortController()
+  failed.value = ''
+  void renderCopy(++request)
+}
 function loadFailed() {
   loadedSource.value = ''
   if (original.value) {
@@ -212,6 +223,7 @@ function onWheel(e: WheelEvent) {
 }
 function pointerDown(e: PointerEvent) {
   if (e.button !== 0) return
+  if (e.target instanceof Element && e.target.closest('button')) return
   surface.value?.setPointerCapture(e.pointerId)
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
 }
@@ -277,6 +289,8 @@ watch(
     abort = new AbortController()
     info.value = null
     originalFailed.value = false
+    previewFailed.value = false
+    previewLoaded.value = false
     failed.value = ''
     page.value = 0
     pages.value = 1
@@ -308,7 +322,20 @@ onBeforeUnmount(() => {
   stopResize?.()
   pointers.clear()
 })
-defineExpose({ fit, actual, zoom, scale, page, pages, turnPage, animated, playing, toggleAnimation })
+defineExpose({
+  fit,
+  actual,
+  zoom,
+  scale,
+  canZoomIn,
+  canZoomOut,
+  page,
+  pages,
+  turnPage,
+  animated,
+  playing,
+  toggleAnimation,
+})
 </script>
 
 <template>
@@ -325,13 +352,15 @@ defineExpose({ fit, actual, zoom, scale, page, pages, turnPage, animated, playin
     @dblclick.stop="doubleClick"
   >
     <img
-      v-if="thumb"
+      v-if="thumb && !previewFailed"
       v-show="!ready"
       class="preview"
       :src="thumbUrl(id, thumb, THUMB_LARGE)"
       :style="previewStyle"
       alt=""
       draggable="false"
+      @load="previewLoaded = true"
+      @error="previewFailed = true"
     />
     <img
       v-if="full"
@@ -352,7 +381,15 @@ defineExpose({ fit, actual, zoom, scale, page, pages, turnPage, animated, playin
     <span v-else-if="info?.limited" class="resolution" role="status">{{
       t('viewer.resolution', { w: info.width, h: info.height })
     }}</span>
-    <span v-if="failed" class="resolution" role="status">{{ failed }}</span>
+    <div v-if="failed" class="resolution failure" role="alert">
+      <span>{{ thumb && !previewFailed ? t('viewer.renderFailed') : t('viewer.loadFailed') }}</span>
+      <span v-if="!thumb || previewFailed">{{ t('video.failureHint') }}</span>
+      <UButton variant="ghost" @click.stop="retryCopy">{{ t('common.retry') }}</UButton>
+    </div>
+    <div v-else-if="!ready && !previewLoaded && !previewFailed && (thumb || full)" class="loading-image" role="status">
+      <div class="lumen-skeleton" />
+      {{ t('details.loading') }}
+    </div>
   </div>
 </template>
 
@@ -386,6 +423,22 @@ img {
 .original.page {
   object-fit: contain;
 }
+.failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.loading-image {
+  position: absolute;
+  inset: 1rem;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  text-align: center;
+  color: var(--lumen-viewer-text-muted);
+}
 .resolution {
   position: absolute;
   top: 0.5rem;
@@ -393,9 +446,10 @@ img {
   transform: translateX(-50%);
   max-width: calc(100% - 1rem);
   text-align: center;
-  pointer-events: none;
+  pointer-events: auto;
   padding: 0.5rem;
-  background: var(--lumen-viewer-bg);
+  background: var(--lumen-viewer-glass);
+  border-radius: var(--lumen-r-md);
   color: var(--lumen-viewer-text);
   font-size: 0.8125rem;
 }

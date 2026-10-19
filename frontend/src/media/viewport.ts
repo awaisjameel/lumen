@@ -21,6 +21,8 @@ export interface ImageControls {
   actual: () => void
   zoom: (factor: number) => void
   scale: number
+  canZoomIn: boolean
+  canZoomOut: boolean
   /** The page shown, from 0, of the pages the file holds (1 unless it is a TIFF of several). */
   page: number
   pages: number

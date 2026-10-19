@@ -9,6 +9,7 @@ import { engine, ErrorCode, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Person } from '../bridge'
 import PersonHeader from './PersonHeader.vue'
+import { showBlocksChanged } from '../shared/block'
 
 vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal<typeof Router>()),
@@ -17,7 +18,15 @@ vi.mock('vue-router', async (importOriginal) => ({
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
-  engine: { person: vi.fn(), namePerson: vi.fn(), people: vi.fn() },
+  engine: {
+    person: vi.fn(),
+    namePerson: vi.fn(),
+    people: vi.fn(),
+    timeline: vi.fn().mockResolvedValue([]),
+    personFacts: vi.fn().mockResolvedValue({ faces: 0, companions: [] }),
+    topPlaces: vi.fn().mockResolvedValue([]),
+    suggestPeople: vi.fn().mockResolvedValue([]),
+  },
 }))
 
 const person = (id: number, name: string): Person => ({
@@ -79,7 +88,7 @@ it('keeps a rename failure on screen while the person reloads around it', async 
   vi.mocked(engine.namePerson).mockRejectedValue(new Error('blocked', { cause: { code: ErrorCode.BlockedName } }))
   wrapper = mountHeader()
   await flushPromises()
-  await wrapper.get('button.name').trigger('click')
+  await wrapper.get('[data-action="rename"]').trigger('click')
   await flushPromises()
   await wrapper.get('input').setValue('Blocked name')
   await wrapper.get('input').trigger('keydown', { key: 'Enter' })
@@ -104,7 +113,7 @@ it('accepts a full emoji name and leaves an overlong name in the editor with val
   vi.mocked(engine.people).mockResolvedValue([])
   wrapper = mountHeader()
   await flushPromises()
-  await wrapper.get('button.name').trigger('click')
+  await wrapper.get('[data-action="rename"]').trigger('click')
   await flushPromises()
   expect(wrapper.get('input').attributes('maxlength')).toBeUndefined()
   await wrapper.get('input').setValue('😀'.repeat(MAX_NAME_LEN + 1))
@@ -129,20 +138,71 @@ it('waits for a rename to finish before allowing another rename', async () => {
     .mockReturnValue(new Promise((resolve) => (finish = resolve)))
   wrapper = mountHeader()
   await flushPromises()
-  await wrapper.get('button.name').trigger('click')
+  await wrapper.get('[data-action="rename"]').trigger('click')
   await wrapper.get('input').setValue('Sara')
   await wrapper.get('input').trigger('keydown', { key: 'Enter' })
   await flushPromises()
-  expect(wrapper.get('button.name').attributes('aria-disabled')).toBe('true')
-  expect(document.activeElement).toBe(wrapper.get('button.name').element)
-  await wrapper.get('button.name').trigger('click')
-  expect(wrapper.find('input').exists()).toBe(false)
+  expect(wrapper.get('input').attributes('disabled')).toBeDefined()
+  await wrapper.get('input').trigger('keydown', { key: 'Enter' })
+  expect(wrapper.get<HTMLInputElement>('input').element.value).toBe('Sara')
   expect(engine.namePerson).toHaveBeenCalledOnce()
   finish?.()
   await flushPromises()
-  expect(wrapper.get('button.name').attributes('aria-disabled')).toBeUndefined()
-  await wrapper.get('button.name').trigger('click')
+  expect(document.activeElement).toBe(wrapper.get('[data-action="rename"]').element)
+  await wrapper.get('[data-action="rename"]').trigger('click')
   expect(wrapper.find('input').exists()).toBe(true)
+})
+
+it('derives the date range from visible photo days and clears the old portrait before a block refresh returns', async () => {
+  setActivePinia(createPinia())
+  vi.mocked(engine.person).mockReset().mockResolvedValue(person(1, 'Ali'))
+  vi.mocked(engine.timeline).mockResolvedValue([
+    { day: '2026-01-01', count: 2 },
+    { day: '2014-02-01', count: 1 },
+  ])
+  wrapper = mountHeader()
+  await flushPromises()
+  expect(wrapper.text()).toContain('1 photo · 2014–2026')
+  let finish: ((value: Person) => void) | undefined
+  vi.mocked(engine.person).mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve
+    }),
+  )
+  const refreshing = showBlocksChanged()
+  await nextTick()
+  expect(wrapper.text()).not.toContain('Ali')
+  finish?.(person(1, 'Current name'))
+  await refreshing
+  await flushPromises()
+  expect(wrapper.text()).toContain('Current name')
+})
+
+it('names who is most often in photos with them and where most were taken, and counts their faces', async () => {
+  setActivePinia(createPinia())
+  vi.mocked(engine.person).mockReset().mockResolvedValue(person(1, 'Ali'))
+  vi.mocked(engine.personFacts).mockResolvedValue({ faces: 36, companions: [person(2, 'Omar'), person(3, 'Sara')] })
+  vi.mocked(engine.topPlaces).mockResolvedValue([
+    { id: 7, name: 'Karachi' },
+    { id: 8, name: 'Lahore' },
+  ])
+  wrapper = mountHeader()
+  await flushPromises()
+  expect(engine.topPlaces).toHaveBeenCalledWith(expect.objectContaining({ person: 1 }))
+  expect(wrapper.findAll('[data-person-companion]').map((c) => [c.text(), c.attributes('href')])).toEqual([
+    ['Omar', '/person/2'],
+    ['Sara', '/person/3'],
+  ])
+  expect(wrapper.findAll('[data-person-place]').map((p) => [p.text(), p.attributes('href')])).toEqual([
+    ['Karachi', '/place/7'],
+    ['Lahore', '/place/8'],
+  ])
+  expect(wrapper.get('.person-tabs').text()).toContain('Faces36')
+  // Blocking someone takes what was said about them away at once.
+  vi.mocked(engine.person).mockReturnValue(new Promise(() => undefined))
+  void showBlocksChanged()
+  await nextTick()
+  expect(wrapper.find('[data-person-facts]').exists()).toBe(false)
 })
 
 const headerId = ref(1)

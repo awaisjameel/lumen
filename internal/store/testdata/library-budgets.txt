@@ -15,6 +15,11 @@
 # those samples.
 # LoadEmbeddings was added on 2026-10-15, with one 768-byte embedding for every
 # photo in the seed.
+# TopPlacesThing, TopPlacesPerson and PersonFacts were added on 2026-10-19, when
+# a collection's page began naming its top places and a person's page the
+# people most often with them. Their samples were taken while this machine ran
+# about twice as slow as on 2026-10-13 (Places, in the same runs: 9.0..9.3,
+# 27.0..37.2 and 32.3..44.2 ms/op), so their ceilings are generous.
 # Every ceiling is max(5ms, 3 * slowest sample), rounded UP to one significant
 # decimal digit. The 5ms floor keeps small timings from failing on ordinary noise.
 # A ceiling catches substantial regressions; it is not a baseline or a 10% target.
@@ -52,6 +57,9 @@ BenchmarkLargeLibraryStore/none/AssetVisible 5ms # 0.013..0.035 ms/op
 BenchmarkLargeLibraryStore/none/Selection 200ms # 31.130..33.889 ms/op
 BenchmarkLargeLibraryStore/none/UnavailableAssets 40ms # 10.779..11.638 ms/op
 BenchmarkLargeLibraryStore/none/Places 30ms # 7.617..8.190 ms/op
+BenchmarkLargeLibraryStore/none/TopPlacesThing 50ms # 11.342..14.152 ms/op
+BenchmarkLargeLibraryStore/none/TopPlacesPerson 5ms # 0.816..1.208 ms/op
+BenchmarkLargeLibraryStore/none/PersonFacts 5ms # 0.645..0.753 ms/op
 BenchmarkLargeLibraryStore/none/SaveEmbeddings64 70ms # 28.140..29.968 ms/op
 BenchmarkLargeLibraryStore/none/SaveTags64 70ms # 21.819..25.295 ms/op
 BenchmarkLargeLibraryStore/none/SaveFaces64 8ms # 3.495..3.688 ms/op
@@ -88,6 +96,9 @@ BenchmarkLargeLibraryStore/folder/AssetVisible 5ms # 0.016..0.035 ms/op
 BenchmarkLargeLibraryStore/folder/Selection 200ms # 40.612..42.047 ms/op
 BenchmarkLargeLibraryStore/folder/UnavailableAssets 60ms # 16.810..17.660 ms/op
 BenchmarkLargeLibraryStore/folder/Places 50ms # 15.510..16.100 ms/op
+BenchmarkLargeLibraryStore/folder/TopPlacesThing 70ms # 15.773..22.887 ms/op
+BenchmarkLargeLibraryStore/folder/TopPlacesPerson 5ms # 1.026..1.582 ms/op
+BenchmarkLargeLibraryStore/folder/PersonFacts 7ms # 0.804..2.096 ms/op
 BenchmarkLargeLibraryStore/folder/SaveEmbeddings64 60ms # 25.831..31.917 ms/op
 BenchmarkLargeLibraryStore/folder/SaveTags64 60ms # 22.977..24.513 ms/op
 BenchmarkLargeLibraryStore/folder/SaveFaces64 7ms # 3.820..4.395 ms/op
@@ -124,6 +135,9 @@ BenchmarkLargeLibraryStore/folder_tag_person/AssetVisible 5ms # 0.017..0.033 ms/
 BenchmarkLargeLibraryStore/folder_tag_person/Selection 200ms # 44.161..47.693 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/UnavailableAssets 80ms # 22.395..23.536 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/Places 70ms # 20.841..21.036 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/TopPlacesThing 90ms # 20.003..27.410 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/TopPlacesPerson 7ms # 1.682..2.101 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/PersonFacts 6ms # 1.225..1.885 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/SaveEmbeddings64 70ms # 26.923..29.550 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/SaveTags64 70ms # 23.155..26.470 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/SaveFaces64 8ms # 4.034..4.993 ms/op
@@ -134,3 +148,15 @@ BenchmarkLargeLibraryStore/folder_tag_person/JobCountsPending 5ms # 0.029..0.090
 BenchmarkLargeLibraryStore/folder_tag_person/CountPending 200ms # 62.317..64.566 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/PendingJobsKind64 5ms # 0.139..0.304 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/Ingest128 200ms # 21.834..33.792 ms/op
+# Redesign engine additions, 2026-10-16: five repeats, three warmed calls each.
+# Counts reads days, person counts and the kept Trash total, never asset rows.
+# The same ceiling rule above applies; existing budgets are unchanged.
+BenchmarkLargeLibraryStore/none/Counts 5ms # 0.359..0.418 ms/op
+BenchmarkLargeLibraryStore/none/DayBucketsPhotos 20ms # 2.151..3.357 ms/op
+BenchmarkLargeLibraryStore/none/DayItemsPhotos 5ms # 0.044..0.063 ms/op
+BenchmarkLargeLibraryStore/folder/Counts 5ms # 0.417..0.576 ms/op
+BenchmarkLargeLibraryStore/folder/DayBucketsPhotos 10ms # 2.170..3.037 ms/op
+BenchmarkLargeLibraryStore/folder/DayItemsPhotos 5ms # 0.053..0.146 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/Counts 5ms # 0.347..0.391 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DayBucketsPhotos 8ms # 2.011..2.441 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/DayItemsPhotos 5ms # 0.047..0.082 ms/op

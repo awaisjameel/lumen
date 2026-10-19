@@ -1,21 +1,45 @@
+import { createPinia, setActivePinia } from 'pinia'
 import { mountInApp } from '../shared/testing'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
+import { defineComponent, h, ref } from 'vue'
 import { engine, MAX_NAME_LEN } from '../bridge'
 import type { Face, Person } from '../bridge'
 import type * as Bridge from '../bridge'
 import PersonPicker from './PersonPicker.vue'
+import { personFixture } from './testing'
 
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
-  engine: { suggestPeople: vi.fn().mockResolvedValue([]) },
+  engine: {
+    people: vi.fn().mockResolvedValue([]),
+    suggestPeople: vi.fn().mockResolvedValue([]),
+    personByName: vi.fn(),
+  },
 }))
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+  vi.mocked(engine.people).mockReset().mockResolvedValue([])
+})
 
 let wrapper: ReturnType<typeof mountInApp> | undefined
 afterEach(() => {
   wrapper?.unmount()
   vi.useRealTimers()
+})
+
+it('rejects a typed current-person name using the engine’s canonical comparison', async () => {
+  vi.mocked(engine.personByName).mockResolvedValue(1)
+  wrapper = mountInApp(PersonPicker, { props: { placeholder: 'Name', exclude: 1 }, plugins: [testRouter()] })
+  await wrapper.get('input').setValue('ALI')
+  await wrapper.get('input').trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(engine.personByName).toHaveBeenCalledWith('ALI')
+  expect(wrapper.findComponent(PersonPicker).emitted('pick')).toBeUndefined()
+  expect(wrapper.get('[role="alert"]').text()).toContain('Choose someone else')
+  expect(wrapper.get<HTMLInputElement>('input').element.value).toBe('ALI')
 })
 
 it('allows the engine emoji limit and rejects longer typed names inline', async () => {
@@ -60,7 +84,7 @@ it('portals suggestions while retaining input focus, exclusion and arrow-key sel
   await vi.advanceTimersByTimeAsync(200)
   await flushPromises()
   expect(document.activeElement).toBe(input.element)
-  expect([...document.body.querySelectorAll('[role="option"]')].map((option) => option.textContent.trim())).toEqual([
+  expect([...document.body.querySelectorAll('[data-person-name]')].map((option) => option.textContent.trim())).toEqual([
     'Sara',
   ])
   await input.trigger('keydown', { key: 'ArrowDown' })
@@ -99,7 +123,11 @@ it('moves up from the typed text to the last suggestion and wraps both ways', as
   await input.setValue('a')
   await vi.advanceTimersByTimeAsync(200)
   await flushPromises()
-  const active = () => document.getElementById(input.attributes('aria-activedescendant') ?? '')?.textContent.trim()
+  const active = () =>
+    document
+      .getElementById(input.attributes('aria-activedescendant') ?? '')
+      ?.querySelector('[data-person-name]')
+      ?.textContent.trim()
   await input.trigger('keydown', { key: 'ArrowUp' })
   expect(active()).toBe('Zoya')
   await input.trigger('keydown', { key: 'ArrowUp' })
@@ -110,6 +138,40 @@ it('moves up from the typed text to the last suggestion and wraps both ways', as
   // Composing text: Enter is the input method's, not a pick.
   await input.trigger('keydown', { key: 'Enter', isComposing: true })
   expect(wrapper.findComponent(PersonPicker).emitted('pick')).toBeUndefined()
+})
+
+it('shows existing people with authoritative photo counts before a name is typed', async () => {
+  vi.mocked(engine.people).mockResolvedValue([personFixture(1, 'Ali', 1284), personFixture(2, 'Sara', 812)])
+  wrapper = mountInApp(PersonPicker, { props: { placeholder: 'Name', exclude: 1 }, plugins: [testRouter()] })
+  await flushPromises()
+  await wrapper.get('input').trigger('focus')
+  await flushPromises()
+  expect(document.body.textContent).toContain('812 photos')
+  expect([...document.body.querySelectorAll('[data-person-name]')].map((el) => el.textContent.trim())).toEqual(['Sara'])
+})
+
+it('keeps the entered name after a managed move fails and blocks repeated picks while saving', async () => {
+  const busy = ref(false),
+    failure = ref('')
+  const picked = vi.fn(() => {
+    busy.value = true
+  })
+  const Host = defineComponent({
+    setup: () => () =>
+      h(PersonPicker, { placeholder: 'Name', busy: busy.value, error: failure.value, managed: true, onPick: picked }),
+  })
+  wrapper = mountInApp(Host, { plugins: [testRouter()] })
+  const input = wrapper.get('input')
+  await input.setValue('Sara')
+  await input.trigger('keydown', { key: 'Enter' })
+  expect(picked).toHaveBeenCalledOnce()
+  await input.trigger('keydown', { key: 'Enter' })
+  expect(picked).toHaveBeenCalledOnce()
+  failure.value = 'The local library is busy.'
+  busy.value = false
+  await flushPromises()
+  expect(wrapper.get<HTMLInputElement>('input').element.value).toBe('Sara')
+  expect(wrapper.get('[role="alert"]').text()).toContain('local library is busy')
 })
 
 function testRouter() {

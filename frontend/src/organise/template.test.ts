@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { ORGANISE_DEFAULT_TEMPLATE } from '../bridge'
-import { renderExample, unknownTokens } from './template'
+import { renderExample, unknownTokens, validTemplate } from './template'
 import type { Example } from './template'
 import parity from './template.parity.json'
 
@@ -59,4 +59,78 @@ it('lists each unknown token once', () => {
   expect(unknownTokens('{Year}/{Nope}/{Nope}/{year}/{Name}')).toEqual(['Nope', 'year'])
   expect(unknownTokens('{Year}/{Month}/{Name}')).toEqual([])
   expect(unknownTokens('plain/{}')).toEqual([''])
+})
+
+// The same lists as fileops TestTemplatesTheUserMayWrite and
+// TestTemplatesThatCannotWorkAreRefusedWithTheRuleTheyBreak.
+it('accepts every scheme the engine accepts', () => {
+  for (const scheme of [
+    ORGANISE_DEFAULT_TEMPLATE,
+    '{Year}',
+    '{Year}\\{Month}\\{Name}',
+    'Photos {Year}/{MonthName}/{Day} {Name}',
+    '{Ext}/{Year}/{Name}',
+    '{Year}-{Month}-{Day} {Name}',
+    '{Camera}/{Place}/{Name}',
+    'con{Year}/{Name}',
+    '{Name}.{Year}',
+    "Mum's photos (2024)/{Name}",
+    'Mum’s photos (2024)/{Name}',
+  ]) {
+    expect(validTemplate(scheme), scheme).toBe(true)
+  }
+})
+
+it('refuses every scheme the engine refuses', () => {
+  for (const scheme of [
+    '',
+    '   ',
+    '/Photos/{Name}',
+    '\\Photos\\{Name}',
+    'D:\\Photos\\{Name}',
+    'c:/{Name}',
+    '../{Name}',
+    'a/../{Name}',
+    '{Year}\\..\\..\\{Name}',
+    './{Name}',
+    '{Year}/.../{Name}',
+    '{Year}/{Nonsense}',
+    '{year}/{Name}',
+    '{Year/{Name}',
+    'Year}/{Name}',
+    '{Year}/a:b',
+    '{Year}/what?/{Name}',
+    '{Year}/*/{Name}',
+    '{Year}/"x"/{Name}',
+    '<{Year}>/{Name}',
+    '{Year}|{Month}/{Name}',
+    '{Year}/a\tb/{Name}',
+    '{Year}/CON/{Name}',
+    '{Year}/nul.txt/{Name}',
+    'com1/{Name}',
+    '{Year}/Trip./{Name}',
+    '{Year}/Trip /{Name}',
+    '{Year}//{Name}',
+    '{Year}/{Name}/',
+    '{Year}/{Name}.{Ext}',
+    '.hidden/{Name}',
+    '{Year}/.cache/{Name}',
+    '$Recycle.Bin/{Name}',
+    '${Year}/{Name}',
+    '{Year}/System Volume Information/{Name}',
+    'system volume information/{Name}',
+    'a'.repeat(201),
+  ]) {
+    expect(validTemplate(scheme), scheme).toBe(false)
+  }
+})
+
+it('refuses a scanner-hidden name before a token, as the engine does', () => {
+  expect(validTemplate('System Volume Information{Year}/{Name}')).toBe(false)
+  expect(validTemplate('{Year}System Volume Information/{Name}')).toBe(true)
+})
+
+it('uses the same Unicode whitespace rules as the engine when validating schemes', () => {
+  expect(validTemplate(String.fromCodePoint(0xfeff))).toBe(true)
+  expect(validTemplate(String.fromCodePoint(0x85))).toBe(false)
 })

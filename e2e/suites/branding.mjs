@@ -37,12 +37,12 @@ const mark = (selector) =>
   }))
 try {
   await resize(page, 1280, 820)
-  await page.waitForSelector('.welcome .brand-mark')
+  await page.waitForSelector('.welcome .logo')
   for (const theme of ['light', 'dark']) {
     await prefs({ theme })
-    await page.waitForSelector('.welcome .brand-mark')
-    const m = await mark('.welcome .brand-mark')
-    check(`${theme} onboarding logo`, m.loaded && m.w === 56 && m.h === 56 && m.alt === '', m)
+    await page.waitForSelector('.welcome .logo')
+    const m = await mark('.welcome .logo')
+    check(`${theme} onboarding logo`, m.loaded && m.w === 64 && m.h === 64 && m.alt === '', m)
     check(
       `${theme} persisted theme`,
       await page.evaluate((theme) => document.documentElement.classList.contains('dark') === (theme === 'dark'), theme),
@@ -92,14 +92,14 @@ try {
     await page.keyboard.press('b')
     await page.keyboard.up('Control')
     await sleep(450)
-    const rail = await mark('.app-nav.collapsed .brand-mark')
+    const rail = await mark('.app-nav.rail .brand-mark')
     check(`${theme} collapsed rail has an accessible Lumen mark`, rail.loaded && rail.alt === 'Lumen', rail)
     await shot(`rail-${theme}`)
     await prefs({ theme, sidebarCollapsed: false })
     await page.click('.app-nav a[href="/settings"]')
     await page.waitForSelector('.about-brand .brand-mark')
     const button = await page.evaluateHandle(() =>
-      [...document.querySelectorAll('.category-nav button')].find((e) => e.textContent.trim() === 'About Lumen'),
+      [...document.querySelectorAll('.category-nav button')].find((e) => e.textContent.trim() === 'Updates and about'),
     )
     await button.asElement().click()
     await sleep(250)
@@ -110,7 +110,8 @@ try {
       about,
     )
     await shot(`about-${theme}`)
-    await resize(page, 800, 780)
+    // Below 720 px the sidebar becomes a drawer behind a narrow header.
+    await resize(page, 700, 780)
     await page.waitForSelector('.narrow-bar .brand-mark')
     const narrow = await mark('.narrow-bar .brand-mark')
     check(`${theme} narrow header logo`, narrow.loaded && narrow.w === 20 && narrow.h === 20, narrow)

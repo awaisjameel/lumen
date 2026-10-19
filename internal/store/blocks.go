@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -39,14 +40,81 @@ func blockName(b string) string {
 		END, ` + b + `.name)`
 }
 
-// Blocks lists the user's visibility rules. This is private UI data and is
-// deliberately not joined into the ordinary People/Things views.
+// Blocks lists the user's visibility rules, each with how many photos it
+// covers and what to show it by. This is private UI data and is deliberately
+// not joined into the ordinary People/Things views.
 func (s *Store) Blocks(ctx context.Context) ([]core.Block, error) {
-	return queryAll(ctx, s.r, func(r *sql.Rows) (b core.Block, err error) {
-		err = r.Scan(&b.ID, &b.Kind, &b.TargetID, &b.Path, &b.Mode, &b.Name)
-		return b, err
-	}, `SELECT b.id, b.kind, COALESCE(b.target_id, 0), COALESCE(b.path, ''), b.mode, `+blockName("b")+`
-		FROM blocks b ORDER BY b.created_at DESC, b.id DESC`)
+	var blocks []core.Block
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		blocks, err = queryAll(ctx, tx, func(r *sql.Rows) (b core.Block, err error) {
+			err = r.Scan(&b.ID, &b.Kind, &b.TargetID, &b.Path, &b.Mode, &b.Name)
+			return b, err
+		}, `SELECT b.id, b.kind, COALESCE(b.target_id, 0), COALESCE(b.path, ''), b.mode, `+blockName("b")+`
+			FROM blocks b ORDER BY b.created_at DESC, b.id DESC`)
+		if err != nil {
+			return err
+		}
+		for i := range blocks {
+			if err := addBlockCover(ctx, tx, &blocks[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return blocks, nil
+}
+
+// blockCandidates lists, for the block ?1, assets that may be covered: by the
+// target's own index where its kind has one, else every asset. It is only a
+// narrowing; blockMatch stays the one rule of what a block covers. Each part
+// joins the block first, by its primary key, so the parts of other kinds read
+// nothing.
+const blockCandidates = `SELECT c.target_id FROM blocks c WHERE c.id = ?1 AND c.kind = 'asset'
+	UNION ALL SELECT f.asset_id FROM blocks c JOIN faces f ON f.person_id = c.target_id WHERE c.id = ?1 AND c.kind = 'person'
+	UNION ALL SELECT t.asset_id FROM blocks c JOIN asset_tags t ON t.tag_id = c.target_id WHERE c.id = ?1 AND c.kind = 'tag'
+	UNION ALL SELECT a.id FROM blocks c JOIN assets a ON a.place_id = c.target_id WHERE c.id = ?1 AND c.kind = 'place'
+	UNION ALL SELECT m.asset_id FROM blocks c JOIN event_members m ON m.tag_id = c.target_id WHERE c.id = ?1 AND c.kind = 'event'
+	UNION ALL SELECT x.asset_id FROM blocks c JOIN face_block_faces x ON x.face_block_id = c.target_id WHERE c.id = ?1 AND c.kind = 'face'
+	UNION ALL SELECT i.asset_id FROM blocks c JOIN albums al ON al.id = c.target_id AND al.kind = 'manual'
+		JOIN album_items i ON i.album_id = al.id WHERE c.id = ?1 AND c.kind = 'album'
+	UNION ALL SELECT a.id FROM blocks c JOIN assets a WHERE c.id = ?1 AND (c.kind = 'folder'
+		OR (c.kind = 'album' AND NOT EXISTS (SELECT 1 FROM albums al WHERE al.id = c.target_id AND al.kind = 'manual')))`
+
+// blockCoverSQL reads what the block ?1 covers as BlockCoverage lists it: the
+// count, and the newest asset, preferring one whose thumbnail is made.
+var blockCoverSQL = `SELECT count(*) OVER (), id, CASE WHEN thumb_version > 0 THEN thumb_version + display_version ELSE 0 END
+	FROM assets WHERE id IN (` + blockCandidates + `) AND ` + baseVisibleOf("") + `
+	AND EXISTS (SELECT 1 FROM blocks target WHERE target.id = ?1 AND ` + blockMatch("assets", "target") + `)
+	ORDER BY thumb_version > 0 DESC, taken_at DESC, id DESC LIMIT 1`
+
+// addBlockCover fills in b's count and cover, and for a person or a face the
+// face to show it by: the person's clearest face (the user's pick first), or
+// the blocked face as it is found now.
+func addBlockCover(ctx context.Context, tx *sql.Tx, b *core.Block) error {
+	err := tx.QueryRowContext(ctx, blockCoverSQL, b.ID).Scan(&b.Count, &b.Cover, &b.CoverThumb)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var where string
+	switch b.Kind {
+	case core.BlockPerson:
+		where = " WHERE f.person_id = ? AND " + baseVisibleOf("a") + " AND a.thumb_version > 0 ORDER BY " + clearest
+	case core.BlockFace:
+		where = " WHERE f.id = (SELECT face_id FROM face_blocks WHERE id = ?) AND " + baseVisibleOf("a") + " AND a.thumb_version > 0"
+	default:
+		return nil
+	}
+	faces, err := queryAll(ctx, tx, scanFace, faceSelect+where+" LIMIT 1", b.TargetID)
+	if err != nil {
+		return err
+	}
+	if len(faces) > 0 {
+		b.Face = faces[0]
+	}
+	return nil
 }
 
 // SetBlock adds or changes one rule. Target validation and the write share the
@@ -201,6 +269,97 @@ func (s *Store) SetBlockMode(ctx context.Context, blockID int64, mode core.Block
 // RemoveBlock restores an item's ordinary visibility without touching media.
 func (s *Store) RemoveBlock(ctx context.Context, id int64) error {
 	return affected(s.w.ExecContext(ctx, "DELETE FROM blocks WHERE id = ?", id))
+}
+
+// BlockRemoval is an opaque receipt for an unblocked rule. Keeping the resolved
+// target matters: event and face targets are durable anchors, not live IDs.
+type BlockRemoval struct {
+	block     core.Block
+	createdAt int64
+	members   []removedEventMember
+	face      *removedFaceBlock
+}
+
+// RemoveBlockForUndo removes a rule and captures its exact persisted target in
+// the same transaction. Only the service keeps the receipt; clients cannot
+// manufacture an anchor or restore an arbitrary rule through it.
+func (s *Store) RemoveBlockForUndo(ctx context.Context, id int64) (*BlockRemoval, error) {
+	r := &BlockRemoval{}
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		b := &r.block
+		err := tx.QueryRowContext(ctx, `SELECT id, kind, COALESCE(target_id, 0), COALESCE(path, ''), mode, name, created_at
+			FROM blocks WHERE id = ?`, id).Scan(&b.ID, &b.Kind, &b.TargetID, &b.Path, &b.Mode, &b.Name, &r.createdAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		switch b.Kind {
+		case core.BlockEvent:
+			r.members, err = queryAll(ctx, tx, func(rows *sql.Rows) (m removedEventMember, err error) {
+				err = rows.Scan(&m.ID, &m.TakenAt, &m.Lat, &m.Lon, &m.Moved)
+				return m, err
+			}, `SELECT a.id, a.taken_at, a.lat, a.lon, m.moved
+				FROM event_members m JOIN assets a ON a.id = m.asset_id WHERE m.tag_id = ?`, b.TargetID)
+		case core.BlockFace:
+			r.face, err = captureFaceBlock(ctx, tx, b.TargetID)
+		default:
+		}
+		if err != nil {
+			return err
+		}
+		return affected(tx.ExecContext(ctx, "DELETE FROM blocks WHERE id = ?", id))
+	})
+	return r, err
+}
+
+// RestoreRemovedBlock re-blocks the captured target. A rule made since removal
+// is retained as it is; Undo must never weaken a newer block's scope.
+func (s *Store) RestoreRemovedBlock(ctx context.Context, r *BlockRemoval) error {
+	if r == nil {
+		return ErrNotFound
+	}
+	b := r.block
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		switch b.Kind {
+		case core.BlockEvent:
+			result, err := tx.ExecContext(ctx, "INSERT INTO event_tags(kind, created_at) VALUES ('block', ?)", r.createdAt)
+			if err != nil {
+				return err
+			}
+			b.TargetID, err = result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			members, err := json.Marshal(r.members)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO event_members(tag_id, asset_id, moved)
+				SELECT ?, a.id, json_extract(j.value, '$.moved') OR NOT
+				(a.taken_at IS json_extract(j.value, '$.takenAt') AND a.lat IS json_extract(j.value, '$.lat')
+				 AND a.lon IS json_extract(j.value, '$.lon'))
+				FROM json_each(?) j JOIN assets a ON a.id = json_extract(j.value, '$.id')`, b.TargetID, string(members)); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO event_dirty(at)
+				SELECT a.taken_at FROM json_each(?1) j JOIN assets a ON a.id = json_extract(j.value, '$.id')
+				UNION SELECT json_extract(value, '$.takenAt') FROM json_each(?1)`, string(members)); err != nil {
+				return err
+			}
+		case core.BlockFace:
+			var err error
+			b.TargetID, err = restoreFaceBlock(ctx, tx, r.face)
+			if err != nil {
+				return err
+			}
+		default:
+		}
+		_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO blocks(kind, target_id, path, mode, name, created_at)
+			VALUES (?, NULLIF(?, 0), NULLIF(?, ''), ?, ?, ?)`, b.Kind, b.TargetID, b.Path, b.Mode, b.Name, r.createdAt)
+		return err
+	})
 }
 
 // IsBlocked checks whether a named view target has been removed from browsing.

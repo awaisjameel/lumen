@@ -21,8 +21,10 @@ import type * as Bridge from '../bridge'
 import type { AssetDetail, CoveredItem } from '../bridge'
 import type * as Block from '../shared/block'
 import { confirm } from '../shared/confirm'
+import type * as Confirm from '../shared/confirm'
 import { ERROR_NOTIFICATION } from '../shared/errors'
 import { t } from '../shared/i18n'
+import { faceFixture } from '../people/testing'
 import BlockedView from './BlockedView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -34,10 +36,14 @@ vi.mock('../bridge', async (importOriginal) => ({
     lockBlocks: vi.fn(),
     blocks: vi.fn(),
     setBlockMode: vi.fn(),
+    setBlock: vi.fn(),
     removeBlock: vi.fn(),
+    unblock: vi.fn(),
+    undoUnblock: vi.fn(),
     resetBlockPIN: vi.fn(),
     blockedItems: vi.fn(),
     trashCovered: vi.fn(),
+    restoreAssets: vi.fn(),
     asset: vi.fn(),
     inspect: vi.fn<typeof Bridge.engine.inspect>().mockResolvedValue({
       orientation: 1,
@@ -58,7 +64,10 @@ vi.mock('../shared/block', async (importOriginal) => ({
   ...(await importOriginal<typeof Block>()),
   showBlocksChanged: vi.fn().mockResolvedValue(undefined),
 }))
-vi.mock('../shared/confirm', () => ({ confirm: vi.fn() }))
+vi.mock('../shared/confirm', async (importOriginal) => ({
+  ...(await importOriginal<typeof Confirm>()),
+  confirm: vi.fn(),
+}))
 
 const privateBlock = {
   id: 1,
@@ -67,6 +76,10 @@ const privateBlock = {
   targetId: 1,
   path: '',
   name: 'Private name',
+  count: 3,
+  cover: 0,
+  coverThumb: 0,
+  face: { ...faceFixture, id: 0 },
 }
 const idle = BLOCK_UNLOCK_IDLE_MINUTES * 60 * 1000
 
@@ -102,10 +115,14 @@ beforeEach(() => {
   vi.mocked(engine.lockBlocks).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.blocks).mockReset().mockResolvedValue([])
   vi.mocked(engine.setBlockMode).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.setBlock).mockReset().mockResolvedValue({ id: 10, created: true })
   vi.mocked(engine.removeBlock).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.unblock).mockReset().mockResolvedValue(77)
+  vi.mocked(engine.undoUnblock).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.resetBlockPIN).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.blockedItems).mockReset().mockResolvedValue([])
   vi.mocked(engine.trashCovered).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.restoreAssets).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.asset).mockReset().mockResolvedValue(photoDetail(1))
   vi.mocked(confirm).mockReset().mockResolvedValue(true)
   notifications = recordNotifications()
@@ -151,7 +168,7 @@ it.each(['mode', 'unblock', 'reload'] as const)(
     const view = await opened()
     const locked = new Error('locked', { cause: { code: ErrorCode.BlocksLocked } })
     if (action === 'mode') vi.mocked(engine.setBlockMode).mockRejectedValueOnce(locked)
-    else if (action === 'unblock') vi.mocked(engine.removeBlock).mockRejectedValueOnce(locked)
+    else if (action === 'unblock') vi.mocked(engine.unblock).mockRejectedValueOnce(locked)
     else vi.mocked(engine.blocks).mockRejectedValueOnce(locked)
     await view.get(action === 'unblock' ? '[data-blocked="unblock"]' : '[data-blocked="mode"]').trigger('click')
     await flushPromises()
@@ -231,9 +248,9 @@ async function forgotten() {
 }
 
 async function chooseNewPIN(view: VueWrapper, first: string, second: string) {
-  const [pin, confirmation] = view.findAll('input')
-  await pin?.setValue(first)
-  await confirmation?.setValue(second)
+  await view.get('input').setValue(first)
+  await view.get('form').trigger('submit')
+  await view.get('input').setValue(second)
   await view.get('form').trigger('submit')
   await flushPromises()
 }
@@ -275,7 +292,7 @@ it.each([
   await chooseNewPIN(view, '654321', '654321')
   expect(view.get('[data-blocked-error]').text()).toBe(t(key, { pinMin: 6, pinMax: 12 }))
   expect(view.text()).not.toContain(t('blocked.pinChanged'))
-  expect(view.findAll('input')).toHaveLength(2)
+  expect(view.findAll('input')).toHaveLength(1)
   await view.get('form').trigger('submit')
   await flushPromises()
   expect(engine.resetBlockPIN).toHaveBeenCalledTimes(2)
@@ -563,6 +580,24 @@ it('names event and face blocks by their kind', async () => {
   expect(kinds[1]).toContain(t('blocked.kindFace'))
 })
 
+it('shows each block by its face or newest photo, with how many photos it covers', async () => {
+  vi.mocked(engine.blocks).mockResolvedValue([
+    { ...privateBlock, id: 1, count: 1, face: { ...faceFixture, thumb: 3 } },
+    { ...privateBlock, id: 2, kind: BlockKind.BlockFolder, name: 'C:\\Private', count: 12, cover: 40, coverThumb: 2 },
+    { ...privateBlock, id: 3, kind: BlockKind.BlockTag, name: 'Receipts', count: 0 },
+  ])
+  const view = await opened()
+  const row = (id: number) => view.get(`[data-block-row="${id}"]`)
+  expect(row(1).get('[data-block-cover]').classes()).toContain('round')
+  expect(row(1).find('[data-block-cover] .face').exists()).toBe(true)
+  expect(row(1).get('.item-name small').text()).toBe(`${t('nav.people')} · ${t('covered.count', { n: 1 })}`)
+  expect(row(2).get('[data-block-cover] img').attributes('src')).toContain('40')
+  expect(row(2).get('.item-name small').text()).toContain(t('covered.count', { n: 12 }))
+  // A block covering nothing yet keeps its icon.
+  expect(row(3).find('[data-block-cover] img').exists()).toBe(false)
+  expect(row(3).get('.item-name small').text()).toContain(t('covered.count', { n: 0 }))
+})
+
 it('does not bring the browser back when the screen is unlocked again after a relock', async () => {
   vi.useFakeTimers()
   const view = await browsing([covered(1, { hiddenBy: [{ id: 2, name: 'Trip' }] })])
@@ -626,7 +661,7 @@ it('creates a matching PIN before unlocking and keeps new PIN fields masked', as
   wrapper = mountView()
   await flushPromises()
   const fields = wrapper.findAll('input')
-  expect(fields).toHaveLength(2)
+  expect(fields).toHaveLength(1)
   expect(
     fields.every(
       (field) =>
@@ -638,7 +673,9 @@ it('creates a matching PIN before unlocking and keeps new PIN fields masked', as
   await chooseNewPIN(wrapper, '123456', '654321')
   expect(engine.createBlockPIN).not.toHaveBeenCalled()
   expect(wrapper.get('[data-blocked-error]').text()).toBe(t('blocked.pinMismatch'))
-  await chooseNewPIN(wrapper, '123456', '123456')
+  await wrapper.get('input').setValue('123456')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
   expect(engine.createBlockPIN).toHaveBeenCalledExactlyOnceWith('123456')
   expect(engine.unlockBlocks).toHaveBeenCalledExactlyOnceWith('123456')
   expect(wrapper.find('form').exists()).toBe(false)
@@ -706,4 +743,141 @@ it('asks before moving a covered photo to the Trash, and moves nothing if the us
   expect(confirm).toHaveBeenCalledExactlyOnceWith(t('covered.trashTitle'), t('covered.trashText'), t('trash.move'))
   expect(engine.trashCovered).not.toHaveBeenCalled()
   expect(cells()).toHaveLength(2)
+})
+
+it('filters blocks by kind and name and clears both filters from the empty result', async () => {
+  vi.mocked(engine.blocks).mockResolvedValue([
+    privateBlock,
+    { ...privateBlock, id: 2, kind: BlockKind.BlockTag, name: 'Receipts' },
+  ])
+  const view = await opened()
+  await view.get(`input[aria-label="${t('blocked.search')}"]`).setValue('RECEIPTS')
+  expect(view.find('[data-block-row="1"]').exists()).toBe(false)
+  expect(view.find('[data-block-row="2"]').exists()).toBe(true)
+  const people = view.findAll('[role="radio"]').find((button) => button.text().startsWith(t('nav.people')))
+  await people?.trigger('click')
+  expect(view.text()).toContain(t('blocked.noMatches'))
+  await view
+    .findAll('button')
+    .find((button) => button.text() === t('blocked.showAll'))
+    ?.trigger('click')
+  expect(view.findAll('[data-block-row]')).toHaveLength(2)
+})
+
+it('counts down an engine cooldown and prevents another unlock until it expires', async () => {
+  vi.useFakeTimers()
+  vi.mocked(engine.unlockBlocks).mockRejectedValueOnce(new Error('wait', { cause: { code: ErrorCode.PINRateLimited } }))
+  const view = await opened()
+  expect(view.text()).toContain(t('pin.cooldown', { n: PIN_COOLDOWN_SECONDS }))
+  expect(view.get('input').attributes('disabled')).toBeDefined()
+  await view.get('form').trigger('submit')
+  expect(engine.unlockBlocks).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(PIN_COOLDOWN_SECONDS * 1000)
+  expect(view.get('input').attributes('disabled')).toBeUndefined()
+  await view.get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.unlockBlocks).toHaveBeenCalledTimes(2)
+})
+
+it('offers mode Undo while unlocked and clears the notice and its authority when locked', async () => {
+  vi.mocked(engine.blocks).mockResolvedValue([privateBlock])
+  const view = await opened()
+  await view.get('[data-blocked="mode"]').trigger('click')
+  await flushPromises()
+  const undo = notifications.find('blocked.change')?.actions?.[0]
+  expect(undo?.label).toBe(t('blocked.undo'))
+  await view
+    .findAll('button')
+    .find((button) => button.text() === t('blocked.lock'))
+    ?.trigger('click')
+  expect(notifications.find('blocked.change')).toBeUndefined()
+  undo?.run()
+  await flushPromises()
+  expect(engine.setBlockMode).toHaveBeenCalledTimes(1)
+})
+
+it('retries a failed initial block list without asking for the PIN again', async () => {
+  vi.mocked(engine.blocks).mockRejectedValueOnce(new Error('library busy')).mockResolvedValueOnce([privateBlock])
+  const view = await opened()
+  expect(view.get('[data-blocked-error]').text()).toContain('library busy')
+  await view
+    .findAll('button')
+    .find((button) => button.text() === t('blocked.retry'))
+    ?.trigger('click')
+  await flushPromises()
+  expect(view.find('[data-block-row="1"]').exists()).toBe(true)
+  expect(engine.unlockBlocks).toHaveBeenCalledTimes(1)
+})
+
+it('clears covered selection with Escape before closing the browser', async () => {
+  const view = await browsing([covered(1), covered(2)])
+  await view.get('[data-covered-select]').trigger('click')
+  expect(view.find('[role="toolbar"][aria-label="1 selected"]').exists()).toBe(true)
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  await flushPromises()
+  expect(view.find('[data-covered="back"]').exists()).toBe(true)
+  expect(view.find('[role="toolbar"][aria-label="1 selected"]').exists()).toBe(false)
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  await flushPromises()
+  expect(view.find('[data-covered="back"]').exists()).toBe(false)
+})
+
+it('keeps ten thousand blocks virtualised while retaining the full count', async () => {
+  giveTheGridASize()
+  vi.mocked(engine.blocks).mockResolvedValue(
+    Array.from({ length: 10000 }, (_, index) => ({ ...privateBlock, id: index + 1, name: `Person ${index + 1}` })),
+  )
+  const view = await opened()
+  expect(view.text()).toContain(t('blocked.count', { n: 10000 }))
+  expect(view.findAll('[data-block-row]').length).toBeGreaterThan(0)
+  expect(view.findAll('[data-block-row]').length).toBeLessThan(100)
+})
+
+it('forgets a private operation error when Lock now is used', async () => {
+  vi.mocked(engine.blocks).mockResolvedValue([privateBlock])
+  const view = await opened()
+  vi.mocked(engine.setBlockMode).mockRejectedValueOnce(new Error('Private name could not be changed'))
+  await view.get('[data-blocked="mode"]').trigger('click')
+  await flushPromises()
+  expect(view.get('[data-blocked-error]').text()).toContain('Private name')
+  await view
+    .findAll('button')
+    .find((button) => button.text() === t('blocked.lock'))
+    ?.trigger('click')
+  expect(view.text()).not.toContain('Private name')
+})
+
+it.each([
+  BlockKind.BlockPerson,
+  BlockKind.BlockTag,
+  BlockKind.BlockPlace,
+  BlockKind.BlockAlbum,
+  BlockKind.BlockFolder,
+  BlockKind.BlockAsset,
+  BlockKind.BlockEvent,
+  BlockKind.BlockFace,
+])('unblocks %s at once and puts it back exactly with Undo', async (kind) => {
+  vi.mocked(engine.blocks).mockResolvedValue([{ ...privateBlock, kind }])
+  const view = await opened()
+  await view.get('[data-blocked="unblock"]').trigger('click')
+  await flushPromises()
+  expect(confirm).not.toHaveBeenCalled()
+  expect(engine.unblock).toHaveBeenCalledExactlyOnceWith(privateBlock.id)
+  notifications.find('blocked.change')?.actions?.[0]?.run()
+  await flushPromises()
+  // The engine's receipt restores what the rule covered, faces and events included.
+  expect(engine.undoUnblock).toHaveBeenCalledExactlyOnceWith(77)
+  expect(engine.setBlock).not.toHaveBeenCalled()
+})
+
+it('claims PIN protection only once a PIN exists', async () => {
+  vi.mocked(engine.blockPINConfigured).mockResolvedValueOnce(false)
+  const first = mountView()
+  await flushPromises()
+  expect(first.text()).not.toContain(t('blocked.protected'))
+  first.unmount()
+  vi.mocked(engine.blockPINConfigured).mockResolvedValueOnce(true)
+  wrapper = mountView()
+  await flushPromises()
+  expect(wrapper.text()).toContain(t('blocked.protected'))
 })

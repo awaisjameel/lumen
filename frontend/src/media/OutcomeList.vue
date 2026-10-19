@@ -19,18 +19,18 @@ watch(
 </script>
 
 <template>
-  <div class="outcomes" role="status">
+  <div class="outcomes" role="status" aria-live="polite" aria-atomic="false">
     <p v-if="items.length > PAGE">
       {{ t('files.previewCount', { shown: Math.min((page + 1) * PAGE, items.length), n: items.length }) }}
     </p>
     <slot v-for="item in shown" :item="item" />
   </div>
-  <div v-if="items.length > PAGE" class="pages">
+  <nav v-if="items.length > PAGE" class="pages" :aria-label="t('files.pages')">
     <UButton :disabled="page === 0" variant="outline" @click="page--">{{ t('files.previousPage') }}</UButton>
     <UButton :disabled="(page + 1) * PAGE >= items.length" variant="outline" @click="page++">{{
       t('files.nextPage')
     }}</UButton>
-  </div>
+  </nav>
 </template>
 
 <style scoped>
@@ -39,6 +39,7 @@ watch(
   overflow-y: auto;
   overflow-wrap: anywhere;
   font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
 }
 .outcomes :deep(p) {
   margin: 0.25rem 0;
@@ -46,5 +47,7 @@ watch(
 .pages {
   display: flex;
   gap: 0.5rem;
+  justify-content: flex-end;
+  padding-top: 0.75rem;
 }
 </style>

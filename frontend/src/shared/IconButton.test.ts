@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from 'vitest'
+import { defineComponent, h } from 'vue'
 import { flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import IconButton from './IconButton.vue'
@@ -43,6 +44,17 @@ it('hands what it is given to the button', async () => {
   await button.trigger('click')
   expect(clicks).toBe(1)
   expect(button.classes()).toContain('mine')
+})
+
+// The tooltip is the root, so without care a parent's scoped rules for a
+// class it puts on the button (an atlas marker's position) never match.
+it('gives the button the scoped styles of the component that draws it', () => {
+  const Parent = defineComponent({
+    __scopeId: 'data-v-parent',
+    render: () => h(IconButton, { icon: icons.close, label: 'Close', class: 'marker' }),
+  })
+  wrapper = mountInApp(Parent)
+  expect(wrapper.get('button.marker').attributes()).toHaveProperty('data-v-parent')
 })
 
 // A button that shows only an icon says what it does only through

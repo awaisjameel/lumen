@@ -26,7 +26,7 @@ func (s *Store) Selection(ctx context.Context, view core.View, ids []int64, sear
 	if err != nil {
 		return core.Selection{}, err
 	}
-	order := "taken_at DESC, id DESC"
+	order := viewOrder(view)
 	if search {
 		data, err := json.Marshal(ids)
 		if err != nil {

@@ -6,7 +6,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
-import { AlbumKind, engine, ErrorCode, Kind, MAX_NAME_LEN } from '../bridge'
+import { AlbumKind, engine, ErrorCode, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Album } from '../bridge'
 import { blockRequest } from '../shared/block'
@@ -114,7 +114,8 @@ it('keeps every smart rule field and maps all media back to the engine zero valu
   vi.mocked(engine.albums).mockResolvedValue([{ ...album, kind: AlbumKind.AlbumSmart, rule }])
   const w = await mounted()
   await menuAction(w, t('albums.editNamed', { name: album.name }))
-  const media = w.findComponent(USelect)
+  const media = w.findAllComponents(USelect)[1]
+  if (!media) throw new Error('The media choice is missing')
   expect(media.props()).toMatchObject({ modelValue: 1 })
   expect(editor().get<HTMLInputElement>('input[type="date"][aria-label="Taken on or after"]').element.value).toBe(
     rule.from,
@@ -178,8 +179,6 @@ function testRouter() {
   })
 }
 
-vi.mock('../search/SearchBox.vue', () => ({ default: { render: () => null } }))
-
 async function menuAction(
   _w: ReturnType<typeof mountInApp>,
   label: string,
@@ -200,3 +199,70 @@ function editor() {
   if (!dialog) throw new Error('The album editor is closed')
   return new DOMWrapper(dialog)
 }
+
+it('shows a live caption and filters manual and smart cards without changing saved albums', async () => {
+  vi.mocked(engine.albums).mockResolvedValue([
+    album,
+    { ...album, id: 2, kind: AlbumKind.AlbumSmart, name: 'Favourites' },
+  ])
+  const w = await mounted()
+  expect(w.get('[aria-live="polite"]').text()).toBe('2 albums · 1 smart')
+  await w.get('[role="radiogroup"][aria-label="Album type"] button:nth-of-type(3)').trigger('click')
+  expect(w.text()).toContain('Favourites')
+  expect(w.text()).not.toContain(album.name)
+  expect(useAlbums().list).toHaveLength(2)
+})
+
+it('shows each album by the cover it chose, without reading its photos', async () => {
+  vi.mocked(engine.albums).mockResolvedValue([{ ...album, count: 30, cover: 7, coverThumb: 3 }])
+  const w = await mounted()
+  expect(w.get('.collection-card .cover img').attributes('src')).toBe(thumbUrl(7, 3))
+  expect(w.get('h2').text()).toBe(t('albums.collections'))
+})
+
+it('blocks saving an inverted date range while retaining the draft', async () => {
+  const rule = { ...emptyRule(), from: '2026-10-16', to: '2026-10-15' }
+  vi.mocked(engine.albums).mockResolvedValue([{ ...album, kind: AlbumKind.AlbumSmart, rule }])
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  await editor().get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.updateAlbum).not.toHaveBeenCalled()
+  expect(editor().get('[role="alert"]').text()).toContain('The start date must not follow the end date.')
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe(album.name)
+})
+
+it('opens the existing album editor from a collection hero’s edit link', async () => {
+  const router = testRouter()
+  await router.push({ path: '/', query: { edit: '1' } })
+  wrapper = mountInApp(AlbumsView, { plugins: [router] })
+  await flushPromises()
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe(album.name)
+  expect(editor().text()).toContain('The album type stays the same when editing.')
+})
+
+it('keeps the saving draft when the empty-state creation action is used again', async () => {
+  vi.mocked(engine.albums).mockResolvedValue([])
+  let finish: ((id: number) => void) | undefined
+  vi.mocked(engine.createAlbum).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve
+    }),
+  )
+  const w = await mounted()
+  await w.get('[data-action="new-album"]').trigger('click')
+  await flushPromises()
+  await editor().get('form input').setValue('Summer memories')
+  await editor().get('form').trigger('submit')
+  await flushPromises()
+  const createAgain = w
+    .findAll('button')
+    .filter((button) => button.text() === 'New album')
+    .at(-1)
+  await createAgain?.trigger('click')
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('Summer memories')
+  if (!finish) throw new Error('The save did not start')
+  finish(2)
+  await flushPromises()
+  expect(engine.createAlbum).toHaveBeenCalledOnce()
+})

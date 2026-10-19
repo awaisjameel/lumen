@@ -53,6 +53,7 @@ try {
   }))
   check('the showcase is served by the development server', before.dev)
   check('the showcase renders its sections', before.sections.length > 0, before.sections)
+  check('the showcase includes the app states reference', before.sections.includes('App states'), before.sections)
   check(
     'every icon of the set is drawn',
     before.icons > 0 && before.emptyIcons === 0,
@@ -62,7 +63,7 @@ try {
   const dark = await page.evaluateHandle(
     () =>
       [...document.querySelectorAll('[role="radio"]')].find(
-        (r) => r.getAttribute('value') === 'dark' || r.closest('label,div')?.textContent?.trim() === 'dark',
+        (r) => r.getAttribute('value') === 'dark' || r.closest('label,div')?.textContent?.trim() === 'Darkroom',
       ) ?? null,
   )
   await dark.asElement()?.click()

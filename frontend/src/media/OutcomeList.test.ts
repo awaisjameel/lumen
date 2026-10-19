@@ -30,3 +30,19 @@ it('shows a long list a page at a time and returns to the first page when it shr
     wrapper.unmount()
   }
 })
+
+it('labels outcome pagination and disables the unavailable page actions', async () => {
+  const wrapper = mountInApp(OutcomeList<number>, { props: { items: Array.from({ length: 101 }, (_, i) => i) } })
+  try {
+    const nav = wrapper.get(`nav[aria-label="${t('files.pages')}"]`)
+    const previous = nav.findAll('button').find((button) => button.text() === t('files.previousPage'))
+    const next = nav.findAll('button').find((button) => button.text() === t('files.nextPage'))
+    expect(previous?.attributes('disabled')).toBeDefined()
+    expect(next?.attributes('disabled')).toBeUndefined()
+    await next?.trigger('click')
+    expect(previous?.attributes('disabled')).toBeUndefined()
+    expect(next?.attributes('disabled')).toBeDefined()
+  } finally {
+    wrapper.unmount()
+  }
+})

@@ -39,7 +39,11 @@ import Page from '../../shared/Page.vue'
 import PageHeader from '../../shared/PageHeader.vue'
 import { usePreferences } from '../../shared/preferences'
 import PrefRow from '../../shared/PrefRow.vue'
-import SelectionBar from '../../shared/SelectionBar.vue'
+import SelectionDock from '../../shared/SelectionDock.vue'
+import ViewBar from '../../shared/ViewBar.vue'
+import Segmented from '../../shared/Segmented.vue'
+import CollectionHero from '../../shared/CollectionHero.vue'
+import StatesShowcase from './StatesShowcase.vue'
 import WorkProgress from '../../shared/WorkProgress.vue'
 
 const prefs = usePreferences()
@@ -54,7 +58,11 @@ const look = reactive<Appearance>({
 watch(look, (a) => applyAppearance(a))
 onBeforeUnmount(() => applyAppearance(prefs.prefs))
 
-const themes = [Theme.ThemeSystem, Theme.ThemeLight, Theme.ThemeDark]
+const themes = [
+  { label: 'Follow Windows', value: Theme.ThemeSystem },
+  { label: 'Daylight', value: Theme.ThemeLight },
+  { label: 'Darkroom', value: Theme.ThemeDark },
+]
 const accents = [
   Accent.AccentBlue,
   Accent.AccentTeal,
@@ -70,7 +78,8 @@ const densities = [Density.DensityComfortable, Density.DensityCompact]
 const widths = [
   { label: 'Full', value: '100%' },
   { label: '1200', value: '1200px' },
-  { label: '900', value: '900px' },
+  { label: '1024', value: '1024px' },
+  { label: '720', value: '720px' },
   { label: '600', value: '600px' },
   { label: '480', value: '480px' },
 ]
@@ -85,6 +94,8 @@ const choice = ref('one')
 const picked = ref('one')
 const amount = ref(40)
 const text = ref('')
+const selected = ref(3)
+const filter = ref('all')
 const options = [
   { label: 'First choice', value: 'one' },
   { label: 'Second choice with a longer label', value: 'two' },
@@ -115,21 +126,22 @@ function ask() {
 <template>
   <Page>
     <template #header>
-      <PageHeader title="Component showcase" subtitle="Development only">
-        <URadioGroup v-model="look.theme" :items="themes" orientation="horizontal" variant="table" size="xs" />
-        <USelect v-model="look.accent" :items="accents" class="w-28" aria-label="Accent" />
-        <USelect v-model="look.density" :items="densities" class="w-36" aria-label="Density" />
-        <USlider
-          v-model="look.textScale"
-          :min="TEXT_SCALE_MIN"
-          :max="TEXT_SCALE_MAX"
-          :step="5"
-          class="w-28"
-          aria-label="Text size"
-        />
-      </PageHeader>
+      <PageHeader title="Component showcase" subtitle="Development only"> </PageHeader>
     </template>
 
+    <ViewBar label="Preview appearance">
+      <URadioGroup v-model="look.theme" :items="themes" orientation="horizontal" variant="table" size="xs" />
+      <USelect v-model="look.accent" :items="accents" class="w-28" aria-label="Accent" />
+      <USelect v-model="look.density" :items="densities" class="w-36" aria-label="Density" />
+      <USlider
+        v-model="look.textScale"
+        :min="TEXT_SCALE_MIN"
+        :max="TEXT_SCALE_MAX"
+        :step="5"
+        class="w-28"
+        aria-label="Text size"
+      />
+    </ViewBar>
     <div class="widths" role="group" aria-label="Content width">
       <UButton
         v-for="w in widths"
@@ -147,13 +159,30 @@ function ask() {
     <div class="frame" :style="{ width }">
       <section>
         <h2>Page header, long title</h2>
-        <PageHeader :title="LONG" subtitle="1,234 items" :back="{ to: '/', label: 'Back to Library' }">
-          <UInput :leading-icon="icons.search" placeholder="Search" class="flex-1 max-w-80" />
+        <PageHeader :title="LONG" subtitle="1,234 items" :back="{ to: '/', label: 'Library' }">
+          <template #search><UInput :leading-icon="icons.search" placeholder="Search" class="w-full" /></template>
           <UButton :icon="icons.plus" color="primary" variant="solid">New album</UButton>
           <IconButton :icon="icons.more" label="More actions" color="neutral" variant="ghost" />
         </PageHeader>
       </section>
 
+      <section>
+        <h2>View bar and collection hero</h2>
+        <ViewBar label="Media view"
+          ><Segmented
+            v-model="filter"
+            label="Show"
+            :items="[
+              { value: 'all', label: 'All' },
+              { value: 'photos', label: 'Photos' },
+              { value: 'videos', label: 'Videos' },
+            ]"
+          /><template #end><UButton :icon="icons.sliders" variant="ghost">View options</UButton></template></ViewBar
+        ><CollectionHero kind="Album" name="Summer 2026" meta="248 photos"
+          ><template #actions><UButton :icon="icons.play">Slideshow</UButton></template></CollectionHero
+        >
+      </section>
+      <StatesShowcase />
       <section>
         <h2>Buttons</h2>
         <div class="row">
@@ -252,12 +281,18 @@ function ask() {
           <div class="tile"><MediaTile :id="1" :thumb="0" /></div>
           <div class="tile"><MediaTile :id="2" :thumb="0" favourite /></div>
           <div class="tile"><MediaTile :id="3" :thumb="0" video :duration-ms="83_000" /></div>
-          <div class="tile"><MediaTile :id="4" :thumb="0" selected favourite /></div>
+          <div class="tile">
+            <MediaTile
+              :id="4"
+              :thumb="0"
+              :selected="!!selected"
+              checkable
+              favourite
+              @check="selected = selected ? 0 : 3"
+            />
+          </div>
         </div>
-        <SelectionBar summary="3 selected" hint="Moving them to the Trash keeps the files on disk.">
-          <UButton :icon="icons.restore">Restore</UButton>
-          <UButton color="error" variant="soft" :icon="icons.trash">Move to Trash</UButton>
-        </SelectionBar>
+        <UButton v-if="!selected" @click="selected = 3">Select three photos</UButton>
       </section>
 
       <section>
@@ -308,6 +343,12 @@ function ask() {
         </div>
       </section>
     </div>
+    <template #dock
+      ><SelectionDock :count="selected" :summary="`${selected} selected`" @clear="selected = 0"
+        ><UButton :icon="icons.restore">Restore</UButton
+        ><UButton color="error" variant="ghost" :icon="icons.trash">Move to Trash</UButton></SelectionDock
+      ></template
+    >
   </Page>
 </template>
 

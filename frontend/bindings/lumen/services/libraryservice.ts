@@ -106,6 +106,14 @@ export function ClearPlaybackHistory(): $CancellablePromise<void> {
 }
 
 /**
+ * Counts supplies cheap sidebar totals. Refresh after local mutations and
+ * library:changed (assets or people); index:progress alone changes no count.
+ */
+export function Counts(): $CancellablePromise<core$0.LibraryCounts> {
+    return $Call.ByID(2547788525);
+}
+
+/**
  * CreateAlbum saves a new manual album holding items, or a smart rule (no
  * items), in one step.
  */
@@ -179,6 +187,14 @@ export function Event(id: number): $CancellablePromise<core$0.Event> {
 }
 
 /**
+ * EventCount previews how many events a quiet period of hours would make; it
+ * saves nothing.
+ */
+export function EventCount(hours: number): $CancellablePromise<number> {
+    return $Call.ByID(3152195102, hours);
+}
+
+/**
  * Events detects time and location groups in the currently visible timeline.
  */
 export function Events(): $CancellablePromise<core$0.Event[] | null> {
@@ -220,6 +236,14 @@ export function Failures(): $CancellablePromise<core$0.FailureGroup[] | null> {
  */
 export function FileMoveOutcomes(runID: number): $CancellablePromise<core$0.OrganiseMove[] | null> {
     return $Call.ByID(2312951439, runID);
+}
+
+/**
+ * FindCities searches the bundled catalogue, never the network. The result
+ * limit defaults to 20 and is held to 1..50; an empty query yields no matches.
+ */
+export function FindCities(query: string, limit: number): $CancellablePromise<core$0.CityMatch[] | null> {
+    return $Call.ByID(1412826729, query, limit);
 }
 
 /**
@@ -338,6 +362,14 @@ export function ReadCustomisation(): $CancellablePromise<core$0.CustomisationPre
 }
 
 /**
+ * RecheckSources queues an immediate background check. It never waits for a
+ * source disk; library:changed reports the result, including recovered folders.
+ */
+export function RecheckSources(): $CancellablePromise<void> {
+    return $Call.ByID(3152015650);
+}
+
+/**
  * RemoveBlock restores the current view of a blocked item.
  */
 export function RemoveBlock(id: number): $CancellablePromise<void> {
@@ -395,6 +427,20 @@ export function RestoreAllTrash(): $CancellablePromise<void> {
  */
 export function RestoreAssets(ids: number[] | null): $CancellablePromise<void> {
     return $Call.ByID(1245830972, ids);
+}
+
+/**
+ * RestoreLocation removes location corrections for all IDs atomically.
+ */
+export function RestoreLocation(ids: number[] | null): $CancellablePromise<void> {
+    return $Call.ByID(4092370082, ids);
+}
+
+/**
+ * RestoreTakenAt removes date corrections for all IDs atomically.
+ */
+export function RestoreTakenAt(ids: number[] | null): $CancellablePromise<void> {
+    return $Call.ByID(1811100409, ids);
 }
 
 /**
@@ -506,6 +552,14 @@ export function SetIdleOnly(on: boolean): $CancellablePromise<void> {
 }
 
 /**
+ * SetLocation sets coordinates for all IDs atomically, retaining the metadata
+ * location. A newly matching block applies before this call returns.
+ */
+export function SetLocation(ids: number[] | null, lat: number, lon: number): $CancellablePromise<void> {
+    return $Call.ByID(2706363260, ids, lat, lon);
+}
+
+/**
  * SetOCR turns reading the text in screenshots and documents on or off.
  * Turning it on queues the photos it applies to; turning it off stops the
  * work, and text already read stays searchable.
@@ -559,6 +613,15 @@ export function SetPreferences(p: core$0.Preferences): $CancellablePromise<core$
  */
 export function SetTagConfidence(v: number): $CancellablePromise<void> {
     return $Call.ByID(1275176765, v);
+}
+
+/**
+ * SetTakenAt sets wall-clock seconds for all IDs atomically. The UI should
+ * validate its calendar input before converting to seconds, and reload the
+ * detail after success. library:changed invalidates grids and collections.
+ */
+export function SetTakenAt(ids: number[] | null, takenAt: number): $CancellablePromise<void> {
+    return $Call.ByID(2864938359, ids, takenAt);
 }
 
 /**
@@ -641,6 +704,13 @@ export function Timeline(view: core$0.View): $CancellablePromise<core$0.DayBucke
 }
 
 /**
+ * TopPlaces names the places where most of the view's items were taken, most first.
+ */
+export function TopPlaces(view: core$0.View): $CancellablePromise<core$0.NamedPlace[] | null> {
+    return $Call.ByID(429354692, view);
+}
+
+/**
  * TrashAssets moves assets to Lumen's Trash: they leave every view, and
  * their files are untouched.
  */
@@ -675,6 +745,15 @@ export function TrashSelection(ids: number[] | null): $CancellablePromise<core$0
 }
 
 /**
+ * Unblock removes a rule while unlocked and returns a single-use Undo receipt.
+ * The receipt differs from the row ID: SQLite may reuse that ID for another
+ * rule before an old toast disappears. A stale toast must not undo that rule.
+ */
+export function Unblock(id: number): $CancellablePromise<number> {
+    return $Call.ByID(2991484887, id);
+}
+
+/**
  * UndoBlock removes the most recent new block during its short Undo window.
  */
 export function UndoBlock(id: number): $CancellablePromise<void> {
@@ -688,6 +767,15 @@ export function UndoBlock(id: number): $CancellablePromise<void> {
  */
 export function UndoOrganise(runID: number): $CancellablePromise<void> {
     return $Call.ByID(694597831, runID);
+}
+
+/**
+ * UndoUnblock re-blocks the most recently removed rule during the same short
+ * Undo window as UndoBlock. It works after relocking because it only hides;
+ * the persisted face/event anchor and scope are never supplied by the client.
+ */
+export function UndoUnblock(receipt: number): $CancellablePromise<void> {
+    return $Call.ByID(1127262057, receipt);
 }
 
 /**

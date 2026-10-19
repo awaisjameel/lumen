@@ -176,6 +176,13 @@ func largeLibraryCalls(ctx context.Context, b *testing.B, st *Store) {
 		{"People", func() error { return errOf(st.People(ctx)) }, invalidate, nil},
 		{"DayBuckets", func() error { return errOf(st.DayBuckets(ctx, core.View{}, core.TagConfidenceDefault)) }, invalidate, nil},
 		{"CountVisible", func() error { return errOf(st.CountVisible(ctx)) }, invalidate, nil},
+		{"Counts", func() error { return errOf(st.Counts(ctx)) }, invalidate, nil},
+		{"DayBucketsPhotos", func() error {
+			return errOf(st.DayBuckets(ctx, core.View{Filter: core.FilterPhotos}, core.TagConfidenceDefault))
+		}, invalidate, nil},
+		{"DayItemsPhotos", func() error {
+			return errOf(st.DayItems(ctx, ordinaryDay, ordinaryDay, core.View{Filter: core.FilterPhotos}, core.TagConfidenceDefault))
+		}, nil, nil},
 		{"Events", func() error { return errOf(st.Events(ctx, core.EventGapDefault)) }, invalidate, nil},
 		{"EventsRegroup", func() error { return errOf(st.Events(ctx, gap)) }, otherGap, nil},
 		{"Event", func() error { return errOf(st.Event(ctx, eventID, core.EventGapDefault)) }, invalidate, nil},
@@ -218,6 +225,13 @@ func largeLibraryCalls(ctx context.Context, b *testing.B, st *Store) {
 		{"Selection", func() error { return errOf(st.Selection(ctx, core.View{}, nil, false)) }, invalidate, nil},
 		{"UnavailableAssets", func() error { return errOf(st.UnavailableAssets(ctx)) }, invalidate, nil},
 		{"Places", func() error { return errOf(st.Places(ctx)) }, invalidate, nil},
+		{"TopPlacesThing", func() error {
+			return errOf(st.TopPlaces(ctx, core.View{Tag: 2}, core.TagConfidenceDefault, 3))
+		}, invalidate, nil},
+		{"TopPlacesPerson", func() error {
+			return errOf(st.TopPlaces(ctx, core.View{Person: 2}, core.TagConfidenceDefault, 3))
+		}, invalidate, nil},
+		{"PersonFacts", func() error { return errOf(st.PersonFacts(ctx, 2, 3)) }, invalidate, nil},
 		{"SaveEmbeddings64", func() error { return st.SaveEmbeddings(ctx, "bench", "bench", embeddings) }, nil, nil},
 		{"SaveTags64", func() error { return st.ReplaceAITags(ctx, tags) }, nil, nil},
 		{"SaveFaces64", func() error { return st.SaveFaces(ctx, "bench", "bench", faces) }, nil, nil},

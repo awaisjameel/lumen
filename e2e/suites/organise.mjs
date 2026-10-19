@@ -83,9 +83,9 @@ try {
   await page.screenshot({ path: join(s.out, 'preview.png') })
 
   await clickText('button', 'Move 2 files…')
-  await clickText('[role="dialog"] button', 'Move files')
+  await clickText('[role="dialog"] button', 'Move 2 files')
   await page.waitForFunction(
-    () => document.querySelector('.finished')?.textContent.includes('Finished. Your files are in their new folders.'),
+    () => document.querySelector('[data-organise-finished] h2')?.textContent.includes('Your files are in their new folders.'),
     { timeout: 30000, polling: 16 },
   )
   must(
@@ -94,7 +94,7 @@ try {
   )
 
   await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 })
-  await clickText('.run-entry button', 'Undo')
+  await clickText('[data-organise-run] button', 'Undo…')
   await page.waitForFunction(
     () => document.querySelector('[data-confirm="ok"]')?.textContent.trim() === 'Put files back',
     { timeout: 5000 },

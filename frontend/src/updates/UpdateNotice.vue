@@ -36,6 +36,8 @@ watch(
     notify({
       id: 'update',
       kind: 'info',
+      icon: 'update',
+      duration: 0,
       title: status.phase === UpdatePhase.UpdateReady ? t('update.phase.ready') : t('update.phase.available'),
       description: t('update.notice', { version: status.offer.version }),
       actions: [
@@ -44,6 +46,7 @@ watch(
       ],
     })
   },
+  { immediate: true },
 )
 </script>
 

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"path/filepath"
+	"slices"
 	"time"
 
 	"lumen/internal/core"
@@ -13,6 +15,9 @@ import (
 // ErrNotFound is returned when an asset, album, person, tag or face does not
 // exist (or no longer does), or an asset is not visible.
 var ErrNotFound = errors.New("not found")
+
+// ErrInvalidFilter means a view names no supported timeline filter.
+var ErrInvalidFilter = errors.New("invalid library filter")
 
 // UnavailableAssets identifies stored vectors that must not compete for search
 // results. Keep their embeddings so restored sources become searchable again.
@@ -55,8 +60,11 @@ var recountDayCountsSQL = `DELETE FROM day_counts;
 // The grid builds its entire layout, and the timeline scrubber, from this
 // list. AI tags count from minScore up.
 func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float64) ([]core.DayBucket, error) {
+	if trashView(v) {
+		return s.trashDayBuckets(ctx, v, minScore)
+	}
 	if v.Tag == 0 && v.Person == 0 && v.Album == 0 && v.Place == 0 && v.Event == 0 &&
-		(v.Filter == core.FilterAll || v.Filter == core.FilterFavourites || v.Filter == core.FilterVideos) {
+		(v.Filter == core.FilterAll || v.Filter == core.FilterPhotos || v.Filter == core.FilterFavourites || v.Filter == core.FilterVideos) {
 		return keptDayBuckets(ctx, s.r, v.Filter)
 	}
 	return s.dayBucketsCounted(ctx, v, minScore)
@@ -65,6 +73,8 @@ func (s *Store) DayBuckets(ctx context.Context, v core.View, minScore float64) (
 func keptDayBuckets(ctx context.Context, db querier, filter core.Filter) ([]core.DayBucket, error) {
 	column := "total"
 	switch filter {
+	case core.FilterPhotos:
+		column = "(total - videos)"
 	case core.FilterFavourites:
 		column = "favourites"
 	case core.FilterVideos:
@@ -90,8 +100,106 @@ func (s *Store) dayBucketsCounted(ctx context.Context, v core.View, minScore flo
 		FROM assets WHERE `+where+` GROUP BY day ORDER BY day DESC`, args...)
 }
 
+// The Trash is grouped by the day each item was moved there, in this PC's
+// time zone, newest first; inside a day the most recently trashed comes
+// first. trashed_at is a moment (Unix seconds), so its day is found here
+// rather than by SQLite, whose idea of local time need not be Go's.
+
+// trashView reports whether v is the Trash itself, the one view grouped so.
+func trashView(v core.View) bool {
+	return v.Filter == core.FilterTrash && v.Tag == 0 && v.Person == 0 && v.Album == 0 && v.Place == 0 && v.Event == 0
+}
+
+// trashDay is the day, YYYY-MM-DD, that the moment at falls on.
+func (s *Store) trashDay(at int64) string {
+	return time.Unix(at, 0).In(s.zone).Format(time.DateOnly)
+}
+
+// trashDayBuckets counts the Trash's items per day they were trashed on.
+// Items trashed together share a second, so the rows read are few.
+func (s *Store) trashDayBuckets(ctx context.Context, v core.View, minScore float64) ([]core.DayBucket, error) {
+	where, args, err := s.viewSQL(ctx, v, minScore)
+	if err != nil {
+		return nil, err
+	}
+	type moment struct {
+		at    int64
+		count int
+	}
+	moments, err := queryAll(ctx, s.r, func(r *sql.Rows) (m moment, err error) {
+		err = r.Scan(&m.at, &m.count)
+		return m, err
+	}, `SELECT trashed_at, count(*) FROM assets WHERE `+where+` GROUP BY trashed_at ORDER BY trashed_at DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := []core.DayBucket{}
+	for _, m := range moments {
+		day := s.trashDay(m.at)
+		if n := len(out); n > 0 && out[n-1].Day == day {
+			out[n-1].Count += m.count
+		} else {
+			out = append(out, core.DayBucket{Day: day, Count: m.count})
+		}
+	}
+	return out, nil
+}
+
+// trashColumns name a Trash item by its files, in trashFields order: the
+// first file's path (in the order Delete from disk reads them), and the size
+// and number of all of them.
+const trashColumns = `COALESCE((SELECT path FROM files WHERE asset_id = assets.id ORDER BY path, id LIMIT 1), ''),
+	(SELECT COALESCE(sum(size), 0) FROM files WHERE asset_id = assets.id),
+	(SELECT count(*) FROM files WHERE asset_id = assets.id)`
+
+// trashDayItems is DayItems for the Trash, whose days are those items were
+// trashed on.
+func (s *Store) trashDayItems(ctx context.Context, from, to time.Time, v core.View, minScore float64) ([]core.DayItems, error) {
+	where, args, err := s.viewSQL(ctx, v, minScore)
+	if err != nil {
+		return nil, err
+	}
+	start := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, s.zone).Unix()
+	end := time.Date(to.Year(), to.Month(), to.Day()+1, 0, 0, 0, 0, s.zone).Unix()
+	rows, err := s.r.QueryContext(ctx, `SELECT id, trashed_at, `+gridColumns+`, `+trashColumns+`
+		FROM assets WHERE `+where+` AND trashed_at >= ? AND trashed_at < ?
+		ORDER BY trashed_at DESC, id DESC`, append(args, start, end)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []core.DayItems{}
+	for rows.Next() {
+		var it core.GridItem
+		var at int64
+		if err := rows.Scan(append(append([]any{&it.ID, &at}, gridFields(&it)...), &it.Name, &it.Size, &it.Files)...); err != nil {
+			return nil, err
+		}
+		it.Name = filepath.Base(it.Name)
+		day := s.trashDay(at)
+		if n := len(out); n == 0 || out[n-1].Day != day {
+			out = append(out, core.DayItems{Day: day})
+		}
+		out[len(out)-1].Items = append(out[len(out)-1].Items, it)
+	}
+	return out, rows.Err()
+}
+
+// viewOrder is the order a view's grid shows its assets in.
+func viewOrder(v core.View) string {
+	if trashView(v) {
+		return "trashed_at DESC, id DESC"
+	}
+	return "taken_at DESC, id DESC"
+}
+
 // viewSQL is the WHERE clause (and its arguments) selecting a view's assets.
 func (s *Store) viewSQL(ctx context.Context, v core.View, minScore float64) (where string, args []any, err error) {
+	switch v.Filter {
+	case core.FilterAll, core.FilterPhotos, core.FilterVideos, core.FilterFavourites, core.FilterTrash:
+	default:
+		return "", nil, ErrInvalidFilter
+	}
 	targets := []struct {
 		kind core.BlockKind
 		id   int64
@@ -166,6 +274,8 @@ func (s *Store) viewFilterSQL(ctx context.Context, v core.View, minScore float64
 		f.favourites = true
 	case core.FilterVideos:
 		f.kind = core.KindVideo
+	case core.FilterPhotos:
+		f.kind = core.KindPhoto
 	}
 	where, args = f.where(minScore)
 	return where, args, nil
@@ -246,31 +356,107 @@ func (s *Store) DayItems(ctx context.Context, from, to string, v core.View, minS
 	if a.After(b) {
 		a, b = b, a
 	}
+	if trashView(v) {
+		return s.trashDayItems(ctx, a, b, v, minScore)
+	}
 	where, args, err := s.viewSQL(ctx, v, minScore)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.r.QueryContext(ctx, `SELECT id, taken_at, `+gridColumns+`
-		FROM assets WHERE `+where+` AND taken_at >= ? AND taken_at < ?
-		ORDER BY taken_at DESC, id DESC`, append(args, a.Unix(), b.AddDate(0, 0, 1).Unix())...)
+	out := []core.DayItems{}
+	err = s.read(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT id, taken_at, COALESCE(place_id, 0), `+gridColumns+`
+			FROM assets WHERE `+where+` AND taken_at >= ? AND taken_at < ?
+			ORDER BY taken_at DESC, id DESC`, append(args, a.Unix(), b.AddDate(0, 0, 1).Unix())...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var places []dayPlaces // beside out, one per day
+		for rows.Next() {
+			var it core.GridItem
+			var takenAt, place int64
+			if err := rows.Scan(append([]any{&it.ID, &takenAt, &place}, gridFields(&it)...)...); err != nil {
+				return err
+			}
+			day := time.Unix(takenAt, 0).UTC().Format(time.DateOnly)
+			if n := len(out); n == 0 || out[n-1].Day != day {
+				out = append(out, core.DayItems{Day: day})
+				places = append(places, dayPlaces{})
+			}
+			out[len(out)-1].Items = append(out[len(out)-1].Items, it)
+			places[len(places)-1].add(place)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return s.nameDayPlaces(ctx, tx, out, places)
+	})
+	return out, err
+}
+
+// dayPlaces counts a day's items by place, remembering which came first, so
+// the most common place wins and a tie goes to the newest item's.
+type dayPlaces struct {
+	order []int64
+	count map[int64]int
+}
+
+func (d *dayPlaces) add(place int64) {
+	if place == 0 {
+		return
+	}
+	if d.count == nil {
+		d.count = map[int64]int{}
+	}
+	if d.count[place] == 0 {
+		d.order = append(d.order, place)
+	}
+	d.count[place]++
+}
+
+func (d *dayPlaces) most() int64 {
+	var best int64
+	for _, place := range d.order {
+		if d.count[place] > d.count[best] {
+			best = place
+		}
+	}
+	return best
+}
+
+// nameDayPlaces names each day by its most common place. A place whose name
+// is blocked names no day, as it names no event.
+func (s *Store) nameDayPlaces(ctx context.Context, tx *sql.Tx, days []core.DayItems, places []dayPlaces) error {
+	most := make([]int64, len(days))
+	var ids []any
+	for i := range places {
+		if most[i] = places[i].most(); most[i] != 0 && !slices.Contains(ids, any(most[i])) {
+			ids = append(ids, most[i])
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id, name FROM places WHERE id IN (`+placeholders(len(ids))+`)
+		AND NOT `+placeBlocked("places.id"), ids...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	out := []core.DayItems{}
+	names := map[int64]string{}
 	for rows.Next() {
-		var it core.GridItem
-		var takenAt int64
-		if err := rows.Scan(append([]any{&it.ID, &takenAt}, gridFields(&it)...)...); err != nil {
-			return nil, err
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return err
 		}
-		day := time.Unix(takenAt, 0).UTC().Format(time.DateOnly)
-		if n := len(out); n == 0 || out[n-1].Day != day {
-			out = append(out, core.DayItems{Day: day})
-		}
-		out[len(out)-1].Items = append(out[len(out)-1].Items, it)
+		names[id] = name
 	}
-	return out, rows.Err()
+	for i := range days {
+		days[i].Place = names[most[i]]
+	}
+	return rows.Err()
 }
 
 // gridColumns are the columns a core.GridItem needs besides its id, in
@@ -334,14 +520,19 @@ func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.
 	var camera sql.NullString
 	var duration sql.NullInt64
 	var videoCodec, audioCodec sql.NullString
-	var lat, lon sql.NullFloat64
+	var lat, lon, originalLat, originalLon sql.NullFloat64
+	var originalAt sql.NullInt64
+	var originalFrom sql.NullString
+	var locationCorrected bool
 	var thumb int64
 	err := q.QueryRowContext(ctx, `SELECT id, kind, ext, taken_at, date_from, width, height, camera, lat, lon,
 		CASE WHEN `+placeBlocked("assets.place_id")+` THEN 0 ELSE COALESCE(place_id, 0) END, favourite,
-		duration_ms, video_codec, audio_codec, thumb_version, display_rotation, display_flip
+		duration_ms, video_codec, audio_codec, thumb_version, display_rotation, display_flip,
+		original_taken_at, original_date_from, location_corrected, original_lat, original_lon
 		FROM assets WHERE id = ? AND `+servableOf(unlocked), id).
 		Scan(&d.ID, &d.Kind, &d.Ext, &d.TakenAt, &d.DateFrom, &w, &h, &camera, &lat, &lon, &d.PlaceID, &d.Favourite,
-			&duration, &videoCodec, &audioCodec, &thumb, &d.Adjustment.Rotation, &d.Adjustment.Flip)
+			&duration, &videoCodec, &audioCodec, &thumb, &d.Adjustment.Rotation, &d.Adjustment.Flip,
+			&originalAt, &originalFrom, &locationCorrected, &originalLat, &originalLon)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -349,6 +540,15 @@ func assetDetail(ctx context.Context, q querier, id int64, unlocked bool) (core.
 		return d, err
 	}
 	d.Width, d.Height, d.Camera = int(w.Int64), int(h.Int64), camera.String
+	if originalAt.Valid {
+		d.OriginalDate = &core.OriginalDate{TakenAt: originalAt.Int64, From: core.DateSource(originalFrom.String)}
+	}
+	if locationCorrected {
+		d.OriginalLocation = &core.OriginalLocation{}
+		if originalLat.Valid && originalLon.Valid {
+			d.OriginalLocation.Lat, d.OriginalLocation.Lon = &originalLat.Float64, &originalLon.Float64
+		}
+	}
 	if lat.Valid && lon.Valid {
 		d.Lat, d.Lon = &lat.Float64, &lon.Float64
 	}

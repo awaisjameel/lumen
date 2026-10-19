@@ -2,8 +2,11 @@ import { computed, markRaw, reactive, ref, shallowRef } from 'vue'
 import { engine, errorCode, ErrorCode } from '../bridge'
 import type { Block, CoveredItem } from '../bridge'
 import { confirm } from '../shared/confirm'
-import { reportError } from '../shared/errors'
+import { ERROR_NOTIFICATION, errorText, reportError } from '../shared/errors'
 import { t } from '../shared/i18n'
+import { dismiss } from '../shared/notify'
+import { showBlocksChanged } from '../shared/block'
+import { showTrashUndo, TRASH_UNDO_NOTIFICATION } from '../trash/undo'
 import type { ViewerActions, ViewerSource } from '../library/store'
 
 /** What the browser needs of the Blocked screen around it. */
@@ -27,10 +30,12 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
   const block = shallowRef<Block | null>(null)
   const items = shallowRef<CoveredItem[]>([]) // up to tens of thousands
   const loading = ref(false)
+  const error = ref('')
   const selected = shallowRef<ReadonlySet<number>>(new Set())
   const trashing = ref(false)
   const viewing = ref<number | null>(null)
   let request = 0
+  let retryAction: (() => Promise<void>) | null = null
 
   const position = computed(() => new Map(items.value.map((it, i) => [it.id, i])))
 
@@ -47,8 +52,10 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
       hooks.used()
     } catch (e) {
       if (mine !== request) return
-      close()
-      hooks.failed(e)
+      if (errorCode(e) === ErrorCode.BlocksLocked) {
+        close()
+        hooks.failed(e)
+      } else error.value = errorText(e)
     } finally {
       if (mine === request) loading.value = false
     }
@@ -57,6 +64,10 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
   /** Closes the browser and the Viewer, and forgets the photos. */
   function close() {
     request++
+    dismiss(TRASH_UNDO_NOTIFICATION)
+    dismiss(ERROR_NOTIFICATION)
+    error.value = ''
+    retryAction = null
     block.value = null
     items.value = []
     viewing.value = null
@@ -88,6 +99,7 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
   }
 
   function view(id: number) {
+    if (!position.value.has(id) || trashing.value) return
     viewing.value = id
     hooks.used()
   }
@@ -111,6 +123,8 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
     const targets = ids ?? (id === null ? [] : [id])
     if (trashing.value || !targets.length || targets.some((target) => !position.value.has(target))) return
     const mine = request
+    error.value = ''
+    retryAction = null
     trashing.value = true
     try {
       if (!(await confirm(t('covered.trashTitle'), t('covered.trashText'), t('trash.move')))) return
@@ -130,7 +144,11 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
       } catch (e) {
         if (mine !== request) return
         if (errorCode(e) === ErrorCode.BlocksLocked) hooks.failed(e)
-        else reportError(e)
+        else {
+          error.value = errorText(e)
+          retryAction = () => moveToTrash(targets)
+          reportError(e)
+        }
         return
       }
       if (mine !== request) return
@@ -138,6 +156,33 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
       selected.value = new Set([...selected.value].filter((target) => !removed.has(target)))
       if (viewing.value === id && id !== null && removed.has(id)) viewing.value = next?.id ?? null
       hooks.used()
+      const restoreTrashed = async () => {
+        if (mine !== request || !block.value || trashing.value) return
+        trashing.value = true
+        error.value = ''
+        retryAction = null
+        try {
+          await engine.restoreAssets(targets)
+          if (mine !== request) return
+          const got = await engine.blockedItems(block.value.id)
+          if (mine !== request) return
+          items.value = got
+          hooks.used()
+          await showBlocksChanged()
+        } catch (e) {
+          if (mine !== request) return
+          if (errorCode(e) === ErrorCode.BlocksLocked) hooks.failed(e)
+          else {
+            error.value = errorText(e)
+            retryAction = restoreTrashed
+            reportError(e)
+          }
+        } finally {
+          if (mine === request) trashing.value = false
+        }
+      }
+      showTrashUndo(targets, restoreTrashed)
+      void showBlocksChanged().catch(reportError)
     } finally {
       if (mine === request) trashing.value = false
     }
@@ -180,11 +225,17 @@ export function useCoveredPhotos(hooks: CoveredHooks) {
     block,
     items,
     loading,
+    error,
     viewing,
     selected,
     trashing,
     source: markRaw(source),
     open,
+    retry: () => {
+      if (retryAction) return retryAction()
+      const current = block.value
+      return current ? open(current) : Promise.resolve()
+    },
     close,
     view,
     touch,

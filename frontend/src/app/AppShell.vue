@@ -1,7 +1,10 @@
 <script setup lang="ts">
-// The frame around every page. Wide windows: a sidebar the user can resize
-// or collapse. Medium: the sidebar is a rail of icons. Narrow: the page
-// takes the whole window and navigation opens as a drawer.
+// The frame around every page: the sidebar on the window's base, and the
+// page as an inset sheet beside it (rounded where they meet, as Windows 11
+// apps draw it). Wide windows: a sidebar the user can resize or collapse
+// to a rail. Medium: the sidebar is a rail of icons. Narrow (below Lumen's
+// minimum window): the page takes the whole window and navigation opens as
+// a drawer.
 import IconButton from '../shared/IconButton.vue'
 import USlideover from '@nuxt/ui/components/Slideover.vue'
 import { computed, ref, watch } from 'vue'
@@ -103,24 +106,36 @@ useCommands([
   display: flex;
   height: 100%;
   min-width: 0;
+  background: var(--lumen-bg-base);
 }
 
 .sidebar {
   position: relative;
   flex-shrink: 0;
-  border-right: 1px solid var(--ui-border);
-  background: var(--ui-bg-muted);
 }
 
 .sidebar.collapsed {
-  width: 3.75rem;
+  width: var(--lumen-rail-w);
 }
 
+/* The page sheet. */
 .main {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  margin-top: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--ui-border);
+  border-right: 0;
+  border-bottom: 0;
+  border-top-left-radius: var(--lumen-r-lg);
+  background: var(--ui-bg);
+}
+.narrow .main {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
 }
 
 .narrow-bar {
@@ -141,6 +156,7 @@ useCommands([
 }
 
 .content {
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;

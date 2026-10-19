@@ -175,3 +175,66 @@ func TestTypeScriptModulesAreNotVideos(t *testing.T) {
 		t.Fatalf("scan: %+v, %v; want the 5 videos seen and the module forgotten", res, err)
 	}
 }
+
+func TestUnavailableSourceKeepsItsFilesUntilAReadableScanConfirmsDeletion(t *testing.T) {
+	for _, mode := range []string{"missing", "file", "disconnected during scan"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := t.Context()
+			st, err := store.Open(filepath.Join(t.TempDir(), "library.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			root := filepath.Join(t.TempDir(), "photos")
+			if err := os.Mkdir(root, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "one.jpg")
+			if err := os.WriteFile(path, []byte("original"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			src, err := st.AddSource(ctx, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sc := Scanner{Store: st}
+			if _, err := sc.Scan(ctx, src, "", Options{}); err != nil {
+				t.Fatal(err)
+			}
+			disconnect := func() {
+				if err := os.RemoveAll(root); err != nil {
+					t.Fatal(err)
+				}
+				if mode == "file" {
+					if err := os.WriteFile(root, []byte("not a directory"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if mode == "disconnected during scan" {
+				sc.OnProgress = func(int) { disconnect() }
+			} else {
+				disconnect()
+			}
+			if res, err := sc.Scan(ctx, src, "", Options{}); err == nil || res.Removed != 0 {
+				t.Fatalf("unavailable scan: %+v, %v", res, err)
+			}
+			known, err := st.KnownFiles(ctx, src.ID, "")
+			if err != nil || len(known) != 1 {
+				t.Fatalf("unavailable root lost files: %v, %v", known, err)
+			}
+			if mode == "file" {
+				if err := os.Remove(root); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Mkdir(root, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			sc.OnProgress = nil
+			if res, err := sc.Scan(ctx, src, "", Options{}); err != nil || res.Removed != 1 {
+				t.Fatalf("readable empty source did not reconcile: %+v, %v", res, err)
+			}
+		})
+	}
+}

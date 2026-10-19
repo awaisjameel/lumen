@@ -18,8 +18,12 @@ import (
 
 func dayBucketsReference(ctx context.Context, db querier, filter core.Filter) ([]core.DayBucket, error) {
 	f := assetFilter{favourites: filter == core.FilterFavourites}
-	if filter == core.FilterVideos {
+	switch filter {
+	case core.FilterVideos:
 		f.kind = core.KindVideo
+	case core.FilterPhotos:
+		f.kind = core.KindPhoto
+	default:
 	}
 	where, args := f.where(core.TagConfidenceDefault)
 	return queryAll(ctx, db, func(r *sql.Rows) (b core.DayBucket, err error) {
@@ -31,7 +35,7 @@ func dayBucketsReference(ctx context.Context, db querier, filter core.Filter) ([
 
 func compareDayCounts(ctx context.Context, t *testing.T, db querier) {
 	t.Helper()
-	for _, filter := range []core.Filter{core.FilterAll, core.FilterFavourites, core.FilterVideos} {
+	for _, filter := range []core.Filter{core.FilterAll, core.FilterPhotos, core.FilterFavourites, core.FilterVideos} {
 		got, err := keptDayBuckets(ctx, db, filter)
 		check(t, err)
 		want, err := dayBucketsReference(ctx, db, filter)
@@ -123,6 +127,20 @@ func TestDayBucketsUseKeptCountsOnlyForTheThreeWholeTimelineFilters(t *testing.T
 			view.Filter = filter
 			got, err := st.DayBuckets(ctx, view, core.TagConfidenceDefault)
 			want, wantErr := st.dayBucketsCounted(ctx, view, core.TagConfidenceDefault)
+			if view == (core.View{Filter: core.FilterTrash}) {
+				// The Trash's days are those its items were trashed on, not
+				// taken on (trash_test.go): the same items, regrouped.
+				total := func(buckets []core.DayBucket) (n int) {
+					for _, b := range buckets {
+						n += b.Count
+					}
+					return n
+				}
+				if !errors.Is(err, wantErr) || total(got) != total(want) {
+					t.Fatalf("view %+v: by trashed day %v (%v), counted %v (%v)", view, got, err, want, wantErr)
+				}
+				continue
+			}
 			if !errors.Is(err, wantErr) || !slices.Equal(got, want) {
 				t.Fatalf("view %+v: kept %v (%v), counted %v (%v)", view, got, err, want, wantErr)
 			}
@@ -236,11 +254,15 @@ func TestTimelineCountReadersNeverReadAssets(t *testing.T) {
 		return nil
 	}))
 	check(t, conn.Close())
-	for _, filter := range []core.Filter{core.FilterAll, core.FilterFavourites, core.FilterVideos} {
+	for _, filter := range []core.Filter{core.FilterAll, core.FilterPhotos, core.FilterFavourites, core.FilterVideos} {
 		buckets, err := st.DayBuckets(ctx, core.View{Filter: filter}, core.TagConfidenceDefault)
 		check(t, err)
-		if len(buckets) != 16 {
-			t.Fatalf("filter %q: got %d days, want 16", filter, len(buckets))
+		want := 16
+		if filter == core.FilterPhotos {
+			want = 0
+		}
+		if len(buckets) != want {
+			t.Fatalf("filter %q: got %d days, want %d", filter, len(buckets), want)
 		}
 	}
 	n, err := st.CountVisible(ctx)

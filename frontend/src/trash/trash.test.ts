@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { defineComponent, h } from 'vue'
+import { commandById, isEnabled, runCommand, useCommands } from '../shared/commands'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import { DateSource, engine, ErrorCode, Filter, Kind } from '../bridge'
 import type * as Bridge from '../bridge'
@@ -12,7 +14,7 @@ import { confirm } from '../shared/confirm'
 import { ERROR_NOTIFICATION } from '../shared/errors'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import type { RecordedNotifications } from '../shared/testing'
-import { deleteAllFromDisk, deleteFromDisk, KEPT_NOTIFICATION, restoreAll } from './actions'
+import { deleteAllFromDisk, deleteFromDisk, KEPT_NOTIFICATION, restoreAll, useTrashActions } from './actions'
 import TrashBar from './TrashBar.vue'
 import { showTrashUndo, TRASH_UNDO_NOTIFICATION } from './undo'
 
@@ -48,7 +50,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     trashAssets: vi.fn(),
     restoreAssets: vi.fn(),
     restoreAllTrash: vi.fn(),
-    trashCount: vi.fn(),
+    counts: vi.fn(),
     trashSelection: vi.fn(),
     deleteFromDisk: vi.fn(),
   },
@@ -100,7 +102,7 @@ beforeEach(() => {
   vi.mocked(engine.trashAssets).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.restoreAssets).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.restoreAllTrash).mockReset().mockResolvedValue(undefined)
-  vi.mocked(engine.trashCount).mockReset().mockResolvedValue(0)
+  vi.mocked(engine.counts).mockReset().mockResolvedValue({ photos: 0, videos: 0, favourites: 0, people: 0, trash: 0 })
   vi.mocked(engine.trashSelection)
     .mockReset()
     .mockResolvedValue({ assets: [1], files: 2 })
@@ -129,7 +131,7 @@ it('moves a photo to the Trash, moves the viewer on to the next one and offers U
   notifications.find(TRASH_UNDO_NOTIFICATION)?.actions?.[0]?.run()
   await flushPromises()
   expect(engine.restoreAssets).toHaveBeenCalledWith([2])
-  expect(engine.trashCount).toHaveBeenCalled()
+  expect(engine.counts).toHaveBeenCalled()
 })
 
 it('closes the viewer when the last photo has nothing to move on to', async () => {
@@ -173,7 +175,7 @@ it('restores a trashed photo and moves the viewer on', async () => {
 it('restores everything in the Trash', async () => {
   const lib = await libraryShowing(Filter.FilterTrash)
   await restoreAll(lib)
-  expect(engine.restoreAllTrash).toHaveBeenCalledOnce()
+  expect(engine.restoreAssets).toHaveBeenCalledExactlyOnceWith([1])
 })
 
 it('calls nothing when the delete-from-disk question is declined', async () => {
@@ -190,7 +192,8 @@ it('says how many files go to the Recycle Bin before deleting them from disk', a
   expect(confirm).toHaveBeenCalledWith(
     'Delete from disk?',
     expect.stringContaining('2 files will be moved to the Windows Recycle Bin'),
-    'Move to Recycle Bin',
+    'Move 2 files to Recycle Bin',
+    { danger: true },
   )
   expect(engine.deleteFromDisk).toHaveBeenCalledWith({ assets: [1], files: 2 })
   expect(notifications.find(ERROR_NOTIFICATION)).toBeUndefined()
@@ -201,12 +204,16 @@ it('deletes exactly the selection the user confirmed, for one photo and for the 
   vi.mocked(engine.trashSelection).mockResolvedValueOnce({ assets: [1], files: 5 })
   await deleteFromDisk(lib, { day, id: 1 })
   expect(engine.trashSelection).toHaveBeenLastCalledWith([1])
-  expect(confirm).toHaveBeenLastCalledWith(expect.anything(), expect.stringContaining('5 files'), expect.anything())
+  expect(confirm).toHaveBeenLastCalledWith(expect.anything(), expect.stringContaining('5 files'), expect.anything(), {
+    danger: true,
+  })
   expect(engine.deleteFromDisk).toHaveBeenLastCalledWith({ assets: [1], files: 5 })
   vi.mocked(engine.trashSelection).mockResolvedValueOnce({ assets: [1, 2, 3], files: 7 })
   await deleteAllFromDisk(lib)
   expect(engine.trashSelection).toHaveBeenLastCalledWith([])
-  expect(confirm).toHaveBeenLastCalledWith(expect.anything(), expect.stringContaining('7 files'), expect.anything())
+  expect(confirm).toHaveBeenLastCalledWith(expect.anything(), expect.stringContaining('7 files'), expect.anything(), {
+    danger: true,
+  })
   expect(engine.deleteFromDisk).toHaveBeenLastCalledWith({ assets: [1, 2, 3], files: 7 })
 })
 
@@ -217,7 +224,7 @@ it('says the Trash changed when the engine refuses what was confirmed', async ()
   expect(notifications.find(ERROR_NOTIFICATION)?.title).toBe(
     'The Trash changed while you were deciding, so nothing was deleted. Try again.',
   )
-  expect(engine.trashCount).toHaveBeenCalled()
+  expect(engine.counts).toHaveBeenCalled()
 })
 
 it('deletes nothing and asks nothing when the file count cannot be read', async () => {
@@ -284,7 +291,9 @@ it('confirms the engine’s file count from the Viewer even before the photo’s
   await button?.trigger('click')
   await flushPromises()
   expect(engine.trashSelection).toHaveBeenCalledWith([1])
-  expect(confirm).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('2 files'), expect.anything())
+  expect(confirm).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('2 files'), expect.anything(), {
+    danger: true,
+  })
 })
 
 it('confirms the number of files, not of photos, when deleting the whole Trash from its bar', async () => {
@@ -296,7 +305,9 @@ it('confirms the number of files, not of photos, when deleting the whole Trash f
   await flushPromises()
   expect(lib.total).toBe(3)
   expect(engine.trashSelection).toHaveBeenCalledWith([])
-  expect(confirm).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('5 files'), expect.anything())
+  expect(confirm).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('5 files'), expect.anything(), {
+    danger: true,
+  })
 })
 
 it('offers Move to Trash in the Viewer outside the Trash', async () => {
@@ -346,13 +357,14 @@ it('offers Move to Trash in the Details panel of a library photo', async () => {
 it('disables both recovery actions while a restore is pending and restores once', async () => {
   await libraryShowing(Filter.FilterTrash)
   let finish: (() => void) | undefined
-  vi.mocked(engine.restoreAllTrash).mockReturnValue(new Promise<void>((resolve) => (finish = resolve)))
+  vi.mocked(engine.restoreAssets).mockReturnValue(new Promise<void>((resolve) => (finish = resolve)))
   wrapper = mountInApp(TrashBar)
   await wrapper.get('[data-trash-restore-all]').trigger('click')
+  await flushPromises()
   expect(wrapper.get<HTMLButtonElement>('[data-trash-restore-all]').element.disabled).toBe(true)
   expect(wrapper.get<HTMLButtonElement>('[data-trash-delete-all]').element.disabled).toBe(true)
   await wrapper.get('[data-trash-restore-all]').trigger('click')
-  expect(engine.restoreAllTrash).toHaveBeenCalledOnce()
+  expect(engine.restoreAssets).toHaveBeenCalledExactlyOnceWith([1])
   expect(engine.deleteFromDisk).not.toHaveBeenCalled()
   if (!finish) throw new Error('the restore did not start')
   finish()
@@ -381,4 +393,69 @@ it('dismisses Undo once used and reports a failed restore through the notificati
   await flushPromises()
   expect(restore).toHaveBeenCalledExactlyOnceWith([1, 3])
   expect(notifications.find(ERROR_NOTIFICATION)?.title).toContain('restore refused')
+})
+
+it('offers Undo for restoring a snapshot and returns only those IDs to the Trash', async () => {
+  const lib = await libraryShowing(Filter.FilterTrash)
+  vi.mocked(engine.trashSelection).mockResolvedValueOnce({ assets: [1, 3], files: 4 })
+  await restoreAll(lib)
+  expect(engine.restoreAssets).toHaveBeenCalledExactlyOnceWith([1, 3])
+  const offer = notifications.find('trash.restoreUndo')
+  expect(offer?.title).toBe('2 items restored to the Library.')
+  offer?.actions?.[0]?.run()
+  await flushPromises()
+  expect(engine.trashAssets).toHaveBeenCalledExactlyOnceWith([1, 3])
+  expect(notifications.find('trash.restoreUndo')).toBeUndefined()
+})
+
+it('preserves trashed items and offers no Undo when restore fails', async () => {
+  const lib = await libraryShowing(Filter.FilterTrash)
+  vi.mocked(engine.restoreAssets).mockRejectedValueOnce(new Error('drive disconnected'))
+  await restoreAll(lib)
+  expect(notifications.find('trash.restoreUndo')).toBeUndefined()
+  expect(notifications.find(ERROR_NOTIFICATION)?.title).toContain('drive disconnected')
+})
+
+it('exports dock commands with a shared busy reason, a danger action and snapshot-based recovery', async () => {
+  const lib = await libraryShowing(Filter.FilterTrash)
+  lib.selectedIDs = new Set([1, 3])
+  const Host = defineComponent({
+    setup() {
+      useCommands(useTrashActions(lib).commands)
+      return () => h('div')
+    },
+  })
+  wrapper = mountInApp(Host)
+  const restore = commandById('trash.restore')
+  const recycle = commandById('trash.recycle')
+  if (!restore || !recycle) throw new Error('The Trash dock commands are missing')
+  expect(recycle.danger).toBe(true)
+  expect(isEnabled(restore)).toBe(true)
+  let finish: (() => void) | undefined
+  vi.mocked(engine.restoreAssets).mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      finish = resolve
+    }),
+  )
+  const running = runCommand('trash.restore')
+  await flushPromises()
+  expect(isEnabled(restore)).toBe(false)
+  expect(isEnabled(recycle)).toBe(false)
+  expect(recycle.reason?.()).toBe('Wait until the current action finishes.')
+  expect(await runCommand('trash.recycle')).toBe(false)
+  if (!finish) throw new Error('The restore did not start')
+  finish()
+  await running
+  expect(engine.restoreAssets).toHaveBeenCalledExactlyOnceWith([1, 3])
+  expect(lib.selectedIDs.size).toBe(0)
+  expect(isEnabled(restore)).toBe(false)
+  expect(confirm).not.toHaveBeenCalled()
+})
+
+it('distinguishes the item count from files on disk and exposes that count to the page header', async () => {
+  await libraryShowing(Filter.FilterTrash)
+  vi.mocked(engine.trashSelection).mockResolvedValue({ assets: [1, 2, 3], files: 5 })
+  wrapper = mountInApp(TrashBar)
+  await flushPromises()
+  expect(wrapper.findComponent(TrashBar).emitted('files')?.[0]).toEqual([5])
 })

@@ -100,7 +100,7 @@ function onKey(e: KeyboardEvent) {
   left: 3px;
   width: 1px;
   background: transparent;
-  transition: background var(--lumen-motion-control) var(--lumen-ease);
+  transition: background var(--lumen-d-fast) var(--lumen-ease-out);
 }
 .resize-handle:hover::after,
 .resize-handle:focus-visible::after,
