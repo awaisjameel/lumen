@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"os"
 	"testing"
 )
 
@@ -45,8 +46,12 @@ func TestDriveProbeReportsCancellationBeforeOpeningTheVolume(t *testing.T) {
 }
 
 func BenchmarkDriveSeekPenalty(b *testing.B) {
+	root := os.Getenv("LUMEN_SCAN_BENCH_ROOT")
+	if root == "" {
+		b.Fatal("LUMEN_SCAN_BENCH_ROOT must name a folder on the drive to probe")
+	}
 	for range b.N {
-		seeks, err := driveSeekPenalty(b.Context(), `D:\Downloads\14th aug Office\14th aug Office`)
+		seeks, err := driveSeekPenalty(b.Context(), root)
 		if err != nil {
 			b.Fatal(err)
 		}
