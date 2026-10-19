@@ -40,5 +40,5 @@ state. Supplying the original embedded root on every construction overwrites
 the client's cached root; this experiment does not yet prove persisted root
 rotation or revoked-key recovery across restart.
 
-See [the 12A record](../../docs/phase12a-updater-2026-10-10.md) for the selected
+See [the 12A record](../../docs/history/phase12a-updater-2026-10-10.md) for the selected
 activation direction, bootstrap contracts and remaining acceptance gates.

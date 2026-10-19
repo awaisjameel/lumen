@@ -135,7 +135,7 @@ func TestExposureTimeReadsAsEXIFWritesIt(t *testing.T) {
 }
 
 // TestRealCameraFiles runs over the camera files in LUMEN_RAW_SAMPLES
-// (docs/phase9-formats-2026-10-07.md lists the set it was accepted on).
+// (docs/history/phase9-formats-2026-10-07.md lists the set it was accepted on).
 // Every file must give its size, a thumbnail and pixels of the same shape:
 // the developed picture, or for a file LibRaw cannot develop its preview.
 func TestRealCameraFiles(t *testing.T) {

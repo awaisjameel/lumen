@@ -8,7 +8,7 @@ Unicode true
 ##   LUMEN_NOTICES           THIRD_PARTY_NOTICES.txt (scripts/notices.py)
 ##   LUMEN_WEBVIEW2          Microsoft's standalone WebView2 runtime installer (scripts/deps.sh)
 ##   LUMEN_SIGN              optional: a command that signs the file "%1"
-## Decisions (docs/phase6-design-2026-10-03.md): installed per user, with no
+## Decisions (docs/history/phase6-design-2026-10-03.md): installed per user, with no
 ## administrator prompt; WebView2 ships inside, so installing needs no internet.
 ####
 !define WAILS_INSTALL_SCOPE "user"

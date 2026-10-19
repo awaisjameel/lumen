@@ -4,13 +4,14 @@ Thank you for trying Lumen before its first release. Lumen is a photo
 gallery for Windows that organises your photos and videos with AI that runs
 on your own PC. Nothing is uploaded: Lumen never connects to the internet.
 
-This beta is version 0.11.0. It is meant to be used on your real photos, so
-that we learn how it copes with years of camera rolls, WhatsApp images,
-screenshots and phone backups.
+The beta is meant to be used on your real photos, so that we learn how it
+copes with years of camera rolls, WhatsApp images, screenshots and phone
+backups. Settings → Updates and about → About Lumen shows which version you
+have.
 
 ## Installing
 
-1. Run `Lumen-0.11.0-x64-setup.exe`. It installs Lumen for you alone, in
+1. Run `Lumen-<version>-x64-setup.exe`. It installs Lumen for you alone, in
    `%LOCALAPPDATA%\Programs\Lumen`, without asking for administrator rights.
 2. Windows may say it protected your PC, because this beta is not signed
    yet. Choose **More info**, then **Run anyway**.
@@ -61,7 +62,7 @@ folders when you use one of these, each of which asks first:
   switches, how many processor threads Lumen may use, and an option to index
   only while you are away.
 - **Customise**: try the appearance, image viewing, video and shortcut settings.
-  Settings → Reset and presets lets you preview a customisation file before
+  Settings → Backup and presets lets you preview a customisation file before
   applying it, and reset sections while keeping your folders, photos and PIN.
 - **Camera RAW**: try photos from your camera. Lumen can use an embedded
   preview or develop the sensor data locally. Tell us the camera model and
@@ -91,7 +92,7 @@ folders when you use one of these, each of which asks first:
 
 ### Sending a problem report
 
-Settings → **About Lumen** → **Save a problem report…** saves a zip file
+Settings → Updates and about → **About Lumen** → **Save a problem report…** saves a zip file
 wherever you choose. It holds Lumen's log, any crash reports, and a
 description of your PC (Windows version, processor, memory, graphics card)
 and of your library's state (how many photos, what is left to do, your
@@ -114,8 +115,9 @@ come back. Your photos themselves are never touched either way.
 ## Known limits of this beta
 
 - It is not signed yet, so Windows warns before installing it.
-- Lumen does not check for new versions. New versions are published at
-  <https://github.com/awaisjameel/lumen/releases>.
+- In-app updates are not available in beta builds; Settings → Updates and
+  about says so. Install a new version over the old one. New versions are
+  published at <https://github.com/awaisjameel/lumen/releases>.
 - English only.
 - Camera RAW support varies by camera and compression mode. DNG with
   lossy-JPEG sensor data or deflate compression is not read by this build.
