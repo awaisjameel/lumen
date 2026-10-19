@@ -62,7 +62,7 @@ because a run failed.
 - **Always pass `-timeout`** to `go test`; the race run is slow.
 - Tests that need real models go through `internal/testenv` and skip cleanly without `deps/runtime`. Face and RAW tests also skip unless `LUMEN_FACE_PHOTOS` / `LUMEN_RAW_SAMPLES` name a folder (see `e2e/README.md`).
 - The frontend must finish building before Go embeds `frontend/dist`; never run the frontend and Go production builds concurrently.
-- The version is set once in `build/config.yml`; after changing it run `wails3 task common:update:build-assets` (`TestVersionsAgree` fails until then).
+- The version and the copyright are set once in `build/config.yml`; after changing either, run `wails3 task common:update:build-assets` (`TestVersionsAgree` fails until then) and restore the PolyForm licence it resets in `build/linux/nfpm/nfpm.yaml` (`TestLicenceAndCopyrightAgree`).
 - After changing an exported service method or a wire type, regenerate the bindings and check `git diff -- frontend/bindings`. Bindings are never edited by hand.
 
 ### Running the real app for a check
