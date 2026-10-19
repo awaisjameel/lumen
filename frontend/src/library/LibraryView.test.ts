@@ -169,6 +169,9 @@ it('puts the Trash actions and its files on disk in the header, with no photo se
   expect(header.find('[data-trash-restore-all]').exists()).toBe(true)
   expect(wrapper.find('search-box-stub').exists()).toBe(false)
   expect(wrapper.get('[data-trash-notice]').text()).toContain(t('trash.summary', { n: 3 }))
+  // Its items are files to restore or delete: no view bar, no Details toggle.
+  expect(wrapper.find('[role="toolbar"]').exists()).toBe(false)
+  expect(header.find(`[aria-label="${t('library.info')}"]`).exists()).toBe(false)
   wrapper.unmount()
 })
 
@@ -406,6 +409,18 @@ it('opens the legacy Videos route with the Videos filter selected', async () => 
     expect.objectContaining({ filter: Filter.FilterVideos }),
     expect.anything(),
   )
+  wrapper.unmount()
+})
+
+it('counts photos and videos in the caption, leaving out videos the library has none of', async () => {
+  const { wrapper, lib } = await mountedLibrary('/')
+  lib.counts = { photos: 1200, videos: 0, favourites: 0, people: 0, trash: 0 }
+  lib.countsLoaded = true
+  await flushPromises()
+  expect(wrapper.get('[aria-live="polite"]').text()).toBe('1,200 photos')
+  lib.counts = { photos: 1200, videos: 3, favourites: 0, people: 0, trash: 0 }
+  await flushPromises()
+  expect(wrapper.get('[aria-live="polite"]').text()).toBe('1,200 photos · 3 videos')
   wrapper.unmount()
 })
 

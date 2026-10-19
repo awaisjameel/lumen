@@ -46,8 +46,32 @@ const ENGINE_CATEGORIES: readonly PrefCategory[] = [
   PrefCategory.PrefFiles,
 ]
 
-/** The single group search results live in (they have no days). */
+/**
+ * The groups search results live in, as they have no days: the few best
+ * matches lead, then the rest, both best first.
+ */
+export const BEST = 'best'
 export const RESULTS = 'results'
+/** How many results lead as the best match. */
+export const BEST_MATCHES = 4
+
+/** Whether a group is one of a search's, not a day. */
+export function isResults(group: string): boolean {
+  return group === BEST || group === RESULTS
+}
+
+/** Search results, best first, as their groups. */
+function resultGroups(items: GridItem[]): { buckets: DayBucket[]; days: Map<string, GridItem[]> } {
+  const groups = [
+    [BEST, items.slice(0, BEST_MATCHES)],
+    [RESULTS, items.slice(BEST_MATCHES)],
+  ] as const
+  const kept = groups.filter(([, part]) => part.length)
+  return {
+    buckets: kept.map(([day, part]) => ({ day, count: part.length })),
+    days: new Map(kept),
+  }
+}
 
 /** What the grid shows: part of the timeline, or search results (best first). */
 export type Scope =
@@ -80,7 +104,7 @@ export interface Sel {
 }
 
 /** What a search found beyond its items. */
-type SearchInfo = Omit<SearchResults, 'items'>
+export type SearchInfo = Omit<SearchResults, 'items'>
 
 /**
  * Library state: the groups (days, or one group of search results) for the
@@ -243,6 +267,8 @@ export const useLibrary = defineStore('library', () => {
   // day -> items. A shallowRef keeps big maps cheap; notifyDays tells
   // everything shown from it that it changed.
   const days = shallowRef(new Map<string, GridItem[]>())
+  // day -> where most of its items were taken, for its heading; set with days.
+  const dayPlaces = shallowRef(new Map<string, string>())
   /**
    * Tells the views days changed (or its items did, in place). A new Map, not
    * triggerRef: a watcher of () => days skips its callback when the value is
@@ -281,7 +307,7 @@ export const useLibrary = defineStore('library', () => {
   async function resultSelection() {
     const current = scope.value
     if (current.kind === 'search') {
-      const ids = (days.value.get(RESULTS) ?? []).map((item) => item.id)
+      const ids = resultItems().map((item) => item.id)
       return engine.selection({ filter: Filter.FilterAll }, ids, true)
     }
     if (current.media && (current.view.album || current.view.filter === Filter.FilterFavourites)) {
@@ -495,7 +521,7 @@ export const useLibrary = defineStore('library', () => {
       if (s.kind === 'search') {
         const r = s.query
           ? await engine.search(s.query, signal)
-          : { items: [], people: [], pending: 0, complete: true, noAI: false, blocked: false }
+          : { items: [], people: [], description: '', pending: 0, complete: true, noAI: false, blocked: false }
         if (current !== generation || request !== loadRequest) return
         let items = r.items
         // A pre-change answer must be read again before any of its hits
@@ -521,16 +547,16 @@ export const useLibrary = defineStore('library', () => {
           pending: r.pending,
           complete: r.complete,
           people: r.people,
+          description: r.description,
           noAI: r.noAI,
           blocked: r.blocked,
         }
-        buckets.value = items.length ? [{ day: RESULTS, count: items.length }] : []
-        days.value = new Map(items.length ? [[RESULTS, items]] : [])
-        fresh.add(RESULTS)
+        showResults(items)
       } else {
         let b = await engine.timeline(s.view, signal)
         if (s.media && (s.view.album || s.view.filter === Filter.FilterFavourites)) {
           const projected = new Map<string, GridItem[]>()
+          const placed = new Map<string, string>()
           const counts: DayBucket[] = []
           for (const bucket of b) {
             const rows = await engine.days(bucket.day, bucket.day, s.view, signal)
@@ -540,11 +566,14 @@ export const useLibrary = defineStore('library', () => {
               .filter((item) => (s.media === Filter.FilterVideos ? !!item.v : !item.v))
             if (items.length) {
               projected.set(bucket.day, items)
+              const place = rows[0]?.place
+              if (place) placed.set(bucket.day, place)
               counts.push({ day: bucket.day, count: items.length })
               fresh.add(bucket.day)
             }
           }
           days.value = projected
+          dayPlaces.value = placed
           b = counts
         }
         if (current !== generation || request !== loadRequest) return
@@ -562,6 +591,18 @@ export const useLibrary = defineStore('library', () => {
     } finally {
       if (request === loadRequest) searchLoading.value = false
     }
+  }
+
+  /** A search's results, best first. */
+  function resultItems(): GridItem[] {
+    return [...(days.value.get(BEST) ?? []), ...(days.value.get(RESULTS) ?? [])]
+  }
+
+  function showResults(items: GridItem[]) {
+    const groups = resultGroups(items)
+    buckets.value = groups.buckets
+    days.value = groups.days
+    for (const { day } of groups.buckets) fresh.add(day)
   }
 
   /** Stop a search while keeping any already visible, revalidated results. */
@@ -622,13 +663,12 @@ export const useLibrary = defineStore('library', () => {
     const request = ++resultsRequest
     resultsAbort.abort()
     resultsAbort = new AbortController()
-    const items = days.value.get(RESULTS) ?? []
+    const items = resultItems()
     try {
       const updated = await currentHits(items, resultsAbort.signal)
       const kept = scope.value.kind === 'search' ? await refineHits(updated, scope.value, resultsAbort.signal) : updated
       if (current !== generation || load !== loadRequest || request !== resultsRequest) return
-      buckets.value = kept.length ? [{ day: RESULTS, count: kept.length }] : []
-      days.value = new Map(kept.length ? [[RESULTS, kept]] : [])
+      showResults(kept)
       if (selected.value && !itemAt(selected.value)) selected.value = movedOn(selected.value)
       if (viewer.value && !itemAt(viewer.value)) viewer.value = movedOn(viewer.value)
       stale = false
@@ -702,6 +742,7 @@ export const useLibrary = defineStore('library', () => {
     if (scope.value.kind === 'search') {
       timelineLoaded.value = false
       days.value = new Map()
+      dayPlaces.value = new Map()
       buckets.value = []
       await setScope(scope.value)
     } else {
@@ -710,6 +751,7 @@ export const useLibrary = defineStore('library', () => {
       inflight.clear()
       fresh.clear()
       days.value = new Map()
+      dayPlaces.value = new Map()
       selected.value = null
       viewer.value = null
       await refresh({ assets: true, thumbs: false, tags: true, people: true })
@@ -753,6 +795,7 @@ export const useLibrary = defineStore('library', () => {
       const got = await engine.days(from, to, view, daysAbort.signal)
       if (current !== generation || revision !== dayRevision) return
       const next = new Map(days.value)
+      const nextPlaces = new Map(dayPlaces.value)
       const inSpan = new Set(missing)
       for (const d of got) {
         if (!inSpan.has(d.day)) continue // another request owns intervening days
@@ -764,13 +807,17 @@ export const useLibrary = defineStore('library', () => {
             ? d.items.filter((item) => (currentScope.media === Filter.FilterVideos ? !!item.v : !item.v))
             : d.items
         next.set(d.day, items)
+        if (d.place) nextPlaces.set(d.day, d.place)
+        else nextPlaces.delete(d.day)
         fresh.add(d.day)
         inSpan.delete(d.day)
       }
       for (const d of inSpan) {
         next.delete(d) // the day emptied (e.g. files deleted)
+        nextPlaces.delete(d)
         fresh.add(d)
       }
+      dayPlaces.value = nextPlaces
       days.value = next
       daysError.value = ''
       // A filter edit or source removal can remove the selected item while
@@ -828,6 +875,7 @@ export const useLibrary = defineStore('library', () => {
     if (!refreshingSearch) {
       searchInfo.value = null
       days.value = new Map()
+      dayPlaces.value = new Map()
       buckets.value = []
     }
     fresh.clear()
@@ -1028,6 +1076,7 @@ export const useLibrary = defineStore('library', () => {
     daysError,
     searchInfo,
     searchLoading,
+    dayPlaces,
     cancelSearch,
     days,
     selected,

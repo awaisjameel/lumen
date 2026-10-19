@@ -901,8 +901,10 @@ async function resetAll() {
                     <strong>{{ t('settings.previewTitle') }}</strong>
                     <p>{{ t('settings.previewMeta') }}</p>
                   </div>
+                  <!-- The accent's own colour, so choosing one shows it here. -->
                   <UButton
                     :icon="icons.heart"
+                    color="primary"
                     variant="soft"
                     :aria-pressed="previewFavourite"
                     @click="previewFavourite = !previewFavourite"

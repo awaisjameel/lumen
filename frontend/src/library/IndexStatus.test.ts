@@ -7,6 +7,7 @@ import { Device, engine, FailReason, WaitReason } from '../bridge'
 import type { Progress } from '../bridge'
 import { useLibrary } from './store'
 import IndexStatus from './IndexStatus.vue'
+import { commandById, runCommand } from '../shared/commands'
 import { mountInApp } from '../shared/testing'
 
 let mounted: VueWrapper | undefined
@@ -230,4 +231,20 @@ it('shows AI failure reasons and the unsupported-format explanation even with no
   expect(details().text()).toContain('Image model unavailable')
   expect(details().text()).toContain('Face model unavailable')
   expect(details().text()).toContain('the original files stay in their folders')
+})
+
+it('opens its activity from anywhere, as a search waiting for photos asks', async () => {
+  show({ embedding: 40 }, { embedding: true })
+  expect(new DOMWrapper(document.body).find('[data-activity-details]').exists()).toBe(false)
+  expect(await runCommand('app.activity')).toBe(true)
+  await flushPromises()
+  expect(details().text()).toContain('Understanding your photos')
+  mounted?.unmount()
+  mounted = undefined
+  expect(commandById('app.activity')).toBeUndefined()
+})
+
+it('leaves the activity command to the library’s own card, not a preview of one', () => {
+  mounted = mountInApp(IndexStatus, { plugins: [router], props: { progress: idle } })
+  expect(commandById('app.activity')).toBeUndefined()
 })

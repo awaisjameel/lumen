@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { dateLabel, dayLabel, daySpan } from './format'
+import { dateLabel, dayLabel, daySpan, spanOfDays } from './format'
 import { t } from './i18n'
 
 beforeEach(() => {
@@ -33,4 +33,10 @@ it('counts one item in the singular', () => {
 it('names a day by its date alone, with the year', () => {
   expect(dateLabel('2026-10-15')).toBe('15 October 2026')
   expect(dateLabel('2021-01-03')).toBe('3 January 2021')
+})
+
+it('spans a collection’s days from its oldest to its newest, or says nothing without days', () => {
+  expect(spanOfDays(['2026-10-04', '2026-06-01', '2021-01-03'])).toBe(daySpan('2021-01-03', '2026-10-04'))
+  expect(spanOfDays(['2026-10-04', '2026-10-03'], true)).toBe(daySpan('2026-10-03', '2026-10-04', true))
+  expect(spanOfDays([])).toBe('')
 })

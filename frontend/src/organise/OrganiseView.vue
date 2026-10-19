@@ -22,6 +22,7 @@ import type { OrganiseMove, OrganiseRun } from '../bridge'
 import { icons } from '../design/icons'
 import { useLibrary } from '../library/store'
 import { FileTools } from '../media/lazy'
+import Chip from '../shared/Chip.vue'
 import ViewBar from '../shared/ViewBar.vue'
 import Segmented from '../shared/Segmented.vue'
 import { registerCommands, runCommand, useCommands } from '../shared/commands'
@@ -595,18 +596,14 @@ onScopeDispose(() => removeRunCommands())
               <p id="organise-scheme-help" class="hint">{{ t('organise.schemeHint') }}</p>
             </div>
             <div class="chips" role="group" :aria-label="t('organise.tokens')">
-              <UButton
+              <Chip
                 v-for="token in ORGANISE_TOKENS"
                 :key="token"
                 :disabled="busy"
                 data-organise-token
-                class="chip"
-                size="sm"
-                color="neutral"
-                variant="outline"
                 :title="t(`organise.token.${token}`)"
                 @click="insertToken(token)"
-                >{{ braced(token) }}</UButton
+                >{{ braced(token) }}</Chip
               >
             </div>
             <p v-if="schemeError" id="organise-scheme-check" class="scheme-error" aria-live="polite">
@@ -1112,11 +1109,6 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-}
-.chip {
-  min-height: 2rem;
-  border-radius: 999px;
-  font-variant-numeric: tabular-nums;
 }
 .scheme-error {
   display: flex;

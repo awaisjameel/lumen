@@ -18,6 +18,7 @@ import { notify } from '../shared/notify'
 import { useCommands } from '../shared/commands'
 import type { Command } from '../shared/commands'
 import CardGrid from '../shared/CardGrid.vue'
+import Chip from '../shared/Chip.vue'
 import FeatureState from '../shared/FeatureState.vue'
 import Icon from '../shared/Icon.vue'
 import IconButton from '../shared/IconButton.vue'
@@ -159,21 +160,16 @@ useCommands([refreshCommand])
       ><ViewBar :label="t('places.country')"
         ><div class="country-chips">
           <span>{{ t('places.country') }}</span
-          ><UButton
-            :variant="!country ? 'soft' : 'ghost'"
-            :color="!country ? 'primary' : 'neutral'"
-            :aria-pressed="!country"
-            @click="country = ''"
-            >{{ t('places.allCountries') }} <span class="tnum">{{ formatNumber(list.length) }}</span></UButton
-          ><UButton
+          ><Chip :pressed="!country" data-country="" @click="country = ''"
+            >{{ t('places.allCountries') }} <span class="count">{{ formatNumber(list.length) }}</span></Chip
+          ><Chip
             v-for="name in countries"
             :key="name"
-            :variant="country === name ? 'soft' : 'ghost'"
-            :aria-pressed="country === name"
-            :color="country === name ? 'primary' : 'neutral'"
+            :pressed="country === name"
+            :data-country="name"
             @click="country = name"
             >{{ name }}
-            <span class="tnum">{{ formatNumber(list.filter((p) => p.country === name).length) }}</span></UButton
+            <span class="count">{{ formatNumber(list.filter((p) => p.country === name).length) }}</span></Chip
           >
         </div></ViewBar
       ></template
@@ -342,6 +338,12 @@ p,
 }
 .country-chips > * {
   flex-shrink: 0;
+}
+.country-chips .count {
+  color: var(--ui-text-dimmed);
+}
+.country-chips [aria-pressed='true'] .count {
+  color: inherit;
 }
 .tnum,
 .section-head span {

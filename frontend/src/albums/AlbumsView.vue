@@ -58,8 +58,8 @@ const visibleAlbums = computed(() =>
 )
 const filters = computed(() => [
   { value: 'all', label: t('albums.all') },
-  { value: AlbumKind.AlbumManual, label: t('albums.manual') },
-  { value: AlbumKind.AlbumSmart, label: t('albums.smart') },
+  { value: AlbumKind.AlbumManual, label: t('albums.allManual') },
+  { value: AlbumKind.AlbumSmart, label: t('albums.allSmart') },
 ])
 const dateError = computed(
   () => kind.value === AlbumKind.AlbumSmart && !!rule.value.from && !!rule.value.to && rule.value.from > rule.value.to,

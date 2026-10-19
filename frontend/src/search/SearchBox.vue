@@ -20,6 +20,11 @@ import { useLibrary } from '../library/store'
 import FaceThumb from '../people/FaceThumb.vue'
 import { useRecentSearches } from './recent'
 
+defineProps<{
+  /** Whether a Search button follows the field, as on the search page. */
+  button?: boolean
+}>()
+
 const route = useRoute()
 const router = useRouter()
 const lib = useLibrary()
@@ -127,8 +132,9 @@ function search() {
   if (!q) return
   close()
   void recent.remember(q)
-  if (route.name === 'search' && route.query.q === q) {
-    void lib.setScope({ kind: 'search', query: q }).catch(logError) // search again
+  // A new search starts unrefined; the same one, unrefined, runs again.
+  if (route.name === 'search' && route.query.q === q && Object.keys(route.query).length === 1) {
+    void lib.setScope({ kind: 'search', query: q }).catch(logError)
   } else {
     void router.push({ name: 'search', query: { q } })
   }
@@ -226,126 +232,149 @@ async function clearRecent() {
 
 <template>
   <div ref="root" class="search" @focusout="focusOut">
-    <UInput
-      ref="field"
-      v-model="text"
-      class="box"
-      type="search"
-      role="combobox"
-      aria-autocomplete="list"
-      aria-haspopup="listbox"
-      :aria-controls="open && options.length ? `${id}-list` : undefined"
-      :aria-expanded="open && options.length > 0"
-      :aria-activedescendant="open && options.length ? `${id}-${active}` : undefined"
-      :aria-label="t('search.command')"
-      :placeholder="t('search.placeholder')"
-      :title="focusTitle"
-      :leading-icon="icons.search"
-      variant="none"
-      :ui="{ base: 'search-input', trailing: 'pe-1.5 gap-1' }"
-      spellcheck="false"
-      autocomplete="off"
-      @focus="onFocus"
-      @update:model-value="open = true"
-      @keydown="onKey"
-    >
-      <template #trailing>
-        <IconButton
-          v-if="text"
-          :icon="icons.close"
-          :label="t('search.clear')"
-          color="neutral"
-          variant="ghost"
-          size="xs"
-          @mousedown.prevent
-          @click="clear"
-        />
-        <template v-else
-          ><kbd v-if="focusCaps.length" class="lumen-kbd" aria-hidden="true">{{ focusCaps.join(' ') }}</kbd></template
-        >
-      </template>
-    </UInput>
-
-    <div v-if="open && (options.length || preparing || prepareFailed)" class="menu lumen-float" @mousedown.prevent>
-      <p v-if="preparing" class="status" role="status">
-        <span class="lumen-light-dot" />{{ t('search.modelLoading') }}
-      </p>
-      <div v-else-if="prepareFailed" class="status" role="status">
-        {{ t('search.modelUnavailable')
-        }}<UButton color="neutral" variant="ghost" size="xs" @click="retry">{{ t('common.retry') }}</UButton>
-      </div>
-      <ul
-        v-if="options.length"
-        :id="`${id}-list`"
-        role="listbox"
-        :aria-label="t('search.suggestions')"
-        :aria-busy="loading"
+    <div class="field">
+      <UInput
+        ref="field"
+        v-model="text"
+        class="box"
+        type="search"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-haspopup="listbox"
+        :aria-controls="open && options.length ? `${id}-list` : undefined"
+        :aria-expanded="open && options.length > 0"
+        :aria-activedescendant="open && options.length ? `${id}-${active}` : undefined"
+        :aria-label="t('search.command')"
+        :placeholder="t('search.placeholder')"
+        :title="focusTitle"
+        :leading-icon="icons.search"
+        variant="none"
+        :ui="{ base: 'search-input', trailing: 'pe-1.5 gap-1' }"
+        spellcheck="false"
+        autocomplete="off"
+        @focus="onFocus"
+        @update:model-value="open = true"
+        @keydown="onKey"
       >
-        <template v-for="(o, i) in options" :key="optionKey(o)">
-          <li v-if="heading(o, i)" class="heading" role="presentation">{{ heading(o, i) }}</li>
-          <li
-            :id="`${id}-${i}`"
-            role="option"
-            :aria-selected="active === i"
-            :class="{ active: active === i, thing: o.kind === 'thing', recent: o.kind === 'recent' }"
-            @mouseenter="active = i"
-            @click="choose(o)"
+        <template #trailing>
+          <IconButton
+            v-if="text"
+            :icon="icons.close"
+            :label="t('search.clear')"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            @mousedown.prevent
+            @click="clear"
+          />
+          <template v-else
+            ><kbd v-if="focusCaps.length" class="lumen-kbd" aria-hidden="true">{{ focusCaps.join(' ') }}</kbd></template
           >
-            <template v-if="o.kind === 'search'"
-              ><Icon name="search" :size="20" /><span class="ellipsis">{{ t('search.for', { q: text.trim() }) }}</span
-              ><kbd class="lumen-kbd">Enter</kbd></template
-            >
-            <template v-else-if="o.kind === 'person'"
-              ><FaceThumb :face="o.person.cover" :size="32" round /><span class="ellipsis">{{ o.person.name }}</span
-              ><span class="count">{{ formatNumber(o.person.count) }}</span></template
-            >
-            <template v-else-if="o.kind === 'recent'"
-              ><Icon name="history" :size="16" /><span class="ellipsis">{{ o.query }}</span></template
-            >
-            <template v-else
-              ><Icon name="tag" :size="16" /><span class="ellipsis">{{ o.tag.name }}</span></template
-            >
-          </li>
         </template>
-      </ul>
-      <div v-if="error" class="status" role="alert">
-        <span>{{ t('search.suggestionError') }}</span
-        ><UButton color="neutral" variant="ghost" size="xs" @click="retry">{{ t('common.retry') }}</UButton>
-      </div>
-      <p
-        v-else-if="text.trim() && !loading && !found[0].length && !found[1].length && !recentOptions.length"
-        class="status"
-        role="status"
-      >
-        {{ t('search.noSuggestions') }}
-      </p>
-      <div v-if="options.length" class="foot">
-        <span><kbd class="lumen-kbd">↑</kbd> <kbd class="lumen-kbd">↓</kbd> {{ t('commands.move') }}</span
-        ><span><kbd class="lumen-kbd">Enter</kbd> {{ t('search.run') }}</span
-        ><UButton
-          v-if="recentOptions.length"
-          class="forget"
-          color="neutral"
-          variant="ghost"
-          size="xs"
-          data-search-forget
-          @click="clearRecent"
-          >{{ t('search.recentClear') }}</UButton
-        ><UButton color="neutral" variant="ghost" size="xs" @click="open = false"
-          ><kbd class="lumen-kbd">Esc</kbd>{{ t('common.close') }}</UButton
+      </UInput>
+
+      <div v-if="open && (options.length || preparing || prepareFailed)" class="menu lumen-float" @mousedown.prevent>
+        <p v-if="preparing" class="status" role="status">
+          <span class="lumen-light-dot" />{{ t('search.modelLoading') }}
+        </p>
+        <div v-else-if="prepareFailed" class="status" role="status">
+          {{ t('search.modelUnavailable')
+          }}<UButton color="neutral" variant="ghost" size="xs" @click="retry">{{ t('common.retry') }}</UButton>
+        </div>
+        <ul
+          v-if="options.length"
+          :id="`${id}-list`"
+          role="listbox"
+          :aria-label="t('search.suggestions')"
+          :aria-busy="loading"
         >
+          <template v-for="(o, i) in options" :key="optionKey(o)">
+            <li v-if="heading(o, i)" class="heading" role="presentation">{{ heading(o, i) }}</li>
+            <li
+              :id="`${id}-${i}`"
+              role="option"
+              :aria-selected="active === i"
+              :class="{ active: active === i, thing: o.kind === 'thing', recent: o.kind === 'recent' }"
+              @mouseenter="active = i"
+              @click="choose(o)"
+            >
+              <template v-if="o.kind === 'search'"
+                ><Icon name="search" :size="20" /><span class="ellipsis">{{ t('search.for', { q: text.trim() }) }}</span
+                ><kbd class="lumen-kbd">Enter</kbd></template
+              >
+              <template v-else-if="o.kind === 'person'"
+                ><FaceThumb :face="o.person.cover" :size="32" round /><span class="ellipsis">{{ o.person.name }}</span
+                ><span class="count">{{ formatNumber(o.person.count) }}</span></template
+              >
+              <template v-else-if="o.kind === 'recent'"
+                ><Icon name="history" :size="16" /><span class="ellipsis">{{ o.query }}</span></template
+              >
+              <template v-else
+                ><Icon name="tag" :size="16" /><span class="ellipsis">{{ o.tag.name }}</span></template
+              >
+            </li>
+          </template>
+        </ul>
+        <div v-if="error" class="status" role="alert">
+          <span>{{ t('search.suggestionError') }}</span
+          ><UButton color="neutral" variant="ghost" size="xs" @click="retry">{{ t('common.retry') }}</UButton>
+        </div>
+        <p
+          v-else-if="text.trim() && !loading && !found[0].length && !found[1].length && !recentOptions.length"
+          class="status"
+          role="status"
+        >
+          {{ t('search.noSuggestions') }}
+        </p>
+        <div v-if="options.length" class="foot">
+          <span><kbd class="lumen-kbd">↑</kbd> <kbd class="lumen-kbd">↓</kbd> {{ t('commands.move') }}</span
+          ><span><kbd class="lumen-kbd">Enter</kbd> {{ t('search.run') }}</span
+          ><UButton
+            v-if="recentOptions.length"
+            class="forget"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            data-search-forget
+            @click="clearRecent"
+            >{{ t('search.recentClear') }}</UButton
+          ><UButton color="neutral" variant="ghost" size="xs" @click="open = false"
+            ><kbd class="lumen-kbd">Esc</kbd>{{ t('common.close') }}</UButton
+          >
+        </div>
       </div>
     </div>
+    <UButton
+      v-if="button"
+      color="primary"
+      variant="solid"
+      :disabled="!text.trim()"
+      :title="text.trim() ? undefined : t('search.runReason')"
+      :trailing-icon="icons['arrow-right']"
+      data-search-run
+      @click="search"
+      >{{ t('search.run') }}</UButton
+    >
   </div>
 </template>
 
 <style scoped>
 .search {
-  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   flex: 1;
   width: 100%;
   min-width: 0;
   max-width: 40rem;
+}
+.search:has([data-search-run]) {
+  max-width: 48rem;
+}
+.field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
 }
 .box {
   width: 100%;

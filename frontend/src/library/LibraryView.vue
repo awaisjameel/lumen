@@ -4,14 +4,12 @@ import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
-import UInput from '@nuxt/ui/components/Input.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
-import UPopover from '@nuxt/ui/components/Popover.vue'
 import USlider from '@nuxt/ui/components/Slider.vue'
 import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import {
   AlbumKind,
@@ -37,10 +35,11 @@ import { logError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { useLiveReload } from '../shared/liveReload'
 import FeatureState from '../shared/FeatureState.vue'
-import { dateLabel, dayLabel } from '../shared/format'
+import { dateLabel, dayLabel, spanOfDays } from '../shared/format'
 import { formatNumber, listFormat, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import { useLayoutMode } from '../shared/layout'
+import Chip from '../shared/Chip.vue'
 import Icon from '../shared/Icon.vue'
 import MediaTile from '../shared/MediaTile.vue'
 import Page from '../shared/Page.vue'
@@ -51,6 +50,8 @@ import { observeResize } from '../shared/observeResize'
 import PersonHeader from '../people/PersonHeader.vue'
 import { usePeople } from '../people/store'
 import SearchBox from '../search/SearchBox.vue'
+import SearchRefine from '../search/SearchRefine.vue'
+import SearchSummary from '../search/SearchSummary.vue'
 import SourcesNotice from './SourcesNotice.vue'
 import { useThings } from '../things/store'
 import { useAlbums } from '../albums/store'
@@ -58,7 +59,7 @@ import { buildLayout, GAP, move, rowHeight, rowOfItem } from './layout'
 import type { Row } from './layout'
 import TrashBar from '../trash/TrashBar.vue'
 import TrashCaption from '../trash/TrashCaption.vue'
-import { RESULTS, scopeKey, useLibrary } from './store'
+import { BEST, isResults, scopeKey, useLibrary } from './store'
 import type { Scope, Sel } from './store'
 import TimelineScrubber from './TimelineScrubber.vue'
 import DetailsPanel from './DetailsPanel.vue'
@@ -147,21 +148,6 @@ const mediaItems = computed(() => [
   { value: Filter.FilterAll, label: t('library.all') },
   { value: Filter.FilterPhotos, label: t('library.photos') },
   ...(lib.settings.videos ? [{ value: Filter.FilterVideos, label: t('library.videos') }] : []),
-])
-const places = shallowRef<Place[]>([])
-function refine(key: string, value: string | number | boolean | undefined) {
-  void router.replace({ query: { ...route.query, [key]: value ? String(value) : undefined } })
-}
-async function loadPlaces() {
-  try {
-    places.value = await engine.places()
-  } catch (e) {
-    logError(e)
-  }
-}
-const placeChoices = computed(() => [
-  { value: 0, label: t('search.resultsAnyPlace') },
-  ...places.value.map((p) => ({ value: p.id, label: p.name })),
 ])
 const manualAlbums = computed(() =>
   albums.list.filter((a) => a.kind === AlbumKind.AlbumManual).map((a) => ({ value: a.id, label: a.name })),
@@ -340,10 +326,22 @@ function reloadCollection() {
   void loadGroupTitle()
   void lib.refresh().catch(logError)
 }
+// A search is refined by its kind, Favourites, dates and place (SearchRefine).
+const filtered = computed(
+  () =>
+    media.value !== Filter.FilterAll ||
+    (lib.isSearch && !!(route.query.favourites || route.query.from || route.query.to || route.query.place)),
+)
 function clearFilters() {
   if (lib.isSearch) void router.replace({ name: 'search', query: { q: route.query.q } })
   else showMedia(Filter.FilterAll)
 }
+/** Starts over with an empty search box, its suggestions open. */
+async function searchAgain() {
+  await router.push({ name: 'search' })
+  await runCommand('search.focus')
+}
+const examples = computed(() => [t('search.example.sunset'), t('search.example.cake'), t('search.example.text')])
 
 // --- Layout and virtualization --------------------------------------------
 
@@ -369,7 +367,6 @@ onBeforeUnmount(() => {
 
 const layout = computed(() =>
   buildLayout(lib.buckets, Math.max(width.value, 200), prefs.prefs.tileSize, {
-    headers: !lib.isSearch,
     caption: lib.inTrash ? TRASH_CAPTION_H : 0,
   }),
 )
@@ -856,7 +853,6 @@ watch(
   { flush: 'post' },
 )
 
-const aiError = computed(() => lib.progress?.ai.error ?? '')
 const empty = computed(() => lib.timelineLoaded && lib.buckets.length === 0)
 // A search can take seconds (the first one loads the text model): say so.
 const searching = computed(() => lib.isSearch && lib.searchLoading)
@@ -864,8 +860,9 @@ const emptyText = computed((): [string, string] => {
   const s = scope.value
   if (s.kind === 'search') {
     if (!s.query) return [t('search.resultsFirstUse'), t('search.resultsFirstUseHint')]
+    if (lib.searchInfo?.blocked) return [t('search.blockedTitle'), t('search.blockedHint')]
     return lib.searchInfo?.noAI
-      ? [t('search.unavailable'), aiError.value || t('error.noAI')]
+      ? [t('search.unavailable'), t('search.unavailableHint')]
       : [t('search.none'), t('search.noneHint')]
   }
   if (media.value !== Filter.FilterAll && route.name !== 'videos')
@@ -899,18 +896,35 @@ const emptyText = computed((): [string, string] => {
 // TrashBar reports it; unknown until it has asked.
 const trashFiles = ref<number | null>(null)
 const countText = computed(() => {
-  if (lib.isSearch) return t('search.results', { n: lib.total })
+  if (lib.isSearch) {
+    if (searching.value) return t('search.searching')
+    if (scope.value.kind === 'search' && !scope.value.query) return t('search.onThisPC')
+    return lib.total ? t('search.results', { n: lib.total }) : t('search.none')
+  }
   if (lib.inTrash && trashFiles.value !== null && lib.total)
     return t('trash.count', {
       items: t('status.items', { n: lib.total }),
       files: t('trash.files', { n: trashFiles.value }),
     })
-  if (collectionKind.value || personId.value || lib.inTrash) return t('status.items', { n: lib.total })
+  // A collection says when, as its hero does: "Jan 2021 – Oct 2026 · 248 items".
+  if (collectionKind.value)
+    return [
+      spanOfDays(
+        lib.buckets.map((b) => b.day),
+        collectionKind.value === 'event',
+      ),
+      t('collection.items', { n: lib.total }),
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  if (personId.value || lib.inTrash) return t('status.items', { n: lib.total })
   if (media.value === Filter.FilterPhotos) return t('library.photoCount', { n: formatNumber(lib.total) })
   if (media.value === Filter.FilterVideos) return t('library.videoCount', { n: formatNumber(lib.total) })
-  return lib.countsLoaded
+  if (!lib.countsLoaded) return t('status.items', { n: lib.total })
+  // A library without videos is not told it has none.
+  return lib.counts.videos
     ? t('library.caption', { photos: formatNumber(lib.counts.photos), videos: formatNumber(lib.counts.videos) })
-    : t('status.items', { n: lib.total })
+    : t('library.photoCount', { n: formatNumber(lib.counts.photos) })
 })
 
 const emptyIcon = computed<IconName>(() => (lib.isSearch ? 'search' : lib.inTrash ? 'trash' : 'photos'))
@@ -925,25 +939,27 @@ function onZoom(v: number | undefined) {
 function cellLabel(day: string, it: GridItem): string {
   if (lib.inTrash)
     return t('trash.cell', { name: it.name || t(it.v ? 'library.video' : 'library.photo'), day: dateLabel(day) })
-  const what =
-    day === RESULTS
-      ? t(it.v ? 'library.video' : 'library.photo')
-      : t(it.v ? 'library.videoOn' : 'library.photoOn', { day: dayLabel(day) })
+  const what = isResults(day)
+    ? t(it.v ? 'library.video' : 'library.photo')
+    : t(it.v ? 'library.videoOn' : 'library.photoOn', { day: dayLabel(day) })
   return it.f ? t('library.favouriteItem', { item: what }) : what
 }
 
-// Why a search may be missing photos: too many matches, or photos the AI
-// hasn't seen yet.
-const searchNotes = computed(() => {
+/**
+ * A search group's heading: the best few, said by what made them best (the
+ * description's meaning, else the people named), then the rest.
+ */
+function resultsHead(day: string): [string, string] {
+  if (day !== BEST) return [t('search.resultsMore'), t('search.bestFirst')]
   const info = lib.searchInfo
-  if (!lib.isSearch || !info) return []
-  const notes: string[] = []
-  if (info.people.length) notes.push(t('search.withPeople', { names: listFormat.format(info.people) }))
-  if (info.noAI && lib.total) notes.push(t('search.onlyPeople'))
-  if (!info.complete) notes.push(t('search.more', { n: lib.total }))
-  if (info.pending) notes.push(t('search.pending', { n: info.pending }))
-  return notes
-})
+  const byPeople = !!info?.people.length && (!info.description || info.noAI)
+  return [
+    t('search.resultsFirst'),
+    byPeople
+      ? t('search.withPeople', { names: listFormat.format(info.people.map((p) => p.name)) })
+      : t('search.closest'),
+  ]
+}
 </script>
 
 <template>
@@ -951,9 +967,11 @@ const searchNotes = computed(() => {
     <Page class="main" :scroll="false">
       <template #header>
         <PageHeader :title="title" :subtitle="countText" :back="back">
-          <template v-if="!lib.inTrash" #search><SearchBox /></template>
+          <template v-if="!lib.inTrash" #search><SearchBox :button="lib.isSearch" /></template>
           <TrashBar v-if="lib.inTrash" @files="trashFiles = $event" />
+          <!-- The Trash opens an item's details from its caption, and closes them in the panel. -->
           <IconButton
+            v-if="!lib.inTrash"
             :kbds="capsOf('view.details')"
             :icon="icons.inspector"
             :label="t('library.info')"
@@ -979,13 +997,6 @@ const searchNotes = computed(() => {
       </template>
 
       <template #toolbar>
-        <UAlert v-if="lib.searchLoading && lib.total" :title="t('search.searching')" color="neutral" variant="subtle"
-          ><template #actions
-            ><UButton color="neutral" variant="outline" @click="lib.cancelSearch()">{{
-              t('common.cancel')
-            }}</UButton></template
-          ></UAlert
-        >
         <UAlert
           v-if="lib.loadError && lib.total"
           :title="t('library.loadFailed')"
@@ -997,9 +1008,6 @@ const searchNotes = computed(() => {
             }}</UButton></template
           ></UAlert
         >
-        <p v-if="lib.isSearch && lib.timelineLoaded && lib.total" class="results-order">
-          {{ t('search.resultsFirst') }}
-        </p>
         <div v-if="lib.inTrash && lib.total" class="trash-intro" data-trash-notice>
           <p>{{ t('trash.summary', { n: lib.total }) }}</p>
           <p class="note"><Icon name="info" :size="14" />{{ t('trash.recoveryHint') }}</p>
@@ -1017,62 +1025,20 @@ const searchNotes = computed(() => {
             <UButton color="neutral" variant="outline" @click="lib.retryDays()">{{ t('common.retry') }}</UButton>
           </template>
         </UAlert>
-        <p v-for="n in searchNotes" :key="n" class="note">{{ n }}</p>
-        <p v-if="lib.isSearch && lib.searchInfo?.blocked" class="note">
-          {{ t('search.blocked') }}
-          <RouterLink to="/settings/blocked" class="link">{{ t('search.openBlocked') }}</RouterLink>
-        </p>
-        <ViewBar :label="t('library.view')">
+        <!-- The Trash lists files to restore or delete: no view to change. -->
+        <ViewBar v-if="!lib.inTrash" :label="t(lib.isSearch ? 'search.refine' : 'library.view')">
+          <SearchRefine v-if="lib.isSearch" :media="media" :videos="lib.settings.videos" />
           <Segmented
-            v-if="!lib.inTrash"
+            v-else
             :model-value="media"
             :items="mediaItems"
             :label="t('library.show')"
             @update:model-value="showMedia"
           />
           <template #end>
-            <UPopover
-              v-if="lib.isSearch"
-              @update:open="
-                (value) => {
-                  if (value) void loadPlaces()
-                }
-              "
+            <span v-if="lib.isSearch" class="order" :title="t('search.relevanceHint')"
+              ><Icon name="sliders" :size="14" />{{ t('search.relevance') }}</span
             >
-              <IconButton :icon="icons.filter" :label="t('search.resultsRefine')" color="neutral" variant="ghost" />
-              <template #content>
-                <div class="refine">
-                  <UCheckbox
-                    :model-value="route.query.favourites === 'true'"
-                    :label="t('search.resultsFavourites')"
-                    @update:model-value="refine('favourites', $event === true || undefined)"
-                  />
-                  <label
-                    >{{ t('search.resultsFrom')
-                    }}<UInput
-                      type="date"
-                      :model-value="String(route.query.from ?? '')"
-                      @update:model-value="refine('from', $event)"
-                  /></label>
-                  <label
-                    >{{ t('search.resultsTo')
-                    }}<UInput
-                      type="date"
-                      :model-value="String(route.query.to ?? '')"
-                      @update:model-value="refine('to', $event)"
-                  /></label>
-                  <USelect
-                    :model-value="Number(route.query.place) || 0"
-                    :items="placeChoices"
-                    :aria-label="t('search.resultsPlace')"
-                    @update:model-value="refine('place', $event)"
-                  />
-                  <UButton color="neutral" variant="ghost" @click="clearFilters">{{
-                    t('library.clearFilters')
-                  }}</UButton>
-                </div>
-              </template>
-            </UPopover>
             <div class="zoom" role="group" :aria-label="t('library.zoom')">
               <IconButton
                 :icon="icons['zoom-out']"
@@ -1110,6 +1076,13 @@ const searchNotes = computed(() => {
             </UDropdownMenu>
           </template>
         </ViewBar>
+        <SearchSummary
+          v-if="lib.isSearch && scope.kind === 'search' && scope.query"
+          :info="lib.searchInfo"
+          :total="lib.total"
+          :searching="searching"
+          @cancel="lib.cancelSearch()"
+        />
         <SourcesNotice />
         <UAlert
           v-if="work.total.value"
@@ -1157,11 +1130,8 @@ const searchNotes = computed(() => {
             :aria-label="t(lib.isSearch ? 'search.searching' : 'library.loading')"
             role="status"
           >
-            <p>{{ t(lib.isSearch ? 'search.searching' : 'library.loading') }}</p>
-            <UButton v-if="lib.isSearch" color="neutral" variant="outline" @click="lib.cancelSearch()">{{
-              t('common.cancel')
-            }}</UButton>
-            <p v-if="lib.isSearch">{{ t('library.modelLoading') }}</p>
+            <!-- A search says it is at work, with its Cancel, above the grid. -->
+            <p v-if="!lib.isSearch">{{ t('library.loading') }}</p>
             <div class="skeletons"><span v-for="i in 12" :key="i" class="lumen-skeleton" /></div>
           </div>
           <div v-else-if="empty && lib.progress?.scanning && lib.sources.length && !scanDismissed" class="scan-state">
@@ -1175,14 +1145,42 @@ const searchNotes = computed(() => {
             :title="emptyText[0]"
             :text="emptyText[1]"
           >
-            <UButton v-if="media !== Filter.FilterAll" @click="clearFilters">{{ t('library.clearFilters') }}</UButton>
+            <UButton v-if="filtered" @click="clearFilters">{{ t('library.clearFilters') }}</UButton>
+            <template v-else-if="lib.isSearch">
+              <!-- First use offers searches to try; no match offers starting over, then them. -->
+              <template v-if="scope.kind === 'search' && !scope.query">
+                <UButton
+                  v-for="example in examples"
+                  :key="example"
+                  color="neutral"
+                  variant="outline"
+                  :trailing-icon="icons['arrow-right']"
+                  data-search-example
+                  @click="router.push({ name: 'search', query: { q: example } })"
+                  >{{ example }}</UButton
+                >
+              </template>
+              <UButton v-else color="neutral" variant="outline" data-search-again @click="searchAgain">{{
+                t(lib.searchInfo?.noAI && !lib.searchInfo.blocked ? 'search.forPerson' : 'search.tryAnother')
+              }}</UButton>
+              <div v-if="scope.kind === 'search' && scope.query && !lib.searchInfo?.blocked" class="examples">
+                <span>{{ t('search.tryFor') }}</span>
+                <Chip
+                  v-for="example in examples"
+                  :key="example"
+                  data-search-example
+                  @click="router.push({ name: 'search', query: { q: example } })"
+                  >{{ example }}<Icon name="arrow-right" :size="14"
+                /></Chip>
+              </div>
+            </template>
             <UButton v-else-if="collectionKind === 'album'" @click="collectionHead?.addPhotos()">{{
               t('collection.addPhotos')
             }}</UButton>
             <UButton v-else-if="collectionKind === 'smart'" @click="collectionHead?.editRule()">{{
               t('collection.editRule')
             }}</UButton>
-            <UButton v-else-if="route.name === 'favourites' || lib.isSearch" to="/">{{ t('nav.library') }}</UButton>
+            <UButton v-else-if="route.name === 'favourites'" to="/">{{ t('nav.library') }}</UButton>
             <UButton v-else-if="!lib.inTrash && !collectionKind && !personId" to="/settings">{{
               t('settings.addFolder')
             }}</UButton>
@@ -1216,6 +1214,11 @@ const searchNotes = computed(() => {
                     >{{ t(dayState(v.row.day) === true ? 'selection.clear' : 'trash.selectAll') }}</UButton
                   >
                 </template>
+                <template v-else-if="isResults(v.row.day)">
+                  <h2>{{ resultsHead(v.row.day)[0] }}</h2>
+                  <span class="results-hint">{{ resultsHead(v.row.day)[1] }}</span>
+                  <span class="day-count">{{ t('search.groupCount', { n: v.row.count }) }}</span>
+                </template>
                 <template v-else>
                   <UCheckbox
                     class="day-check"
@@ -1225,7 +1228,9 @@ const searchNotes = computed(() => {
                     @update:model-value="lib.selectDay(v.row.day)"
                   />
                   <h2>{{ dayLabel(v.row.day) }}</h2>
-                  <span v-if="group && 'country' in group" class="day-place">{{ group.name }}</span>
+                  <span v-if="lib.dayPlaces.get(v.row.day)" class="day-place" data-day-place
+                    ><Icon name="places" :size="14" />{{ lib.dayPlaces.get(v.row.day) }}</span
+                  >
                   <span class="day-count">{{ t('library.dayCount', { n: v.row.count }) }}</span>
                 </template>
               </div>
@@ -1254,7 +1259,7 @@ const searchNotes = computed(() => {
                       :favourite="it?.f"
                       :selected="isSelected(it)"
                       :checkable="!!it"
-                      :selecting="lib.selectedIDs.size > 0"
+                      :selecting="lib.selectedIDs.size > 0 || lib.inTrash"
                       @check="check(v.row.day, it, $event)"
                     >
                       <template v-if="it && !lib.inTrash" #actions>
@@ -1435,11 +1440,6 @@ const searchNotes = computed(() => {
   margin: 0;
 }
 
-.link {
-  color: var(--ui-primary);
-  text-decoration: underline;
-}
-
 .zoom {
   display: flex;
   align-items: center;
@@ -1537,19 +1537,47 @@ const searchNotes = computed(() => {
     outline: 3px solid Highlight;
   }
 }
-.results-order {
-  padding: 0 var(--lumen-page-x);
-  margin: 0 0 0.5rem;
+.results-hint,
+.order {
   color: var(--ui-text-dimmed);
   font-size: 0.75rem;
+}
+.order {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  white-space: nowrap;
+}
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  color: var(--ui-text-dimmed);
+  font-size: 0.75rem;
+}
+.examples > span {
+  flex-basis: 100%;
 }
 .scan-state {
   padding: 1rem var(--lumen-page-x);
 }
 .day-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
   margin-left: auto;
-  color: var(--ui-text-dimmed);
+  overflow: hidden;
+  color: var(--ui-text-muted);
   font-size: 0.75rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.day-place + .day-count {
+  margin-left: 0.75rem;
 }
 .day-count {
   margin-left: auto;
@@ -1567,17 +1595,6 @@ const searchNotes = computed(() => {
 .day-header:focus-within .day-check,
 .day-header.selecting .day-check {
   opacity: 1;
-}
-.refine {
-  display: grid;
-  gap: 1rem;
-  padding: 1rem;
-  min-width: 15rem;
-}
-.refine label {
-  display: grid;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
 }
 .batch-banner {
   margin: 0 var(--lumen-page-x) 0.5rem;

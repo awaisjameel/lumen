@@ -12,7 +12,7 @@ import CollectionHero from '../shared/CollectionHero.vue'
 import Icon from '../shared/Icon.vue'
 import { block } from '../shared/block'
 import { errorText, reportError } from '../shared/errors'
-import { daySpan } from '../shared/format'
+import { spanOfDays } from '../shared/format'
 import { t } from '../shared/i18n'
 import { nameTooLong, trimName } from '../shared/names'
 import { notify } from '../shared/notify'
@@ -48,11 +48,8 @@ const resettable = computed(
 )
 const pinned = computed(() => (props.kind === 'thing' ? thing.value?.pinned : event.value?.pinned))
 const meta = computed(() => {
-  const dates = props.days.filter(Boolean)
-  const first = dates.at(-1),
-    last = dates[0]
   return [
-    first && last ? daySpan(first, last, props.kind === 'event') : '',
+    spanOfDays(props.days, props.kind === 'event'),
     t('collection.items', { n: props.count }),
     place.value
       ? [place.value.region, place.value.country].filter(Boolean).join(', ')

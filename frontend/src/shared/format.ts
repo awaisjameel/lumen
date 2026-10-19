@@ -41,6 +41,14 @@ export function daySpan(first: string, last: string, byDay = false): string {
   return (byDay ? daySpanFmt : monthSpanFmt).formatRange(parseDay(first), parseDay(last))
 }
 
+/** The span of a collection's days, newest first as the timeline lists them; "" without days. */
+export function spanOfDays(days: readonly string[], byDay = false): string {
+  const dates = days.filter(Boolean)
+  const first = dates.at(-1)
+  const last = dates[0]
+  return first && last ? daySpan(first, last, byDay) : ''
+}
+
 /** A day as a date, without its weekday: "15 October 2026". */
 export function dateLabel(day: string): string {
   return dateFmt.format(parseDay(day))

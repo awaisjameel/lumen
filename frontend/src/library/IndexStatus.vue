@@ -6,6 +6,7 @@ import IconButton from '../shared/IconButton.vue'
 import { computed, ref, shallowRef, useId, watch } from 'vue'
 import { engine, FailReason, WaitReason } from '../bridge'
 import type { FailureGroup, Progress } from '../bridge'
+import { useCommands } from '../shared/commands'
 import { fileName } from '../shared/format'
 import { t, formatNumber } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
@@ -28,6 +29,20 @@ const id = useId()
 const list = computed(() => (p.value ? tasks(p.value) : []))
 // The list behind the card: what's at work and next, and what failed.
 const expanded = ref(false)
+// The library's own card (not a preview of one) opens from anywhere: a
+// search still waiting for photos to be understood links to it.
+if (!props.progress)
+  useCommands([
+    {
+      id: 'app.activity',
+      group: 'app',
+      title: () => t('status.open'),
+      available: () => !!p.value,
+      run: () => {
+        expanded.value = true
+      },
+    },
+  ])
 const stopped = computed(
   () =>
     paused.value ||
