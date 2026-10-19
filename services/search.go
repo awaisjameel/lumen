@@ -66,15 +66,15 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	}
 	matches := people.MatchNames(query, named)
 	if slices.ContainsFunc(matches, func(match people.NameMatch) bool { return match.Target.Blocked }) {
-		return core.SearchResult{Items: []core.GridItem{}, People: []string{}, Complete: true, Blocked: true}, nil
+		return core.SearchResult{Items: []core.GridItem{}, People: []core.SearchPerson{}, Complete: true, Blocked: true}, nil
 	}
 	personMatches := slices.DeleteFunc(matches, func(match people.NameMatch) bool { return match.Target.Kind != core.BlockPerson })
 	var who []int64
-	var names []string
+	spelled := []core.SearchPerson{}
 	for _, match := range personMatches {
 		if !slices.Contains(who, match.Target.ID) {
 			who = append(who, match.Target.ID)
-			names = append(names, query[match.Start:match.End])
+			spelled = append(spelled, core.SearchPerson{ID: match.Target.ID, Name: query[match.Start:match.End]})
 		}
 	}
 	text := people.RemainingQuery(query, personMatches)
@@ -152,10 +152,7 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	if names == nil {
-		names = []string{}
-	}
-	return core.SearchResult{Items: items, People: names, Pending: pending, Complete: complete, NoAI: noAI}, nil
+	return core.SearchResult{Items: items, People: spelled, Description: text, Pending: pending, Complete: complete, NoAI: noAI}, nil
 }
 
 // RecentSearches lists the searches the user ran last, newest first. One that

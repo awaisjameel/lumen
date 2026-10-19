@@ -94,6 +94,7 @@ export type {
     Preferences,
     Progress,
     RenderInfo,
+    SearchPerson,
     SearchResult,
     Selection,
     Settings,

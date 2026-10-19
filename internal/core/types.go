@@ -570,12 +570,20 @@ type NamedTarget struct {
 
 // SearchResult is the answer to a natural-language search, best match first.
 type SearchResult struct {
-	Items    []GridItem `json:"items"`
-	People   []string   `json:"people"`   // people named in the query: results show all of them
-	Pending  int        `json:"pending"`  // photos not yet understood, so not searchable yet
-	Complete bool       `json:"complete"` // false: more matched than are shown
-	NoAI     bool       `json:"noAI"`     // the description could not be searched: the AI isn't available (see AI.Error)
-	Blocked  bool       `json:"blocked"`  // a blocked named entity occurred in the query
+	Items       []GridItem     `json:"items"`
+	People      []SearchPerson `json:"people"`      // people named in the query: results show all of them
+	Description string         `json:"description"` // the rest of the query, searched for; empty if it only names people
+	Pending     int            `json:"pending"`     // photos not yet understood, so not searchable yet
+	Complete    bool           `json:"complete"`    // false: more matched than are shown
+	NoAI        bool           `json:"noAI"`        // the description could not be searched: the AI isn't available (see AI.Error)
+	Blocked     bool           `json:"blocked"`     // a blocked named entity occurred in the query
+}
+
+// SearchPerson is a person a search named, spelled as the query spelled them,
+// so the query can be written again without them.
+type SearchPerson struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // Face is one face in a photo or video: where it is, and who it is.
@@ -616,6 +624,7 @@ type DayBucket struct {
 type DayItems struct {
 	Day   string     `json:"day"`
 	Items []GridItem `json:"items"`
+	Place string     `json:"place,omitempty"` // where most of the day's items were taken; "" if nowhere known or its name is blocked
 }
 
 // AssetDetail is everything the details panel shows.

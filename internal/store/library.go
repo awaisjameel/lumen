@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"lumen/internal/core"
@@ -362,27 +363,100 @@ func (s *Store) DayItems(ctx context.Context, from, to string, v core.View, minS
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.r.QueryContext(ctx, `SELECT id, taken_at, `+gridColumns+`
-		FROM assets WHERE `+where+` AND taken_at >= ? AND taken_at < ?
-		ORDER BY taken_at DESC, id DESC`, append(args, a.Unix(), b.AddDate(0, 0, 1).Unix())...)
+	out := []core.DayItems{}
+	err = s.read(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT id, taken_at, COALESCE(place_id, 0), `+gridColumns+`
+			FROM assets WHERE `+where+` AND taken_at >= ? AND taken_at < ?
+			ORDER BY taken_at DESC, id DESC`, append(args, a.Unix(), b.AddDate(0, 0, 1).Unix())...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var places []dayPlaces // beside out, one per day
+		for rows.Next() {
+			var it core.GridItem
+			var takenAt, place int64
+			if err := rows.Scan(append([]any{&it.ID, &takenAt, &place}, gridFields(&it)...)...); err != nil {
+				return err
+			}
+			day := time.Unix(takenAt, 0).UTC().Format(time.DateOnly)
+			if n := len(out); n == 0 || out[n-1].Day != day {
+				out = append(out, core.DayItems{Day: day})
+				places = append(places, dayPlaces{})
+			}
+			out[len(out)-1].Items = append(out[len(out)-1].Items, it)
+			places[len(places)-1].add(place)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return s.nameDayPlaces(ctx, tx, out, places)
+	})
+	return out, err
+}
+
+// dayPlaces counts a day's items by place, remembering which came first, so
+// the most common place wins and a tie goes to the newest item's.
+type dayPlaces struct {
+	order []int64
+	count map[int64]int
+}
+
+func (d *dayPlaces) add(place int64) {
+	if place == 0 {
+		return
+	}
+	if d.count == nil {
+		d.count = map[int64]int{}
+	}
+	if d.count[place] == 0 {
+		d.order = append(d.order, place)
+	}
+	d.count[place]++
+}
+
+func (d *dayPlaces) most() int64 {
+	var best int64
+	for _, place := range d.order {
+		if d.count[place] > d.count[best] {
+			best = place
+		}
+	}
+	return best
+}
+
+// nameDayPlaces names each day by its most common place. A place whose name
+// is blocked names no day, as it names no event.
+func (s *Store) nameDayPlaces(ctx context.Context, tx *sql.Tx, days []core.DayItems, places []dayPlaces) error {
+	most := make([]int64, len(days))
+	var ids []any
+	for i := range places {
+		if most[i] = places[i].most(); most[i] != 0 && !slices.Contains(ids, any(most[i])) {
+			ids = append(ids, most[i])
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id, name FROM places WHERE id IN (`+placeholders(len(ids))+`)
+		AND NOT `+placeBlocked("places.id"), ids...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	out := []core.DayItems{}
+	names := map[int64]string{}
 	for rows.Next() {
-		var it core.GridItem
-		var takenAt int64
-		if err := rows.Scan(append([]any{&it.ID, &takenAt}, gridFields(&it)...)...); err != nil {
-			return nil, err
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return err
 		}
-		day := time.Unix(takenAt, 0).UTC().Format(time.DateOnly)
-		if n := len(out); n == 0 || out[n-1].Day != day {
-			out = append(out, core.DayItems{Day: day})
-		}
-		out[len(out)-1].Items = append(out[len(out)-1].Items, it)
+		names[id] = name
 	}
-	return out, rows.Err()
+	for i := range days {
+		days[i].Place = names[most[i]]
+	}
+	return rows.Err()
 }
 
 // gridColumns are the columns a core.GridItem needs besides its id, in

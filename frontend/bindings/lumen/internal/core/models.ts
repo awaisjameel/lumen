@@ -570,6 +570,11 @@ export interface DayBucket {
 export interface DayItems {
     "day": string;
     "items": GridItem[] | null;
+
+    /**
+     * where most of the day's items were taken; "" if nowhere known or its name is blocked
+     */
+    "place"?: string;
 }
 
 /**
@@ -1696,6 +1701,15 @@ export interface RenderInfo {
 }
 
 /**
+ * SearchPerson is a person a search named, spelled as the query spelled them,
+ * so the query can be written again without them.
+ */
+export interface SearchPerson {
+    "id": number;
+    "name": string;
+}
+
+/**
  * SearchResult is the answer to a natural-language search, best match first.
  */
 export interface SearchResult {
@@ -1704,7 +1718,12 @@ export interface SearchResult {
     /**
      * people named in the query: results show all of them
      */
-    "people": string[] | null;
+    "people": SearchPerson[] | null;
+
+    /**
+     * the rest of the query, searched for; empty if it only names people
+     */
+    "description": string;
 
     /**
      * photos not yet understood, so not searchable yet

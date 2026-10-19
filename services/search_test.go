@@ -403,8 +403,8 @@ func TestSearchNeverReturnsTextOfPhotosTheUserCannotSee(t *testing.T) {
 	}
 }
 
-// nameAli names the faces of the given photos Ali.
-func (l *textLibrary) nameAli(t *testing.T, ids ...int64) {
+// nameAli names the faces of the given photos Ali, and returns who she is.
+func (l *textLibrary) nameAli(t *testing.T, ids ...int64) int64 {
 	t.Helper()
 	ctx := t.Context()
 	var results []store.FaceResult
@@ -424,15 +424,17 @@ func (l *textLibrary) nameAli(t *testing.T, ids ...int64) {
 		}
 		faces = append(faces, fs[0].ID)
 	}
-	if _, err := l.st.NameFaces(ctx, faces, "Ali"); err != nil {
+	ali, err := l.st.NameFaces(ctx, faces, "Ali")
+	if err != nil {
 		t.Fatal(err)
 	}
+	return ali
 }
 
 func TestSearchNarrowsTextMatchesToTheNamedPeople(t *testing.T) {
 	l := newTextLibrary(t)
 	ctx := t.Context()
-	l.nameAli(t, l.a, l.c)
+	ali := l.nameAli(t, l.a, l.c)
 	l.say(t, l.a, "Gate B12 boarding")
 	l.say(t, l.b, "Gate B13 boarding") // not Ali's
 	l.engine.hits = []search.Hit{{ID: l.c, Score: 0.9}}
@@ -440,8 +442,8 @@ func TestSearchNarrowsTextMatchesToTheNamedPeople(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []int64{l.a, l.c}; !slices.Equal(resultIDs(r), want) || !slices.Equal(r.People, []string{"Ali"}) {
-		t.Fatalf("results = %v for %v, want Ali's photo with the text, then her other that the engine found", resultIDs(r), r.People)
+	if want := []int64{l.a, l.c}; !slices.Equal(resultIDs(r), want) || !slices.Equal(r.People, []core.SearchPerson{{ID: ali, Name: "Ali"}}) || r.Description != "boarding" {
+		t.Fatalf("results = %v for %v, want Ali's photo with the text, then her other that the engine found, Ali and \"boarding\" searched", resultIDs(r), r.People)
 	}
 	// The engine searches only Ali's photos.
 	if l.engine.allow == nil || !l.engine.allow(l.a) || !l.engine.allow(l.c) || l.engine.allow(l.b) || l.engine.allow(l.d) {
@@ -449,8 +451,8 @@ func TestSearchNarrowsTextMatchesToTheNamedPeople(t *testing.T) {
 	}
 	// A name alone gives the person's photos, as before, without a text search.
 	l.engine.asked = nil
-	if r, err := l.svc.Search(ctx, "Ali"); err != nil || !slices.Equal(resultIDs(r), []int64{l.c, l.a}) || len(l.engine.asked) != 0 {
-		t.Errorf("a name alone = %v, %v (engine asked %q)", resultIDs(r), err, l.engine.asked)
+	if r, err := l.svc.Search(ctx, "Ali"); err != nil || !slices.Equal(resultIDs(r), []int64{l.c, l.a}) || len(l.engine.asked) != 0 || r.Description != "" {
+		t.Errorf("a name alone = %v, %v (engine asked %q, description %q)", resultIDs(r), err, l.engine.asked, r.Description)
 	}
 }
 
