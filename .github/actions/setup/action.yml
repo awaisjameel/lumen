@@ -110,6 +110,21 @@ runs:
           echo "$PATHS"
           echo EOF
         } >>"$GITHUB_ENV"
+    # Every module the later steps need, fetched here once, so no build or
+    # test downloads on the fly. go mod tidy fetches what the build and every
+    # test import, and leaves a tidy go.mod and go.sum as they are (go mod
+    # download all would add sums the bindings check then rejects). The
+    # module proxy sometimes drops a download mid-stream, so retry; with a
+    # restored cache this is quick.
+    - name: Download the Go modules
+      shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          go mod tidy && exit 0
+          echo "::warning::go mod tidy failed (attempt $attempt of 3)"
+          sleep $((attempt * 15))
+        done
+        exit 1
 
     # The CLI at the version go.mod already pins, so there is one source.
     - name: Find the Wails CLI's version
