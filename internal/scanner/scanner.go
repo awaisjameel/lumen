@@ -167,7 +167,7 @@ func (s *Scanner) Scan(ctx context.Context, src core.Source, under string, opt O
 		}
 	}()
 
-	walkErr := filepath.WalkDir(walkRoot, func(path string, d fs.DirEntry, err error) error {
+	walkErr := core.WalkDir(walkRoot, func(path string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -437,7 +437,7 @@ func CheckRoot(ctx context.Context, path string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	f, err := os.Open(path)
+	f, err := core.OpenDirShared(path)
 	if err != nil {
 		return err
 	}

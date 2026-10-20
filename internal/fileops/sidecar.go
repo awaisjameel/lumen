@@ -12,6 +12,8 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+
+	"lumen/internal/core"
 )
 
 // Sidecar files (IMG_1.jpg.xmp) are the one kind of file Lumen creates in
@@ -135,7 +137,7 @@ func writeSidecar(ctx context.Context, path string, data, wrote []byte, create b
 
 // hashFile is the hash of the file at path, read from its start.
 func hashFile(path string) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := core.OpenShared(path)
 	if err != nil {
 		return nil, err
 	}

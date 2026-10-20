@@ -9,7 +9,6 @@ import (
 	"image/draw"
 	"io"
 	"math"
-	"os"
 	"strconv"
 
 	"github.com/evanoberholster/imagemeta/imagehash"
@@ -282,7 +281,7 @@ func (d Decoders) heif(ctx context.Context, path string, orientation, maxSide in
 // goDecode reads formats libvips lacks with Go's image packages. They carry
 // no orientation.
 func goDecode(path string) (source, error) {
-	f, err := os.Open(path)
+	f, err := core.OpenShared(path)
 	if err != nil {
 		return source{}, err
 	}
