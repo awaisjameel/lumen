@@ -167,7 +167,7 @@ written.
     control directly when it meets the need; add a Lumen component only for
     shared product behaviour or a recurring composition (`Page`,
     `PageHeader`, `FeatureState`, `CollectionCard`, `MediaTile`,
-    `SelectionBar`, `MetaRow`, `PrefRow`, `WorkProgress`). Virtual grids, the
+    `SelectionDock`, `MetaRow`, `PrefRow`, `WorkProgress`). Virtual grids, the
     viewer and timelines stay purpose-built.
   - Colour, spacing, density, motion and layers come from the tokens in
     `design/tokens.css` (Nuxt UI's `--ui-*` and Lumen's `--lumen-*`), by
