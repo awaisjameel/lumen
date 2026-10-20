@@ -67,7 +67,12 @@ jobs:
           fi
           echo "VERSION=$version" >>"$GITHUB_ENV"
 
+      # The CI build job's Go cache: the installer's Lumen.exe is compiled
+      # the same way.
       - uses: ./.github/actions/setup
+        with:
+          go-cache: build
+          wails: "true"
 
       # A signing provider's own setup step goes here, before the check
       # below: it must make the certificate SIGN_THUMBPRINT names available

@@ -4,6 +4,8 @@
 # latency gate. Hosted runners are slower than the machine the latency
 # budgets were set on, so here that gate reports without failing;
 # scripts/lint.sh on a developer's machine stays the binding gate.
+# The jobs run side by side, the race tests split in two because the store's
+# randomised oracles alone take as long as every other package together.
 # The release workflow calls this one, so a release passes the same checks.
 name: CI
 
@@ -39,14 +41,17 @@ jobs:
         run: bash scripts/check-commit-msg.sh --range "$BASE..$HEAD"
 
   checks:
-    name: Checks (Windows)
+    name: Build and static checks
     runs-on: windows-2025
-    timeout-minutes: 150
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        with:
+          go-cache: build
+          wails: "true"
 
       # First, because Lumen.exe embeds frontend/dist, which a fresh clone
       # lacks: no Go package compiles before the frontend is built.
@@ -69,14 +74,69 @@ jobs:
         shell: bash
         run: scripts/lint.sh --no-bench
 
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-go-cache
+
+  tests:
+    name: Go tests, ${{ matrix.shard }}
+    runs-on: windows-2025
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: store
+            packages: ./internal/store
+          - shard: everything else
+            packages: . ./internal/... ./services/... ./cmd/... ./scripts/...
+            skip: lumen/internal/store
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          go-cache: race-${{ matrix.shard == 'store' && 'store' || 'rest' }}
+
+      # Go embeds frontend/dist; the tests need it to exist, not to be
+      # checked, which the build job does.
+      - name: Build the frontend
+        shell: bash
+        run: cd frontend && npx vite build --mode production --logLevel warn
+
       - name: Go tests (race detector)
         shell: bash
+        env:
+          PACKAGES: ${{ matrix.packages }}
+          SKIP: ${{ matrix.skip }}
         run: |
           source scripts/env.sh
+          read -ra patterns <<<"$PACKAGES"
+          mapfile -t pkgs < <(go list "${patterns[@]}" | grep -vxF "${SKIP:-.}")
           # Native models and filesystem tests must not compete across
-          # packages on hosted runners. The store's exhaustive oracles also
-          # need a larger package budget than on a developer's machine.
-          go test -race -p 1 -count=1 -timeout 1800s . ./internal/... ./services/... ./cmd/... ./scripts/...
+          # packages on hosted runners, so the tests run one package at a
+          # time; compiling them first keeps the build itself parallel.
+          go test -race -count=1 -run '^$' "${pkgs[@]}" >/dev/null
+          go test -race -p 1 -count=1 -timeout 1800s "${pkgs[@]}"
+
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-go-cache
+
+  latency:
+    name: Large-library latency
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          go-cache: bench
+
+      - name: Build the frontend
+        shell: bash
+        run: cd frontend && npx vite build --mode production --logLevel warn
 
       - name: Large-library latency (reported, not enforced)
         id: bench
@@ -103,3 +163,6 @@ jobs:
           if [ "$OUTCOME" = failure ]; then
             echo "::warning title=Latency budgets::a figure exceeded its budget on this runner; check it on a developer machine with scripts/bench.sh"
           fi
+
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-go-cache

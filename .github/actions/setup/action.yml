@@ -1,16 +1,33 @@
 name: Set up the Lumen build
 description: >-
   The pinned toolchain the README's "Building from source" names (Go, Node,
-  Python, llvm-mingw, the Wails CLI), the native dependencies scripts/deps.sh
-  fetches and prepares, cached between runs, and the frontend's packages.
+  Python, llvm-mingw, optionally the Wails CLI), the native dependencies
+  scripts/deps.sh fetches and prepares, and the frontend's packages, with
+  each expensive piece cached between runs.
 
+inputs:
+  go-cache:
+    description: >-
+      The name of this job's Go build cache. Jobs that compile differently
+      (race tests, a production build, linting) keep separate caches.
+    required: true
+  wails:
+    description: Whether to install the Wails CLI ("true" or "false").
+    default: "false"
+
+# The caches here are restored with actions/cache/restore and saved as soon
+# as they are complete, not in a post-job step: a post step only saves after
+# a successful job, so one failing test would otherwise send every later run
+# back to a cold 1.7 GB dependency build. The Go caches fill during the job,
+# so the job saves them at its end with ./.github/actions/save-go-cache.
 runs:
   using: composite
   steps:
-    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+    - id: go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version-file: go.mod
-        cache-dependency-path: go.sum
+        cache: false
 
     # Node 24.21.0 bundles npm 11.19.0, the oldest frontend/package.json's
     # engines accept (engine-strict is on).
@@ -27,7 +44,7 @@ runs:
 
     # The clang cgo, LibRaw and OxiPNG are built with, pinned with its hash.
     - id: llvm
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/llvm-mingw
         key: llvm-mingw-20260922-ucrt-x86_64
@@ -42,6 +59,11 @@ runs:
         unzip -q "$tmp/llvm-mingw.zip" -d "$tmp"
         mv "$tmp/llvm-mingw-20260922-ucrt-x86_64" "$tmp/llvm-mingw"
         rm "$tmp/llvm-mingw.zip"
+    - if: steps.llvm.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/llvm-mingw
+        key: ${{ steps.llvm.outputs.cache-primary-key }}
     - name: Put the toolchain on PATH
       shell: bash
       run: |
@@ -49,24 +71,84 @@ runs:
         echo 'C:\Program Files\7-Zip' >>"$GITHUB_PATH"
         { echo CGO_ENABLED=1; echo CC=clang; echo CXX=clang++; } >>"$GITHUB_ENV"
 
-    # The CLI at the version go.mod already pins, so there is one source.
-    # The module proxy sometimes drops a download mid-stream, so retry.
-    - name: Install the Wails CLI
+    # One cache per job purpose. A run restores the newest for its go.sum, or
+    # failing that its purpose's newest; Go's cache is content-addressed, so
+    # an older one still serves every package that has not changed. Pushes to
+    # main save a fresh one, and other runs save only when nothing was found,
+    # which keeps pull requests from crowding the repository's cache quota.
+    - name: Locate the Go caches
+      id: go-paths
       shell: bash
       run: |
-        version=$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)
+        lint=$(cygpath -w "$(cygpath -u "$RUNNER_TEMP")/golangci-lint")
+        echo "GOLANGCI_LINT_CACHE=$lint" >>"$GITHUB_ENV"
+        {
+          echo 'paths<<EOF'
+          go env GOCACHE GOMODCACHE
+          echo "$lint"
+          echo EOF
+        } >>"$GITHUB_OUTPUT"
+    - id: go-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.go-paths.outputs.paths }}
+        key: go-${{ runner.os }}-${{ inputs.go-cache }}-go${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ inputs.go-cache }}-go${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-
+          go-${{ runner.os }}-${{ inputs.go-cache }}-go${{ steps.go.outputs.go-version }}-
+    - name: Note how to save the Go caches
+      shell: bash
+      env:
+        PATHS: ${{ steps.go-paths.outputs.paths }}
+        KEY: ${{ steps.go-cache.outputs.cache-primary-key }}
+        SAVE: ${{ github.ref == 'refs/heads/main' || steps.go-cache.outputs.cache-matched-key == '' }}
+      run: |
+        {
+          echo "LUMEN_GO_CACHE_KEY=$KEY"
+          echo "LUMEN_GO_CACHE_SAVE=$SAVE"
+          echo 'LUMEN_GO_CACHE_PATHS<<EOF'
+          echo "$PATHS"
+          echo EOF
+        } >>"$GITHUB_ENV"
+
+    # The CLI at the version go.mod already pins, so there is one source.
+    - name: Find the Wails CLI's version
+      id: wails
+      if: inputs.wails == 'true'
+      shell: bash
+      run: |
+        echo "version=$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)" >>"$GITHUB_OUTPUT"
+        echo "bin=$(go env GOPATH)\\bin\\wails3.exe" >>"$GITHUB_OUTPUT"
+    - id: wails-cache
+      if: inputs.wails == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.wails.outputs.bin }}
+        key: wails3-${{ runner.os }}-${{ steps.wails.outputs.version }}-go${{ steps.go.outputs.go-version }}
+    # The module proxy sometimes drops a download mid-stream, so retry.
+    - name: Install the Wails CLI
+      if: inputs.wails == 'true' && steps.wails-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VERSION: ${{ steps.wails.outputs.version }}
+      run: |
         for attempt in 1 2 3; do
-          go install "github.com/wailsapp/wails/v3/cmd/wails3@$version" && exit 0
+          go install "github.com/wailsapp/wails/v3/cmd/wails3@$VERSION" && exit 0
           echo "::warning::go install failed (attempt $attempt of 3)"
           sleep $((attempt * 15))
         done
         exit 1
+    - if: inputs.wails == 'true' && steps.wails-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.wails.outputs.bin }}
+        key: ${{ steps.wails-cache.outputs.cache-primary-key }}
 
     # Everything scripts/deps.sh fetches is pinned by hash, so the key is the
     # scripts and sources that decide what it builds. The downloads also
     # keep a cold build working after an upstream prunes a pinned file.
     - id: deps
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           deps
@@ -86,6 +168,16 @@ runs:
     - name: Fetch and prepare the native dependencies
       shell: bash
       run: scripts/deps.sh
+    - if: steps.deps.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          deps
+          !deps/src
+          !deps/oxipng/rustc-*
+          !deps/oxipng/cargo-*
+          !deps/oxipng/rust-std-*
+        key: ${{ steps.deps.outputs.cache-primary-key }}
 
     - name: Install the frontend's packages
       shell: bash

@@ -36,7 +36,7 @@ go test -race -timeout 900s -run TestTagByNameRefusesABlockedThing ./internal/st
 
 scripts/lint.sh                             # static checks, frontend tests, doc links and large-library latency; must stay at zero
 scripts/lint.sh --fix                       # apply automatic fixes first
-scripts/lint.sh --no-bench                  # everything but the latency gate (CI runs that as a reported step)
+scripts/lint.sh --no-bench                  # everything but the latency gate (CI runs that as a reported job)
 scripts/bench.sh                            # large-library latency gate alone (one to two minutes; sources env.sh)
 scripts/install-hooks.sh                    # once per clone: commit-msg, pre-commit and pre-push hooks (.githooks)
 scripts/version.sh bump 0.13.0              # release: bump on a release/ branch, regenerate assets, commit
