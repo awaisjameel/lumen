@@ -4,6 +4,8 @@
 
 A Windows-first desktop photo and video gallery that organises large libraries with on-device AI. Fully local: no accounts, no uploads, no telemetry. The AI models, FFmpeg and the city database ship inside the installer, and Lumen never downloads anything at run time.
 
+![The Lumen library: a timeline of photos grouped by day, with the place of each day](docs/screenshots/library.webp)
+
 - **Search in plain language** ("dog on a beach at sunset", "Ali and Sara at the beach"), with results in a fraction of a second.
 - **People, Things, Places and Events** found automatically. Your corrections always win over the AI.
 - **A fast timeline** for hundreds of thousands of photos, a full viewer and video playback for codecs WebView2 cannot play itself.
@@ -12,6 +14,18 @@ A Windows-first desktop photo and video gallery that organises large libraries w
 - **Careful with your files**: originals are never modified. Removals go to the Windows Recycle Bin, and moves are previewed, journalled and undoable.
 
 The full tour of what Lumen does is in [docs/features.md](docs/features.md).
+
+## Screenshots
+
+| Search in plain language | The viewer with its details |
+| --- | --- |
+| ![Search results for "snowy mountains at sunrise", best matches first](docs/screenshots/search.webp) | ![A photo in the viewer beside its details panel](docs/screenshots/viewer.webp) |
+| **Places, on an offline atlas** | **Things, found automatically** |
+| ![Places grouped by city and country on a stylised world atlas](docs/screenshots/places.webp) | ![Things such as Nature, Mountains and Cities with photo mosaics](docs/screenshots/things.webp) |
+| **Smart albums** | **The dark theme** |
+| ![Smart albums that follow a Thing as the library changes](docs/screenshots/albums.webp) | ![Search results for "city lights at night" in the dark theme](docs/screenshots/dark.webp) |
+
+The sample photos are from [Unsplash](https://unsplash.com/license), by way of [Lorem Picsum](https://picsum.photos); their dates and places are invented for the screenshots.
 
 ## Privacy and the network
 
@@ -188,7 +202,7 @@ scripts/             deps.sh and its parts, prepare_models.py, env.sh, lint.sh, 
 .github/             CI and release workflows, and the shared toolchain set-up they use
 .githooks/           commit-msg, pre-commit and pre-push (scripts/install-hooks.sh turns them on)
 build/               Wails build config (config.yml holds the version), icons, the NSIS installer in build/windows/nsis
-docs/                the feature tour, beta guide, production signing, branding, GeoNames provenance, the original plan; docs/history holds the dated records
+docs/                the feature tour, beta guide, production signing, branding, GeoNames provenance, the original plan, the README screenshots; docs/history holds the dated records
 spikes/              Phase 0 experiments and later feasibility probes (own Go module; models in spikes/.cache)
 ```
 
