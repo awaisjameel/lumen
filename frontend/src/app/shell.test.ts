@@ -182,8 +182,10 @@ it('offers navigation and its own commands only once there is a library', async 
   await flushPromises()
   expect(router.currentRoute.value.path).toBe('/videos')
 
+  // The palette is loaded when first asked for. Importing it first keeps a
+  // slow first transform on a busy machine out of the wait for its dialog.
+  await import('./CommandPalette.vue')
   expect(await runCommand('app.commandPalette')).toBe(true)
-  // The palette is loaded when first asked for.
   const palette = () => document.body.querySelector('[role="dialog"]')?.textContent ?? ''
   await vi.waitFor(() => expect(palette()).toContain('Go to Library'))
   expect(palette()).toContain('Keyboard shortcuts')
@@ -195,6 +197,7 @@ it('lists every command that has a shortcut in the shortcut reference', async ()
   lib.sources = [{ id: 1, path: 'C:\\Photos', enabled: true }]
   wrapper = mountInApp(AppOverlays, { plugins: [pinia, router] })
   await flushPromises()
+  await import('./ShortcutHelp.vue') // loaded when first asked for, as above
   expect(await runCommand('app.shortcuts')).toBe(true)
   const text = () => document.body.querySelector('[role="dialog"]')?.textContent ?? ''
   await vi.waitFor(() => expect(text()).toContain('Keyboard shortcuts'))
