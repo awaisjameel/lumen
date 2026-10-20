@@ -262,8 +262,10 @@ func blockedOracleChanges() []blockedOracleChange {
 }
 
 func TestMaterialisedBlocksEqualTheOriginalPredicateThroughRandomisedChanges(t *testing.T) {
+	t.Parallel()
 	for _, seed := range []uint64{1, 42, 20261013} {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
+			t.Parallel()
 			st, ctx := openTest(t), t.Context()
 			seedBlockedOracle(ctx, t, st)
 			rng := rand.New(rand.NewPCG(seed, seed+1))

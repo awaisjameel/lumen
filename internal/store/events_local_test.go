@@ -57,8 +57,10 @@ func assertEventsMatchEveryAsset(t *testing.T, st *Store) {
 }
 
 func TestLocalEventsEqualTheWholeTimelineThroughRandomisedChanges(t *testing.T) {
+	t.Parallel()
 	for _, seed := range []uint64{1, 42, 20261013} {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
+			t.Parallel()
 			st, ctx := openTest(t), t.Context()
 			f := newEventFixture(t, st)
 			rng := rand.New(rand.NewPCG(seed, seed+1))
