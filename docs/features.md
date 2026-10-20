@@ -73,7 +73,7 @@ Each photo goes through these stages in order: metadata → thumbnails → AI em
   - A new person needs clear faces in three photos.
 - **Your corrections always win:**
   - Name a person. Using a name that's already taken asks "same person?" and merges them.
-  - Remove a face with "Not this person"; it is never put back.
+  - Take a face out with **Not {name}** in face review; it is never put back.
   - Move faces to another person or a new person, which splits a group.
   - Choose a person's picture.
 - Anything you've placed or named is never undone by the AI.

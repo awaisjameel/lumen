@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs static checks for Go, the frontend, the Python model script and these
-# shell scripts, plus frontend regression tests and the large-library benchmark.
+# Runs static checks for Go, the frontend, the Python scripts and these shell
+# scripts, plus the frontend and installer-payload regression tests, the
+# documentation's relative links and the large-library benchmark.
 # It runs them all, then fails if any failed, so one run shows every problem.
 #
 #   scripts/lint.sh             check

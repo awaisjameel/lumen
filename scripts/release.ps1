@@ -63,7 +63,7 @@ if ($Mode -eq 'Package') {
     }
     [IO.File]::WriteAllBytes($configFile, [Text.Encoding]::UTF8.GetBytes(($config | ConvertTo-Json -Depth 100) + "`n"))
     Invoke-Checked 'wails3' @('generate', 'bindings', '-f', '-tags production', '-clean=true', '-ts', '-i')
-    Invoke-Checked 'C:\Program Files\Git\bin\bash.exe' @('-lc', 'source scripts/env.sh && scripts/lint.sh && go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/...')
+    Invoke-Checked 'C:\Program Files\Git\bin\bash.exe' @('-lc', 'source scripts/env.sh && scripts/lint.sh && go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/... ./scripts/...')
     Invoke-Checked 'wails3' @('task', 'package', "SIGN_THUMBPRINT=$CertificateThumbprint", "TIMESTAMP_SERVER=$TimestampServer")
 }
 

@@ -5,7 +5,7 @@ Lumen's mark is a blue photographic aperture opening onto a warm illuminated **L
 ## Source and use
 
 - `build/appicon.png`: canonical 1254 × 1254 transparent PNG master. Generated with the built-in image-generation tool on 2026-10-05; retain this source rather than editing derived files. This is raster artwork, not an SVG or vector source.
-- `frontend/public/lumen.png`: 128 × 128, shared by `BrandMark.vue` and the native application About icon. Covers the sidebar, collapsed rail, navigation drawer, narrow header, onboarding and Settings → About. The app name remains live, theme-aware system-font text. Marks adjacent to that name are decorative; a collapsed standalone mark has an accessible name.
+- `frontend/public/lumen.png`: 128 × 128, shared by `BrandMark.vue` and the native application About icon. Covers the sidebar, collapsed rail, navigation drawer, narrow header, onboarding and About Lumen (Settings → Updates and about). The app name remains live, theme-aware system-font text. Marks adjacent to that name are decorative; a collapsed standalone mark has an accessible name.
 - `frontend/public/favicon.png`: dedicated 32 × 32 browser icon.
 - `build/windows/icon.ico`: 16, 32, 48, 64, 128 and 256 pixel representations, embedded into Lumen.exe by the existing syso build and into NSIS setup/uninstall; shortcuts use the executable icon.
 - `build/darwin/icons.icns`, DMG icon/background and `build/appicon.icon`: the same identity for the macOS build templates. The stale template `Assets.car` was removed and is now ignored; Icon Composer regenerates it on macOS 26+. No Wails artwork remains in the branding sources.
@@ -22,7 +22,7 @@ Run from the repository root in Git Bash:
 wails3 task common:generate:icons
 ```
 
-This runs `go run ./scripts/branding` and then the existing Wails ICO/ICNS generator. The frontend and icon build tasks depend on the same PNG task, with `run: once` preventing concurrent writers. PNGs use the existing `golang.org/x/image` scaler and preserve transparency, with no new packages, image service, runtime dependency or network request. Identical PNGs are left untouched. iOS exports follow its generated asset catalogue rather than a second size manifest. The branding command is included in `scripts/lint.sh`.
+This runs `go run ./scripts/branding` and then the existing Wails ICO/ICNS generator. The frontend and icon build tasks depend on the same PNG task, with `run: once` preventing concurrent writers. PNGs use the existing `golang.org/x/image` scaler and preserve transparency, with no new packages, image service, runtime dependency or network request. Identical PNGs are left untouched. iOS exports follow its generated asset catalogue rather than a second size manifest. `scripts/lint.sh` checks the branding command's code with the other Go packages.
 
 After changing the master, regenerate and commit all derived assets together. Run `scripts/lint.sh`, `wails3 task package`, and inspect native onboarding, navigation and About in both themes. macOS, Linux and mobile assets can be generated here, but acceptance of those applications requires their native toolchains/devices.
 

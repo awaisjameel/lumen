@@ -1,6 +1,7 @@
 # Packaged beta acceptance
 
-The versioned 0.12.0 layout also has a host-safe scratch acceptance script:
+The versioned runtime layout, new in 0.12.0, also has a host-safe scratch
+acceptance script:
 
 ```sh
 node e2e/installer/layout.mjs
@@ -43,7 +44,9 @@ On Windows with Windows Sandbox and its `wsb.exe` CLI installed, from Git Bash:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File e2e/installer/run-sandbox.ps1
 ```
 
-The default previous installer is `bin/Lumen-0.10.0-x64-setup.exe`;
+The default previous installer is `bin/Lumen-0.11.0-x64-setup.exe`, the
+accepted flat beta that the first updater-capable release must install over
+([production signing](../../docs/production-signing.md#build-and-verify-a-signed-release));
 `-PreviousVersion` selects another already-built version. Both packages must
 exist. Close any existing Sandbox first: the runner refuses to reuse it.
 

@@ -1,5 +1,5 @@
 # Builds a disposable, offline installer acceptance environment.
-param([string]$PreviousVersion = '0.10.0')
+param([string]$PreviousVersion = '0.11.0')
 $ErrorActionPreference = 'Stop'
 function Sandbox-Ids { return @(& wsb.exe list | Where-Object { $_ -match '^[a-f0-9-]{36}$' }) }
 if (@(Sandbox-Ids).Count) { throw 'Close the existing Windows Sandbox before running installer acceptance.' }
