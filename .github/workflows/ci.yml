@@ -73,7 +73,10 @@ jobs:
         shell: bash
         run: |
           source scripts/env.sh
-          go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/...
+          # Native models and filesystem tests must not compete across
+          # packages on hosted runners. The store's exhaustive oracles also
+          # need a larger package budget than on a developer's machine.
+          go test -race -p 1 -count=1 -timeout 1800s . ./internal/... ./services/... ./cmd/... ./scripts/...
 
       - name: Large-library latency (reported, not enforced)
         id: bench

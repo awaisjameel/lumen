@@ -14,6 +14,9 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"lumen/internal/core"
+	"lumen/internal/testenv"
 )
 
 // binCount is how many items the Recycle Bin of path's drive holds
@@ -90,6 +93,30 @@ func TestRecycleLeavesFoldersAndRelativePathsAlone(t *testing.T) {
 	}
 	if _, err := os.Stat(child); err != nil {
 		t.Errorf("the folder's file was touched: %v", err)
+	}
+}
+
+func TestRecycleRecognisesShellCallbacksForShortPaths(t *testing.T) {
+	dir := testenv.ShortPath(t)
+	path := write(t, filepath.Join(dir, "photo.jpg"))
+	long := core.LongPath(t.Context(), path)
+	out, err := Recycle(t.Context(), []string{path, long, strings.ToUpper(path)})
+	if err != nil || len(out) != 3 {
+		t.Fatalf("Recycle(short path) = %+v, %v; want Recycled", out, err)
+	}
+	for _, o := range out {
+		if o.Status == Kept {
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("the shell touched a file it could not recycle: %v", err)
+			}
+			t.Skip("this drive has no Recycle Bin, so the shell refused to recycle")
+		}
+		if o.Status != Recycled {
+			t.Fatalf("Recycle(short path) = %+v; want every alias Recycled", out)
+		}
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the recycled file is still in its folder: %v", err)
 	}
 }
 

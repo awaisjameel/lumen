@@ -72,7 +72,7 @@ func Recycle(ctx context.Context, paths []string) ([]Outcome, error) {
 	var queue []int
 	for i, p := range paths {
 		out[i].Path = p
-		key := core.Fold(filepath.Clean(p))
+		key := core.Fold(filepath.Clean(core.LongPath(ctx, p)))
 		if first, dup := op.byPath[key]; dup {
 			op.duplicates = append(op.duplicates, [2]int{i, first})
 			continue
@@ -246,7 +246,7 @@ func (o *operation) failAll(idx []int, err error) {
 func (o *operation) beforeDelete(path string, flags uint32) (proceed bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	i, ok := o.byPath[core.Fold(filepath.Clean(path))]
+	i, ok := o.byPath[core.Fold(filepath.Clean(core.LongPath(context.Background(), path)))]
 	if !ok || o.decided[i] {
 		return false
 	}
@@ -262,7 +262,7 @@ func (o *operation) beforeDelete(path string, flags uint32) (proceed bool) {
 // afterDelete is the shell reporting how deleting the file at path went.
 func (o *operation) afterDelete(path string, hr uintptr) {
 	o.mu.Lock()
-	i, ok := o.byPath[core.Fold(filepath.Clean(path))]
+	i, ok := o.byPath[core.Fold(filepath.Clean(core.LongPath(context.Background(), path)))]
 	allowed := ok && o.allowed[i]
 	o.mu.Unlock()
 	if !allowed {

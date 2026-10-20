@@ -43,7 +43,8 @@ try {
   const source = sources.find((x) => same(x.path) === same(files))
   if (!source) throw new Error('the isolated source was not added')
   await waitIndexed(page, { timeout: 120000 })
-  await page.reload()
+  // The base library already shows the grid. Reloading here can abort its
+  // outstanding thumbnail reads while the new source is being reconciled.
   await page.waitForSelector('.scroller')
   let preflight
   for (let attempt = 0; attempt < 50; attempt++) {

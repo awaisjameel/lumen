@@ -83,6 +83,22 @@ func TestRawThatCannotBeDevelopedShowsItsEmbeddedPreview(t *testing.T) {
 	}
 }
 
+func TestRawMetadataKeepsTheCameraWallClockInEveryTimezone(t *testing.T) {
+	d := rawDecoders(t)
+	for _, zone := range []string{"UTC0", "PST8PDT", "PKT-5"} {
+		t.Run(zone, func(t *testing.T) {
+			t.Setenv("TZ", zone)
+			for _, cut := range []bool{false, true} {
+				p := write(t, "camera.dng", testenv.DNG{Cut: cut}.Bytes(t))
+				m, err := d.Metadata(t.Context(), p, core.KindPhoto)
+				if err != nil || m.TakenAt.Format(time.DateTime) != "2024-03-05 10:20:30" {
+					t.Fatalf("cut=%t: taken %s, err %v; want the camera's wall clock", cut, m.TakenAt, err)
+				}
+			}
+		})
+	}
+}
+
 func TestRawThatLibRawCannotReadIsUnsupportedNotFailed(t *testing.T) {
 	d := rawDecoders(t)
 	ctx := context.Background()

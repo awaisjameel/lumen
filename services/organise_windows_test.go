@@ -433,9 +433,10 @@ func TestScansThatFollowAnOrganiseRunFindTheLibraryAlreadyMatchingTheDisk(t *tes
 	}
 	check(t, l.s.StartOrganise(ctx, plan.RunID))
 	l.waitState(plan.RunID, core.OrganiseDone)
-	// The watcher saw every move; its rescans are queued for after the run and
-	// are debounced. Give them time to run, then to finish.
-	time.Sleep(debounceWait)
+	// Wait for a completed rescan rather than assuming the hosted runner
+	// finished its debounce and queued work within a fixed sleep.
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline) && len(scans.done()) == 0; time.Sleep(100 * time.Millisecond) {
+	}
 	settle(4)
 	if done := scans.done(); len(done) == 0 {
 		t.Fatal("no scan followed the run, so the test proved nothing")
@@ -514,9 +515,6 @@ func (h *scanLog) done() [][3]int64 {
 	defer h.mu.Unlock()
 	return slices.Clone(h.scans)
 }
-
-// debounceWait is longer than the watcher's quiet period before it rescans.
-const debounceWait = 4 * time.Second
 
 type fileRow struct {
 	asset, size, mtime int64
