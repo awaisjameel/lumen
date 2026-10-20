@@ -2,6 +2,7 @@
   "name": "lumen-e2e",
   "private": true,
   "version": "0.0.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "description": "End-to-end suites that drive the built Lumen app in its native WebView2",
   "type": "module",
   "engines": {
