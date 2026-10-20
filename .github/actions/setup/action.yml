@@ -23,6 +23,16 @@ inputs:
 runs:
   using: composite
   steps:
+    # Hosted Windows runners scan every file as it is written, which slows
+    # restoring caches of many small files, npm ci, the Go build and the
+    # file-heavy tests several-fold. The runner is a throwaway machine that
+    # runs only this repository's checkout, so the scan protects nothing.
+    - name: Stop real-time scanning on the throwaway runner
+      shell: pwsh
+      run: |
+        try { Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop }
+        catch { Write-Output "::warning::real-time scanning stays on: $_" }
+
     - id: go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:

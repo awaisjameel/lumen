@@ -4,8 +4,8 @@
 # latency gate. Hosted runners are slower than the machine the latency
 # budgets were set on, so here that gate reports without failing;
 # scripts/lint.sh on a developer's machine stays the binding gate.
-# The jobs run side by side, the race tests split in two because the store's
-# randomised oracles alone take as long as every other package together.
+# The jobs run side by side, the race tests split three ways because the
+# store's tests alone take as long as every other package together.
 # The release workflow calls this one, so a release passes the same checks.
 name: CI
 
@@ -100,19 +100,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The store's randomised oracles take as long as the rest of its
+        # tests, so -run and -skip split the package between two jobs.
         include:
+          - shard: store oracles
+            packages: ./internal/store
+            tests: -run Randomised
+            cache: race-store
           - shard: store
             packages: ./internal/store
+            tests: -skip Randomised
+            cache: race-store
           - shard: everything else
             packages: . ./internal/... ./services/... ./cmd/... ./scripts/...
             skip: lumen/internal/store
+            cache: race-rest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
-          go-cache: race-${{ matrix.shard == 'store' && 'store' || 'rest' }}
+          go-cache: ${{ matrix.cache }}
 
       # Go embeds frontend/dist; the tests need it to exist, not to be
       # checked, which the build job does.
@@ -125,15 +134,17 @@ jobs:
         env:
           PACKAGES: ${{ matrix.packages }}
           SKIP: ${{ matrix.skip }}
+          TESTS: ${{ matrix.tests }}
         run: |
           source scripts/env.sh
           read -ra patterns <<<"$PACKAGES"
+          read -ra tests <<<"$TESTS"
           mapfile -t pkgs < <(go list "${patterns[@]}" | grep -vxF "${SKIP:-.}")
           # Native models and filesystem tests must not compete across
           # packages on hosted runners, so the tests run one package at a
           # time; compiling them first keeps the build itself parallel.
           go test -race -count=1 -run '^$' "${pkgs[@]}" >/dev/null
-          go test -race -p 1 -count=1 -timeout 1800s "${pkgs[@]}"
+          go test -race -p 1 -count=1 -timeout 1800s "${tests[@]}" "${pkgs[@]}"
 
       - if: ${{ !cancelled() }}
         uses: ./.github/actions/save-go-cache
