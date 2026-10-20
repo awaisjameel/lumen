@@ -9,10 +9,26 @@
 # The release workflow calls this one, so a release passes the same checks.
 name: CI
 
+# Every change is checked on its pull request, so a merge does not repeat the
+# work, with one exception: a merge that changes what the caches hold runs
+# again to save them on main. A pull request's caches are visible only to
+# that pull request, so without main's, each new one would start cold.
 on:
   pull_request:
   push:
     branches: [main]
+    paths:
+      - go.mod
+      - go.sum
+      - frontend/package-lock.json
+      - scripts/deps.sh
+      - scripts/compression-deps.sh
+      - scripts/oxipng-deps.sh
+      - scripts/oxipng-notices.py
+      - scripts/prepare_models.py
+      - native/lumen-raw/**
+      - .github/actions/**
+      - .github/workflows/ci.yml
   workflow_dispatch:
   workflow_call:
 
