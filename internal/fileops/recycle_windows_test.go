@@ -142,7 +142,7 @@ func TestRecycleStopsWhenTheContextHasEnded(t *testing.T) {
 func TestTheSinkRefusesAnItemWithoutTheRecycleFlagAndTheFileIsReportedKept(t *testing.T) {
 	path := write(t, filepath.Join(t.TempDir(), "a.jpg"))
 	out := []Outcome{{Path: path}}
-	op := &operation{outcomes: out, byPath: map[string]int{strings.ToLower(path): 0}, decided: make([]bool, 1), allowed: make([]bool, 1)}
+	op := &operation{outcomes: out, byPath: map[string]int{pathKey(t.Context(), path): 0}, decided: make([]bool, 1), allowed: make([]bool, 1)}
 
 	if op.beforeDelete(path, 0) {
 		t.Fatal("the sink let the shell delete a file it would not recycle")
@@ -157,6 +157,25 @@ func TestTheSinkRefusesAnItemWithoutTheRecycleFlagAndTheFileIsReportedKept(t *te
 	}
 }
 
+// A caller may name a file by its 8.3 alias (a runner's TEMP is one) while
+// the shell's callbacks spell it out in full: the sink must still know it.
+func TestTheSinkKnowsAShortPathByTheLongFormTheShellReports(t *testing.T) {
+	path := write(t, filepath.Join(testenv.ShortPath(t), "a.jpg"))
+	long := core.LongPath(t.Context(), path)
+	if strings.EqualFold(long, path) {
+		t.Fatalf("LongPath(%s) did not expand the alias", path)
+	}
+	out := []Outcome{{Path: path}}
+	op := &operation{outcomes: out, byPath: map[string]int{pathKey(t.Context(), path): 0}, decided: make([]bool, 1), allowed: make([]bool, 1)}
+
+	if op.beforeDelete(long, 0) {
+		t.Fatal("the sink let the shell delete a file it would not recycle")
+	}
+	if out[0].Status != Kept {
+		t.Fatalf("outcome = %+v, want Kept: the sink did not recognise %s as %s", out[0], long, path)
+	}
+}
+
 func TestTheSinkRefusesAnItemItWasNeverGiven(t *testing.T) {
 	op := &operation{byPath: map[string]int{}, decided: nil, allowed: nil}
 	if op.beforeDelete(`C:\somewhere\else.jpg`, tsfDeleteRecycleIfPossible) {
@@ -167,7 +186,7 @@ func TestTheSinkRefusesAnItemItWasNeverGiven(t *testing.T) {
 func TestTheSinkReportsAShellFailureWithItsWindowsReason(t *testing.T) {
 	path := `C:\x\a.jpg`
 	out := []Outcome{{Path: path}}
-	op := &operation{outcomes: out, byPath: map[string]int{strings.ToLower(path): 0}, decided: make([]bool, 1), allowed: make([]bool, 1)}
+	op := &operation{outcomes: out, byPath: map[string]int{pathKey(t.Context(), path): 0}, decided: make([]bool, 1), allowed: make([]bool, 1)}
 	if !op.beforeDelete(path, tsfDeleteRecycleIfPossible) {
 		t.Fatal("the sink refused a recyclable file")
 	}
