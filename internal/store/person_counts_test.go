@@ -92,9 +92,11 @@ func personCountChanges() []blockedOracleChange {
 }
 
 func TestPersonCountsAndCoversEqualTheReferenceAfterEveryRandomisedChange(t *testing.T) {
+	t.Parallel()
 	for _, limit := range []int64{keptCountsThreshold, 1} {
 		for _, seed := range []uint64{1, 42, 20261014} {
 			t.Run(fmt.Sprintf("limit=%d/seed=%d", limit, seed), func(t *testing.T) {
+				t.Parallel()
 				st := openTest(t)
 				ctx := context.WithValue(t.Context(), keptCountsThresholdKey{}, limit)
 				seedPersonCounts(t, st)

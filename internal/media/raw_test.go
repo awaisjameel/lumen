@@ -83,6 +83,22 @@ func TestRawThatCannotBeDevelopedShowsItsEmbeddedPreview(t *testing.T) {
 	}
 }
 
+func TestRawMetadataKeepsTheCameraWallClockInEveryTimezone(t *testing.T) {
+	d := rawDecoders(t)
+	for _, zone := range []string{"UTC0", "PST8PDT", "PKT-5"} {
+		t.Run(zone, func(t *testing.T) {
+			t.Setenv("TZ", zone)
+			for _, cut := range []bool{false, true} {
+				p := write(t, "camera.dng", testenv.DNG{Cut: cut}.Bytes(t))
+				m, err := d.Metadata(t.Context(), p, core.KindPhoto)
+				if err != nil || m.TakenAt.Format(time.DateTime) != "2024-03-05 10:20:30" {
+					t.Fatalf("cut=%t: taken %s, err %v; want the camera's wall clock", cut, m.TakenAt, err)
+				}
+			}
+		})
+	}
+}
+
 func TestRawThatLibRawCannotReadIsUnsupportedNotFailed(t *testing.T) {
 	d := rawDecoders(t)
 	ctx := context.Background()
@@ -135,7 +151,7 @@ func TestExposureTimeReadsAsEXIFWritesIt(t *testing.T) {
 }
 
 // TestRealCameraFiles runs over the camera files in LUMEN_RAW_SAMPLES
-// (docs/phase9-formats-2026-10-07.md lists the set it was accepted on).
+// (docs/history/phase9-formats-2026-10-07.md lists the set it was accepted on).
 // Every file must give its size, a thumbnail and pixels of the same shape:
 // the developed picture, or for a file LibRaw cannot develop its preview.
 func TestRealCameraFiles(t *testing.T) {

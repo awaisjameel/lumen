@@ -328,6 +328,29 @@ func TestVersionsAgree(t *testing.T) {
 	}
 }
 
+// The copyright is set once, in build/config.yml, and the LICENSE's Required
+// Notice gives the same text. Regenerating the build assets also resets the
+// Linux package's licence to Wails' template default, so both are checked.
+func TestLicenceAndCopyrightAgree(t *testing.T) {
+	m := regexp.MustCompile(`(?m)^[ \t]+copyright: "([^"]+)"`).FindStringSubmatch(readRepoFile(t, "build/config.yml"))
+	if m == nil {
+		t.Fatal("build/config.yml has no info.copyright")
+	}
+	want := m[1]
+	if !strings.Contains(readRepoFile(t, "LICENSE"), "\nRequired Notice: "+want+" (") {
+		t.Errorf("LICENSE has no Required Notice reading %q", want)
+	}
+	for name, text := range map[string]string{
+		"build/windows/info.json":            `"LegalCopyright": "` + want + `"`,
+		"build/windows/nsis/wails_tools.nsh": `!define INFO_COPYRIGHT "` + want + `"`,
+		"build/linux/nfpm/nfpm.yaml":         `license: "PolyForm-Noncommercial-1.0.0"`,
+	} {
+		if !strings.Contains(readRepoFile(t, name), text) {
+			t.Errorf("%s lacks %s: run wails3 task common:update:build-assets, then restore the nfpm licence", name, text)
+		}
+	}
+}
+
 // The installer's Add/Remove Programs entry links the releases page the
 // About section shows.
 func TestInstallerNamesTheReleasesPage(t *testing.T) {

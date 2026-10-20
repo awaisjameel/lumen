@@ -33,8 +33,16 @@ func TestRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	safe := strings.ToLower(filepath.ToSlash(path))
-	if !strings.HasPrefix(safe, "d:/downloads/lumen/spikes/.cache/") && !strings.HasPrefix(safe, "d:/downloads/lumen/spikes/phase7/fixtures/") {
+	// The test runs in spikes/phase7/probe, three folders below the repository.
+	repo, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside := func(dir string) bool {
+		prefix := strings.ToLower(filepath.ToSlash(filepath.Join(repo, dir))) + "/"
+		return strings.HasPrefix(strings.ToLower(filepath.ToSlash(path)), prefix)
+	}
+	if !inside(filepath.Join("spikes", ".cache")) && !inside(filepath.Join("spikes", "phase7", "fixtures")) {
 		t.Fatal("probe input must be in an authorised fixture folder")
 	}
 	side, err := strconv.Atoi(os.Getenv("PHASE7_SIDE"))
@@ -45,7 +53,8 @@ func TestRender(t *testing.T) {
 	if err := vips.Init(); err != nil {
 		t.Fatal(err)
 	}
-	d := media.Decoders{FFmpeg: "D:/Downloads/Lumen/deps/runtime/ffmpeg/ffmpeg.exe", FFprobe: "D:/Downloads/Lumen/deps/runtime/ffmpeg/ffprobe.exe"}
+	ffmpeg := filepath.Join(repo, "deps", "runtime", "ffmpeg")
+	d := media.Decoders{FFmpeg: filepath.Join(ffmpeg, "ffmpeg.exe"), FFprobe: filepath.Join(ffmpeg, "ffprobe.exe")}
 	m, err := d.Metadata(context.Background(), path, core.KindPhoto)
 	if err != nil {
 		t.Fatal(err)

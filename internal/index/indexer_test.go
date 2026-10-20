@@ -309,12 +309,17 @@ func waitIdle(t *testing.T, ix *Indexer, total int) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	var p core.Progress
+	settled := false
 	for time.Now().Before(deadline) {
 		time.Sleep(200 * time.Millisecond)
 		p = ix.Progress(context.Background())
-		if !p.Scanning && p.Metadata == 0 && p.Thumbnail == 0 && p.Embedding == 0 && p.Total == total && ix.pendingScans() == 0 {
+		// Progress reads job counts before the total. Ingest can commit
+		// between them, so confirm an idle result on the next snapshot.
+		idle := !p.Scanning && p.Metadata == 0 && p.Thumbnail == 0 && p.Embedding == 0 && p.Total == total && ix.pendingScans() == 0
+		if idle && settled {
 			return
 		}
+		settled = idle
 	}
 	t.Fatalf("indexer did not settle: %+v (want total %d)", p, total)
 }

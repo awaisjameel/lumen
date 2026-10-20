@@ -1,0 +1,599 @@
+{
+  "exe": "bin/Lumen.exe",
+  "screens": [
+    {
+      "name": "wide-library",
+      "path": "/",
+      "overflowX": 0,
+      "title": "Library",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-favourites",
+      "path": "/favourites",
+      "overflowX": 0,
+      "title": "Favourites",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-videos",
+      "path": "/videos",
+      "overflowX": 0,
+      "title": "Videos",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-people",
+      "path": "/people",
+      "overflowX": 0,
+      "title": "People",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-things",
+      "path": "/things",
+      "overflowX": 0,
+      "title": "Things",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-places",
+      "path": "/places",
+      "overflowX": 0,
+      "title": "Places",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-events",
+      "path": "/events",
+      "overflowX": 0,
+      "title": "Events",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-albums",
+      "path": "/albums",
+      "overflowX": 0,
+      "title": "Albums",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-duplicates",
+      "path": "/duplicates",
+      "overflowX": 0,
+      "title": "Duplicates",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-trash",
+      "path": "/trash",
+      "overflowX": 0,
+      "title": "Trash",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-search",
+      "path": "/search?q=red%20circle",
+      "overflowX": 0,
+      "title": "“red circle”",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-settings",
+      "path": "/settings",
+      "overflowX": 0,
+      "title": "Settings",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-blocked",
+      "path": "/settings/blocked",
+      "overflowX": 0,
+      "title": "Blocked",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-organise",
+      "path": "/settings/organise",
+      "overflowX": 0,
+      "title": "Organise files on disk",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-thing",
+      "path": "/things/2",
+      "overflowX": 0,
+      "title": "Screenshots",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "wide-event",
+      "path": "/events/1",
+      "overflowX": 0,
+      "title": "5 Oct 2026",
+      "width": 1440,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-library",
+      "path": "/",
+      "overflowX": 0,
+      "title": "Library",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-favourites",
+      "path": "/favourites",
+      "overflowX": 0,
+      "title": "Favourites",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-videos",
+      "path": "/videos",
+      "overflowX": 0,
+      "title": "Videos",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-people",
+      "path": "/people",
+      "overflowX": 0,
+      "title": "People",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-things",
+      "path": "/things",
+      "overflowX": 0,
+      "title": "Things",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-places",
+      "path": "/places",
+      "overflowX": 0,
+      "title": "Places",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-events",
+      "path": "/events",
+      "overflowX": 0,
+      "title": "Events",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-albums",
+      "path": "/albums",
+      "overflowX": 0,
+      "title": "Albums",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-duplicates",
+      "path": "/duplicates",
+      "overflowX": 0,
+      "title": "Duplicates",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-trash",
+      "path": "/trash",
+      "overflowX": 0,
+      "title": "Trash",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-search",
+      "path": "/search?q=red%20circle",
+      "overflowX": 0,
+      "title": "“red circle”",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-settings",
+      "path": "/settings",
+      "overflowX": 0,
+      "title": "Settings",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-blocked",
+      "path": "/settings/blocked",
+      "overflowX": 0,
+      "title": "Blocked",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-organise",
+      "path": "/settings/organise",
+      "overflowX": 0,
+      "title": "Organise files on disk",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-thing",
+      "path": "/things/2",
+      "overflowX": 0,
+      "title": "Screenshots",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "medium-event",
+      "path": "/events/1",
+      "overflowX": 0,
+      "title": "5 Oct 2026",
+      "width": 1040,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-library",
+      "path": "/",
+      "overflowX": 0,
+      "title": "Library",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-favourites",
+      "path": "/favourites",
+      "overflowX": 0,
+      "title": "Favourites",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-videos",
+      "path": "/videos",
+      "overflowX": 0,
+      "title": "Videos",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-people",
+      "path": "/people",
+      "overflowX": 0,
+      "title": "People",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-things",
+      "path": "/things",
+      "overflowX": 0,
+      "title": "Things",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-places",
+      "path": "/places",
+      "overflowX": 0,
+      "title": "Places",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-events",
+      "path": "/events",
+      "overflowX": 0,
+      "title": "Events",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-albums",
+      "path": "/albums",
+      "overflowX": 0,
+      "title": "Albums",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-duplicates",
+      "path": "/duplicates",
+      "overflowX": 0,
+      "title": "Duplicates",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-trash",
+      "path": "/trash",
+      "overflowX": 0,
+      "title": "Trash",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-search",
+      "path": "/search?q=red%20circle",
+      "overflowX": 0,
+      "title": "“red circle”",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-settings",
+      "path": "/settings",
+      "overflowX": 0,
+      "title": "Settings",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-blocked",
+      "path": "/settings/blocked",
+      "overflowX": 0,
+      "title": "Blocked",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-organise",
+      "path": "/settings/organise",
+      "overflowX": 0,
+      "title": "Organise files on disk",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-thing",
+      "path": "/things/2",
+      "overflowX": 0,
+      "title": "Screenshots",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "narrow-event",
+      "path": "/events/1",
+      "overflowX": 0,
+      "title": "5 Oct 2026",
+      "width": 720,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-library",
+      "path": "/",
+      "overflowX": 0,
+      "title": "Library",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-favourites",
+      "path": "/favourites",
+      "overflowX": 0,
+      "title": "Favourites",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-videos",
+      "path": "/videos",
+      "overflowX": 0,
+      "title": "Videos",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-people",
+      "path": "/people",
+      "overflowX": 0,
+      "title": "People",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-things",
+      "path": "/things",
+      "overflowX": 0,
+      "title": "Things",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-places",
+      "path": "/places",
+      "overflowX": 0,
+      "title": "Places",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-events",
+      "path": "/events",
+      "overflowX": 0,
+      "title": "Events",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-albums",
+      "path": "/albums",
+      "overflowX": 0,
+      "title": "Albums",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-duplicates",
+      "path": "/duplicates",
+      "overflowX": 0,
+      "title": "Duplicates",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-trash",
+      "path": "/trash",
+      "overflowX": 0,
+      "title": "Trash",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-search",
+      "path": "/search?q=red%20circle",
+      "overflowX": 0,
+      "title": "“red circle”",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-settings",
+      "path": "/settings",
+      "overflowX": 0,
+      "title": "Settings",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-blocked",
+      "path": "/settings/blocked",
+      "overflowX": 0,
+      "title": "Blocked",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-organise",
+      "path": "/settings/organise",
+      "overflowX": 0,
+      "title": "Organise files on disk",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-thing",
+      "path": "/things/2",
+      "overflowX": 0,
+      "title": "Screenshots",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    },
+    {
+      "name": "small-event",
+      "path": "/events/1",
+      "overflowX": 0,
+      "title": "5 Oct 2026",
+      "width": 520,
+      "dpr": 1.25,
+      "dark": false
+    }
+  ],
+  "requests": {
+    "local": 261,
+    "externalBlocked": []
+  },
+  "consoleErrors": [
+    "404 http://wails.localhost/wails/custom.js",
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "checks": {
+    "sources": 1,
+    "ids": {
+      "thing": 2,
+      "person": 0,
+      "place": 0,
+      "event": 1,
+      "album": 0
+    }
+  }
+}

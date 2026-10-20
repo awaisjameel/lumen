@@ -208,9 +208,24 @@ await guard('formats', async () => {
 await guard('viewer', async () => {
   await page.waitForFunction(() => document.querySelectorAll('.scroller .cell img').length >= 6, { timeout: 30000 })
   await shot('grid')
+  // Grid keyboard focus can begin at a later loaded tile. Open the first
+  // preview explicitly so the viewer's forward-only walk covers the corpus.
+  const first = assets.find((a) => a.thumb)
+  if (!first) throw new Error('the corpus has no preview to open')
+  await page.evaluate(() => {
+    document.querySelector('.scroller').scrollTop = 0
+  })
+  const tile = await page.waitForSelector(`#cell-${first.id}`, { visible: true })
+  if (!tile) throw new Error(`the first preview tile is missing: ${first.id}`)
+  await tile.click()
+  await page.waitForFunction(
+    (id) => document.querySelector('.scroller')?.getAttribute('aria-activedescendant') === `cell-${id}`,
+    {},
+    first.id,
+  )
   await page.focus('.scroller')
-  await page.keyboard.press('ArrowRight')
   await page.keyboard.press('Enter')
+  await page.waitForSelector('.viewer[aria-modal="true"]')
   const seen = new Map()
   for (let i = 0; i < assets.length + 4; i++) {
     await sleep(700)

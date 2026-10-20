@@ -4,23 +4,22 @@ This file provides guidance to AI Coding Agents when working with code in this r
 
 ## What this is
 
-Lumen is a Windows-first desktop photo gallery with on-device AI: a Go engine and a Vue 3 UI in one Wails v3 (beta.26) window. It is fully local. **Lumen makes no network request and never downloads anything at run time**; do not add one (the only authorised future exception is the opt-in updater in `docs/automatic-updates-plan-2026-10-04.md`).
+Lumen is a Windows-first desktop photo gallery with on-device AI: a Go engine and a Vue 3 UI in one Wails v3 (beta.26) window. It is fully local. **Lumen makes no network request and never downloads anything at run time**; do not add one. The only authorised exception is the opt-in updater (`internal/update`), which stays inert until release trust is configured (`docs/production-signing.md`).
 
 Two documents are authoritative and should be read before non-trivial work:
 
-- `README.md`: status by phase, setup, layout, and the list of deliberate deviations from the plan.
-- `AUDIT_CONVENTIONS.md`: how code is written here (errors, context, SQLite, logging, the Go-to-TypeScript contract, Pinia and Vue, tests). Where two patterns compete, it picks one.
+- `README.md`: what Lumen does, status, setup, commands, layout, and the list of deliberate deviations from the plan.
+- `CONVENTIONS.md`: how code is written here (errors, context, SQLite, logging, the Go-to-TypeScript contract, Pinia and Vue, tests). Where two patterns compete, it picks one.
 
-`docs/` holds dated records per phase (design, implementation, audits). They are historical; the newest for a phase is the one that applies.
+`docs/` holds the living guides (features, beta testing, production signing, branding, GeoNames data) and the original plan. `docs/history/` holds the dated records per phase (design, implementation, audits), indexed in `docs/history/README.md`. They are historical; the newest for a phase is the one that applies, and where a record and the code differ, the code and the README win.
 
-## Dev Rules
+## Development rules
 
-- Make sure the code implementation is as much unified as possible, clean, uses consistent coding standards, follows existing structure/conventions.
-- Everything aligns without any gaps/drifts/issues/conflicts/mismatch/duplications and everything must be end to end type-safe and follows SOLID principles in implementation.
-- Uses state of the art techniques and to make it as fully typed, robust, performant, optimized and maintainable as possible.
-- Follow best practices throughout the development process.
-- Without any inconsistencies or technical debt .
-- Best practices are followed consistently for frontend, backend, and infrastructure.
+- Keep the implementation unified and clean: consistent coding standards, following the existing structure and conventions.
+- Everything aligns, with no gaps, drift, conflicts, mismatches or duplication. Code is type-safe end to end and follows SOLID principles.
+- Use current techniques to keep the code fully typed, robust, fast and maintainable.
+- Follow best practices consistently, for the frontend, the backend and the infrastructure alike.
+- Leave no inconsistencies or technical debt behind.
 
 ## Commands
 
@@ -32,12 +31,16 @@ wails3 build                                # production build -> bin/Lumen.exe
 wails3 task package                         # build + NSIS installer -> bin/Lumen-<version>-x64-setup.exe
 
 source scripts/env.sh                       # REQUIRED before go test / vet / run: puts deps/runtime (libvips DLL) on PATH
-go test -race -count=1 -timeout 900s . ./internal/... ./services/...
+go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/...
 go test -race -timeout 900s -run TestTagByNameRefusesABlockedThing ./internal/store   # one test
 
-scripts/lint.sh                             # static checks, frontend tests and large-library latency; must stay at zero
+scripts/lint.sh                             # static checks, frontend tests, doc links and large-library latency; must stay at zero
 scripts/lint.sh --fix                       # apply automatic fixes first
+scripts/lint.sh --no-bench                  # everything but the latency gate (CI runs that as a reported job)
 scripts/bench.sh                            # large-library latency gate alone (one to two minutes; sources env.sh)
+scripts/install-hooks.sh                    # once per clone: commit-msg, pre-commit and pre-push hooks (.githooks)
+scripts/version.sh bump 0.13.0              # release: bump on a release/ branch, regenerate assets, commit
+scripts/version.sh tag                      # on main after the merge: push v<version>, which drafts the release
 
 cd frontend
 npm run check                               # vue-tsc, ESLint (zero warnings), Prettier
@@ -62,8 +65,9 @@ because a run failed.
 - **Name the Go packages, never `./...`**: `build/` holds Wails' mobile templates, which only build on their own platforms. `spikes/` is its own Go module.
 - **Always pass `-timeout`** to `go test`; the race run is slow.
 - Tests that need real models go through `internal/testenv` and skip cleanly without `deps/runtime`. Face and RAW tests also skip unless `LUMEN_FACE_PHOTOS` / `LUMEN_RAW_SAMPLES` name a folder (see `e2e/README.md`).
-- The frontend must finish building before Go embeds `frontend/dist`; never run the frontend and Go production builds concurrently.
-- The version is set once in `build/config.yml`; after changing it run `wails3 task common:update:build-assets` (`TestVersionsAgree` fails until then).
+- The frontend must finish building before Go embeds `frontend/dist`; never run the frontend and Go production builds concurrently. On a fresh clone, run `wails3 build` once before `go test` or `scripts/lint.sh`: without `frontend/dist` no Go package compiles.
+- The version and the copyright are set once in `build/config.yml`. Change the version only with `scripts/version.sh bump`. After changing the copyright, run `wails3 task common:update:build-assets` and restore the PolyForm licence it resets in `build/linux/nfpm/nfpm.yaml` (`TestVersionsAgree`, `TestLicenceAndCopyrightAgree`).
+- CI (`.github/workflows/ci.yml`) and the release workflow (`release.yml`, on a `v*` tag) run on Windows runners set up by `.github/actions/setup`. A release is only ever drafted; the owner publishes it (README, "Releasing"). Pin every action to a full commit SHA with its version in a comment.
 - After changing an exported service method or a wire type, regenerate the bindings and check `git diff -- frontend/bindings`. Bindings are never edited by hand.
 
 ### Running the real app for a check
@@ -86,7 +90,7 @@ A scratch library's SQLite file cannot be edited with the `sqlite3` CLI: its ind
 - `internal/ai` never imports `store`. Models load only while there is work and take turns on one GPU lock (DirectML, CPU fallback).
 - `internal/fileops`: every change to files in the user's folders (Recycle Bin, journalled moves, sidecars). Originals are never modified or permanently deleted.
 - `internal/update`: installation policy, authenticated discovery and delivery, staging, activation and recovery. It never imports `store` and writes no SQL; `main.go` takes the library backup and runs the first-launch health gate. Its only network use is the opt-in updater, and `release-config.json` is empty until release engineering supplies trust, so a checkout makes no request. `cmd/lumen-launcher` (installed as the stable `Lumen.exe`) and `cmd/lumen-update` are built with `CGO_ENABLED=0` and depend on nothing in a replaceable runtime generation.
-- `services/`: thin Wails services (Library, Search, People, Media, System, Update): argument checks, error codes, calls into `internal/*`.
+- `services/`: thin Wails services (Library, Search, People, Media, System, Compression, Update): argument checks, error codes, calls into `internal/*`.
 
 ### Cross-cutting rules that are easy to break
 
@@ -128,10 +132,7 @@ Import direction, enforced by ESLint: `bridge` ← `design` ← `shared` ← fea
 - Line endings are LF everywhere (`.gitattributes`); when a script writes files on Windows, write bytes, not text mode.
 - Everything ships in one installer: a new runtime dependency is pinned in `scripts/deps.sh` and lands in `deps/runtime/`, with its licence picked up by `scripts/notices.py`.
 
-## Git Rules:
+## Git rules
 
-- Never add claude, codex, or any AI assistant as co-author or Mention claude, codex or any AI assistant anywhere(Commit messages, pull requests, issues, comments, etc.).
-
-## Skills:
-
-- Use relevent skills when needed from ./skills/\*
+- Never add an AI assistant as a co-author, and never mention one anywhere: commit messages, pull requests, issues, comments.
+- Commit subjects are Conventional Commits (`type(scope): summary`). `scripts/check-commit-msg.sh` enforces both rules, as the commit-msg hook and in CI.

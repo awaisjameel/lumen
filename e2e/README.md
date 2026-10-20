@@ -38,6 +38,7 @@ Needs: Node (as `package.json` says), Python with Pillow, and `deps/` from `scri
 | `formats` | Camera RAW of every family, JPEG XL, animated PNG, multi-page TIFF, MPEG/TS/Ogg/ASF video, from indexing to the viewer | `formats` |
 | `customise` | Changes every preference in Settings and sees it take effect (page, grid, viewer) and survive a restart; reassigns a shortcut and uses it; turns a photo format off and on; holds an animation still; clears the viewing copies; saves an export preset; resets a section and everything | base library + three files of its own |
 | `compression` | Reviewed JPEG/PNG copies, JPEG XL native rendering and byte-exact JPEG restoration, partial outcomes, pause/cancel, restart, collisions and compression defaults | Generated scratch JPEG/PNG/BMP files, duplicate JPEG and XMP |
+| `updates` | Opens Application updates in a build without release trust: automatic checks off, stable channel, public delivery disabled, the privacy text, no request leaving the PC, a narrow window | base library |
 | `showcase` | The component showcase of a development run. Only when named: it starts `wails3 dev`, so it needs the build toolchain in the environment | base library |
 
 ## Fixtures

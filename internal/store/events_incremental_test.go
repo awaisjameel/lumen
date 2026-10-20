@@ -62,6 +62,7 @@ func compareEventLists(t *testing.T, st *Store, caches map[int]eventListSnapshot
 }
 
 func TestIncrementalEventListsEqualFullRegroupsAfterEveryRandomisedChange(t *testing.T) {
+	t.Parallel()
 	for _, seed := range []uint64{1, 42, 20261013} {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
 			t.Parallel()

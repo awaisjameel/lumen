@@ -14,8 +14,12 @@ import (
 )
 
 func TestIndexerTakesCameraRawFilesIntoTheLibrary(t *testing.T) {
+	checkIndexerTakesCameraRawFilesIntoTheLibrary(t, t.TempDir())
+}
+
+func checkIndexerTakesCameraRawFilesIntoTheLibrary(t *testing.T, photos string) {
+	t.Helper()
 	raw := testenv.File(t, "lumen-raw.exe")
-	photos := t.TempDir()
 	paths := core.PathsIn(t.TempDir())
 	if err := paths.Ensure(); err != nil {
 		t.Fatal(err)
@@ -44,6 +48,7 @@ func TestIndexerTakesCameraRawFilesIntoTheLibrary(t *testing.T) {
 	// Both readable files carry the camera's date, so they share its day.
 	days, err := st.DayItems(ctx, "2024-03-05", "2024-03-05", core.View{}, core.TagConfidenceDefault)
 	if err != nil || len(days) != 1 || len(days[0].Items) != 2 {
+		t.Logf("progress after indexing: %+v", ix.Progress(ctx))
 		t.Fatalf("day items = %+v, %v", days, err)
 	}
 	shapes := map[string][2]int{}

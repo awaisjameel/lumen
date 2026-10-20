@@ -59,12 +59,17 @@ unzip -p "$D/cache/directml.nupkg" LICENSE.txt >"$D/licenses/directml.LICENSE.tx
 unzip -p "$D/cache/directml.nupkg" ThirdPartyNotices.txt >"$D/licenses/directml.ThirdPartyNotices.txt"
 
 # FFmpeg 9.0 (LGPL, shared). Only ffmpeg.exe, ffprobe.exe and the libraries
-# they load ship. BtbN prunes old autobuilds: if this 404s, pin a newer one
-# and its hash.
-get https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-26-13-03/ffmpeg-n9.0.2-10-g51c4a23d74-win64-lgpl-shared-9.0.zip \
-  ffmpeg.zip 8f3a5190804eed8c0f4927dbac688bcc35a1d2b9c36d7bf9a4386ec7bd1627ed
-if [ ! -f "$RT/ffmpeg/ffmpeg.exe" ] || [ ! -f "$RT/ffmpeg/ffprobe.exe" ]; then
+# they load ship. BtbN deletes its daily autobuilds after about two weeks but
+# keeps each month's last one, so pin a month-end autobuild (and its hash).
+FFMPEG_SHA=7157177b8a6cb2174c1650ba8c71b363f2c78cba5330f88c4c02cf5b2b880646
+get https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0.zip \
+  ffmpeg.zip $FFMPEG_SHA
+# A new pin replaces the whole folder, so no library of the old build stays.
+# The archive's hash is noted outside the runtime, which ships as it is.
+if [ "$(cat "$D/ffmpeg.extracted" 2>/dev/null)" != "$FFMPEG_SHA" ]; then
+  rm -rf "$RT/ffmpeg"
   unzip -q -o -j "$D/cache/ffmpeg.zip" '*/bin/ffmpeg.exe' '*/bin/ffprobe.exe' '*/bin/*.dll' '*/LICENSE.txt' -d "$RT/ffmpeg"
+  echo "$FFMPEG_SHA" >"$D/ffmpeg.extracted"
 fi
 cp -u "$RT/ffmpeg/LICENSE.txt" "$D/licenses/ffmpeg.LICENSE.txt"
 

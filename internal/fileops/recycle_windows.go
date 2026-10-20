@@ -72,7 +72,7 @@ func Recycle(ctx context.Context, paths []string) ([]Outcome, error) {
 	var queue []int
 	for i, p := range paths {
 		out[i].Path = p
-		key := core.Fold(filepath.Clean(p))
+		key := pathKey(ctx, p)
 		if first, dup := op.byPath[key]; dup {
 			op.duplicates = append(op.duplicates, [2]int{i, first})
 			continue
@@ -100,6 +100,13 @@ func Recycle(ctx context.Context, paths []string) ([]Outcome, error) {
 		out[d[0]].Status, out[d[0]].Err = out[d[1]].Status, out[d[1]].Err
 	}
 	return out, err
+}
+
+// pathKey is how byPath recognises a file: folded and cleaned, with Windows
+// 8.3 aliases expanded, so the shell's spelling of a path in its callbacks
+// matches the caller's (a runner's TEMP, for one, is a short path).
+func pathKey(ctx context.Context, path string) string {
+	return core.Fold(filepath.Clean(core.LongPath(ctx, path)))
 }
 
 // operation is what one Recycle call knows: the shell reports its decisions
@@ -244,9 +251,10 @@ func (o *operation) failAll(idx []int, err error) {
 // deleted; anything the shell does not recognise as one of ours is refused
 // too, whatever it says.
 func (o *operation) beforeDelete(path string, flags uint32) (proceed bool) {
+	key := pathKey(context.Background(), path) // the shell's callback carries no context
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	i, ok := o.byPath[core.Fold(filepath.Clean(path))]
+	i, ok := o.byPath[key]
 	if !ok || o.decided[i] {
 		return false
 	}
@@ -261,8 +269,9 @@ func (o *operation) beforeDelete(path string, flags uint32) (proceed bool) {
 
 // afterDelete is the shell reporting how deleting the file at path went.
 func (o *operation) afterDelete(path string, hr uintptr) {
+	key := pathKey(context.Background(), path) // the shell's callback carries no context
 	o.mu.Lock()
-	i, ok := o.byPath[core.Fold(filepath.Clean(path))]
+	i, ok := o.byPath[key]
 	allowed := ok && o.allowed[i]
 	o.mu.Unlock()
 	if !allowed {

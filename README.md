@@ -2,149 +2,64 @@
 
 <img src="frontend/public/lumen.png" width="64" height="64" alt="Lumen aperture logo" />
 
-A Windows-first desktop photo gallery that organises large libraries with on-device AI. Fully local: no accounts, no uploads, no telemetry. See [the plan](Local%20AI%20Photo%20Gallery%20—%20End-to-End%20Plan.md) for the full vision and roadmap.
+A Windows-first desktop photo and video gallery that organises large libraries with on-device AI. Fully local: no accounts, no uploads, no telemetry. The AI models, FFmpeg and the city database ship inside the installer, and Lumen never downloads anything at run time.
 
-Brand assets and their regeneration workflow are documented in [the branding guide](docs/branding.md).
+- **Search in plain language** ("dog on a beach at sunset", "Ali and Sara at the beach"), with results in a fraction of a second.
+- **People, Things, Places and Events** found automatically. Your corrections always win over the AI.
+- **A fast timeline** for hundreds of thousands of photos, a full viewer and video playback for codecs WebView2 cannot play itself.
+- **Camera RAW, HEIC, JPEG XL**, animated and multi-page images, and most video containers.
+- **Privacy tools**: PIN-protected blocking of people, Things, places, events, albums, photos and folders.
+- **Careful with your files**: originals are never modified. Removals go to the Windows Recycle Bin, and moves are previewed, journalled and undoable.
+
+The full tour of what Lumen does is in [docs/features.md](docs/features.md).
+
+## Privacy and the network
+
+Lumen makes no network request. Photos, thumbnails, faces and search all stay on the PC.
+
+The one exception is an **opt-in updater** (`internal/update`). It is built but inert: its trust configuration (`internal/update/release-config.json`) is empty, so builds from this repository never contact a server. Enabling it needs a real publisher certificate, quorum-held signing keys and hosting, as set out in [the production signing process](docs/production-signing.md). Until then, new versions are installed over the old one with the offline installer.
+
+Settings → Updates and about → About Lumen links to the releases page, which opens in the browser only when clicked.
 
 ## Status
 
-**Phase 1 (fast library browser)** is working:
+Lumen is in beta. The owner accepted beta 0.11.0 on 12 October 2026; 0.12.0 is the current candidate. Installers are published on the [releases page](https://github.com/awaisjameel/lumen/releases) as pre-releases, unsigned until a code-signing certificate is in place ([Releasing](#releasing)); you can also build one from source (below).
 
-- First-run folder picker with suggested folders; sources never overlap
-- Scanner: parallel content hashing (xxh3-128), date guess from file names, skip hidden/system folders
-- Recursive folder watching (`ReadDirectoryChangesW`) with debounced rescans, plus a reconcile scan on startup
-- Durable job queue in SQLite (`asset_jobs`): metadata, thumbnails, then the AI, newest first, **on-screen days first**; resumes after a crash; changing a stage's version re-runs only that stage
-- The sidebar status says what indexing is doing; hovering it lists what is at work now and what comes next, and which files couldn't be read and why (damaged, too slow to read, locked by another app)
-- EXIF (date, size, orientation, camera, GPS) via imagemeta, with goexif as a fallback for JPEG/TIFF
-- Thumbnails (256 and 1024 px) plus a 64-bit perceptual hash, served at `/media/thumb/{id}/{size}`
-- Virtualized, day-grouped grid with a timeline scrubber, keyboard navigation, zoom
-- Viewer (instant preview, then the original), details panel, favourites, light/dark themes
-- Exact duplicates collapse into one asset with several file paths
+| Phase | Scope | State | Record |
+| --- | --- | --- | --- |
+| 0 | Spikes: libvips and HEIC, vector search, SigLIP 2, YuNet + SFace, PP-OCRv5 | Done | [spikes/README.md](spikes/README.md) |
+| 1 | Fast library browser: scanner, watcher, job queue, thumbnails, timeline, viewer | Working | [audits](docs/history/README.md#audits) |
+| 2 | Natural-language search and Things | Working | |
+| 3 | People: face detection, recognition and clustering | Working | |
+| 4 | Videos: metadata, previews, AI on frames, playback with conversion | Working | |
+| 5 | Organisation: albums, places, events, blocking, Trash, duplicates, text in images, organise on disk, XMP sidecars | Working | [design](docs/history/phase5-design-2026-10-01.md), [blocking](docs/history/blocking-phase5-2026-09-30.md) |
+| 6 | Polish and ship v1: installer, politeness, crash reports, onboarding, performance | Working | [design](docs/history/phase6-design-2026-10-03.md), [performance](docs/history/performance-2026-10-03.md) |
+| 7 | Nuxt UI frontend and design system | Built | [design](docs/history/phase7-design-2026-10-04.md), [review](docs/history/phase7-review-2026-10-04.md) |
+| 8 | Viewing, playback, details and file tools | Built | [record](docs/history/phase8-implementation-2026-10-05.md) |
+| 9 | Camera RAW and broader formats | Built | [record](docs/history/phase9-formats-2026-10-07.md) |
+| 10 | Customisation and preference UX | Built | [record](docs/history/phase10-customisation-2026-10-08.md) |
+| 11 | Lossless compression (11A–D); same-format replacement with Undo (11E) is deferred | Built | [record](docs/history/phase11-compression-2026-10-09.md), [audit](docs/history/phase11-audit-2026-10-10.md) |
+| 12 | Application updates; public signing and delivery remain open | Built, inert | [record](docs/history/phase12-implementation-2026-10-12.md) |
+| | Interface redesign (October 2026) | Merged | [record](docs/history/redesign-2026-10-19.md) |
 
-**Phase 2 (search and Things)** is working:
+Every record, audit and plan is listed in [the history index](docs/history/README.md). Where a record and the code differ, the code and this README win.
 
-- Thumbnails through **libvips** (JPEG, PNG, WebP, GIF, TIFF, AVIF, shrink-on-load); **HEIC** through Windows' decoder (WIC), falling back to the bundled FFmpeg; BMP through Go; camera RAW through LibRaw and JPEG XL through the bundled native decoder
-- **SigLIP 2** image embeddings on the GPU through DirectML (CPU fallback), batches of 16, loaded only while there is work
-- **Natural-language search** from the search box (Ctrl+F): results best first, cut relative to the best match so a query matching nothing returns nothing; an in-memory int8 index answers in milliseconds
-- **Things**: about 180 built-in labels, the broad kind of each photo (People, Screenshots, Documents…), labels users add ("Eiffel Tower", found across the library at once), tags users add or remove on any photo (their edits always win), a confidence slider
-- AI work waits while on battery (a setting allows it), and pauses with the rest
-- Indexing gives way to the user's programs: Lumen runs below normal priority, its stages share half the CPU's threads between them (Settings → Indexing and performance lets the user give it fewer or more, at once), FFmpeg decodes with two threads (long videos are sampled by seeking to each frame), and the GPU, which also draws the screen, rests a third of the time. A playing video still converts at normal priority
+### Known limits
 
-**Phase 3 (people)** is working:
+- Windows 10 and 11 (64-bit) only. The macOS, Linux and mobile build templates carry the branding but are untested.
+- The installer is not signed yet, so Windows SmartScreen warns before installing it.
+- English only.
+- Compression skips sources above 16 megapixels, and its history keeps the newest 100 runs.
+- Developed RAW and rendered HEIC/TIFF viewing copies are limited to 4096 pixels on the long side. DNG with lossy-JPEG or deflate-compressed sensor data is not read.
+- Same-format compression replacement and Undo are not included: compression saves new copies only.
 
-- **Faces**: YuNet finds faces (with five landmarks) in each photo decoded at 2048 px; each is aligned to SFace's template and turned into a 128-dim identity vector. Both models run on the GPU through DirectML (CPU fallback; the two give the same faces and vectors), taking turns with the image model, loaded only while there is work; a 1,466-photo library took about 45 s on a laptop
-- **People**: faces are grouped by average-linkage clustering (a group's similarity is the dot product of mean vectors, so merging is cheap), incrementally as photos arrive. Two faces in one photo are never one person; blurred or turned-away faces may join someone but never start a new person
-- **User corrections always win**: naming, merging (naming someone with a name already taken asks "same person?"), "not this person" (never put back), moving faces to someone else or a new person (splitting), choosing their picture, blocking (Phase 5). A face placed by the user never moves; a named or blocked person is never merged automatically
-- **People view**, a person's photos (their page is the timeline, filtered), a face review that lists the least-alike faces first, people in the details panel ("Who is this?" for faces not recognised yet)
-- **Search by person**: names in a search narrow it to photos of all of them ("Ali and Sara at the beach"); names alone give their photos, newest first. The search box suggests people as you type
+## Installing
 
-**Phase 4 (videos)** is working:
+Download `Lumen-<version>-x64-setup.exe` from the [releases page](https://github.com/awaisjameel/lumen/releases), check it against the release's `SHA256SUMS.txt`, and run it. It installs Lumen for the current user in `%LOCALAPPDATA%\Programs\Lumen` with no administrator prompt, and carries Microsoft's WebView2 runtime for PCs without one, so installing needs no internet either. The library lives in `%LOCALAPPDATA%\Lumen`. The uninstaller asks whether to remove the library (no by default). Testers should read [the beta guide](docs/beta-testing.md).
 
-- Videos are included when the user enables them in Settings. Bundled FFmpeg and ffprobe read capture date, dimensions, duration, codecs, camera, and location without changing the original file.
-- Indexing makes a poster and a 4×4 hover preview sprite. SigLIP 2 and face recognition share one streaming frame-sampling pass (about one per five seconds, at most 24), with independent photo/video versions and stage retries. Search results jump to the best matching moment.
-- The viewer plays supported files directly and converts other codecs to H.264/AAC while playing. Seeking a converted video starts a new stream at that point; converted copies are not kept on disk. Video streams from a small server on 127.0.0.1 (a random secret in every path), because the app's own origin hands WebView2 a response only once it is complete.
+## Building from source (Windows)
 
-**Phase 5 (organization) is working:**
-
-- **Albums**: manual albums collect photos and videos without moving files. Membership follows an asset when its file is renamed or moved; the Details panel adds or removes the selected item. Smart albums save a rule for media kind, favourites, inclusive capture dates, a Thing and a person, and update as the library changes. Albums have live counts, covers, rename/edit and deletion.
-- **Places** groups GPS-tagged media by nearby city using a bundled, offline GeoNames index. Existing libraries are resolved in the background after an upgrade. Places show live visible counts and open filtered timelines.
-- **Events** groups visible media after a configurable time gap (12 hours by default) or a location jump over 100 km, and regroups as the library changes. What the user says about an event (its name, a pin, a block) follows its photos: a split keeps it on both halves, and photos that join take it on. Reset restores the automatic name.
-- **Pins and renames**: Things and Events can be pinned (pinned first, newest pin first, kept across restarts). Things can be renamed; a renamed built-in keeps its AI prompts and matches and goes by the new name everywhere, search included, and "Reset name" restores the original.
-- **Blocking** covers people, single faces (optionally with their look-alikes), Things, places, events, albums, photos/videos and folders. A label can be hidden alone or with the photos it covers; photos and folders always hide media. One visibility rule feeds grids, search, counts, covers, media URLs and the video server. Search reports exact blocked person, Thing, place and album names, with whole-word Unicode matching and longer-name precedence.
-- **Settings → Blocked** is PIN-protected: attempts are rate-limited, and it locks after 10 idle minutes or when the user leaves it. It lists every block with mode changes and unblocking (a new block offers a brief Undo), and opens each block's covered photos in the Viewer. A forgotten PIN is reset through Windows sign-in: Windows Hello when it is set up, otherwise the account password. Hidden people and user-hidden Things from earlier versions became photo blocks on upgrade.
-- **Trash**: "Move to Trash" in the Viewer and Details panel needs no confirmation and offers Undo. Trash restores items, or deletes them from disk to the Windows Recycle Bin after a confirmation; nothing is ever emptied automatically. A recycled file's asset keeps its names, tags and albums in case the file comes back.
-- **Duplicates** lists exact copies and likely similar photos (from the perceptual hashes) and pre-selects the best copy: highest resolution, then the original camera file and format, file size, metadata, and age. Nothing happens until the user confirms: similar photos go to Trash, and extra files of exact copies go to the Recycle Bin.
-- **Text in images** (off by default): Lumen reads the text in photos the AI sorts as screenshots or documents (PP-OCRv5, English, on the CPU) into SQLite full-text search. Photos whose text has every word of a query come first in search, then the semantic results.
-- **Organise on disk** (Settings → Organise files on disk) moves files into a folder scheme built from a template (`{Year} {Month} {MonthName} {Day} {Event} {Place} {Camera} {Name} {Ext}`, default `{Year}/{Month}/{Event}/{Name}`), each file within its own source folder. A preview lists every move, skip and renamed collision first. Nothing is ever overwritten: a name collision gets ` (2)`, ` (3)`… Each move is journalled, so a run survives a crash and can be resumed or undone, and scans wait while files move. Blocked, trashed and missing files are left alone, and blocked names never become folder names.
-- **XMP sidecars** (off by default): a background pass writes `IMG_1.jpg.xmp` beside each photo with its Things, its named people and their face regions, and a 5-star rating for favourites. Lumen rewrites only sidecars it wrote and never touches an original. Blocked labels, and blocked, hidden or trashed photos, are never exported. **Delete Lumen’s sidecar files** in Settings takes them all back: it turns the setting off and moves every sidecar Lumen wrote, and that nobody has edited since, to the Recycle Bin.
-- **Thumbnail cache cap**: thumbnails and video previews stay under a cap (2 GB by default, set in Settings). The least recently viewed are removed first, and a removed thumbnail is rebuilt the next time it is shown.
-
-Design and decisions for the last part of Phase 5 are in [docs/phase5-design-2026-10-01.md](docs/phase5-design-2026-10-01.md); the original blocking scope is in [the blocking note](docs/blocking-phase5-2026-09-30.md).
-
-**Phase 6 (polish and ship v1) is working; the current beta is 0.11.0:**
-
-- **Installer** (`task package`): `bin\Lumen-0.11.0-x64-setup.exe` (839 MiB) installs Lumen per user, in `%LOCALAPPDATA%\Programs\Lumen`, with no administrator prompt. It carries the runtime folder (DLLs, FFmpeg, models) and Microsoft's standalone WebView2 runtime, which it installs only on a PC without one, so installing never needs the internet. It refuses to replace or remove a running Lumen. The uninstaller removes only what Setup put there, and asks whether to remove the library too (no by default; a silent uninstall keeps it). The installer and Lumen.exe are signed when a certificate is configured; there is none yet. Current installed acceptance limits are recorded [here](docs/beta-package-acceptance-2026-10-10.md).
-- **No network, still**: Lumen never checks for updates. Settings → About Lumen shows the version and the releases page, which opens in the browser only when clicked.
-- **Politeness**: besides the manual pause and waiting for mains power, indexing waits while a game, full-screen video or presentation is in front, and while other programs keep the processor above 70 % for 30 seconds (until they fall to 50 %). Both are on by default. Advanced: index only while the user is away (no input for 5 minutes). Lumen's own work never counts as "other programs": the process and everything it starts share one Windows job, whose processor time is measured. The sidebar status says why indexing waits.
-- **Crash reports and diagnostics, local only**: a crash's account from the Go runtime is kept in `crashes\` beside the library, and the next start says Lumen closed unexpectedly. A panic in a call from the UI is kept as a report and the app runs on. The UI's own failures reach `lumen.log`, rate-limited, and an unexpected one tells the user. Settings → About Lumen opens the log folder and saves a problem report (the log, crash reports and a description of the PC and library, no photos), which the user may choose to share.
-- **Notices**: `THIRD_PARTY_NOTICES.txt` beside Lumen.exe (Settings → About Lumen → Licences) is generated from the build itself (`scripts/notices.py`): the native components and models `deps.sh` pins, the Go modules linked into Lumen.exe and the packages bundled into the UI, each with its licence text.
-- **Performance pass** ([docs/performance-2026-10-03.md](docs/performance-2026-10-03.md)), measured in the real app: cold start to a usable grid in about a second, 60 fps scrolling, searches in 120–200 ms once the text model is loaded, 454 MB in all when idle. On mains power 3,000 photos are browsable in 55 s and fully understood in 264 s on the integrated GPU, with indexing on half the processor.
-- Onboarding, empty states and the beta guide for testers ([docs/beta-testing.md](docs/beta-testing.md)). Design and decisions: [docs/phase6-design-2026-10-03.md](docs/phase6-design-2026-10-03.md).
-
-**Phase 7 (the Nuxt UI frontend and design system)** is built
-([record](docs/phase7-design-2026-10-04.md), [baseline inventory](docs/phase7-inventory-2026-10-04.md), [implementation review](docs/phase7-review-2026-10-04.md)):
-
-- Every screen is rebuilt on Nuxt UI 4 and Tailwind CSS 4 inside the same standalone Vue app: one shell (resizable, collapsible sidebar; icon rail at medium width; navigation drawer when narrow), one page header, one set of loading, empty and failure states, one card, tile, selection bar and settings row.
-- Design tokens for light and dark themes, six accent colours, comfortable and compact density and a 90–130 % text size, all in Settings → Appearance. They are saved with the library (SQLite), not in the WebView; an older Lumen's theme and thumbnail size are carried over once.
-- A command registry behind toolbars, menus, shortcuts and the command palette (Ctrl+K); a shortcut reference (`?`); one overlay coordinator; one notification channel (toasts, with Undo).
-- Icons, fonts and styles are local: the build bundles only the icons the manifest names, and nothing is ever fetched. Reduced motion and Windows contrast themes are honoured.
-- Contracts for later phases: per-asset media capabilities (`AssetDetail.caps`), the typed preference contract, and feasibility records for [RAW and rendered images](docs/phase7-media-feasibility-2026-10-04.md) and [the updater](docs/phase7-updater-feasibility-2026-10-04.md). No updater exists yet and Lumen still makes no network request.
-
-**Phase 8 (viewing, playback, details and file tools)** is implemented locally:
-
-- Image fit/actual size, pointer-centred wheel/pinch zoom and pan, fullscreen, a virtual filmstrip, slideshow, comparison and reversible display rotation/flip. Canonical source and AI pixels remain unchanged.
-- Cancellable HEIC/TIFF viewing renders report the available resolution. Native workers are bounded to 4096 pixels on the long side; very large sources retain their preview until tiled decoding is available.
-- Configurable playback, audio conversion and text subtitles, opt-in resume history, and explicit frame export. The Blocked browser does not record playback history.
-- A resizable metadata inspector, multi-selection across virtual pages, shared batch actions, validated Windows hand-off, previewed rename/move with journal recovery and Undo, and original/JPEG/PNG export with per-file outcomes.
-- Implementation, verification evidence and limits: [Phase 8 record](docs/phase8-implementation-2026-10-05.md).
-
-**Phase 9 (camera RAW first, then broader formats)** is implemented locally:
-
-- **Camera RAW**: Adobe DNG, Canon (CR2, CR3, CRW), Nikon (NEF, NRW), Sony (ARW, SR2, SRF), Fujifilm (RAF), Olympus and OM System (ORF), Panasonic (RW2) and Pentax (PEF). LibRaw develops the sensor data in a worker process of its own (`lumen-raw.exe`), with a memory budget and a lifetime per file. One neutral development (the camera's white balance and colour matrix, sRGB, upright) feeds thumbnails, the perceptual hash, the AI and the viewer, so it does not have the camera's own JPEG look. A file LibRaw cannot develop shows its embedded camera preview, labelled as one; a file it cannot read at all is skipped with a reason. A RAW and the JPEG beside it stay two photos, and are never offered as similar copies.
-- **One format catalogue** (`internal/core/formats.go`) names every extension, its kind, its family and what the WebView is sent; the scanner, decoders and services read it.
-- **JPEG XL** uses the bundled native decoder (extended in Phase 11 to retain colour profiles, transparency and EXIF); **animated PNG** joins the animations the WebView plays from the original; a **multi-page TIFF** is turned through page by page in the viewer.
-- **More video containers**: MPG/MPEG, TS, OGV and ASF, converted as they play. A TypeScript source named `.ts` is told from a transport stream by its first packets.
-- The tested camera matrix, measurements, decisions and limits: [Phase 9 record](docs/phase9-formats-2026-10-07.md).
-
-**Phase 10 (customisation and preference UX)** is implemented locally:
-
-- **More to choose**: motion, the viewer's background, the screen Lumen opens on, how thumbnails fill their squares and which badges they carry, how photos open and what the wheel does, held animations, viewing copy quality, video looping and subtitles from the start, a stronger focus ring.
-- **Keyboard shortcuts** can be reassigned, with collision checks; Escape and Tab keep their jobs.
-- **Photo formats** can be left out of indexing without losing what the library already holds; viewing copies have their own size and Clear button.
-- **Export presets**, a Reset for each settings section and for all, and **customisation files** that carry the interface preferences between libraries with a preview before anything is applied. A file holds no folder, history, PIN or block and cannot turn on a feature that writes files.
-- What each preference is, its default, range, owner and limits: [Phase 10 record](docs/phase10-customisation-2026-10-08.md).
-
-**Phase 11 (lossless image compression)** is implemented locally through 11A–D:
-
-- Individual and bulk actions in the grid, viewer and inspector open the Tools workspace. Analyse first, review measured results, then save selected new copies. Originals remain unchanged.
-- Compatible JPEG/PNG optimisation, reversible JPEG-to-JPEG-XL with byte-exact JPEG restoration, and conservatively supported PNG-to-JPEG-XL conversion use pinned offline encoders and independent preservation checks.
-- Durable per-file history, pause/cancel, restart recovery, duplicate-copy choice, destination collision protection, related-copy annotations, and portable compression defaults with category reset.
-- Supported inputs, measurements, verification and limits: [Phase 11 record](docs/phase11-compression-2026-10-09.md). Optional same-format replacement and Undo (11E) remain deferred.
-- Sources above 16 megapixels are skipped for now, and history keeps the newest 100 runs: [Phase 11 audit](docs/phase11-audit-2026-10-10.md), which corrects the record where they differ.
-
-**Phase 12 (application updates) is implemented locally for the 0.12.0 candidate:**
-installation-scoped opt-in checks, requested streaming downloads, authenticated
-staging, a stable launcher/helper, WAL-inclusive backup and a first-launch health
-gate are recorded in [the implementation record](docs/phase12-implementation-2026-10-12.md).
-Production trust configuration is deliberately empty, so this checkout makes no
-off-device update request. The [production signing process](docs/production-signing.md)
-requires a real publisher certificate, quorum trust custody, hosting and signed
-installed-version acceptance before public delivery can be enabled.
-
-The planned update flow combines automatic checks, background preparation
-and a user-approved restart. The updater's limited network exception and
-recovery design are in [the automatic update plan](docs/automatic-updates-plan-2026-10-04.md).
-The phased scope, architecture,
-migration rules and acceptance gates are in
-[the next development plan](docs/next-development-plan-2026-10-04.md).
-Phase 12 public signing/delivery acceptance remains open; local implementation
-and fixture verification do not establish a public release.
-
-The owner accepted beta 0.11.0 on 12 October 2026. The earlier local installer
-record still documents its Sandbox limitation; it is historical evidence,
-separate from that owner acceptance:
-[packaged beta acceptance](docs/beta-package-acceptance-2026-10-10.md).
-
-**The interface redesign** (October 2026) is merged: every screen rebuilt to
-its approved design board, with the engine support the new screens need.
-Boards, decisions and the deliberate departures from them:
-[redesign record](docs/redesign-2026-10-19.md).
-
-**Phase 0 spikes are done**: libvips and HEIC, sqlite-vec, SigLIP 2, YuNet + SFace, PP-OCRv5, all measured on a real laptop. Numbers and the plan changes they imply are in [spikes/README.md](spikes/README.md).
-
-## Setup (Windows)
-
-Needs Go 1.27.2, Node 22.22.2+ / 24.15+ / 26+ and npm 11.19+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, 7-Zip on PATH, and Python 3.14 (`ruff.toml` targets it). Toolchain used:
+Needs Go 1.27.2, Node 22.22.2+ / 24.15+ / 26+ and npm 11.19+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, 7-Zip on `PATH`, and Python 3.14 (`ruff.toml` targets it). Toolchain used:
 
 - Go 1.27.2 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
 - User environment: `CGO_ENABLED=1`, `CC=clang`, `CXX=clang++`
@@ -156,22 +71,67 @@ Then, once, from Git Bash:
 scripts/deps.sh   # ~1.2 GB of downloads, pinned and checked, into deps/ (git-ignored)
 ```
 
-It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2, the YuNet and SFace face models, the PP-OCRv5 text detector and English recogniser, the linters and NSIS (into `deps/tools/`), and the WebView2 runtime the installer carries (into `deps/installer/`), keeps each shipped component's licence text (in `deps/licenses/`), then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8, which takes it from 565 to 369 MB while agreeing with the original at cosine ≥ 0.9996, and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`. Nothing is ever downloaded at run time.
+It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2, the YuNet and SFace face models, the PP-OCRv5 text detector and English recogniser, the linters and NSIS (into `deps/tools/`), and the WebView2 runtime the installer carries (into `deps/installer/`). It keeps each shipped component's licence text (in `deps/licenses/`) and builds the camera RAW worker (`native/lumen-raw`, LibRaw compiled with the same clang). It then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8 (565 MB to 369 MB, agreeing with the original at cosine ≥ 0.9996), and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`.
 
-Check with `wails3 doctor`.
+Compression adds pinned libjpeg-turbo 3.1.2 and libjxl 0.12.0 tools in `deps/runtime/compress/`. OxiPNG 9.1.5 is built from its locked source with a pinned portable Rust 1.99.0 GNU toolchain and the same clang. The Rust compiler and Cargo cache stay in `deps/`; only the encoder ships.
 
-Compression adds pinned libjpeg-turbo 3.1.2 and libjxl 0.12.0 tools in
-`deps/runtime/compress/`. OxiPNG 9.1.5 is built from its locked source using
-a pinned portable Rust 1.99.0 GNU toolchain and the existing clang compiler.
-The Rust compiler and Cargo cache remain in `deps/`; only the encoder ships.
-Dependency licence texts are collected for the installer notices. These are
-development downloads; the installed app remains offline.
+Check the setup with `wails3 doctor`, then run `wails3 build` once: `Lumen.exe` embeds the built frontend (`frontend/dist`), so on a fresh clone no Go package compiles, and `go test` and `scripts/lint.sh` fail, until it exists. Line endings are pinned to LF by `.gitattributes` (gofmt and Bash need it), whatever `core.autocrlf` says.
 
-Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), whatever `core.autocrlf` says.
+Then turn on the repository's git hooks, once per clone, with `scripts/install-hooks.sh`. **commit-msg** holds messages to Conventional Commits (`type(scope): summary`) and refuses any that credit or mention an AI assistant. **pre-commit** checks the staged files' formatting (gofmt, Prettier, Ruff) and refuses this machine's absolute paths. **pre-push** runs the frontend check, Go vet and the documentation's links.
+
+## Commands
+
+```sh
+wails3 dev                    # run with hot reload
+wails3 build                  # production build -> bin/Lumen.exe
+wails3 task package           # build + NSIS installer -> bin/Lumen-<version>-x64-setup.exe
+source scripts/env.sh         # before go test / vet / run: puts deps/runtime (libvips) on PATH
+go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/...   # wiring, engine, service and release-tool tests
+scripts/lint.sh               # static checks, frontend tests and large-library latency (--fix applies fixes first)
+scripts/bench.sh              # 100,000-photo store latency gate alone (one to two minutes)
+cd frontend && npm run check  # the frontend's alone: vue-tsc, ESLint, Prettier
+npm run test                  # Vitest (jsdom)
+node e2e/run.mjs              # end-to-end suites on bin/Lumen.exe in its WebView2 (after wails3 build)
+```
+
+Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates, which only build for their own platforms, and `spikes/` is its own module. Tests that need real models skip cleanly without `deps/runtime`.
+
+The frontend must finish building before Go embeds `frontend/dist`; never run the frontend and Go production builds concurrently. After changing an exported service method or a wire type, regenerate the bindings with `wails3 generate bindings -f '-tags production' -clean=true -ts -i` (as the build does) and check `git diff -- frontend/bindings`.
+
+`wails3 task package` writes `bin\THIRD_PARTY_NOTICES.txt` (generated from the build by `scripts/notices.py`) and builds the installer from `build/windows/nsis/project.nsi` with the NSIS that `deps.sh` pins. To sign Lumen.exe, the installer and the uninstaller, pass `SIGN_THUMBPRINT=` (a code-signing certificate in the Windows certificate store, where a hardware token's or a signing service's appears) and `TIMESTAMP_SERVER=`, with the Windows SDK's `signtool` on `PATH`. The version and the copyright are set once, in `build/config.yml`. `scripts/version.sh bump` changes the version (see [Releasing](#releasing)); after changing the copyright, run `wails3 task common:update:build-assets` and restore `license: "PolyForm-Noncommercial-1.0.0"` in `build/linux/nfpm/nfpm.yaml`, which that task resets to the template's (`TestVersionsAgree` and `TestLicenceAndCopyrightAgree` check both). The template's Docker, server and MSIX tasks are left out of `Taskfile.yml`: Lumen needs cgo with the Windows libvips, and its installer must carry the runtime folder.
+
+Component tests run in jsdom. Codec playback, native full screen and files moving on disk are checked by the end-to-end suites in [e2e/](e2e/README.md), which drive the built app over the DevTools protocol on scratch libraries with fixtures they generate themselves, one suite per use case: onboarding, a tour of every screen, interface, collections, organise, viewer, file tools, branding, formats, customisation, compression and updates. Installer acceptance is in [e2e/installer](e2e/installer/README.md).
+
+Handy environment variables:
+
+- `LUMEN_DATA_DIR`: use another data folder (default `%LOCALAPPDATA%\Lumen`). A scratch library runs beside the user's Lumen rather than handing over to it.
+- `LUMEN_RUNTIME_DIR`: where the DLLs, `ffmpeg\` and `models\` are (default: beside `Lumen.exe`).
+- `LUMEN_DEVTOOLS_PORT`: expose the WebView's DevTools protocol on `127.0.0.1` so UI tests can drive the real app. Off by default.
+- `LUMEN_FACE_PHOTOS` (tests only): a folder of real photos of people. The face tests run on it and skip without it; keep such photos out of the repository.
+- `LUMEN_RAW_SAMPLES` (tests only): a folder of real camera RAW files. The RAW tests run on it and skip without it; `e2e/fixtures/fetch_raw.py` downloads a pinned CC0 set into `e2e/.cache/raw`.
+
+## Releasing
+
+A release is a version bump merged into `main`, then a tag that the release workflow builds into a draft for review:
+
+1. On an up-to-date `main`, run `scripts/version.sh bump 0.13.0`. It moves to a `release/v0.13.0` branch, sets the version in `build/config.yml`, regenerates the build assets (restoring the nfpm licence), runs `TestVersionsAgree` and `TestLicenceAndCopyrightAgree`, and commits `chore(release): Lumen 0.13.0`. Push the branch, open a pull request and merge it once CI passes.
+2. On `main`, with that merge pulled, run `scripts/version.sh tag`. It refuses unless `main` matches `origin/main` and the version is untagged, then pushes the annotated tag `v0.13.0`.
+3. The tag starts [the release workflow](.github/workflows/release.yml), which:
+   - checks the tag matches `build/config.yml` and sits on `main`;
+   - runs CI's checks;
+   - builds the installer, signed when signing is configured;
+   - creates a **draft** release with the installer, the runtime archive, `THIRD_PARTY_NOTICES.txt`, `SHA256SUMS.txt` and, once the repository is public, signed build provenance (`gh attestation verify`).
+
+   An unsigned build is marked as a pre-release, and its notes tell users how to check the download.
+4. Review the draft: the generated notes, the files, and the installer on a test PC. Then publish it. Published files are never replaced: a fix is a new version. Turning on GitHub's immutable releases (Settings → General → Releases) enforces that.
+
+Signing in the workflow switches on with the repository variables `SIGN_THUMBPRINT` and `TIMESTAMP_SERVER`, once a signing provider's setup step is added ([production signing](docs/production-signing.md#signing-in-the-release-workflow)). The updater's authenticated feed is a separate, local step with offline keys, described in the same document; the release workflow never changes the updater's trust configuration.
 
 ## Code quality
 
-`scripts/lint.sh` runs the static checks, frontend regression tests and the large-library latency gate, runs every step, and reports all failures at the end; `scripts/lint.sh --fix` first applies every automatic fix. Each tool is pinned and configured in the repository:
+`scripts/lint.sh` runs the static checks, the frontend tests, the documentation's links and the large-library latency gate. It runs every step and reports all failures at the end; `scripts/lint.sh --fix` first applies every automatic fix.
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every pull request and every push to `main`, on GitHub's Windows runners, with the toolchain and `deps/` set up as [Building from source](#building-from-source-windows) describes ([.github/actions/setup](.github/actions/setup/action.yml)). It checks the pull request's commit messages, then runs three kinds of job side by side: a production build, which must leave the bindings and `go.mod` as committed, followed by `scripts/lint.sh --no-bench`; the Go race tests (including the release scripts), split into the store and everything else; and the latency gate. The race tests run one package at a time (`-p 1`) with a 30-minute per-package timeout, so native models and filesystem tests do not compete on the smaller runners. The toolchain, `deps/` and each job's Go build cache are cached as soon as they are ready, so a failing run does not send the next one back to a cold build. The latency gate is only reported in the job summary: the runners are slower than the machine the budgets were set on, so `scripts/lint.sh` on a developer's machine stays the binding gate. Each tool is pinned and configured in the repository:
 
 | Code     | Formatting       | Linting                                                                                                                                                       | Config                                                                             |
 | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -180,103 +140,61 @@ Line endings are pinned to LF by `.gitattributes` (gofmt and bash need it), what
 | Python   | Ruff             | Ruff                                                                                                                                                          | `ruff.toml`                                                                        |
 | Shell    |                  | ShellCheck                                                                                                                                                    |                                                                                    |
 
-The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm ci`). npm enforces a seven-day release-age window through `min-release-age=7` in `frontend/.npmrc`; engine checks reject unsupported Node/npm versions. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line. How code is written (errors, context, SQLite, logging, the Go-to-TypeScript contract, Pinia and Vue, tests) is set out in [AUDIT_CONVENTIONS.md](AUDIT_CONVENTIONS.md).
+The Go tools, Ruff and ShellCheck live in `deps/tools/` (from `scripts/deps.sh`); the frontend's are dev dependencies (`npm ci`). npm enforces a seven-day release-age window through `min-release-age=7` in `frontend/.npmrc`, and engine checks reject unsupported Node and npm versions. Exclusions are rare and each says why, in the config or on a `//nolint:linter // reason` line. Editors do the same on save: `.editorconfig` sets line endings and indentation, and `.vscode/settings.json` runs these formatters and linters from the pinned copies (install the recommended extensions).
 
-Editors do the same on save: `.editorconfig` sets line endings and indentation, and `.vscode/settings.json` runs these formatters and linters from the pinned copies (install the recommended extensions).
+How code is written (errors, context, SQLite, logging, the Go-to-TypeScript contract, Pinia and Vue, tests) is set out in [CONVENTIONS.md](CONVENTIONS.md). [AGENTS.md](AGENTS.md) summarises the architecture and the rules that are easy to break, for anyone (or any tool) about to change the code.
 
-After the Go static checks, the latency gate seeds 100,000 photos once and times
-store reads and writes with no blocks, a folder block, and a folder, Thing and
-person block. It includes thousands of events and a day with 10,000 imported
-photos. Every P1 finding in the [bottleneck audit](docs/bottleneck-audit-2026-10-13.md)
-was invisible at 3,000 photos; this step keeps the product's acceptance size in
-the regular gate. Run `scripts/bench.sh` alone (it sources `scripts/env.sh`);
-allow one to two minutes on an i7-13700H with a warm toolchain.
-
-The readable ceilings in `internal/store/testdata/library-budgets.txt` catch
-substantial regressions and allow ordinary timing noise. A missing or unused
-budget also fails. Raise a ceiling only by hand, with a reason and at least five
-repeat measurements in review, using the headroom rule in that file. A failing
-run is a reason to investigate, not automatically to raise a budget.
-
-## Commands
-
-```sh
-wails3 dev                    # run with hot reload
-wails3 build                  # production build -> bin/Lumen.exe
-source scripts/env.sh         # before go test / vet / run: puts deps/runtime (libvips) on PATH
-go test -race -timeout 900s . ./internal/... ./services/... # wiring, engine and service tests (AI tests use deps/runtime)
-scripts/lint.sh               # static checks, frontend tests and large-library latency (--fix applies fixes first)
-scripts/bench.sh              # 100,000-photo store latency gate alone (one to two minutes)
-cd frontend && npm run check  # the frontend's alone: vue-tsc, ESLint, Prettier (lint:fix and format fix)
-npm run test                 # Vitest: async store, viewer and settings regressions
-node e2e/run.mjs             # end-to-end suites on bin/Lumen.exe in its WebView2 (after wails3 build)
-```
-
-Name the Go packages rather than `./...`: `build/` holds Wails' mobile templates, which only build for their own platforms.
-
-`wails3 task package` builds Lumen and its installer, `bin\Lumen-<version>-x64-setup.exe` (build/windows/nsis/project.nsi, with the NSIS that `deps.sh` pins), after writing `bin\THIRD_PARTY_NOTICES.txt`. To sign Lumen.exe, the installer and the uninstaller, pass `SIGN_THUMBPRINT=` (a code-signing certificate in the Windows certificate store, where a hardware token's or a signing service's appears) and `TIMESTAMP_SERVER=`, with the Windows SDK's `signtool` on `PATH`. The version is set once, in `build/config.yml`; after changing it, run `wails3 task common:update:build-assets` (`TestVersionsAgree` fails until then). The template's Docker, server and MSIX tasks are left out of `Taskfile.yml`: Lumen needs cgo with the Windows libvips, and its installer must carry the runtime folder.
-
-Before moving between implementation phases, also regenerate the bindings with
-`wails3 generate bindings -f '-tags production' -clean=true -ts -i` (as the build does), check `git diff -- frontend/bindings`, and run
-`wails3 build`. The frontend must finish building before Go embeds `frontend/dist`;
-do not run independent frontend and Go production builds concurrently. Browser
-component tests use jsdom; actual codec playback, native full screen and files
-moving on disk are checked by the end-to-end suites in [`e2e/`](e2e/README.md),
-which drive the built app over the DevTools protocol on scratch libraries, with
-fixtures they generate themselves (one suite for each use case: onboarding, every
-screen, interface, collections, organise, viewer, file tools, branding, formats).
-See [the latest audit](docs/audit-2026-10-01.md) for findings, verification evidence
-and remaining acceptance limits (earlier audits in `docs/` are historical records).
-
-Handy environment variables:
-
-- `LUMEN_DATA_DIR`: use another data folder (default `%LOCALAPPDATA%\Lumen`). Handy for a scratch library: it runs beside the user's Lumen rather than handing over to it.
-- `LUMEN_RUNTIME_DIR`: where the DLLs, `ffmpeg\` and `models\` are (default: beside `Lumen.exe`).
-- `LUMEN_DEVTOOLS_PORT`: expose the WebView's DevTools protocol on `127.0.0.1` so UI tests (e.g. puppeteer-core) can drive the real app. Off by default.
-- `LUMEN_FACE_PHOTOS` (tests only): a folder of real photos of people. The face tests run on it and skip without it; keep such photos out of the repo.
-- `LUMEN_RAW_SAMPLES` (tests only): a folder of real camera RAW files. The RAW tests run on it and skip without it; `e2e/fixtures/fetch_raw.py` downloads a pinned CC0 set into `e2e/.cache/raw`.
+The latency gate seeds 100,000 photos once and times store reads and writes with no blocks, a folder block, and a folder, Thing and person block. It includes thousands of events and a day with 10,000 imported photos. Every P1 finding in the [bottleneck audit](docs/history/bottleneck-audit-2026-10-13.md) was invisible at 3,000 photos; this step keeps the product's acceptance size in the regular gate. Allow one to two minutes on an i7-13700H with a warm toolchain. The readable ceilings in `internal/store/testdata/library-budgets.txt` catch substantial regressions and allow ordinary timing noise; a missing or unused budget also fails. Raise a ceiling only by hand, with a reason and at least five repeat measurements in review, using the headroom rule in that file. A failing run is a reason to investigate, not to raise a budget.
 
 ## Layout
 
 ```text
-main.go              wiring: paths, logging, store, AI, indexer, services, window
-internal/core        domain types, paths, the wall-clock date convention, case folding, name order
-internal/store       SQLite schema (migrations/), all queries, job queue, tags, embeddings
+main.go              wiring: single-instance hand-over, paths, logging, store, AI, indexer, services, window
+cmd/lumen-launcher   the stable Lumen.exe the installer creates; selects the installed runtime generation
+cmd/lumen-update     the update helper: activates a prepared runtime, never touches the library
+cmd/lumen-trust      offline release tool: role keys and a quorum-signed update root
+cmd/lumen-feed       release tool: prepares authenticated update metadata locally, never publishes
+internal/core        domain and wire types, paths, the format catalogue, the wall-clock date convention, case folding, name order, preferences
+internal/store       SQLite schema (migrations/), all queries, job queue, tags, embeddings, kept counts
 internal/scanner     folder walk, hashing, Windows folder watcher
-internal/media       EXIF, filename dates, thumbnails and their cache, perceptual hash
+internal/media       EXIF, filename dates, decoders, thumbnails and their cache, perceptual hash, rendering
 internal/media/vips  the libvips calls (cgo), one C function per job
 internal/media/wic   Windows Imaging Component decoding (HEIC)
 internal/compress    verified lossless candidates, durable compression coordination and restoration
-native/lumen-raw     the camera RAW worker (C++, LibRaw linked statically); scripts/deps.sh builds it into deps/runtime
-internal/ai          ONNX Runtime sessions, SigLIP 2 image/text encoders, tokenizer, face detection/alignment/recognition
+internal/ai          ONNX Runtime sessions, SigLIP 2 image/text encoders, tokenizer, face detection/alignment/recognition, OCR
 internal/search      in-memory int8 vector index, search, Things vocabulary and tagging
 internal/people      face clustering (incremental, constrained by the user's corrections), names in searches
 internal/places      offline reverse geocoding: the bundled GeoNames cities (cities.tsv.gz)
-internal/index       background pipeline: scan loop, stage workers (OCR, XMP export, cache eviction too), model loading, CPU budget, politeness (battery, full screen, busy PC, idle), events
+internal/index       background pipeline: scan loop, stage workers (OCR, XMP export, cache eviction too), model loading, CPU budget, politeness, events
 internal/fileops     every change to files in the user's folders: Recycle Bin, organise plans and journalled moves, sidecars
-internal/diag        crash reports (the runtime's crash output, recovered panics), the problem report, the PC's description, Lumen's version
+internal/update      updater policy, authenticated discovery and delivery, staging, activation and recovery (inert without release trust)
+internal/diag        crash reports, the problem report, the PC's description, Lumen's version
 internal/signin      Windows sign-in check for a forgotten PIN (Windows Hello, or the account password)
 internal/xmp         the XMP sidecar packet (pure Go)
 internal/parallel    the worker pool loops run on
 internal/testenv     finds deps/runtime for tests, skipping cleanly without it
-e2e/                 end-to-end suites on the built app in WebView2, their fixture generators and perf scripts (e2e/README.md)
-services/            Wails services (Library, Search, People, Media, System, Compression), the block gate, the loopback video server, error codes
+native/lumen-raw     the camera RAW worker (C++, LibRaw linked statically); scripts/deps.sh builds it into deps/runtime
+services/            Wails services (Library, Search, People, Media, System, Compression, Update), the block gate, the loopback video server, error codes
 frontend/src/bridge  the only place the UI calls the engine
 frontend/src/design  design tokens (tokens.css), the icon manifest, how the appearance preferences are applied
-frontend/src/shared  compositions (Page, PageHeader, FeatureState, CollectionCard, MediaTile…), the preference store, command registry, overlay coordinator, notifications, i18n
+frontend/src/shared  compositions (Page, PageHeader, FeatureState, CollectionCard, MediaTile, SelectionDock…), preferences, commands, shortcuts, overlays, notifications, i18n
 frontend/src/app     the shell: navigation, global overlays, command palette, shortcut reference; a development-only component showcase
-frontend/src/{library,search,things,people,onboarding,settings}   UI by feature
-frontend/src/albums  manual and smart album browser and rule editor
-frontend/src/{places,events}   GPS places and automatic event groups
-frontend/src/duplicates  exact-copy and similar-photo review, best copy pre-selected
-frontend/src/trash   Trash actions and Undo
-frontend/src/organise  the organise-on-disk template, preview, progress and undo
-frontend/src/about   Settings → About Lumen, and the notice after a crash
-scripts/             deps.sh (native dependencies), prepare_models.py, env.sh, lint.sh, build_places.py, notices.py, installer_payload.py
-docs/                audits (dated records), the blocking note, the Phase 5, 6 and 7 records, the development plans, GeoNames provenance, the beta guide
-build/windows/nsis   the installer (project.nsi; wails_tools.nsh is generated from build/config.yml)
-spikes/              Phase 0 experiments (own Go module; models in spikes/.cache)
+frontend/src/{library,search,media}   timeline, viewer, search, file tools and filmstrip
+frontend/src/{people,things,places,events,albums}   the collections
+frontend/src/{duplicates,compression,trash,organise}   the tools
+frontend/src/{settings,onboarding,about,updates}   Settings, first run, About Lumen and crash notice, application updates
+e2e/                 end-to-end suites on the built app, their fixture generators, installer acceptance and perf scripts
+scripts/             deps.sh and its parts, prepare_models.py, env.sh, lint.sh, bench.sh, version.sh, the hook checks, notices.py, installer and update payloads, release.ps1, data builders
+.github/             CI and release workflows, and the shared toolchain set-up they use
+.githooks/           commit-msg, pre-commit and pre-push (scripts/install-hooks.sh turns them on)
+build/               Wails build config (config.yml holds the version), icons, the NSIS installer in build/windows/nsis
+docs/                the feature tour, beta guide, production signing, branding, GeoNames provenance, the original plan; docs/history holds the dated records
+spikes/              Phase 0 experiments and later feasibility probes (own Go module; models in spikes/.cache)
 ```
+
+## How it works
+
+**Indexing.** Files are identified by an xxh3-128 hash of their contents (files over 64 MB hash their size and three 4 MB windows). Each asset goes through metadata, thumbnails (256 and 1024 px, plus a 64-bit perceptual hash), the image embedding, faces, text recognition and XMP export, through a durable job queue in SQLite: newest first, on-screen days first, resumed after a crash. Changing what a stage produces bumps its version, which re-runs only that stage. Indexing runs below normal priority on half the processor's threads by default, rests the GPU a third of the time, and waits on battery, behind a game or full-screen video, and while other programs keep the processor busy.
 
 **Dates.** EXIF dates have no time zone, so every date is stored as "wall-clock seconds": the camera's clock time encoded as UTC (`core.WallClock`). The UI formats everything in UTC, so a photo taken at 23:30 stays on its own day.
 
@@ -286,8 +204,13 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 
 **Places.** City names come from [GeoNames](https://www.geonames.org/), licensed under CC BY 4.0. Lumen bundles a reduced 30 September 2026 `cities5000` snapshot (69,760 populated places), with region and country names, so lookups make no network request. A city within 75 km is an approximate label, not an exact administrative boundary. See [data provenance](docs/geonames.md).
 
-## Deviations from the plan (so far)
+**Visibility.** One rule feeds grids, search, counts, covers, media URLs and the video server, so a blocked item disappears everywhere at once. Blocked media is served only while the PIN-protected Blocked settings are open.
 
+## Deviations from the plan
+
+[The original plan](docs/plan.md) set the vision and roadmap. These decisions depart from it:
+
+- **Source-available, not open source** (decided 15 October 2026): the plan said open source from day one. Lumen is licensed under the PolyForm Noncommercial License (see [Licence](#licence)).
 - **TypeScript 6.0**, not 7: `vue-tsc` can't drive the Go-native TS 7 compiler yet. Revisit when Volar supports it.
 - **Pinia 4** (plan said 3; 4 is the current stable).
 - **Search is an in-memory int8 scan**, not sqlite-vec: SQLite stores the vectors, a flat int8 copy in memory is searched (Phase 0: 17 ms at 300k vs 351 ms). No vector extension is loaded.
@@ -307,12 +230,12 @@ spikes/              Phase 0 experiments (own Go module; models in spikes/.cache
 - **AI models ship beside `Lumen.exe`** (`models\` in the runtime folder), read-only from the installer, rather than in the per-user app-data folder; the database and thumbnail cache are in `%LOCALAPPDATA%\Lumen`.
 - **Text in images is in v1**, not "Later", and only for photos the AI sorts as screenshots or documents. It is searched with SQLite FTS4, which go-sqlite3 includes by default; FTS5 would need a build tag on every build and test.
 - **Removing files goes to the Windows Recycle Bin**, never a permanent delete, and only after the user confirms. Duplicates pre-select the best copy (the plan's "quality/best-shot picking" for copies), but nothing moves until the user confirms.
-- **Camera RAW runs in a worker Lumen builds itself** (decided 7 October 2026): LibRaw's source is pinned and compiled by `deps.sh` with the same llvm-mingw clang cgo uses, into one static `lumen-raw.exe`. LibRaw's own Windows binaries need the Visual C++ runtime, which a clean PC may lack. It is used under its CDDL-1.0 option. No JPEG or zlib library is compiled in, so lossy-JPEG and deflate-compressed DNG are not read.
-- **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). Trimming it needs a from-source LGPL build of FFmpeg, a toolchain of its own; packed in the installer the stock build is 63 MB of its 872 MB. Revisit if the installer's size matters more than that build.
-- **No updates in the app** (decided 3 October 2026): the plan left auto-update open, as opt-in. Lumen makes no network request at all; Settings shows the releases page.
+- **Camera RAW is in scope** (the plan parked it) **and runs in a worker Lumen builds itself** (decided 7 October 2026): LibRaw's source is pinned and compiled by `deps.sh` with the same llvm-mingw clang cgo uses, into one static `lumen-raw.exe`. LibRaw's own Windows binaries need the Visual C++ runtime, which a clean PC may lack. It is used under its CDDL-1.0 option. No JPEG or zlib library is compiled in, so lossy-JPEG and deflate-compressed DNG are not read.
+- **The FFmpeg build is the stock LGPL one** (150 MB unpacked, mostly codecs Lumen never uses). Trimming it needs a from-source LGPL build of FFmpeg, a toolchain of its own; packed in the installer the stock build is about 63 MB of roughly 0.9 GB. Revisit if the installer's size matters more than that build.
+- **Updates are opt-in and inert by default** (decided 4 October 2026, replacing the 3 October decision to have no updater): checks happen only when the user enables them or asks, downloads only when requested, and only against compiled-in release trust, which is empty until production signing is in place. No other feature makes a network request.
 - **Installed per user** (decided 3 October 2026), not in Program Files: the library is per user already, and installing or updating needs no administrator.
-- **The installer carries the WebView2 runtime** (decided 3 October 2026, about 200 MB in it) rather than Wails' downloading bootstrapper, so installing needs no internet either.
+- **The installer carries the WebView2 runtime** (decided 3 October 2026, about 200 MB of it) rather than Wails' downloading bootstrapper, so installing needs no internet either.
 
 ## Licence
 
-Lumen is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) (SPDX `PolyForm-Noncommercial-1.0.0`): free for any noncommercial purpose, including personal use and use by charities, schools and public bodies, but not for commercial use. Its source is available, but it is not an open-source licence. The components it ships keep their own licences, listed in `THIRD_PARTY_NOTICES.txt`.
+Lumen is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) (SPDX `PolyForm-Noncommercial-1.0.0`): free for any noncommercial purpose, including personal use and use by charities, schools and public bodies, but not for commercial use. Its source is available, but it is not an open-source licence. The components it ships keep their own licences, listed in `THIRD_PARTY_NOTICES.txt` beside `Lumen.exe` (Settings → Updates and about → About Lumen → Licences).

@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
-$root = 'D:\Downloads\Lumen'
+# The repository root, two folders above this script.
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $env:PATH = "$root\deps\runtime;" + $env:PATH
 $env:PHASE7_FILE = "$root\spikes\phase7\fixtures\enlarged-24mp-tiled.tif"
 $rows = @()

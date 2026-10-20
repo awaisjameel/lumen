@@ -1,7 +1,8 @@
 param([int]$Repeats = 5)
 $ErrorActionPreference = 'Stop'
-$root = 'D:\Downloads\Lumen'
-$env:GOCACHE = 'D:\tmp\phase7\gocache'
+# The repository root, two folders above this script.
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$env:GOCACHE = Join-Path $root 'spikes\.cache\gocache'
 $env:CGO_ENABLED = '1'
 $env:PATH = "$root\deps\runtime;" + $env:PATH
 $env:GOPROXY = 'off'

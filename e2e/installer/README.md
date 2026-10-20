@@ -19,14 +19,15 @@ Lumen or its normal library.
 ## Extracted payload and native workflows
 
 Build with `wails3 task package`, then extract with 7-Zip into an ignored
-folder under `e2e/.work`. From Git Bash:
+folder under `e2e/.work`. From Git Bash at the repository root:
 
 ```sh
-MSYS2_ARG_CONV_EXCL='*' 7z.exe x 'D:\Downloads\Lumen\bin\Lumen-0.11.0-x64-setup.exe' '-oD:\Downloads\Lumen\e2e\.work\package-extracted' -y
+version=$(sed -n 's/^  version: "\(.*\)".*/\1/p' build/config.yml)
+MSYS2_ARG_CONV_EXCL='*' 7z.exe x "bin/Lumen-$version-x64-setup.exe" -oe2e/.work/package-extracted -y
 node e2e/installer/package.mjs e2e/.work/package-extracted
 ```
 
-Use your repository path and current version. The script compares every
+The script compares every
 runtime file, the executable, notices and bundled offline WebView2 installer
 against the build by SHA-256. It rejects unexpected files, apart from NSIS's
 known temporary UI plugins. It then runs the standard suites sequentially

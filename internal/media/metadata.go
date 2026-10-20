@@ -6,7 +6,6 @@ import (
 	"image"
 	"io"
 	"math"
-	"os"
 	"strings"
 	"time"
 
@@ -39,7 +38,7 @@ func ReadMetadata(path string, kind core.Kind) (Metadata, error) {
 	if kind != core.KindPhoto {
 		return m, nil // videos: see Decoders.Metadata
 	}
-	f, err := os.Open(path)
+	f, err := core.OpenShared(path)
 	if err != nil {
 		return m, err
 	}

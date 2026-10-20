@@ -1,0 +1,15 @@
+name: Save the Go caches
+description: >-
+  Saves the Go build, module and lint caches the job filled, under the key
+  and policy ./.github/actions/setup chose. Run it as the job's last step
+  unless the run was cancelled, so a failing step still leaves its compiled
+  packages for the next run.
+
+runs:
+  using: composite
+  steps:
+    - if: env.LUMEN_GO_CACHE_SAVE == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.LUMEN_GO_CACHE_PATHS }}
+        key: ${{ env.LUMEN_GO_CACHE_KEY }}

@@ -9,7 +9,7 @@ import prettier from 'eslint-config-prettier/flat'
 import pluginVue from 'eslint-plugin-vue'
 import globals from 'globals'
 
-// The feature folders: each owns its views and store (AUDIT_CONVENTIONS.md).
+// The feature folders: each owns its views and store (CONVENTIONS.md).
 const features = [
   'about',
   'albums',

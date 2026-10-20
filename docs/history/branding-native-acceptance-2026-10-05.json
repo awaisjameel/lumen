@@ -1,0 +1,174 @@
+{
+  "dataDir": "<scratch>\\lumen-branding-2026-10-05\\data\\1791220991427",
+  "checks": [
+    {
+      "name": "light onboarding logo",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 56,
+        "h": 56,
+        "alt": "",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "light persisted theme",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "dark onboarding logo",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 56,
+        "h": 56,
+        "alt": "",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "dark persisted theme",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "favicon is the dedicated transparent 32px PNG",
+      "pass": true,
+      "detail": {
+        "status": 200,
+        "w": 32,
+        "h": 32,
+        "alpha": 0,
+        "type": "image/png"
+      }
+    },
+    {
+      "name": "light expanded sidebar logo",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 24,
+        "h": 24,
+        "alt": "",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "light collapsed rail has an accessible Lumen mark",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 24,
+        "h": 24,
+        "alt": "Lumen",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "light About uses the shared brand",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 40,
+        "h": 40,
+        "alt": "",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "light narrow header logo",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 20,
+        "h": 20,
+        "alt": "",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "light navigation drawer uses the shared brand",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 24,
+        "h": 24,
+        "alt": "",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "light drawer mark is fully visible",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "dark expanded sidebar logo",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 24,
+        "h": 24,
+        "alt": "",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "dark collapsed rail has an accessible Lumen mark",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 24,
+        "h": 24,
+        "alt": "Lumen",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "dark About uses the shared brand",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 40,
+        "h": 40,
+        "alt": "",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "dark narrow header logo",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 20,
+        "h": 20,
+        "alt": "",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "dark navigation drawer uses the shared brand",
+      "pass": true,
+      "detail": {
+        "loaded": true,
+        "w": 24,
+        "h": 24,
+        "alt": "",
+        "src": "/lumen.png"
+      }
+    },
+    {
+      "name": "dark drawer mark is fully visible",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "no native JavaScript errors",
+      "pass": true,
+      "detail": []
+    }
+  ],
+  "errors": []
+}

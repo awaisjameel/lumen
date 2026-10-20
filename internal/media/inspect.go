@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -54,7 +53,7 @@ func (d Decoders) Inspect(ctx context.Context, path string, kind core.Kind) (cor
 	if profile, err := vips.Profile(path); err == nil && len(profile) > 0 {
 		info.HasProfile, info.Profile = true, profileName(profile)
 	}
-	f, err := os.Open(path)
+	f, err := core.OpenShared(path)
 	if err != nil {
 		return info, err
 	}
