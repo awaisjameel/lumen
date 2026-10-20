@@ -1,8 +1,8 @@
 name: Save the Go caches
 description: >-
   Saves the Go build, module and lint caches the job filled, under the key
-  and policy ./.github/actions/setup chose. Run it last, with
-  `if: ${{ !cancelled() }}`, so a failing step still leaves its compiled
+  and policy ./.github/actions/setup chose. Run it as the job's last step
+  unless the run was cancelled, so a failing step still leaves its compiled
   packages for the next run.
 
 runs:
