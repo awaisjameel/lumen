@@ -60,6 +60,7 @@ step "frontend: regression tests" npm --prefix frontend run -s test
 step "python: ruff" bash -c "'$T/ruff' check --quiet && '$T/ruff' format --check --quiet"
 step "installer: payload cleanup regressions" python scripts/installer_payload_test.py
 step "dependencies: warm extraction regressions" python scripts/dependency_cache_test.py
+step "runtime: every DLL import shipped or part of Windows" python scripts/runtime_imports.py
 step "docs: relative links" python scripts/check_links.py
 step "shell: shellcheck" "$T/shellcheck" -x scripts/*.sh .githooks/*
 

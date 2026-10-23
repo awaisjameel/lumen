@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Fetches and prepares everything Lumen needs besides Go and Node: libvips,
-# ONNX Runtime with DirectML, FFmpeg, the SigLIP 2, face and OCR models, and
-# the linters. Every download is pinned and checked against its SHA-256 (the two
-# values model prep reads from the SigLIP checkpoint are pinned in
-# prepare_models.py; its Python packages are pinned in model-requirements.txt).
-# Run from Git Bash; safe to re-run (finished steps are skipped). Needs curl,
-# unzip, Go and Python 3.15 (model prep only).
+# ONNX Runtime with DirectML and the Visual C++ runtime it needs, FFmpeg, the
+# SigLIP 2, face and OCR models, and the linters. Every download is pinned and
+# checked against its SHA-256 (the two values model prep reads from the SigLIP
+# checkpoint are pinned in prepare_models.py; its Python packages are pinned in
+# model-requirements.txt). Run from Git Bash; safe to re-run (finished steps are
+# skipped). Needs curl, unzip, 7-Zip, Go and Python 3.15 (model prep only).
 #
 #   deps/cache/     downloads
 #   deps/vips/      libvips headers and import library (for cgo)
@@ -58,6 +58,31 @@ unzip -p "$D/cache/ort-dml.nupkg" LICENSE >"$D/licenses/onnxruntime.LICENSE.txt"
 unzip -p "$D/cache/ort-dml.nupkg" ThirdPartyNotices.txt >"$D/licenses/onnxruntime.ThirdPartyNotices.txt"
 unzip -p "$D/cache/directml.nupkg" LICENSE.txt >"$D/licenses/directml.LICENSE.txt"
 unzip -p "$D/cache/directml.nupkg" ThirdPartyNotices.txt >"$D/licenses/directml.ThirdPartyNotices.txt"
+
+# The Visual C++ runtime ONNX Runtime links against. Windows does not include
+# it, and installing Microsoft's redistributable needs elevation, so its DLLs
+# ship beside Lumen.exe (app-local deployment), where Windows finds them before
+# System32. The redistributable is a WiX bundle: the cabinet after its UI holds
+# the x64 runtime's cabinet (a4), whose entries are named <dll>_amd64. The
+# offset and size are fixed by the pinned hash; nothing is installed or run.
+VCRT=14.51.36247.0
+get https://download.visualstudio.microsoft.com/download/pr/ebdab8e5-1d7b-4d9f-a11b-cbb1720c3b12/843068991DAAA1F73AD9F6239BCE4D0F6A07A51F18C37EA2A867E9BECA71295C/VC_redist.x64.exe \
+  vc-redist-$VCRT-x64.exe 843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c
+VCRT_SUMS="7c26614e1d733892c2deac7e245ce115504b1d80592dd0a01b08e3e5a55f89ca *$RT/msvcp140.dll
+206c931bf90fdad8816de3b5e2ef80b2bcaa9406c89ecc05fe6fddffe251e982 *$RT/msvcp140_1.dll
+d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7 *$RT/vcruntime140.dll
+a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e *$RT/vcruntime140_1.dll"
+if ! sha256sum -c --quiet --status <<<"$VCRT_SUMS" 2>/dev/null; then
+  command -v 7z >/dev/null || { echo '7-Zip is required to extract the pinned Visual C++ runtime' >&2; exit 1; }
+  rm -rf "$D/vcrt" && mkdir -p "$D/vcrt"
+  tail -c +630001 "$D/cache/vc-redist-$VCRT-x64.exe" | head -c 18091661 >"$D/vcrt/payload.cab"
+  7z e -y "-o$D/vcrt" "$D/vcrt/payload.cab" a4 >/dev/null
+  for dll in msvcp140 msvcp140_1 vcruntime140 vcruntime140_1; do
+    7z e -y -so "$D/vcrt/a4" "$dll.dll_amd64" >"$RT/$dll.dll"
+  done
+  rm -rf "$D/vcrt"
+  sha256sum -c --quiet <<<"$VCRT_SUMS"
+fi
 
 # FFmpeg 9.0 (LGPL, shared). Only ffmpeg.exe, ffprobe.exe and the libraries
 # they load ship. BtbN deletes its daily autobuilds after about two weeks but
