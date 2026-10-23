@@ -19,7 +19,7 @@ published version has and has not been tested for.
 
 Download the setup executable and `SHA256SUMS.txt` from the same
 [release](https://github.com/awaisjameel/lumen/releases). Compare its hash before
-running it: `Get-FileHash .\Lumen-0.12.0-x64-setup.exe` in PowerShell, or
+running it: `Get-FileHash .\Lumen-*-x64-setup.exe` in PowerShell, or
 `sha256sum -c SHA256SUMS.txt --ignore-missing` in Git Bash. This guide follows
 the current source; the release notes link the guide as it was for that version.
 

@@ -25,7 +25,7 @@ New here? Follow [the walkthrough](docs/using-lumen.md), or read [everything Lum
    `Lumen-<version>-x64-setup.exe` and `SHA256SUMS.txt`. (The runtime ZIP is for
    update tooling; install with the setup program.)
 2. Check the download against `SHA256SUMS.txt`, in PowerShell with
-   `Get-FileHash .\Lumen-0.12.0-x64-setup.exe`, or in Git Bash with
+   `Get-FileHash .\Lumen-*-x64-setup.exe`, or in Git Bash with
    `sha256sum -c SHA256SUMS.txt --ignore-missing`.
 3. Close Lumen if it is running, and run the setup program. It installs for
    you alone, in `%LOCALAPPDATA%\Programs\Lumen`, with no administrator prompt.
@@ -100,12 +100,12 @@ share it, and can contain file paths: [check it first](docs/beta-testing.md#send
 
 ## Status
 
-Lumen is in beta. As checked on **24 October 2026**, the latest release is
-[v0.12.0](https://github.com/awaisjameel/lumen/releases/tag/v0.12.0), unsigned.
-The source has changed since, with the same version number, so a build from it
-is not that release. [Release status](docs/release-status.md) separates what
-is published, what was accepted and when, and what is still to do before a
-signed release.
+Lumen is in beta. As checked on **24 October 2026**, the latest published
+release is [v0.12.0](https://github.com/awaisjameel/lumen/releases/tag/v0.12.0),
+unsigned. The source is version 0.12.1, the next release, which is drafted
+unsigned and published only after review. [Release status](docs/release-status.md)
+separates what is published, what was accepted and when, and what is still to
+do before a signed release.
 
 ### Known limits
 
