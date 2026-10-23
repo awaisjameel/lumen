@@ -2,7 +2,7 @@
 
 Sep 25, 2026 · @Awais Jameel
 
-> This is the original plan, kept as written apart from small edits. Where Lumen differs from it, the decision is recorded in [the README's deviations from the plan](../README.md#deviations-from-the-plan), notably the licence (source-available, not open source), camera RAW (in scope) and updates (opt-in, inert until release signing).
+> This is the original plan, kept as written apart from small edits. Where Lumen differs from it, the decision is recorded in [the implemented design decisions](architecture.md#deviations-from-the-plan), notably the licence (source-available, not open source), camera RAW (in scope) and updates (opt-in, inert until release signing). For current behaviour, read [the feature tour](features.md) and [the walkthrough](using-lumen.md): an item planned here is not thereby implemented.
 
 ## 1. Vision & Principles
 

@@ -2,27 +2,34 @@
 
 Lumen is a Windows desktop photo and video gallery. All of its AI runs on your own PC. It has no accounts, uploads or telemetry, and it makes no network requests; the only exception is an opt-in updater, inert until release signing is set up (section 16). The AI models, FFmpeg and the city database ship inside the installer.
 
+For step-by-step examples, use [the walkthrough](using-lumen.md). Installation and
+release evidence are tracked in [release status](release-status.md).
+
 ---
 
 ## 1. Getting started and the library
 
 - **First run:** a welcome screen suggests folders to add, such as Pictures, and lets you pick others. Source folders can't overlap.
-- **Scanning:** Lumen walks each folder, skipping hidden and system folders. It identifies every file by a hash of its contents, and guesses a date from the file name when EXIF has none.
+- **Scanning:** Lumen walks each folder, skipping hidden and system folders. It identifies files by a content hash (files over 64 MB use size plus three sampled windows), and guesses a date from the file name when EXIF has none.
 - **Watching:** Lumen watches the folders, including subfolders, for changes and rescans after a short delay. It also checks everything once at startup.
-- **Exact duplicates** (byte-identical files) appear as one photo with several file paths.
+- **Exact copies** normally appear as one photo with several file paths; large-file hash sampling is not a forensic byte comparison.
 - **Formats:**
   - JPEG, PNG, WebP, GIF, animated PNG, TIFF (including multi-page), AVIF, HEIC, BMP and JPEG XL.
   - Camera RAW: DNG, Canon, Nikon, Sony, Fujifilm, Olympus/OM, Panasonic and Pentax. RAW files are developed in a separate worker process. If a file can't be developed, Lumen shows its embedded preview with a label saying so.
-  - Videos are optional: switch them on in Settings. MP4/MOV and other containers play directly. Others, such as MPG, TS, OGV and ASF, are converted while they play.
+  - Videos are optional: switch them on in Settings. Playback depends on the codecs, not just the container suffix. Unsupported direct-play codecs are converted locally while they play.
 - You can leave individual formats out of indexing without losing anything already in the library.
 
 ## 2. Background indexing
 
-Each photo goes through these stages in order: metadata → thumbnails → AI embedding → faces → text recognition (OCR) → XMP export.
+Metadata and thumbnails come first. Embedding/tagging and face recognition then
+have separate work queues; a face result can arrive before semantic search is
+ready. When enabled, OCR reads eligible screenshots/documents after tagging,
+and XMP export writes changes to Lumen-owned sidecars. This is not one strictly
+sequential chain for every photo.
 
 - The work queue is stored in the database, so it picks up where it left off after a crash or restart.
 - **Newest photos go first**, and the days currently on screen jump the queue.
-- The **sidebar status** says what indexing is doing. Hovering it shows what's being worked on, what comes next, and which files couldn't be read and why (damaged, too slow, or locked by another app).
+- The **sidebar status** says what indexing is doing. Selecting it shows what's being worked on, what comes next, and which files couldn't be read and why (damaged, too slow, or locked by another app).
 - **It stays out of your way:**
   - It runs below normal priority on about half the CPU's threads, which you can change.
   - The GPU rests a third of the time.
@@ -51,7 +58,7 @@ Each photo goes through these stages in order: metadata → thumbnails → AI em
 ## 5. Search (AI)
 
 - Press `Ctrl+F` or `/` and type in plain language, e.g. "dog on a beach at sunset". The SigLIP 2 model matches the meaning of the query.
-- Results come back best match first. Weak matches are cut off relative to the best one, so a query that matches nothing returns nothing. Searches take about 120–200 ms.
+- Results come back best match first. Weak matches are cut off relative to the best one, so a query that matches nothing returns nothing. Warm searches can be quick; first use loads a model, and latency depends on the PC, library and query. Dated measurements are in the [dependency record](history/dependency-upgrade-2026-10-23.md#local-performance-samples).
 - **People in queries:** "Ali and Sara at the beach" narrows to photos containing both of them. A name on its own gives that person's photos. The search box suggests people as you type.
 - **Video results** jump to the best matching moment.
 - **Text in images** (off by default) reads text in photos the AI classes as screenshots or documents (English, on the CPU). Photos containing every word of the query come first, ahead of the AI matches.
@@ -70,7 +77,7 @@ Each photo goes through these stages in order: metadata → thumbnails → AI em
 - Faces are **grouped into people automatically** as photos arrive, with some safeguards:
   - Two faces in the same photo are never treated as the same person.
   - Blurry or turned-away faces can join an existing person but can't start a new one.
-  - A new person needs clear faces in three photos.
+  - A new person needs clear faces in at least three photos.
 - **Your corrections always win:**
   - Name a person. Using a name that's already taken asks "same person?" and merges them.
   - Take a face out with **Not {name}** in face review; it is never put back.
@@ -97,13 +104,14 @@ Each photo goes through these stages in order: metadata → thumbnails → AI em
 ## 10. Blocking (privacy)
 
 - Almost anything can be **blocked**: people, single faces (optionally with similar faces), Things, places, events, albums, individual photos or videos, and whole folders.
-- A label can be hidden on its own, or together with every photo it covers.
-- Once blocked, an item disappears everywhere: grids, search, counts, album covers, thumbnails and video streaming.
+- A label or person can be hidden on its own, leaving its photos visible, or together with the photos it covers.
+- When the block hides photos, those photos disappear from grids, search, counts, album covers, thumbnails and video streaming.
 - **Settings → Privacy and blocked** is protected by a PIN:
   - Wrong attempts are rate-limited, and it locks after 10 idle minutes or when you leave it.
   - It lists every block, where you can change how each one hides content or unblock it. A new block offers a brief Undo.
   - You can browse a block's hidden photos in the viewer. Playback history isn't recorded there.
   - A forgotten PIN is reset by signing in to Windows (Windows Hello or your account password).
+- Blocking controls visibility inside Lumen; it does not encrypt originals or prevent access in other applications.
 
 ## 11. Trash and Duplicates
 
@@ -147,7 +155,7 @@ Settings sections: Appearance · Library and folders · Viewing and playback · 
 ## 15. Reliability and diagnostics
 
 - **Crash reports stay on your PC.** After a crash, the next start says Lumen closed unexpectedly.
-- About Lumen opens the log folder and can save a **problem report** (logs, crash reports, a description of the PC and library, no photos) for you to share if you choose.
+- About Lumen opens the log folder and can save a **problem report** (logs, crash reports, a description of the PC and library, no photos) for you to share if you choose. Reports can contain paths: [inspect the ZIP before sharing](beta-testing.md#sending-a-problem-report).
 - Third-party licences are listed in the app.
 
 ## 16. Installation and updates
@@ -158,4 +166,4 @@ Settings sections: Appearance · Library and folders · Viewing and playback · 
 
 ---
 
-**How far along it is:** see [the status table in the README](../README.md#status), which also lists the known limits.
+**How far along it is:** see [the README's status](../README.md#status) and its known limits, and [release status](release-status.md) for what has been published and accepted.

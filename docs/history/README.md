@@ -1,8 +1,8 @@
 # Development history
 
-Dated records of how Lumen was designed, built and checked, phase by phase. They are historical: each describes the code on its date, and later records correct earlier ones. Where a record and the code differ, the code and [the README](../../README.md) win. Paths such as `<scratch>` name the scratch folders measurements were made in; they were never part of the repository.
+Dated records of how Lumen was designed, built and checked, phase by phase. They are historical: each describes the code on its date, and later records correct earlier ones. None of their test results or measurements is evidence about a later build. Where a record and the code differ, the code and the living guides win. Paths such as `<scratch>` name the scratch folders measurements were made in; they were never part of the repository.
 
-The living documents are one folder up: [the feature tour](../features.md), [the beta guide](../beta-testing.md), [production signing](../production-signing.md), [branding](../branding.md), [GeoNames data](../geonames.md) and [the original plan](../plan.md).
+The living documents are one folder up, listed with the topic each owns in [the documentation map](../README.md). [The original plan](../plan.md) sits beside them but is historical too: [the design decisions](../architecture.md#deviations-from-the-plan) record where Lumen departs from it. What has been published, and what the current source has and has not passed, is kept in [release status](../release-status.md), not here.
 
 ## Phases
 
@@ -37,7 +37,8 @@ Phases 0 to 4 have no records of their own: Phase 0's measurements are in [the s
 - 14 October 2026: [the audit's P2 items](audit-p2-round-2026-10-14.md), [kept counts](kept-counts-2026-10-14.md), [name order](name-order-2026-10-14.md)
 - 15 October 2026: [SQLite tuning](sqlite-tuning-2026-10-15.md)
 - 23 October 2026: [dependency upgrade and acceptance record](dependency-upgrade-2026-10-23.md), [resolved inventory](dependency-inventory-2026-10-23.json)
+- 24 October 2026: [documentation refresh](documentation-refresh-2026-10-24.md): the guides checked against the code, new screenshots and their capture
 
 ## Acceptance logs
 
-The JSON files are the raw reports of native WebView2 acceptance runs, each cited by the record beside it: [branding](branding-native-acceptance-2026-10-05.json) ([branding guide](../branding.md)); Phase 8 [implementation](phase8-native-acceptance-2026-10-05.json), audit runs of [5 October](phase8-audit-native-acceptance-2026-10-05.json) and [6 October](phase8-audit-native-acceptance-2026-10-06.json), the [6 October tour](phase8-audit-native-tour-2026-10-06.json) and [dependency audit](phase8-audit-dependencies-2026-10-06.json); [Phase 9](phase9-native-acceptance-2026-10-07.json); Phase 10 [record](phase10-native-acceptance-2026-10-08.json) and [audit](phase10-audit-native-2026-10-09.json).
+The JSON files are the raw reports of native WebView2 acceptance runs, each cited by the record beside it: [branding](branding-native-acceptance-2026-10-05.json) ([branding verification](branding-verification-2026-10-05.md), moved out of the branding guide); Phase 8 [implementation](phase8-native-acceptance-2026-10-05.json), audit runs of [5 October](phase8-audit-native-acceptance-2026-10-05.json) and [6 October](phase8-audit-native-acceptance-2026-10-06.json), the [6 October tour](phase8-audit-native-tour-2026-10-06.json) and [dependency audit](phase8-audit-dependencies-2026-10-06.json); [Phase 9](phase9-native-acceptance-2026-10-07.json); Phase 10 [record](phase10-native-acceptance-2026-10-08.json) and [audit](phase10-audit-native-2026-10-09.json).

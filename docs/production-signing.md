@@ -9,6 +9,17 @@ The checkout's `internal/update/release-config.json` is deliberately empty.
 There is no production trust root, signing identity or public feed in this
 checkout. Fixture signing keys are not a production bootstrap.
 
+For the currently published assets and the current source candidate's evidence,
+see [release status](release-status.md). An unsigned release's GitHub pre-release
+flag can be changed by its publisher; neither flag nor publication proves signing.
+The version/tag/draft workflow has its canonical guide in [Releasing](releasing.md).
+
+The examples below explicitly use **PowerShell** on the signing workstation.
+For `go run`, first prepare cgo/native PATH as in [Development](development.md)
+in Git Bash; run PowerShell from that prepared shell when required. These are
+release-engineering templates with placeholders, not commands for a normal user
+or routine documentation check.
+
 ## Provision the external signing identities
 
 Obtain a publicly trusted Authenticode code-signing certificate for the
@@ -97,7 +108,7 @@ without matching hashes and both accepted results.
 ## Signing in the release workflow
 
 `.github/workflows/release.yml` turns a version tag into a draft release
-(README, "Releasing"). It signs Lumen.exe, the stable launcher, the helper,
+([Releasing](releasing.md)). It signs Lumen.exe, the stable launcher, the helper,
 the installer and the uninstaller when two repository variables are set:
 `SIGN_THUMBPRINT`, the certificate's thumbprint, and `TIMESTAMP_SERVER`, an
 HTTPS RFC 3161 service. The certificate and its private key must then be
@@ -115,8 +126,8 @@ its signer's thumbprint before drafting the release. A hardware token can
 still sign locally with `release.ps1 -Mode Package`, and those artifacts can
 be uploaded to the release instead.
 
-The workflow never writes `internal/update/release-config.json`, so its
-builds keep the updater inert. Once the public root and publisher pins exist,
+The workflow never writes `internal/update/release-config.json`. With the current
+empty configuration its builds keep the updater inert. Once the public root and publisher pins exist,
 commit that file as `release.ps1 -Mode Package` writes it: it holds only
 public trust data, and every later build, the workflow's included, is then
 updater-capable. Preparing and publishing the feed stays local, because it

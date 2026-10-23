@@ -3,8 +3,9 @@
 Every change to Lumen follows these rules. They are the patterns the
 codebase already uses most, first written down in the October 2026
 hardening pass. Where two patterns compete, the rule below picks one and
-says so. The README covers layout and tooling; this file covers how code is
-written.
+says so. [Architecture](docs/architecture.md) owns the layout, and
+[Development](docs/development.md) owns toolchains and command recipes; this
+file covers how code is written.
 
 ## General
 
@@ -26,23 +27,24 @@ written.
   If two copies exist, keep the one in the lower layer (`core` before
   `store` before `services`; `shared` before a feature folder) and delete
   the other.
-- **Scope.** Each phase is built as its record in `docs/history/` sets out
-  ([the index](docs/history/README.md) names the record that applies to
-  each phase; a later record corrects an earlier one, as the Phase 11 audit
-  corrects the Phase 11 record). Phase 6's decisions (the installer,
+- **Scope.** Current code, [features](docs/features.md) and
+  [design decisions](docs/architecture.md) describe implemented behaviour.
+  [Dated phase records](docs/history/README.md) supply historical context;
+  a planned feature or old test result does not establish current acceptance.
+  Phase 6's decisions (the installer,
   politeness controls, crash reports and diagnostics, onboarding and empty
   states) are not reopened except by an explicit product-owner decision.
   Same-format compression replacement (11E) is deferred. Public update
   delivery (Phase 12) stays disabled until compiled trust and signing
   policy are provisioned ([production signing](docs/production-signing.md)).
-- **No network.** The one authorised exception is the updater planned in
-  [the automatic update plan](docs/history/automatic-updates-plan-2026-10-04.md):
+- **No network.** The one authorised exception is the updater governed by
+  [production signing and update delivery](docs/production-signing.md):
   opt-in checking and explicitly requested authenticated downloads. No
   other feature may add a network request or upload library data.
 
 ## Go
 
-- **Packages** keep the jobs the README's layout gives them. Only `store`
+- **Packages** keep the jobs the [architecture guide](docs/architecture.md) gives them. Only `store`
   writes SQL. `ai` never imports `store`. `services` stay thin: argument
   checks, error codes, calls into `internal/*`.
 - **Interfaces** are declared by the package that consumes them, and only

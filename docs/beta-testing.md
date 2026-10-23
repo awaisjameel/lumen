@@ -1,15 +1,27 @@
 # Testing the Lumen beta
 
-Thank you for trying Lumen before its first release. Lumen is a photo
-gallery for Windows that organises your photos and videos with AI that runs
-on your own PC. Nothing is uploaded: Lumen never connects to the internet.
+Thank you for testing the Lumen beta. Lumen is a photo gallery for Windows
+that organises your photos and videos with AI that runs on your own PC.
+Nothing is uploaded, and Lumen makes no network request: the one exception, an
+opt-in updater, stays switched off until releases are signed.
 
 The beta is meant to be used on your real photos, so that we learn how it
 copes with years of camera rolls, WhatsApp images, screenshots and phone
 backups. Settings → Updates and about → About Lumen shows which version you
 have.
 
+This page is the testers' checklist: what to try, what Lumen does to your
+files, and how to report a problem. [The walkthrough](using-lumen.md) shows how
+to do each thing, and [release status](release-status.md) says what each
+published version has and has not been tested for.
+
 ## Installing
+
+Download the setup executable and `SHA256SUMS.txt` from the same
+[release](https://github.com/awaisjameel/lumen/releases). Compare its hash before
+running it: `Get-FileHash .\Lumen-0.12.0-x64-setup.exe` in PowerShell, or
+`sha256sum -c SHA256SUMS.txt --ignore-missing` in Git Bash. This guide follows
+the current source; the release notes link the guide as it was for that version.
 
 1. Run `Lumen-<version>-x64-setup.exe`. It installs Lumen for you alone, in
    `%LOCALAPPDATA%\Programs\Lumen`, without asking for administrator rights.
@@ -23,14 +35,21 @@ If you already have Lumen, close it and run the new installer over the
 existing installation. You do not need to uninstall first; your library,
 names, albums and settings are kept.
 
-You need Windows 10 or 11 (64-bit) and at least 8 GB of memory. A graphics
+Use Windows 10 or 11 (x64); at least 8 GB of memory is recommended. A graphics
 card is used if there is one; Lumen works without it, more slowly.
 
 ## What Lumen does to your files
 
-Nothing, unless you ask. Lumen reads your photos and keeps what it learns in
-its own library, `%LOCALAPPDATA%\Lumen`. It only changes files in your
-folders when you use one of these, each of which asks first:
+Nothing, unless you ask, and it never edits a photo itself. Lumen reads your
+photos and keeps what it learns in its own library, `%LOCALAPPDATA%\Lumen`. It
+only changes files in your folders when you use one of these, each of which
+shows you what it will do first ([the walkthrough](using-lumen.md#rename-move-export-and-organise-files)
+has examples):
+
+- **File tools** (on selected photos) renames or moves files, or exports
+  copies to a folder you choose. Moves are journalled, survive a crash and
+  can be undone; a name already taken gets a number instead of being
+  overwritten.
 
 - **Delete from disk** (in the Trash and Duplicates) moves files to the
   Windows Recycle Bin, never further.
@@ -49,7 +68,7 @@ folders when you use one of these, each of which asks first:
 
 - **Start**: choose your photo folders. Photos appear within seconds; the AI
   then works through them in the background. The status at the bottom left
-  says what it is doing; hover over it for more.
+  says what it is doing; select it for more.
 - **Search** (Ctrl+F): try what is in a photo ("beach at sunset", "birthday
   cake", "receipt") and people's names once you have named them.
 - **People**: name a few people, merge duplicates, and correct mistakes.
@@ -72,9 +91,10 @@ folders when you use one of these, each of which asks first:
   losslessly…**, or open **Tools → Compression**. Analyse first, review the
   measured sizes and preservation checks, then save selected copies. Try a
   bulk selection, pause/cancel and reopening Lumen with an unfinished review.
-  Compatible mode keeps JPEG/PNG formats; reversible JPEG mode creates JPEG
-  XL and can restore the original JPEG byte for byte. Eligible PNG photos
-  can also become JPEG XL. Other programs may not open JPEG XL.
+  **Optimise existing format** keeps JPEG and PNG; **Reversible JPEG to
+  JPEG XL** makes a JPEG XL from which the original JPEG can be restored byte
+  for byte; **Convert losslessly to JPEG XL** does the same for eligible PNG
+  photos. Other programs may not open JPEG XL.
 
 ## What to tell us
 
@@ -115,9 +135,9 @@ come back. Your photos themselves are never touched either way.
 ## Known limits of this beta
 
 - It is not signed yet, so Windows warns before installing it.
-- In-app updates are not available in beta builds; Settings → Updates and
-  about says so. Install a new version over the old one. New versions are
-  published at <https://github.com/awaisjameel/lumen/releases>.
+- In-app updates are switched off until releases are signed: Settings →
+  Updates and about says so. Install a new version over the old one. New
+  versions are published at <https://github.com/awaisjameel/lumen/releases>.
 - English only.
 - Camera RAW support varies by camera and compression mode. DNG with
   lossy-JPEG sensor data or deflate compression is not read by this build.

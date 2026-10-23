@@ -1,0 +1,103 @@
+{
+  "capturedAt": "2026-10-23T20:17:28.901Z",
+  "version": "0.12.0",
+  "sourceCommit": "820ebed69a17681cdde74768009beabe6105c627",
+  "executableSHA256": "c6a710cfce4a9d8d49686c52954c4b4c42e57d5ac788e87dd71db324243a00b1",
+  "mediaManifestSHA256": "dc80d4d5bbc6940984d9cb6fcb21534ca7c4da4602fbafda4a8ffcfa7592c245",
+  "screenshots": [
+    {
+      "file": "faces.webp",
+      "caption": "Reviewing the faces of a named person, one selected.",
+      "width": 1800,
+      "height": 1125,
+      "cssWidth": 1440,
+      "cssHeight": 900,
+      "devicePixelRatio": 1.25,
+      "bytes": 58838,
+      "sha256": "d643f7d39ba277cac71f677ece73547416402beae038d7a6840c448ed3831956"
+    }
+  ],
+  "kept": [
+    {
+      "file": "library.webp",
+      "caption": "The Library, grouped by day with the place of each day.",
+      "capturedIn": "44edd34",
+      "capturedOn": "2026-10-21",
+      "width": 1800,
+      "height": 1125,
+      "bytes": 196108,
+      "sha256": "b7b4bdf251d96ebfef23faa85970b9cdadcdf268262ac791256e4a35458b0ad4"
+    },
+    {
+      "file": "search.webp",
+      "caption": "Search results for snowy mountains at sunrise.",
+      "capturedIn": "44edd34",
+      "capturedOn": "2026-10-21",
+      "width": 1800,
+      "height": 1125,
+      "bytes": 140168,
+      "sha256": "963e54ef1292cf012d21d1924df1e4335e71ed08ce564a26b7898dab35629e76"
+    },
+    {
+      "file": "viewer.webp",
+      "caption": "A coffee photo in the viewer beside its details.",
+      "capturedIn": "44edd34",
+      "capturedOn": "2026-10-21",
+      "width": 1800,
+      "height": 1125,
+      "bytes": 109982,
+      "sha256": "2f77b44570ec73be165db6734d9f46e429717fce70296b4fb395f56087275e2d"
+    },
+    {
+      "file": "places.webp",
+      "caption": "Places on the offline atlas.",
+      "capturedIn": "44edd34",
+      "capturedOn": "2026-10-21",
+      "width": 1800,
+      "height": 1125,
+      "bytes": 142014,
+      "sha256": "da60dd03f147bc051ac0a6cec7a746b59f298e260d98c2b393dafe9d099b6100"
+    },
+    {
+      "file": "things.webp",
+      "caption": "Things found in the sample library.",
+      "capturedIn": "44edd34",
+      "capturedOn": "2026-10-21",
+      "width": 1800,
+      "height": 1125,
+      "bytes": 192796,
+      "sha256": "3c27ce2daa913b9c989166a4f3fe2b3b5b1e7999b0098bc8932c548eccc4779b"
+    },
+    {
+      "file": "albums.webp",
+      "caption": "Three smart albums, each following a Thing.",
+      "capturedIn": "44edd34",
+      "capturedOn": "2026-10-21",
+      "width": 1800,
+      "height": 1125,
+      "bytes": 98572,
+      "sha256": "d9f7653d4d1f704bdcb756e0b54d206ff7466ae67039c5a5cb0e2475c161152b"
+    },
+    {
+      "file": "dark.webp",
+      "caption": "Search results for city lights at night in the dark theme.",
+      "capturedIn": "44edd34",
+      "capturedOn": "2026-10-21",
+      "width": 1800,
+      "height": 1125,
+      "bytes": 149592,
+      "sha256": "9af92ba755d9c781b420cce826e9334decf0deafa58e6854b58f7829ccf40403"
+    }
+  ],
+  "checks": [
+    "all 998 sample files indexed",
+    "all five portrait frames are in the library",
+    "the face model found the portrait faces",
+    "the named person persists",
+    "faces has the gallery's framing",
+    "no uncaught page errors",
+    "no application request left the PC"
+  ],
+  "personGroupedByClustering": true,
+  "externalRequests": []
+}

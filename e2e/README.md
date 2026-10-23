@@ -2,7 +2,7 @@
 
 These suites drive the **built app** (`bin\Lumen.exe`, the production build in its native WebView2) the way a person does: they click, type and press keys through the WebView's DevTools port, call the same bound services the frontend calls, and check the files on disk. They complement the Go tests (engine and services) and the Vitest tests (components in jsdom), which cannot show that a codec plays, a dialog takes the pointer or a file really moved.
 
-Every run uses a scratch library (`LUMEN_DATA_DIR`). The suites never open your own library, and never read a folder outside this repository.
+Every run uses a scratch library (`LUMEN_DATA_DIR`). The suites never open your own library. They read only fixtures generated or downloaded into this repository's ignored folders, unless you name an outside input yourself: a corpus for the Go tests (`LUMEN_RAW_SAMPLES`, `LUMEN_FACE_PHOTOS`) or a previous build (`LUMEN_PREVIOUS_EXE`).
 
 ## Running
 
@@ -45,12 +45,12 @@ Install the pinned fixture tooling with `python -m pip install -r e2e/requiremen
 
 ## Fixtures
 
-Nothing binary is committed. `fixtures/build.py` generates every file deterministically on first use, into `.work/fixtures/`:
+No test media is committed. `fixtures/build.py` generates the fixtures deterministically on first use, into `.work/fixtures/`:
 
 - `library`: dated synthetic JPEGs in year/month folders (600; `LUMEN_E2E_PHOTOS` changes it).
 - `videos`: one H.264 MP4 that WebView2 plays directly, two MPEG-4 files it cannot.
 - `media`: twelve photos (one turned by EXIF), a 6000x4000 TIFF, a Display P3 JPEG, a HEIC where `spikes/fetch.sh` has downloaded one, and two videos with two audio tracks and subtitles.
-- `formats`: the files above the table's last row, with a RAW cut short (it keeps only its preview) and a TypeScript `main.ts` the scanner must not take for a video.
+- `formats`: the downloaded RAW samples below, plus generated JPEG XL, animated PNG, multi-page TIFF and older-container videos, with a RAW cut short (it keeps only its preview) and a TypeScript `main.ts` the scanner must not take for a video.
 
 The **base library** is the `library` fixture indexed to the end by the build under test (thumbnails, embeddings, faces: a few minutes, once), then given favourites, albums, a Thing and some Trash. Each suite works on its own fresh copy, so suites cannot spoil one another and can run in any order.
 
@@ -66,8 +66,8 @@ python fixtures/fetch_raw.py .cache/raw                # all 32, about 1.2 GB, f
 Some Go tests run on real files and skip without them (from the repository root, after `source scripts/env.sh`, with `CGO_ENABLED=1` and `CC` set as for a build):
 
 ```bash
-LUMEN_RAW_SAMPLES="$PWD/e2e/.cache/raw" go test -race -timeout 900s ./internal/media ./internal/index
-LUMEN_FACE_PHOTOS="<a folder of photos of people>" go test -race -timeout 900s ./internal/ai ./internal/index
+LUMEN_RAW_SAMPLES="$PWD/e2e/.cache/raw" go test -race -p 1 -count=1 -timeout 1800s ./internal/media ./internal/index
+LUMEN_FACE_PHOTOS="<a folder of photos of people>" go test -race -p 1 -count=1 -timeout 1800s ./internal/ai ./internal/index
 python e2e/perf/raw_matrix.py     # lumen-raw on every sample: time, peak memory, output size
 python e2e/perf/compression.py    # pinned encoder time, peak private commit and sizes on generated fixtures
 ```
@@ -101,6 +101,10 @@ node perf/compare.mjs <exeA> <dataA> <exeB> <dataB>      # two builds, launches 
 `perf.mjs` measures cold start to a usable grid, idle memory, reload time and bundle size, scroll frame times, first and warm search, viewer open and next, and memory after use; results go to `.work/results/perf/`. An older build cannot open a library a newer one has migrated, so a comparison gives each build its own library. `LUMEN_E2E_PHOTOS=3000` makes the library the size the published figures used.
 
 `node perf/thumbs.mjs [photos=3600]` measures thumbnail revalidation in the native WebView after full indexing: first timeline entry, ten-screen scrolling in both directions, a fifty-screen fling and return, leaving and returning, the viewer, scrolling during a separate 1,800-photo import, and scrolling with one folder block. It records every thumbnail and sprite request, raw conditional-response statuses, memory/disk cache flags, bytes, timings, decoded visible tiles without a request, animation-frame gaps over 50 ms and matching DevTools traces. Before scrolling, after the fifty-screen fling, and after a further thirty seconds at rest it sums Windows private bytes and working sets for every WebView process descended from this scratch app; working sets may count shared pages more than once. It also probes ordinary and cache-only access after blocking a previously fetched thumbnail, retained decoded images and blobs, and exact cached JPEG bytes after shutdown. The tile is scrolled out before blocking and the grid is reopened afterwards: the script fails if the blocked thumbnail is painted again or any URL access succeeds. Run the probe helpers' tests with `node --test perf/thumbs-*.test.mjs` from `e2e`. Build first, install the e2e dependencies as above, run on a quiet PC, and leave the window alone. Each invocation generates its own fixtures and library under `.work/thumbs-measure/<timestamp>/`, writes `report.json` and scenario traces there, closes only its own process with `taskkill /PID` without `/F`, and retains all scratch data; it never clears other runs. To reuse generated photos while indexing a fresh library, set `LUMEN_THUMBS_FIXTURES` to an earlier run's absolute path under `.work/thumbs-measure/` and pass the same photo count.
+
+## Documentation screenshots
+
+This folder's `docs/` holds a separate, opt-in capture of the README's face-review screenshot, on a library of pinned public photos; it is not a suite of `run.mjs`. Its steps, the photos' provenance and the review it needs are in [the screenshots guide](../docs/screenshots/README.md#reproducing-the-face-review).
 
 ## Writing a suite
 

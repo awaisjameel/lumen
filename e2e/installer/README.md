@@ -1,5 +1,11 @@
 # Packaged beta acceptance
 
+Run these commands from the repository root in **Git Bash** after completing
+[development setup](../../docs/development.md#setup), including e2e npm/Pillow
+dependencies, cgo and `source scripts/env.sh`. `wails3 task package` must finish
+before extraction. These are acceptance procedures, not proof that this candidate
+has passed them; read [release status](../../docs/release-status.md).
+
 The versioned runtime layout, new in 0.12.0, also has a host-safe scratch
 acceptance script:
 

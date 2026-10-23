@@ -8,10 +8,10 @@ Lumen is a Windows-first desktop photo gallery with on-device AI: a Go engine an
 
 Two documents are authoritative and should be read before non-trivial work:
 
-- `README.md`: what Lumen does, status, setup, commands, layout, and the list of deliberate deviations from the plan.
+- `README.md`: what Lumen does, status and links to the canonical usage, development, release and architecture guides.
 - `CONVENTIONS.md`: how code is written here (errors, context, SQLite, logging, the Go-to-TypeScript contract, Pinia and Vue, tests). Where two patterns compete, it picks one.
 
-`docs/` holds the living guides (features, beta testing, production signing, branding, GeoNames data) and the original plan. `docs/history/` holds the dated records per phase (design, implementation, audits), indexed in `docs/history/README.md`. They are historical; the newest for a phase is the one that applies, and where a record and the code differ, the code and the README win.
+`docs/` holds the living guides indexed in `docs/README.md`, plus the historical original plan. `docs/history/` holds the dated records per phase (design, implementation, audits), indexed in `docs/history/README.md`. They are historical; later records supersede earlier evidence; current code and living guides take precedence over phase records.
 
 ## Development rules
 
@@ -23,7 +23,7 @@ Two documents are authoritative and should be read before non-trivial work:
 
 ## Commands
 
-Go needs cgo (`CGO_ENABLED=1`, `CC=clang` from llvm-mingw) and the native dependencies in git-ignored `deps/`, fetched once with `scripts/deps.sh` from Git Bash (about 1.2 GB). The shell scripts are Bash; run them with Git Bash, not PowerShell.
+Go needs cgo (`CGO_ENABLED=1`, `CC=clang` from llvm-mingw) and the native dependencies in git-ignored `deps/`, fetched once with `scripts/deps.sh` from Git Bash (about 1.2 GB). The shell scripts are Bash; run them with Git Bash, not PowerShell. `scripts/env.sh` only puts the native runtime on `PATH`: it neither enables cgo nor selects the Go, Node or Python versions. Toolchain versions, first-time setup and what each command checks are in [the development guide](docs/development.md); this is the quick reference, run from the repository root.
 
 ```sh
 wails3 dev                                  # run with hot reload
@@ -34,23 +34,24 @@ source scripts/env.sh                       # REQUIRED before go test / vet / ru
 go test -race -p 1 -count=1 -timeout 1800s . ./internal/... ./services/... ./cmd/... ./scripts/...
 go test -race -timeout 900s -run TestTagByNameRefusesABlockedThing ./internal/store   # one test
 
-scripts/lint.sh                             # static checks, frontend tests, doc links and large-library latency; must stay at zero
+scripts/lint.sh                             # static checks, frontend tests, docs and large-library latency; must stay at zero
 scripts/lint.sh --fix                       # apply automatic fixes first
 scripts/lint.sh --no-bench                  # everything but the latency gate (CI runs that as a reported job)
 scripts/bench.sh                            # large-library latency gate alone (one to two minutes; sources env.sh)
+scripts/check-docs.sh                       # documentation alone: links, anchors and the screenshots' capture record
 scripts/install-hooks.sh                    # once per clone: commit-msg, pre-commit and pre-push hooks (.githooks)
 scripts/version.sh bump 0.13.0              # release: bump on a release/ branch, regenerate assets, commit
 scripts/version.sh tag                      # on main after the merge: push v<version>, which drafts the release
 
-cd frontend
-npm run check                               # vue-tsc, ESLint (zero warnings), Prettier
-npm run test                                # Vitest (jsdom)
-npx vitest run src/shared/commands.test.ts  # one file; add -t "name" for one test
-npm run format                              # Prettier --write
+npm --prefix frontend run check             # vue-tsc, ESLint (zero warnings), Prettier
+npm --prefix frontend test                  # Vitest (jsdom)
+(cd frontend && npx --no-install vitest run src/shared/commands.test.ts)   # one file; add -t "name" for one test
+npm --prefix frontend run format            # Prettier --write
 
 node e2e/run.mjs                            # end-to-end suites against bin/Lumen.exe (after wails3 build)
 node e2e/run.mjs viewer formats             # named suites; --list shows them, --clean deletes e2e/.work
 SECTIONS=themes,video node e2e/suites/interface.mjs
+node e2e/docs/capture.mjs                   # recapture docs/screenshots/faces.webp (read docs/screenshots/README.md first)
 
 wails3 generate bindings -f '-tags production' -clean=true -ts -i   # regenerate frontend/bindings
 ```
@@ -67,7 +68,7 @@ because a run failed.
 - Tests that need real models go through `internal/testenv` and skip cleanly without `deps/runtime`. Face and RAW tests also skip unless `LUMEN_FACE_PHOTOS` / `LUMEN_RAW_SAMPLES` name a folder (see `e2e/README.md`).
 - The frontend must finish building before Go embeds `frontend/dist`; never run the frontend and Go production builds concurrently. On a fresh clone, run `wails3 build` once before `go test` or `scripts/lint.sh`: without `frontend/dist` no Go package compiles.
 - The version and the copyright are set once in `build/config.yml`. Change the version only with `scripts/version.sh bump`. After changing the copyright, run `wails3 task common:update:build-assets` and restore the PolyForm licence it resets in `build/linux/nfpm/nfpm.yaml` (`TestVersionsAgree`, `TestLicenceAndCopyrightAgree`).
-- CI (`.github/workflows/ci.yml`) and the release workflow (`release.yml`, on a `v*` tag) run on Windows runners set up by `.github/actions/setup`. A release is only ever drafted; the owner publishes it (README, "Releasing"). Pin every action to a full commit SHA with its version in a comment.
+- CI (`.github/workflows/ci.yml`) and the release workflow (`release.yml`, on a `v*` tag) run on Windows runners set up by `.github/actions/setup`. A release is only ever drafted; the owner publishes it ([releasing](docs/releasing.md)), and [release status](docs/release-status.md) says what has actually been published and accepted. Pin every action to a full commit SHA with its version in a comment.
 - After changing an exported service method or a wire type, regenerate the bindings and check `git diff -- frontend/bindings`. Bindings are never edited by hand.
 
 ### Running the real app for a check
