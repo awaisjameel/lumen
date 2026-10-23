@@ -90,8 +90,8 @@ func watch(ctx context.Context, dir string, onChange func(path string)) (<-chan 
 		for {
 			_ = windows.CancelIoEx(h, nil) // fails once the read has ended; the loop checks
 			select {
-			case <-readerDone:
-				return // cancelled: err stays nil
+			case err = <-readerDone:
+				return // The deferred function normalises cancellation to nil.
 			case <-t.C:
 			}
 		}

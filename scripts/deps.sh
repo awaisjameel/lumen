@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Fetches and prepares everything Lumen needs besides Go and Node: libvips,
-# ONNX Runtime with DirectML, FFmpeg, the SigLIP 2, face and OCR models, and
-# the linters. Every download is pinned and checked against its SHA-256 (the two
-# values model prep reads from the SigLIP checkpoint are pinned in
-# prepare_models.py; its Python packages are pinned by version). Run from Git
-# Bash; safe to re-run (finished steps are skipped). Needs curl, unzip, Go and
-# Python 3.14 (model prep only).
+# ONNX Runtime with DirectML and the Visual C++ runtime it needs, FFmpeg, the
+# SigLIP 2, face and OCR models, and the linters. Every download is pinned and
+# checked against its SHA-256 (the two values model prep reads from the SigLIP
+# checkpoint are pinned in prepare_models.py; its Python packages are pinned in
+# model-requirements.txt). Run from Git Bash; safe to re-run (finished steps are
+# skipped). Needs curl, unzip, 7-Zip, Go and Python 3.15 (model prep only).
 #
 #   deps/cache/     downloads
 #   deps/vips/      libvips headers and import library (for cgo)
@@ -21,6 +21,8 @@ ROOT=$PWD
 D=$ROOT/deps
 RT=$D/runtime
 mkdir -p "$D/cache" "$RT/ffmpeg" "$D/src/siglip2" "$D/src/faces" "$D/licenses"
+# shellcheck source=scripts/dependency-cache.sh
+source "$ROOT/scripts/dependency-cache.sh"
 
 # get URL FILE SHA256: download to deps/cache/FILE unless it is already there
 # with the right hash.
@@ -33,17 +35,16 @@ get() {
   mv "$out.part" "$out"
 }
 
-# libvips 8.18.6, "web" formats (JPEG, PNG, WebP, GIF, TIFF, AVIF, SVG),
+# libvips 8.18.7, "web" formats (JPEG, PNG, WebP, GIF, TIFF, AVIF, SVG),
 # statically linked into one DLL. It has no HEVC decoder: HEIC goes through WIC or FFmpeg.
-get https://github.com/libvips/build-win64-mxe/releases/download/v8.18.6/vips-dev-x64-web-8.18.6-static.zip \
-  vips.zip 42ceea0c2f53d1244f3cb54c059881487b37452ee46c1c98c0d4b47480b20588
-if [ ! -f "$D/vips/lib/libvips.lib" ]; then
-  rm -rf "$D/vips" "$D/vips-dev-8.18"
-  unzip -q "$D/cache/vips.zip" -d "$D" && mv "$D/vips-dev-8.18" "$D/vips"
-fi
-cp -u "$D/vips/bin/libvips-42.dll" "$RT/"
-cp -u "$D/vips/LICENSE" "$D/licenses/libvips.LICENSE.txt"
-cp -u "$D/vips/versions.json" "$D/licenses/libvips.versions.json" # the libraries built into the DLL
+VIPS_SHA=a736af61d3b46499760efa606e469cb14e060445b1f6fd36a1fa2e75009e1197
+get https://github.com/libvips/build-win64-mxe/releases/download/v8.18.7/vips-dev-x64-web-8.18.7-static.zip \
+  vips-8.18.7.zip "$VIPS_SHA"
+unpack_dependency_zip "$D/cache/vips-8.18.7.zip" "$D/vips" vips-dev-8.18 "$VIPS_SHA"
+# Archive timestamps need not increase between releases; copy the selected build.
+cp "$D/vips/bin/libvips-42.dll" "$RT/"
+cp "$D/vips/LICENSE" "$D/licenses/libvips.LICENSE.txt"
+cp "$D/vips/versions.json" "$D/licenses/libvips.versions.json" # the libraries built into the DLL
 
 # ONNX Runtime 1.24.4, the last release with a DirectML build (onnxruntime_go
 # v1.27.0 matches it), and DirectML 1.15.4.
@@ -57,6 +58,31 @@ unzip -p "$D/cache/ort-dml.nupkg" LICENSE >"$D/licenses/onnxruntime.LICENSE.txt"
 unzip -p "$D/cache/ort-dml.nupkg" ThirdPartyNotices.txt >"$D/licenses/onnxruntime.ThirdPartyNotices.txt"
 unzip -p "$D/cache/directml.nupkg" LICENSE.txt >"$D/licenses/directml.LICENSE.txt"
 unzip -p "$D/cache/directml.nupkg" ThirdPartyNotices.txt >"$D/licenses/directml.ThirdPartyNotices.txt"
+
+# The Visual C++ runtime ONNX Runtime links against. Windows does not include
+# it, and installing Microsoft's redistributable needs elevation, so its DLLs
+# ship beside Lumen.exe (app-local deployment), where Windows finds them before
+# System32. The redistributable is a WiX bundle: the cabinet after its UI holds
+# the x64 runtime's cabinet (a4), whose entries are named <dll>_amd64. The
+# offset and size are fixed by the pinned hash; nothing is installed or run.
+VCRT=14.51.36247.0
+get https://download.visualstudio.microsoft.com/download/pr/ebdab8e5-1d7b-4d9f-a11b-cbb1720c3b12/843068991DAAA1F73AD9F6239BCE4D0F6A07A51F18C37EA2A867E9BECA71295C/VC_redist.x64.exe \
+  vc-redist-$VCRT-x64.exe 843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c
+VCRT_SUMS="7c26614e1d733892c2deac7e245ce115504b1d80592dd0a01b08e3e5a55f89ca *$RT/msvcp140.dll
+206c931bf90fdad8816de3b5e2ef80b2bcaa9406c89ecc05fe6fddffe251e982 *$RT/msvcp140_1.dll
+d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7 *$RT/vcruntime140.dll
+a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e *$RT/vcruntime140_1.dll"
+if ! sha256sum -c --quiet --status <<<"$VCRT_SUMS" 2>/dev/null; then
+  command -v 7z >/dev/null || { echo '7-Zip is required to extract the pinned Visual C++ runtime' >&2; exit 1; }
+  rm -rf "$D/vcrt" && mkdir -p "$D/vcrt"
+  tail -c +630001 "$D/cache/vc-redist-$VCRT-x64.exe" | head -c 18091661 >"$D/vcrt/payload.cab"
+  7z e -y "-o$D/vcrt" "$D/vcrt/payload.cab" a4 >/dev/null
+  for dll in msvcp140 msvcp140_1 vcruntime140 vcruntime140_1; do
+    7z e -y -so "$D/vcrt/a4" "$dll.dll_amd64" >"$RT/$dll.dll"
+  done
+  rm -rf "$D/vcrt"
+  sha256sum -c --quiet <<<"$VCRT_SUMS"
+fi
 
 # FFmpeg 9.0 (LGPL, shared). Only ffmpeg.exe, ffprobe.exe and the libraries
 # they load ship. BtbN deletes its daily autobuilds after about two weeks but
@@ -93,8 +119,12 @@ libraw_object() {
   local obj=$D/libraw/obj/${1//\//_}.o
   [ "$obj" -nt "$LR/$1" ] || clang++ -c -w "${RAW_FLAGS[@]}" -o "$obj" "$LR/$1"
 }
-if [ ! -f "$RT/lumen-raw.exe" ] || [ "$ROOT/native/lumen-raw/main.cpp" -nt "$RT/lumen-raw.exe" ]; then
+# The compiler's identity, not where it is unpacked, decides a rebuild.
+RAW_BUILD=$( { clang++ --version | sed '/^InstalledDir:/d'; sha256sum "$ROOT/native/lumen-raw/main.cpp"; printf '%s\n' "${RAW_FLAGS[@]}"; } | sha256sum | cut -d' ' -f1)
+if [ ! -f "$RT/lumen-raw.exe" ] || [ "$(cat "$D/libraw/worker.build" 2>/dev/null)" != "$RAW_BUILD" ]; then
   echo "build lumen-raw.exe"
+  # Objects from an earlier compiler or LibRaw release must not be reused.
+  rm -rf "$D/libraw/obj"
   mkdir -p "$D/libraw/obj"
   # The *_ph.cpp files are placeholders for the parts they stand in for.
   mapfile -t RAW_SOURCES < <(cd "$LR" && find src -name '*.cpp' ! -name '*_ph.cpp' | sort)
@@ -106,6 +136,7 @@ if [ ! -f "$RT/lumen-raw.exe" ] || [ "$ROOT/native/lumen-raw/main.cpp" -nt "$RT/
   [ "$(find "$D/libraw/obj" -name '*.o' | wc -l)" -eq "${#RAW_SOURCES[@]}" ] || { echo "LibRaw did not compile" >&2; exit 1; }
   clang++ -std=c++17 -municode -static -Wall -Wextra "${RAW_FLAGS[@]}" \
     -o "$RT/lumen-raw.exe" "$ROOT/native/lumen-raw/main.cpp" "$D"/libraw/obj/*.o -lws2_32
+  printf '%s\n' "$RAW_BUILD" >"$D/libraw/worker.build"
 fi
 
 # SigLIP 2 base (Apache-2.0): fp16 ONNX towers and the Gemma tokenizer.
@@ -151,12 +182,17 @@ done
 # deps/runtime/models/MODEL, again whenever the script changes.
 prepare() {
   local out=$RT/models/$1
-  [ -f "$out/$1.json" ] && [ ! "$ROOT/scripts/prepare_models.py" -nt "$out/$1.json" ] && return
-  if [ ! -x "$D/venv/Scripts/python" ]; then
-    python -m venv "$D/venv"
-    "$D/venv/Scripts/python" -m pip install -q onnx==1.23.0 tokenizers==0.23.2 numpy==2.5.3
+  [ -f "$out/$1.json" ] && [ ! "$ROOT/scripts/prepare_models.py" -nt "$out/$1.json" ] &&
+    [ ! "$ROOT/scripts/model-requirements.txt" -nt "$out/$1.json" ] && return
+  local venv=$D/venv-3.15
+  if [ ! -x "$venv/Scripts/python" ]; then
+    python -m venv "$venv"
   fi
-  PYTHONIOENCODING=utf-8 "$D/venv/Scripts/python" "$ROOT/scripts/prepare_models.py" "$1" "$D/src/$1" "$out"
+  if ! cmp -s "$ROOT/scripts/model-requirements.txt" "$venv/.lumen-requirements"; then
+    "$venv/Scripts/python" -m pip install -q -r "$ROOT/scripts/model-requirements.txt"
+    cp "$ROOT/scripts/model-requirements.txt" "$venv/.lumen-requirements"
+  fi
+  PYTHONIOENCODING=utf-8 "$venv/Scripts/python" "$ROOT/scripts/prepare_models.py" "$1" "$D/src/$1" "$out"
 }
 prepare siglip2
 prepare faces
@@ -167,9 +203,9 @@ prepare faces
 # version the project uses.
 T=$D/tools
 mkdir -p "$T"
-get https://github.com/astral-sh/ruff/releases/download/0.16.8/ruff-x86_64-pc-windows-msvc.zip \
-  ruff-0.16.8.zip 7985e06caf14b0077cb68da41edbf812e1d9654fe4c144d72b71138e96350129
-"$T/ruff.exe" --version 2>/dev/null | grep -q '^ruff 0.16.8$' || unzip -q -o -j "$D/cache/ruff-0.16.8.zip" ruff.exe -d "$T"
+get https://github.com/astral-sh/ruff/releases/download/0.17.2/ruff-x86_64-pc-windows-msvc.zip \
+  ruff-0.17.2.zip 6f4de58abd7c8de2e8702a89fc0f221e6ca858ad23e25c658c707d83a48c79a0
+"$T/ruff.exe" --version 2>/dev/null | grep -q '^ruff 0.17.2$' || unzip -q -o -j "$D/cache/ruff-0.17.2.zip" ruff.exe -d "$T"
 get https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.zip \
   shellcheck-v0.11.0.zip 8a4e35ab0b331c85d73567b12f2a444df187f483e5079ceffa6bda1faa2e740e
 "$T/shellcheck.exe" --version 2>/dev/null | grep -q '^version: 0.11.0$' ||
@@ -192,15 +228,15 @@ goinstall() {
   echo "build $1 $want"
   GOBIN=$T CGO_ENABLED=0 go install "$pkg"
 }
-goinstall golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
-goinstall deadcode golang.org/x/tools/cmd/deadcode@v0.51.0
-goinstall govulncheck golang.org/x/vuln/cmd/govulncheck@v1.8.0
+goinstall golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+goinstall deadcode golang.org/x/tools/cmd/deadcode@v0.52.0
+goinstall govulncheck golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
 # The installer (task package): NSIS 3.13 builds it, and Microsoft's
 # standalone WebView2 runtime installer goes inside it, so a PC without
 # WebView2 needs no internet to install Lumen. Microsoft's link
 # (https://go.microsoft.com/fwlink/?linkid=2124701) always serves the newest
-# runtime; the file pinned here is the one it served on 3 October 2026. When
+# runtime; the file pinned here is the one it served on 23 October 2026. When
 # Microsoft retires it, fetch the link, check the file is signed by
 # Microsoft (PowerShell: Get-AuthenticodeSignature), and pin its URL and hash.
 get https://downloads.sourceforge.net/project/nsis/NSIS%203/3.13/nsis-3.13.zip \
@@ -209,11 +245,11 @@ if ! "$T/nsis/makensis.exe" -VERSION 2>/dev/null | grep -q '^v3.13$'; then
   rm -rf "$T/nsis" "$T/nsis-3.13"
   unzip -q "$D/cache/nsis-3.13.zip" -d "$T" && mv "$T/nsis-3.13" "$T/nsis"
 fi
-WV2=https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d7548c8b-0dc9-4e81-87dd-a346cc9b73a5
+WV2=https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/35871e19-d11b-432d-9d1e-7be0ff286540
 get $WV2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe \
-  webview2-x64.exe f6df8e4bc857786ff641cd01da1449169eaf8236c936ced485ea61685ba4da40
+  webview2-20261023-x64.exe 0625fb5c1e75be58a164e14f95aa58a3e5badb859b3d17c952385f3e4a9ff3e8
 mkdir -p "$D/installer"
-ln -f "$D/cache/webview2-x64.exe" "$D/installer/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+ln -f "$D/cache/webview2-20261023-x64.exe" "$D/installer/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
 
 # Stage the runtime beside the executable (hard links: no copies of 700 MB).
 # shellcheck source=scripts/compression-deps.sh

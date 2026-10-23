@@ -69,6 +69,11 @@ export const SUITES = {
     about:
       'offline defaults, updater capabilities, settings privacy, disabled public delivery and narrow-window layout',
   },
+  upgrade: {
+    port: 9414,
+    about: 'a previous build leaves user state and queued work for the candidate to preserve and finish',
+    optIn: true,
+  },
   showcase: {
     port: 9410,
     about: 'the component showcase of a development run (starts wails3 dev)',

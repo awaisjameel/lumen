@@ -36,6 +36,7 @@ Phases 0 to 4 have no records of their own: Phase 0's measurements are in [the s
 - 13 October 2026: [bottleneck and implementation audit](bottleneck-audit-2026-10-13.md), [materialised block coverage](blocked-assets-performance-2026-10-13.md), [event lookup and the latency gate](event-lookup-latency-gate-2026-10-13.md)
 - 14 October 2026: [the audit's P2 items](audit-p2-round-2026-10-14.md), [kept counts](kept-counts-2026-10-14.md), [name order](name-order-2026-10-14.md)
 - 15 October 2026: [SQLite tuning](sqlite-tuning-2026-10-15.md)
+- 23 October 2026: [dependency upgrade and acceptance record](dependency-upgrade-2026-10-23.md), [resolved inventory](dependency-inventory-2026-10-23.json)
 
 ## Acceptance logs
 

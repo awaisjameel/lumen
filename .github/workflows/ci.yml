@@ -143,7 +143,7 @@ jobs:
           # Native models and filesystem tests must not compete across
           # packages on hosted runners, so the tests run one package at a
           # time; compiling them first keeps the build itself parallel.
-          go test -race -count=1 -run '^$' "${pkgs[@]}" >/dev/null
+          go test -race -count=1 -timeout 1800s -run '^$' "${pkgs[@]}" >/dev/null
           go test -race -p 1 -count=1 -timeout 1800s "${tests[@]}" "${pkgs[@]}"
 
       - if: ${{ !cancelled() }}

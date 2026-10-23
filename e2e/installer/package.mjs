@@ -75,6 +75,7 @@ if (failed.length) throw new Error(JSON.stringify(failed))
 // Remove development overrides and the runtime DLL search path before launch.
 const env = {
   ...process.env,
+  LUMEN_E2E_SYSTEM_PATH_ONLY: '1',
   LUMEN_EXE: active ? join(extracted, 'runtime', active.generation, 'lumen-app.exe') : join(extracted, 'Lumen.exe'),
 }
 delete env.LUMEN_RUNTIME_DIR

@@ -3,6 +3,7 @@
 // own library: LUMEN_DATA_DIR is always set.
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
+import { delimiter, join } from 'node:path'
 import puppeteer from 'puppeteer-core'
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -12,10 +13,18 @@ export async function launch({ exe, dataDir, port, env = {}, args = [] }) {
   if (!dataDir) throw new Error('launch needs a scratch dataDir: the real library is never used')
   mkdirSync(dataDir, { recursive: true })
   const started = Date.now()
+  const inherited = { ...process.env }
+  if (process.env.LUMEN_E2E_SYSTEM_PATH_ONLY === '1') {
+    // A developer's compiler or Git installation must not supply a missing
+    // runtime DLL during packaged acceptance. The harness keeps its own PATH.
+    for (const key of Object.keys(inherited)) if (key.toLowerCase() === 'path') delete inherited[key]
+    const windows = process.env.SystemRoot ?? 'C:\\Windows'
+    inherited.PATH = [join(windows, 'System32'), windows].join(delimiter)
+  }
   const proc = spawn(exe, args, {
     // The AI stages run on battery too: a laptop's tests must not wait for mains.
     env: {
-      ...process.env,
+      ...inherited,
       LUMEN_AI_ON_BATTERY: '1',
       ...env,
       LUMEN_DATA_DIR: dataDir,

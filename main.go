@@ -358,7 +358,7 @@ func webviewDataPath(paths core.Paths) string {
 }
 
 // service registers a Wails service whose methods' errors carry their codes
-// (services.MarshalError). Wails v3 beta.26 gives a bound method only its
+// (services.MarshalError). Wails v3 beta.30 gives a bound method only its
 // service's marshaler, falling back to its own: application.Options'
 // MarshalError never reaches them, so every service names it.
 func service[T any](svc *T, opts application.ServiceOptions) application.Service {

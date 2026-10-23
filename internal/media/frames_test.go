@@ -51,8 +51,8 @@ func TestTimestampWaitEndsOnCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		_ = w.Close()
-		<-done
-		t.Fatal("cancelled timestamp waiter did not stop")
+		err := <-done
+		t.Fatalf("cancelled timestamp waiter did not stop: %v", err)
 	}
 	_ = w.Close()
 	<-log.finished

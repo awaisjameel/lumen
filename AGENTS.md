@@ -4,7 +4,7 @@ This file provides guidance to AI Coding Agents when working with code in this r
 
 ## What this is
 
-Lumen is a Windows-first desktop photo gallery with on-device AI: a Go engine and a Vue 3 UI in one Wails v3 (beta.26) window. It is fully local. **Lumen makes no network request and never downloads anything at run time**; do not add one. The only authorised exception is the opt-in updater (`internal/update`), which stays inert until release trust is configured (`docs/production-signing.md`).
+Lumen is a Windows-first desktop photo gallery with on-device AI: a Go engine and a Vue 3 UI in one Wails v3 (beta.30) window. It is fully local. **Lumen makes no network request and never downloads anything at run time**; do not add one. The only authorised exception is the opt-in updater (`internal/update`), which stays inert until release trust is configured (`docs/production-signing.md`).
 
 Two documents are authoritative and should be read before non-trivial work:
 
@@ -31,7 +31,7 @@ wails3 build                                # production build -> bin/Lumen.exe
 wails3 task package                         # build + NSIS installer -> bin/Lumen-<version>-x64-setup.exe
 
 source scripts/env.sh                       # REQUIRED before go test / vet / run: puts deps/runtime (libvips DLL) on PATH
-go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/... ./scripts/...
+go test -race -p 1 -count=1 -timeout 1800s . ./internal/... ./services/... ./cmd/... ./scripts/...
 go test -race -timeout 900s -run TestTagByNameRefusesABlockedThing ./internal/store   # one test
 
 scripts/lint.sh                             # static checks, frontend tests, doc links and large-library latency; must stay at zero
@@ -107,7 +107,7 @@ A scratch library's SQLite file cannot be edited with the `sqlite3` CLI: its ind
 - `frontend/src/bridge/index.ts` is the only importer of `frontend/bindings` and `@wailsio/runtime` (ESLint enforces it). It re-exports generated types and normalises `null` lists.
 - Values the bindings do not carry (constants, error codes, event names) are mirrored once in the bridge with a `// core.X` comment and checked by `services/contract_test.go`. A new mirror needs a new line in that test.
 - **Error chain:** sentinel error in the detecting package → `services.errorCodes` → `ErrorCode` in the bridge → `codeText` in `shared/errors.ts` → an i18n key.
-- **Every service must be registered through `main.go`'s `service()`**: Wails beta.26 ignores `application.Options.MarshalError` for bound methods, so error codes are lost otherwise (`TestServiceErrorsCarryTheirCodes` guards it).
+- **Every service must be registered through `main.go`'s `service()`**: Wails beta.30 ignores `application.Options.MarshalError` for bound methods, so error codes are lost otherwise (`TestServiceErrorsCarryTheirCodes` guards it).
 - Events are `services.Event*` constants registered with `application.RegisterEvent[T]`; the bridge exposes one `on*` function per event that returns its unsubscribe.
 
 ### Frontend

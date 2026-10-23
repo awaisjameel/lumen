@@ -123,6 +123,7 @@ def main() -> None:
     libraw = pinned(r"libraw\.org/data/LibRaw-([0-9.]+)\.tar\.gz")
     ort = pinned(r"microsoft\.ml\.onnxruntime\.directml/([0-9.]+)/")
     dml = pinned(r"microsoft\.ai\.directml/([0-9.]+)/")
+    vcrt = pinned(r"(?m)^VCRT=([0-9.]+)$")
     compression_source = ROOT / "scripts" / "compression-deps.sh"
     jpeg = pinned(r"libjpeg-turbo/releases/download/([0-9.]+)/", compression_source)
     oxipng = pinned(r"crates/oxipng/oxipng-([0-9.]+)\.crate", ROOT / "scripts" / "oxipng-deps.sh")
@@ -160,6 +161,10 @@ def main() -> None:
             "  https://github.com/microsoft/onnxruntime\n\n"
             f"DirectML {dml} (DirectML.dll): Microsoft Software License Terms, which allow it to be\n"
             "  distributed with applications. https://github.com/microsoft/DirectML\n\n"
+            f"Microsoft Visual C++ runtime {vcrt} (msvcp140.dll, msvcp140_1.dll, vcruntime140.dll,\n"
+            "  vcruntime140_1.dll), which ONNX Runtime needs: unmodified files from Microsoft's x64\n"
+            "  Visual C++ Redistributable, distributed with applications under the Visual Studio\n"
+            "  licence terms. https://aka.ms/VCRedistLicense\n\n"
             f"Compression tools (compress\\): libjpeg-turbo {jpeg} (BSD/IJG/zlib), OxiPNG {oxipng} (MIT),\n"
             f"  and libjxl {jxl} (BSD-3-Clause, with statically linked libraries' licences below).\n"
             "  Pinned and bundled by scripts/compression-deps.sh; no runtime downloads.\n"

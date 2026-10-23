@@ -33,6 +33,9 @@ runtime file, the executable, notices and bundled offline WebView2 installer
 against the build by SHA-256. It rejects unexpected files, apart from NSIS's
 known temporary UI plugins. It then runs the standard suites sequentially
 against the extracted executable, removing development runtime overrides.
+Each application process gets only Windows and System32 on `PATH`, so a
+developer's compiler or Git installation cannot supply a missing runtime DLL.
+The fixture/test harness retains its own toolchain environment.
 Append suite names for a focused run. Payload evidence is written under
 `e2e/.work/package-<version>/`; native evidence uses the standard suite folders.
 

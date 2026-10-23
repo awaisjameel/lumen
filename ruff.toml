@@ -1,7 +1,7 @@
 # Ruff: lint and format for scripts/*.py (model preparation) and e2e/**/*.py
 # (test fixtures). Pinned and installed by scripts/deps.sh; run through
 # scripts/lint.sh.
-target-version = "py314"
+target-version = "py315"
 line-length = 120
 include = ["scripts/**/*.py", "e2e/**/*.py"]
 extend-exclude = ["e2e/node_modules", "e2e/.work", "e2e/.cache"]

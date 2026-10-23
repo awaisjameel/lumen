@@ -77,7 +77,17 @@ try {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        '$p=Get-Process -Name lumen-app -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:LUMEN_LAYOUT_EXECUTABLE }; if($p){$p.Id}; exit 0',
+        // A process exists before WebView2 finishes creating its controller.
+        // Wait for the document before asking the window to close gracefully.
+        `Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$p=Get-Process -Name lumen-app -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:LUMEN_LAYOUT_EXECUTABLE }
+if($p -and $p.MainWindowHandle -ne [IntPtr]::Zero) {
+  $window=[System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+  $document=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Document)
+  if($window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$document)){$p.Id}
+}
+exit 0`,
       ],
       { windowsHide: true, env: { ...process.env, LUMEN_LAYOUT_EXECUTABLE: executable }, encoding: 'utf8' },
     ).trim()

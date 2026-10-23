@@ -73,11 +73,11 @@ Download `Lumen-<version>-x64-setup.exe` from the [releases page](https://github
 
 ## Building from source (Windows)
 
-Needs Go 1.27.2, Node 22.22.2+ / 24.15+ / 26+ and npm 11.19+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, 7-Zip on `PATH`, and Python 3.14 (`ruff.toml` targets it). Toolchain used:
+Needs Go 1.27.3, Node 22.23.4+ / 24.22.1+ / 26.12.1+ and npm 12.2.1+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, 7-Zip on `PATH`, and Python 3.15.1 (`ruff.toml` targets 3.15). Toolchain used:
 
-- Go 1.27.2 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
+- Go 1.27.3 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) 20261020 (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
 - User environment: `CGO_ENABLED=1`, `CC=clang`, `CXX=clang++`
-- Wails CLI pinned to the beta the project uses: `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.26`
+- Wails CLI pinned to the beta the project uses: `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30`
 
 Then, once, from Git Bash:
 
@@ -85,9 +85,9 @@ Then, once, from Git Bash:
 scripts/deps.sh   # ~1.2 GB of downloads, pinned and checked, into deps/ (git-ignored)
 ```
 
-It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML, FFmpeg 9.0 (LGPL), SigLIP 2, the YuNet and SFace face models, the PP-OCRv5 text detector and English recogniser, the linters and NSIS (into `deps/tools/`), and the WebView2 runtime the installer carries (into `deps/installer/`). It keeps each shipped component's licence text (in `deps/licenses/`) and builds the camera RAW worker (`native/lumen-raw`, LibRaw compiled with the same clang). It then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8 (565 MB to 369 MB, agreeing with the original at cosine ≥ 0.9996), and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`.
+It fetches libvips 8.18 (static web build), ONNX Runtime 1.24.4 with DirectML and the Visual C++ runtime it needs (four DLLs taken from Microsoft's pinned redistributable), FFmpeg 9.0 (LGPL), SigLIP 2, the YuNet and SFace face models, the PP-OCRv5 text detector and English recogniser, the linters and NSIS (into `deps/tools/`), and the WebView2 runtime the installer carries (into `deps/installer/`). It keeps each shipped component's licence text (in `deps/licenses/`) and builds the camera RAW worker (`native/lumen-raw`, LibRaw compiled with the same clang). It then prepares the models (`scripts/prepare_models.py`): the vision tower gets a fixed batch shape so DirectML can compile it, the text tower's 256k-token table is stored as int8 (565 MB to 369 MB, agreeing with the original at cosine ≥ 0.9996), and SFace gets a variable batch size so every face in a photo is recognised in one run. Everything that ships beside `Lumen.exe` lands in `deps/runtime/` and is hard-linked into `bin/`.
 
-Compression adds pinned libjpeg-turbo 3.1.2 and libjxl 0.12.0 tools in `deps/runtime/compress/`. OxiPNG 9.1.5 is built from its locked source with a pinned portable Rust 1.99.0 toolchain (the `gnullvm` target) and the same clang. The Rust compiler and Cargo cache stay in `deps/`; only the encoder ships.
+Compression adds pinned libjpeg-turbo 3.2.0 and libjxl 0.12.0 tools in `deps/runtime/compress/`. OxiPNG 10.2.1 is built from its locked source with a pinned portable Rust 1.99.1 toolchain (the `gnullvm` target) and the same clang. The Rust compiler and Cargo cache stay in `deps/`; only the encoder ships.
 
 Check the setup with `wails3 doctor`, then run `wails3 build` once: `Lumen.exe` embeds the built frontend (`frontend/dist`), so on a fresh clone no Go package compiles, and `go test` and `scripts/lint.sh` fail, until it exists. Line endings are pinned to LF by `.gitattributes` (gofmt and Bash need it), whatever `core.autocrlf` says.
 
@@ -100,7 +100,7 @@ wails3 dev                    # run with hot reload
 wails3 build                  # production build -> bin/Lumen.exe
 wails3 task package           # build + NSIS installer -> bin/Lumen-<version>-x64-setup.exe
 source scripts/env.sh         # before go test / vet / run: puts deps/runtime (libvips) on PATH
-go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/... ./scripts/...   # wiring, engine, service, release-tool and script tests
+go test -race -p 1 -count=1 -timeout 1800s . ./internal/... ./services/... ./cmd/... ./scripts/...   # wiring, engine, service, release-tool and script tests
 scripts/lint.sh               # static checks, frontend tests and large-library latency (--fix applies fixes first)
 scripts/bench.sh              # 100,000-photo store latency gate alone (one to two minutes)
 cd frontend && npm run check  # the frontend's alone: vue-tsc, ESLint, Prettier
@@ -149,7 +149,7 @@ CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every pull req
 
 | Code     | Formatting       | Linting                                                                                                                                                       | Config                                                                             |
 | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Go       | gofmt, goimports | golangci-lint 2.14 (vet, staticcheck, errcheck, gosec, errorlint, revive and more), deadcode, govulncheck                                                     | `.golangci.yml`                                                                    |
+| Go       | gofmt, goimports | golangci-lint 2.15 (vet, staticcheck, errcheck, gosec, errorlint, revive and more), deadcode, govulncheck                                                     | `.golangci.yml`                                                                    |
 | Frontend | Prettier 3.9     | ESLint 10 with typescript-eslint (strict, type-aware) and eslint-plugin-vue, plus `vue-tsc`; import boundaries between `design`, `shared`, features and `app` | `frontend/eslint.config.js`, `frontend/.prettierrc.json`, `frontend/tsconfig.json` |
 | Python   | Ruff             | Ruff                                                                                                                                                          | `ruff.toml`                                                                        |
 | Shell    |                  | ShellCheck                                                                                                                                                    |                                                                                    |
@@ -249,6 +249,7 @@ spikes/              Phase 0 experiments and later feasibility probes (own Go mo
 - **Updates are opt-in and inert by default** (decided 4 October 2026, replacing the 3 October decision to have no updater): checks happen only when the user enables them or asks, downloads only when requested, and only against compiled-in release trust, which is empty until production signing is in place. No other feature makes a network request.
 - **Installed per user** (decided 3 October 2026), not in Program Files: the library is per user already, and installing or updating needs no administrator.
 - **The installer carries the WebView2 runtime** (decided 3 October 2026, about 200 MB of it) rather than Wails' downloading bootstrapper, so installing needs no internet either.
+- **The Visual C++ runtime ships beside `Lumen.exe`** (decided 23 October 2026): ONNX Runtime needs it, Windows does not include it, and Microsoft's redistributable installer needs administrator rights, which the per-user install avoids. The four DLLs are unmodified files from the pinned x64 redistributable, distributed under the Visual Studio licence terms. Windows Update does not service app-local copies, so a Lumen update replaces them. `scripts/runtime_imports.py`, run by `scripts/lint.sh`, fails if a shipped file imports a DLL that is neither beside it nor part of Windows.
 
 ## Licence
 
