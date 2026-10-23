@@ -424,6 +424,15 @@ it('counts photos and videos in the caption, leaving out videos the library has 
   wrapper.unmount()
 })
 
+it('counts a single photo or video in the singular', async () => {
+  const { wrapper, lib } = await mountedLibrary('/')
+  lib.counts = { photos: 1, videos: 1, favourites: 0, people: 0, trash: 0 }
+  lib.countsLoaded = true
+  await flushPromises()
+  expect(wrapper.get('[aria-live="polite"]').text()).toBe('1 photo · 1 video')
+  wrapper.unmount()
+})
+
 it('shows a live Photos caption using the filtered timeline total', async () => {
   const { wrapper, lib } = await mountedLibrary('/?media=photos')
   lib.buckets = [{ day: '2026-10-01', count: 248 }]

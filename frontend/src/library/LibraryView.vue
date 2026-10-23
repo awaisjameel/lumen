@@ -36,7 +36,7 @@ import { coalescedLoad } from '../shared/listStore'
 import { useLiveReload } from '../shared/liveReload'
 import FeatureState from '../shared/FeatureState.vue'
 import { dateLabel, dayLabel, spanOfDays } from '../shared/format'
-import { formatNumber, listFormat, t } from '../shared/i18n'
+import { listFormat, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/i18n'
 import { useLayoutMode } from '../shared/layout'
 import Chip from '../shared/Chip.vue'
@@ -918,13 +918,16 @@ const countText = computed(() => {
       .filter(Boolean)
       .join(' · ')
   if (personId.value || lib.inTrash) return t('status.items', { n: lib.total })
-  if (media.value === Filter.FilterPhotos) return t('library.photoCount', { n: formatNumber(lib.total) })
-  if (media.value === Filter.FilterVideos) return t('library.videoCount', { n: formatNumber(lib.total) })
+  if (media.value === Filter.FilterPhotos) return t('library.photoCount', { n: lib.total })
+  if (media.value === Filter.FilterVideos) return t('library.videoCount', { n: lib.total })
   if (!lib.countsLoaded) return t('status.items', { n: lib.total })
   // A library without videos is not told it has none.
   return lib.counts.videos
-    ? t('library.caption', { photos: formatNumber(lib.counts.photos), videos: formatNumber(lib.counts.videos) })
-    : t('library.photoCount', { n: formatNumber(lib.counts.photos) })
+    ? t('library.caption', {
+        photos: t('library.photoCount', { n: lib.counts.photos }),
+        videos: t('library.videoCount', { n: lib.counts.videos }),
+      })
+    : t('library.photoCount', { n: lib.counts.photos })
 })
 
 const emptyIcon = computed<IconName>(() => (lib.isSearch ? 'search' : lib.inTrash ? 'trash' : 'photos'))
