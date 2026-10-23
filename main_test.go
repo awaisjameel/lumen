@@ -307,9 +307,11 @@ func TestVersionsAgree(t *testing.T) {
 	if err := json.Unmarshal([]byte(readRepoFile(t, "build/windows/info.json")), &info); err != nil {
 		t.Fatal(err)
 	}
+	// Wails writes the US English block: Explorer hides the version details
+	// of a language-neutral ("0000") one.
 	found := map[string]string{
 		"info.json file_version":   info.Fixed.FileVersion,
-		"info.json ProductVersion": info.Info["0000"].ProductVersion,
+		"info.json ProductVersion": info.Info["0409"].ProductVersion,
 	}
 	for name, re := range map[string]string{
 		"build/windows/nsis/wails_tools.nsh": `!define INFO_PRODUCTVERSION "([^"]+)"`,
