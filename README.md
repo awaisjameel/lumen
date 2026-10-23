@@ -100,12 +100,10 @@ share it, and can contain file paths: [check it first](docs/beta-testing.md#send
 
 ## Status
 
-Lumen is in beta. As checked on **24 October 2026**, the latest published
-release is [v0.12.0](https://github.com/awaisjameel/lumen/releases/tag/v0.12.0),
-unsigned. The source is version 0.12.1, the next release, which is drafted
-unsigned and published only after review. [Release status](docs/release-status.md)
-separates what is published, what was accepted and when, and what is still to
-do before a signed release.
+Lumen is in beta. As checked on **24 October 2026**, the latest release is
+[v0.12.1](https://github.com/awaisjameel/lumen/releases/tag/v0.12.1), unsigned.
+[Release status](docs/release-status.md) separates what is published, what was
+accepted and when, and what is still to do before a signed release.
 
 ### Known limits
 
