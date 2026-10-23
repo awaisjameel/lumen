@@ -1,6 +1,6 @@
 name: Set up the Lumen build
 description: >-
-  The pinned toolchain the README's "Building from source" names (Go, Node,
+  The pinned toolchain docs/development.md's "Setup" names (Go, Node,
   Python, llvm-mingw, optionally the Wails CLI), the native dependencies
   scripts/deps.sh fetches and prepares, and the frontend's packages, with
   each expensive piece cached between runs.

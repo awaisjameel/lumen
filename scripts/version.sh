@@ -8,7 +8,7 @@
 #                                         the tag, which starts the release
 #                                         workflow (.github/workflows/release.yml)
 #
-# Needs the build toolchain (README, "Building from source"): bump runs Wails
+# Needs the build toolchain (docs/development.md, "Setup"): bump runs Wails
 # and a Go test.
 set -euo pipefail
 cd "$(dirname "$0")/.."

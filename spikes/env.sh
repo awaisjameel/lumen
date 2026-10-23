@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Source this before building or running spikes (Git Bash), with the build
-# toolchain set up as the README describes.
+# toolchain set up as docs/development.md describes.
 S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/env.sh
 source "$S/../scripts/env.sh"

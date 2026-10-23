@@ -82,7 +82,7 @@ jobs:
           if [ -n "$(git status --porcelain)" ]; then
             git status --short
             git diff --stat
-            echo "::error::the build changed tracked files: regenerate the bindings (README, Commands) and commit them"
+            echo "::error::the build changed tracked files: regenerate the bindings (docs/development.md) and commit them"
             exit 1
           fi
 
