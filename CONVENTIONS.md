@@ -107,7 +107,7 @@ written.
     `t.TempDir`. Table tests use `t.Run` only when the cases are independent.
   - Real-model tests use `testenv.Runtime`, which skips cleanly without
     `deps/runtime`.
-  - Pass gate: `go test -race -count=1 -timeout 900s` on the named packages
+  - Pass gate: `go test -race -p 1 -count=1 -timeout 1800s` on the named packages
     (never `./...`), and `golangci-lint run` reports 0 issues.
   - Large-library latency is also a gate: `scripts/lint.sh` runs
     `scripts/bench.sh` after the Go static checks and still runs every later

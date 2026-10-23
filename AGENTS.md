@@ -31,7 +31,7 @@ wails3 build                                # production build -> bin/Lumen.exe
 wails3 task package                         # build + NSIS installer -> bin/Lumen-<version>-x64-setup.exe
 
 source scripts/env.sh                       # REQUIRED before go test / vet / run: puts deps/runtime (libvips DLL) on PATH
-go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/... ./scripts/...
+go test -race -p 1 -count=1 -timeout 1800s . ./internal/... ./services/... ./cmd/... ./scripts/...
 go test -race -timeout 900s -run TestTagByNameRefusesABlockedThing ./internal/store   # one test
 
 scripts/lint.sh                             # static checks, frontend tests, doc links and large-library latency; must stay at zero

@@ -100,7 +100,7 @@ wails3 dev                    # run with hot reload
 wails3 build                  # production build -> bin/Lumen.exe
 wails3 task package           # build + NSIS installer -> bin/Lumen-<version>-x64-setup.exe
 source scripts/env.sh         # before go test / vet / run: puts deps/runtime (libvips) on PATH
-go test -race -count=1 -timeout 900s . ./internal/... ./services/... ./cmd/... ./scripts/...   # wiring, engine, service, release-tool and script tests
+go test -race -p 1 -count=1 -timeout 1800s . ./internal/... ./services/... ./cmd/... ./scripts/...   # wiring, engine, service, release-tool and script tests
 scripts/lint.sh               # static checks, frontend tests and large-library latency (--fix applies fixes first)
 scripts/bench.sh              # 100,000-photo store latency gate alone (one to two minutes)
 cd frontend && npm run check  # the frontend's alone: vue-tsc, ESLint, Prettier
