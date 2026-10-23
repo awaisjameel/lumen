@@ -22,8 +22,8 @@ Read [release status](release-status.md) before describing a build as accepted.
 The workflow creates a draft; it does not publish it, accept an installer or
 enable update delivery. An owner can publish an unsigned release and change its
 GitHub pre-release flag. That flag proves neither signing nor installer acceptance.
-Never replace the published 0.12.0 assets with a newer build that still happens
-to have 0.12.0 in its configuration. Bump the version for the next release.
+Never replace a published release's assets with a newer build that still has
+its version in the configuration. Bump the version for the next release.
 
 The signing, trust provisioning, feed and signed-upgrade gates have one owner:
 [production signing and update delivery](production-signing.md). The executable
