@@ -186,8 +186,8 @@ func TestEvictionWaitsWhileIndexingIsPaused(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- f.ix.evictThumbs(t.Context(), 10) }()
 	select {
-	case <-done:
-		t.Fatal("eviction ran while paused")
+	case err := <-done:
+		t.Fatalf("eviction ran while paused: %v", err)
 	case <-time.After(150 * time.Millisecond):
 	}
 	if got := f.cache.Bytes(); got != 4*pairBytes {

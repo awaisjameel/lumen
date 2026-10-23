@@ -73,8 +73,12 @@ func launchHealth(ctx context.Context, root, dir string, a Activation) error {
 	if err := cmd.Start(); err != nil {
 		return errors.Join(err, Recover(ctx, root))
 	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	done := make(chan struct{})
+	go func() {
+		// The health record determines success; this only announces process completion.
+		_ = cmd.Wait()
+		close(done)
+	}()
 	timer := time.NewTimer(120 * time.Second)
 	defer timer.Stop()
 	ticker := time.NewTicker(200 * time.Millisecond)

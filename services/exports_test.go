@@ -77,8 +77,8 @@ func TestFilePlanningIsCancelledAndAwaitedByShutdown(t *testing.T) {
 	go func() { done <- s.ServiceShutdown() }()
 	<-ctx.Done()
 	select {
-	case <-done:
-		t.Error("shutdown did not wait for planning")
+	case err := <-done:
+		t.Fatalf("shutdown did not wait for planning: %v", err)
 	default:
 	}
 	finish()

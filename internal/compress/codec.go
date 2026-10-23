@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	jpegTool = "libjpeg-turbo 3.1.2"
-	pngTool  = "OxiPNG 9.1.5"
+	jpegTool = "libjpeg-turbo 3.2.0"
+	pngTool  = "OxiPNG 10.2.1"
 	jxlTool  = "libjxl 0.12.0"
 )
 
