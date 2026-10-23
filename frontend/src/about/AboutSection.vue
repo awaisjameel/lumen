@@ -43,6 +43,14 @@ function saveReport() {
   savedTo.value = ''
   return run(async () => (savedTo.value = await about.saveReport()))
 }
+
+function openGeoNames() {
+  return run(() => engine.openLink(Link.LinkGeoNames))
+}
+
+function openReleases() {
+  return run(() => engine.openLink(Link.LinkReleases))
+}
 useCommands([
   {
     id: 'about.logs',
@@ -87,14 +95,9 @@ useCommands([
       :label="t('about.releases')"
       :description="t('about.updates')"
     >
-      <UButton
-        v-if="about.about"
-        class="release-link"
-        variant="link"
-        :icon="icons.external"
-        @click="run(() => engine.openLink(Link.LinkReleases))"
-        >{{ t('about.viewReleases') }}</UButton
-      >
+      <UButton v-if="about.about" class="release-link" variant="link" :icon="icons.external" @click="openReleases">{{
+        t('about.viewReleases')
+      }}</UButton>
     </PrefRow>
     <PrefRow
       v-if="matches('about.openLogs', 'about.logsHint')"
@@ -140,7 +143,7 @@ useCommands([
       </template>
     </UAlert>
     <MetaRow v-if="matches('about.places', 'about.geonames')" :label="t('about.places')" icon="map">
-      <UButton variant="link" @click="run(() => engine.openLink(Link.LinkGeoNames))">{{ t('about.geonames') }}</UButton>
+      <UButton variant="link" @click="openGeoNames">{{ t('about.geonames') }}</UButton>
       {{ t('about.placesLicence') }}
     </MetaRow>
   </div>

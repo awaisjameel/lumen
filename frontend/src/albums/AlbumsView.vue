@@ -40,6 +40,7 @@ const mode = useLayoutMode()
 const router = useRouter()
 const route = useRoute()
 const albums = useAlbums()
+const smartCount = computed(() => albums.list.filter((album) => album.kind === AlbumKind.AlbumSmart).length)
 const things = useThings()
 const people = usePeople()
 const name = ref('')
@@ -301,6 +302,9 @@ const albumItems = useItemCommands(
     },
   ],
 )
+function albumMoreItems(id: number) {
+  return albumItems(id).filter((item) => item.icon !== icons.pencil)
+}
 useCommands([
   {
     id: 'albums.new',
@@ -330,7 +334,7 @@ useCommands([
         :subtitle="
           t('albums.caption', {
             n: albums.list.length,
-            smart: albums.list.filter((album) => album.kind === AlbumKind.AlbumSmart).length,
+            smart: smartCount,
           })
         "
       >
@@ -572,10 +576,7 @@ useCommands([
           </form>
         </template>
         <template #footer>
-          <UDropdownMenu
-            v-if="editedAlbum"
-            :items="albumItems(editedAlbum.id).filter((item) => item.icon !== icons.pencil)"
-          >
+          <UDropdownMenu v-if="editedAlbum" :items="albumMoreItems(editedAlbum.id)">
             <IconButton :icon="icons.more" :label="t('albums.actions', { name: editedAlbum.name })" :disabled="busy" />
           </UDropdownMenu>
           <div class="flex-1" />

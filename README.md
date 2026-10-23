@@ -73,11 +73,11 @@ Download `Lumen-<version>-x64-setup.exe` from the [releases page](https://github
 
 ## Building from source (Windows)
 
-Needs Go 1.27.2, Node 22.22.2+ / 24.15+ / 26+ and npm 11.19+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, 7-Zip on `PATH`, and Python 3.14 (`ruff.toml` targets it). Toolchain used:
+Needs Go 1.27.3, Node 22.23.4+ / 24.22.1+ / 26.12.1+ and npm 12.2.1+ (matching `frontend/package.json`), a C compiler for cgo, Git Bash, 7-Zip on `PATH`, and Python 3.15.1 (`ruff.toml` targets 3.15). Toolchain used:
 
-- Go 1.27.2 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
+- Go 1.27.3 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) 20261020 (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
 - User environment: `CGO_ENABLED=1`, `CC=clang`, `CXX=clang++`
-- Wails CLI pinned to the beta the project uses: `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.26`
+- Wails CLI pinned to the beta the project uses: `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30`
 
 Then, once, from Git Bash:
 

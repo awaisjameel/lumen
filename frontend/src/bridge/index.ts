@@ -480,7 +480,7 @@ export function errorCode(e: unknown): ErrorCode | undefined {
  * no longer wanted the answer, so there is nothing to report.
  */
 export function isCancelled(e: unknown): boolean {
-  // Wails beta.26 reports a late Go cancellation response separately from
+  // Wails beta.30 reports a late Go cancellation response separately from
   // the CancelError already handled by the read's owner. Only that known
   // response is cancellation; other late rejections remain failures.
   return (

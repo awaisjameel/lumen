@@ -263,6 +263,27 @@ async function perform(action: () => Promise<unknown>) {
   }
 }
 
+function chooseMode(value: unknown) {
+  const mode = compressionModes.find((item) => item === value)
+  if (mode) options.value.mode = mode
+}
+
+function reveal(job: CompressionJob) {
+  return perform(() => engine.revealCompression(job.runId, job.id))
+}
+
+function analyse() {
+  return perform(() => engine.analyseCompression(runID.value))
+}
+
+function pause() {
+  return perform(() => engine.pauseCompression(runID.value))
+}
+
+function cancel() {
+  return perform(() => engine.cancelCompression(runID.value))
+}
+
 async function plan() {
   if (badDirectory.value || !inputs.value.length || anyActive.value || !available.value) return
   const mine = generation
@@ -503,12 +524,7 @@ onBeforeUnmount(() => {
               class="mode-cards"
               :disabled="submitting"
               :ui="{ fieldset: 'grid grid-cols-2 gap-3', item: 'mode-card', base: 'size-6', wrapper: 'min-w-0' }"
-              @update:model-value="
-                (value) => {
-                  const mode = compressionModes.find((item) => item === value)
-                  if (mode) options.mode = mode
-                }
-              "
+              @update:model-value="chooseMode"
               ><template #label="{ item }"
                 >{{ item.label }}<span class="mode-tag" aria-hidden="true">{{ item.tag }}</span></template
               ></URadioGroup
@@ -709,12 +725,9 @@ onBeforeUnmount(() => {
                     @click="restore(job)"
                     >{{ t('compression.restore') }}</UButton
                   >
-                  <UButton
-                    v-if="job.state === CompressionState.CompressionDone"
-                    variant="ghost"
-                    @click="perform(() => engine.revealCompression(job.runId, job.id))"
-                    >{{ t('compression.reveal') }}</UButton
-                  >
+                  <UButton v-if="job.state === CompressionState.CompressionDone" variant="ghost" @click="reveal(job)">{{
+                    t('compression.reveal')
+                  }}</UButton>
                 </div>
               </div>
             </OutcomeList>
@@ -753,7 +766,7 @@ onBeforeUnmount(() => {
                 :color="run?.ready ? 'neutral' : 'primary'"
                 :variant="run?.ready ? 'outline' : 'solid'"
                 :disabled="anyActive || submitting || !available"
-                @click="perform(() => engine.analyseCompression(runID))"
+                @click="analyse"
                 >{{
                   run?.state === CompressionState.CompressionPlanned
                     ? t('compression.analyse')
@@ -774,16 +787,12 @@ onBeforeUnmount(() => {
                 v-if="run?.state === CompressionState.CompressionEncoding"
                 variant="outline"
                 :disabled="submitting"
-                @click="perform(() => engine.pauseCompression(runID))"
+                @click="pause"
                 >{{ t('compression.pause') }}</UButton
               >
-              <UButton
-                v-if="canCancel"
-                variant="outline"
-                :disabled="submitting"
-                @click="perform(() => engine.cancelCompression(runID))"
-                >{{ t('compression.cancel') }}</UButton
-              >
+              <UButton v-if="canCancel" variant="outline" :disabled="submitting" @click="cancel">{{
+                t('compression.cancel')
+              }}</UButton>
             </div>
             <UButton v-if="!working" variant="ghost" :disabled="submitting" @click="invalidatePlan">{{
               t('compression.changeOptions')
