@@ -24,7 +24,6 @@ page.on('response', async (r) => {
 
 // Every request: local ones go on, anything else is refused and recorded.
 const session = await page.createCDPSession()
-await session.send('Fetch.enable', { patterns: [{ urlPattern: '*' }] })
 session.on('Fetch.requestPaused', async (e) => {
   const url = e.request.url
   const local = /^(https?:\/\/(wails\.localhost|127\.0\.0\.1|localhost)(:\d+)?\/|data:|blob:|about:)/.test(url)
@@ -40,6 +39,7 @@ session.on('Fetch.requestPaused', async (e) => {
     /* the page went away */
   }
 })
+await session.send('Fetch.enable', { patterns: [{ urlPattern: '*' }] })
 // An error says where it was seen: the screen being visited and the script line that logged it.
 let visiting = 'start'
 page.on('console', (m) => {
@@ -81,7 +81,7 @@ await page.evaluateOnNewDocument(() => {
 // Reload only once the app has started: a reload under its first calls aborts
 // them, and the app rightly logs a call that failed.
 await page.waitForSelector('.shell', { timeout: 60000 })
-await sleep(500)
+await page.waitForNetworkIdle({ idleTime: 1000, timeout: 60000 })
 await page.reload()
 await sleep(2500)
 

@@ -152,7 +152,7 @@ try {
   const t = Date.now()
   await page.keyboard.press('Enter')
   const shown = () => {
-    const i = document.querySelector('[aria-modal="true"] img')
+    const i = document.querySelector('.viewer .image-surface .original')
     return !!i && i.complete && i.naturalWidth > 0
   }
   await page.waitForFunction(shown, { timeout: 15000, polling: 16 })
@@ -160,13 +160,13 @@ try {
   const steps = []
   for (let i = 0; i < 10; i++) {
     const before = await page.evaluate(
-      () => document.querySelector('[aria-modal="true"] img.original, [aria-modal="true"] img')?.currentSrc ?? '',
+      () => document.querySelector('.viewer .image-surface .original')?.currentSrc ?? '',
     )
     const s = Date.now()
     await page.keyboard.press('ArrowRight')
     await page.waitForFunction(
       (before) => {
-        const img = document.querySelector('[aria-modal="true"] img.original, [aria-modal="true"] img')
+        const img = document.querySelector('.viewer .image-surface .original')
         return img && img.currentSrc !== before && img.complete && img.naturalWidth > 0
       },
       { timeout: 15000, polling: 16 },
@@ -189,3 +189,4 @@ const dir = join(WORK, 'results', 'perf')
 mkdirSync(dir, { recursive: true })
 writeFileSync(join(dir, `${label}.json`), JSON.stringify(out, null, 2))
 console.log(JSON.stringify(out, null, 2))
+if (out.runs.searchError || out.runs.viewerError) process.exitCode = 1

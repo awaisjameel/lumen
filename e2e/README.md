@@ -22,6 +22,7 @@ From the repository root, `wails3 task e2e` runs them all and `wails3 task e2e S
 A suite prints `PASS`/`FAIL` for each check with what it observed, writes `report.json` and its screenshots to `.work/results/<suite>/`, and exits non-zero if a check failed. Suites run one after another: they share the GPU, and timing checks need a quiet PC. Leave the window alone while one runs; a click in it is a click in the test.
 
 Needs: Node (as `package.json` says), Python with Pillow, and `deps/` from `scripts/deps.sh` (the fixtures are made with its FFmpeg). `PYTHON` names another interpreter, `LUMEN_EXE` another build.
+Install the pinned fixture tooling with `python -m pip install -r e2e/requirements.txt` from the repository root.
 
 ## The suites, by use case
 
@@ -39,6 +40,7 @@ Needs: Node (as `package.json` says), Python with Pillow, and `deps/` from `scri
 | `customise` | Changes every preference in Settings and sees it take effect (page, grid, viewer) and survive a restart; reassigns a shortcut and uses it; turns a photo format off and on; holds an animation still; clears the viewing copies; saves an export preset; resets a section and everything | base library + three files of its own |
 | `compression` | Reviewed JPEG/PNG copies, JPEG XL native rendering and byte-exact JPEG restoration, partial outcomes, pause/cancel, restart, collisions and compression defaults | Generated scratch JPEG/PNG/BMP files, duplicate JPEG and XMP |
 | `updates` | Opens Application updates in a build without release trust: automatic checks off, stable channel, public delivery disabled, the privacy text, no request leaving the PC, a narrow window | base library |
+| `upgrade` | A previous build writes favourites, albums, manual tags, date/location corrections, blocks, settings and queued OCR work; the candidate reopens and verifies them | 24 generated photos; only when named, with `LUMEN_PREVIOUS_EXE` set |
 | `showcase` | The component showcase of a development run. Only when named: it starts `wails3 dev`, so it needs the build toolchain in the environment | base library |
 
 ## Fixtures
@@ -80,6 +82,10 @@ LUMEN_SEARCH_BENCH_DIR="$PWD/e2e/.work/search-bench" go test -run '^$' -bench '^
 ```
 
 The search benchmarks build 100,000- and 300,000-vector libraries; `LUMEN_SEARCH_BENCH_DIR` keeps them between runs (about 600 MB), and without it each run builds them again.
+
+## Dependency upgrades
+
+Save the previous production executable before rebuilding, then run `LUMEN_PREVIOUS_EXE="<saved executable>" node run.mjs upgrade`. Put its matching native DLLs on `PATH`, or set `LUMEN_PREVIOUS_RUNTIME_DIR` to its saved runtime directory. The suite creates its own scratch library and records before/after state. Manual face corrections also need the Go people/store regressions and the separate real-face corpus checks; this synthetic corpus does not contain faces.
 
 ## Performance
 
