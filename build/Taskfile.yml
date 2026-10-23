@@ -143,10 +143,13 @@ tasks:
     deps:
       - task: go:mod:tidy
     sources:
-      - "**/*.[jt]s"
-      - exclude: frontend/**/*
+      # Only application Go sources define the service contract. Downloaded
+      # tools, experiments and scratch suites can contain thousands of JS/Go
+      # files; they must neither invalidate bindings nor slow this scan.
+      - "*.go"
+      - "internal/**/*.go"
+      - "services/**/*.go"
       - frontend/bindings/**/*  # Rerun when switching between dev/production mode causes changes in output
-      - "**/*.go"
       - go.mod
       - go.sum
     generates:
