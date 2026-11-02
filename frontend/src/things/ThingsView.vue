@@ -390,7 +390,7 @@ useCommands([
         <UButton v-if="query" variant="outline" @click="query = ''">{{ t('things.clearFilter') }}</UButton>
         <template v-else
           ><UButton to="/settings?section=library">{{ t('things.addFolder') }}</UButton
-          ><UButton to="/blocked" variant="ghost">{{ t('things.manageBlocked') }}</UButton></template
+          ><UButton :to="{ name: 'blocked' }" variant="ghost">{{ t('things.manageBlocked') }}</UButton></template
         >
       </FeatureState>
       <p class="confidence">

@@ -130,7 +130,9 @@ async function saveName(reset = false) {
     error.value = t('collection.nameInvalid')
     return
   }
-  const previous = props.name
+  // An automatic title has no override; storing its displayed name on Undo
+  // would stop it following later date or location corrections.
+  const previous = props.kind === 'event' ? (event.value?.nameOverride ?? '') : props.name
   const writeName = nameWriter()
   busy.value = true
   error.value = ''

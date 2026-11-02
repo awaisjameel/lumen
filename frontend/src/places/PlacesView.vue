@@ -291,7 +291,7 @@ useCommands([refreshCommand])
         :title="t(hadPlaces ? 'places.cleared' : 'places.empty')"
         :text="t(hadPlaces ? 'places.clearedHint' : 'places.emptyHint')"
         ><UButton to="/settings?section=library" color="primary" variant="solid">{{ t('places.addFolder') }}</UButton
-        ><UButton to="/blocked" variant="ghost">{{ t('places.manageBlocked') }}</UButton></FeatureState
+        ><UButton :to="{ name: 'blocked' }" variant="ghost">{{ t('places.manageBlocked') }}</UButton></FeatureState
       >
       <FeatureState
         v-else-if="loaded && list.length && !filtered.length && !error"

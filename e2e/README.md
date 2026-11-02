@@ -32,6 +32,7 @@ Install the pinned fixture tooling with `python -m pip install -r e2e/requiremen
 | `tour` | Visits every screen at four window widths: no sideways overflow, no errors, no request leaving the PC | base library |
 | `interface` | Themes and preferences, command palette, keyboard in grid and viewer, Escape, reduced motion, forced colours, DPI, narrow windows, video playback (direct and converted), PIN-locked blocks | base library + `videos` |
 | `collections` | Makes an album, trashes and restores from the viewer, smart albums, custom Things, About | base library |
+| `collection-recovery` | Uses empty Things, Places and Events recovery links by keyboard in both themes at 1440 and 800 px, unblocks behind the PIN, undoes event name edits and restarts | twelve generated photos in its own library |
 | `organise` | Organise on disk: preview, move, Undo, checked on the files themselves | base library + two files of its own |
 | `viewer` | Zoom, pan, rotate, full screen, filmstrip, compare, slideshow; selection and batch; export and rename with Undo; audio tracks, subtitles, frame export; playback history; blocks | `media` |
 | `file-tools` | The File tools dialog and its menu at every width, by keyboard, and inside a full-screen video | `media` |

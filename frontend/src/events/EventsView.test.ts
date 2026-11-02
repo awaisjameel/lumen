@@ -176,6 +176,7 @@ it('drops a blocked event from the list and shows it again when the block is und
   await flushPromises()
   expect(w.findAll('[data-collection]')).toHaveLength(0)
   expect(w.text()).toContain(t('events.cleared'))
+  expect(w.get('a[href="/settings/blocked"]').text()).toBe(t('events.manageBlocked'))
   vi.mocked(engine.events).mockResolvedValue([trip])
   await showBlocksChanged() // and what Undo, or unblocking, does
   await flushPromises()
@@ -210,7 +211,7 @@ function testRouter() {
     routes: [
       { path: '/', component: { template: '<div />' } },
       { path: '/settings', component: { template: '<div />' } },
-      { path: '/blocked', component: { template: '<div />' } },
+      { path: '/settings/blocked', name: 'blocked', component: { template: '<div />' } },
       ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
         name,
         path: `/${name}/:id?`,
