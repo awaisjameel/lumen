@@ -112,8 +112,12 @@ membership follows files renamed or moved through Lumen.
 
 Places need GPS or a location correction; the bundled atlas is an approximate
 nearest-city grouping, not an online street map. Events group photos by time
-gaps and location changes. Rename or pin these collections without changing
+gaps and location changes. You can rename or pin an event without changing
 the source files' metadata. See [Places and Events](features.md#9-places-and-events).
+
+On an event's page, **Reset name** restores its automatic title. **Undo** after
+a rename restores the previous naming choice: an automatic title follows later
+date or location corrections, while a custom title keeps your wording.
 
 ## Hide, block and unblock
 
@@ -126,6 +130,10 @@ Open **Settings → Privacy and blocked**, unlock with the PIN, then review or
 unblock an entry. A new block offers a brief Undo. The unlocked gate locks when
 you leave or after 10 idle minutes. Wrong attempts are rate-limited. If the PIN
 is forgotten, use the Windows sign-in reset offered there.
+
+If no Things, Places or Events remain visible, **Manage blocked items** on
+that screen opens the same PIN-protected manager. Unblock the collection and
+return to its screen to see it again.
 
 Blocking is an application visibility feature. It does not encrypt photos,
 erase them or prevent access in Explorer or other applications. Avoid sharing

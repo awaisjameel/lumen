@@ -36,6 +36,10 @@ export const SUITES = {
     port: 9404,
     about: 'albums, smart albums, Trash and Undo, custom Things, About',
   },
+  'collection-recovery': {
+    port: 9415,
+    about: 'empty collection recovery through the PIN gate and event-name Undo across a restart',
+  },
   organise: {
     port: 9405,
     about: 'organise on disk: preview, move, Undo, on two isolated files',

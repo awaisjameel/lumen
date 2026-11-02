@@ -4,6 +4,8 @@ The README is the entry point. Each topic below has one canonical explanation;
 short introductions and task-specific reminders link to it. This inventory was
 reviewed against source `820ebed` and the current build on 24 October 2026 for
 [issue #29](https://github.com/awaisjameel/lumen/issues/29).
+The [feature completion audit](feature-audit.md), added for issue #31 on
+3 November 2026, records the subsequent workflow review and its own verification.
 
 ## Living documents
 
@@ -12,6 +14,7 @@ reviewed against source `820ebed` and the current build on 24 October 2026 for
 | [README](../README.md) | Product introduction, installation, first run, screenshots, privacy summary, status, known limits and help | Rewritten as a user's path; contributor detail moved to Development, Architecture and Releasing, with one section of links in its place. Release claims defer to release status. |
 | [Using Lumen](using-lumen.md) | Step-by-step examples and expected outcomes | New: folders, indexing, semantic/person/OCR search, face/tag corrections, albums, blocks, duplicates, file tools, compression and settings. Every control it names was checked against `frontend/src/shared/i18n.ts` and the views that use it. |
 | [Features](features.md) | Complete capability reference | Kept its numbered sections and anchors; corrected label-only hiding, hash sampling, the indexing order, search latency, how the activity card opens and problem-report privacy. Procedures link to Using Lumen. |
+| [Feature completion audit](feature-audit.md) | Issue #31 inventory, bounded repair milestones and verification | Separates confirmed workflow defects from deliberate limits, related issues and external acceptance. Records scope before implementation and current verification afterwards. |
 | [Beta testing](beta-testing.md) | Tester checklist, safe file effects, reporting and uninstall | Replaced the absolute "never connects" with the opt-in updater exception, added checksum steps and links to release status and the walkthrough, and corrected how the activity card opens. Memory is a recommendation, not a tested hardware matrix. |
 | [Development](development.md) | Supported Windows toolchains, setup, commands, CI and build troubleshooting | Moved contributor detail out of README. Root-relative npm examples fix directory leakage. Explicit cgo, shell environment, engine checks and e2e requirements match manifests, Taskfiles and setup action. |
 | [CONVENTIONS](../CONVENTIONS.md) | Coding standards and contract ownership | Reviewed against Go/store/bridge/ESLint and test helpers; retained authoritative rules. Command recipes link to Development. |
