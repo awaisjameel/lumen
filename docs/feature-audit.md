@@ -6,6 +6,29 @@ before implementation. An implementation reference establishes that a flow
 exists; it does not establish fresh runtime acceptance. Historical results
 are not counted as results for this checkout.
 
+## Branch and pull request workflow
+
+[`feat/31-feature-completion`](https://github.com/awaisjameel/lumen/tree/feat/31-feature-completion)
+is the integration branch for #31, created from `main` at `bae949c`.
+
+- Create a separate working branch from the integration branch for each new
+  child or sub-issue. Open its PR against `feat/31-feature-completion` and
+  link both the child issue and parent #31.
+- The existing [PR #37](https://github.com/awaisjameel/lumen/pull/37), from
+  `fix/31-collection-recovery`, targets the integration branch and covers
+  #35 and #36 together, including their shared native suite and audit record.
+- Review and merge accepted child PRs into the integration branch. Keep
+  implementation/verification status distinct from delivery to `main`;
+  merging a child PR does not complete #31 or establish a shipped release.
+- After all accepted #31 work and its verification gates are complete, open
+  one PR from `feat/31-feature-completion` to `main`. Record the accepted
+  scope, child PRs, final validation and explicit deferrals in that PR.
+  Until then, child PRs target the integration branch and the final PR waits.
+
+The existing CI workflow checks pull requests regardless of their base branch,
+so child PRs retain the same checks. The open latency gate below still applies
+to PR #37 and the eventual integration acceptance.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:
@@ -144,7 +167,8 @@ Verification on 3 November 2026, on `fix/31-collection-recovery`:
 The accepted defects are implemented and functionally verified locally.
 Milestone performance acceptance remains open until the full gate passes on an
 idle machine. The child issues remain open for this gate and review/merge of
-`fix/31-collection-recovery`. The rest of #31 is an ongoing audit, not a claim
+PR #37 into `feat/31-feature-completion`; delivery to `main` follows the
+integration workflow above. The rest of #31 is an ongoing audit, not a claim
 that every supported interaction has passed native acceptance in this run.
 
 Ignored evidence is retained under `e2e/.work/issue31/`: the before/after
