@@ -78,7 +78,7 @@ function testRouter() {
     routes: [
       { path: '/', component: { template: '<div />' } },
       { path: '/settings', component: { template: '<div />' } },
-      { path: '/blocked', component: { template: '<div />' } },
+      { path: '/settings/blocked', name: 'blocked', component: { template: '<div />' } },
       ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
         name,
         path: `/${name}/:id?`,
@@ -187,7 +187,7 @@ it('offers blocked-item recovery when the last visible place disappears', async 
   await showBlocksChanged()
   await flushPromises()
   expect(wrapper.text()).toContain(t('places.cleared'))
-  expect(wrapper.get('a[href="/blocked"]').text()).toBe(t('places.manageBlocked'))
+  expect(wrapper.get('a[href="/settings/blocked"]').text()).toBe(t('places.manageBlocked'))
 })
 
 vi.mock('../search/SearchBox.vue', () => ({ default: { render: () => null } }))

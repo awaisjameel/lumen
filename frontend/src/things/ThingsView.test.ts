@@ -192,7 +192,7 @@ function testRouter() {
     routes: [
       { path: '/', component: { template: '<div />' } },
       { path: '/settings', component: { template: '<div />' } },
-      { path: '/blocked', component: { template: '<div />' } },
+      { path: '/settings/blocked', name: 'blocked', component: { template: '<div />' } },
       ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
         name,
         path: `/${name}/:id?`,
@@ -331,6 +331,7 @@ it('deletes a custom Thing only after its destructive confirmation', async () =>
   expect(engine.deleteTag).toHaveBeenCalledWith(dogs.id)
   expect(w.find('[data-collection]').exists()).toBe(false)
   expect(w.text()).toContain(t('things.cleared'))
+  expect(w.get('a[href="/settings/blocked"]').text()).toBe(t('things.manageBlocked'))
 })
 
 async function menuAction(

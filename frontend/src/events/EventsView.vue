@@ -246,7 +246,7 @@ useCommands([
         :title="t(hadEvents ? 'events.cleared' : 'events.empty')"
         :text="t(hadEvents ? 'events.clearedHint' : 'events.emptyHint')"
         ><UButton to="/settings?section=library" color="primary" variant="solid">{{ t('events.addFolder') }}</UButton
-        ><UButton to="/blocked" variant="ghost">{{ t('events.manageBlocked') }}</UButton></FeatureState
+        ><UButton :to="{ name: 'blocked' }" variant="ghost">{{ t('events.manageBlocked') }}</UButton></FeatureState
       >
       <p v-if="list.length" class="regrouping">
         <Icon name="info" :size="14" />{{ t('events.followHint')
