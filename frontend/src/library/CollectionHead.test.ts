@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { reactive } from 'vue'
 import { engine, Filter } from '../bridge'
 import type * as Bridge from '../bridge'
+import type { Event } from '../bridge'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import CollectionHead from './CollectionHead.vue'
 
@@ -22,7 +23,7 @@ beforeEach(() => {
   vi.mocked(engine.setEventName).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setEventPinned).mockReset().mockResolvedValue(undefined)
 })
-async function mountHead() {
+async function mountHead(nameOverride = '') {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -34,9 +35,21 @@ async function mountHead() {
   const props = reactive({
     kind: 'event' as const,
     id: 1,
-    name: 'Weekend',
+    name: nameOverride || 'Weekend',
     count: 248,
     days: ['2026-10-04', '2026-10-03'],
+    group: {
+      id: 1,
+      name: nameOverride || 'Weekend',
+      nameOverride,
+      count: 248,
+      startAt: 0,
+      endAt: 0,
+      cover: 0,
+      coverThumb: 0,
+      placeId: 0,
+      pinned: false,
+    } satisfies Event,
   })
   const wrapper = mountInApp(CollectionHead, { props, plugins: [createPinia(), router] })
   return { wrapper, props }
@@ -55,7 +68,32 @@ it('renames inline with Enter and keeps Undo bound to the original event', async
   props.id = 2
   notices.find('collection.name')?.actions?.[0]?.run()
   await flushPromises()
-  expect(engine.setEventName).toHaveBeenLastCalledWith(1, 'Weekend')
+  expect(engine.setEventName).toHaveBeenLastCalledWith(1, '')
+  wrapper.unmount()
+  notices.stop()
+})
+it('restores the exact custom event override when undoing a rename or Reset name', async () => {
+  const notices = recordNotifications()
+  const { wrapper } = await mountHead('Our weekend')
+  await wrapper
+    .findAll('button')
+    .find((b) => b.text() === 'Rename…')
+    ?.trigger('click')
+  await wrapper.get('input').setValue('At the sea')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  notices.find('collection.name')?.actions?.[0]?.run()
+  await flushPromises()
+  expect(engine.setEventName).toHaveBeenLastCalledWith(1, 'Our weekend')
+  await wrapper
+    .findAll('button')
+    .find((b) => b.text() === 'Reset name')
+    ?.trigger('click')
+  await flushPromises()
+  expect(engine.setEventName).toHaveBeenLastCalledWith(1, '')
+  notices.find('collection.name')?.actions?.[0]?.run()
+  await flushPromises()
+  expect(engine.setEventName).toHaveBeenLastCalledWith(1, 'Our weekend')
   wrapper.unmount()
   notices.stop()
 })
