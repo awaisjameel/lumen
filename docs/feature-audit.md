@@ -38,11 +38,12 @@ below remain historical evidence, not new results from this checkout.
 Continue with one child branch and PR at a time: #39 (history ordering), #40
 (bounded favourite Undo), #41 (partial Undo reconciliation), #43 (tagging
 follow-up truthfulness), #42 (smart-album preview cost), #44 (place metadata),
-#45 (draft lifetime), then #46 (command contracts). Each branch starts from the
-latest integration head after the preceding PR merges. The source-backed
-candidates must first be reproduced; #46 is preventive work. Related #28,
-#29, #30 and #38 retain their own scope. No final PR to `main` is opened while
-the user reviews the accumulated parent branch.
+#45 (draft lifetime), #38 (navigation contracts), then #46 (command contracts).
+Each branch starts from the latest integration head after the preceding PR
+merges. The source-backed candidates must first be reproduced; #46 is preventive
+work. #38 establishes navigation identities before #46 coordinates command
+identities with them. Related #28, #29 and #30 retain their own scope. No final
+PR to `main` is opened while the user reviews the accumulated parent branch.
 
 ### #39: Search history ordering
 
@@ -70,8 +71,12 @@ Fresh verification in this Linux workspace:
 
 - The focused history store and mounted search-box tests pass 25/25, including
   the reopened box after an older clear fails.
+- All 958 frontend tests in 110 files pass, as do type checking, ESLint,
+  formatting and the production frontend build. Its existing bundle-size
+  advisory remains; no build threshold was changed.
 - The history SQLite regression passes with the race detector:
   `go test -race -count=1 -timeout 900s ./internal/store -run 'RecentSearch|RememberSearch|ClearRecent'`.
+  `go vet ./internal/core ./internal/store` also passes.
 - Documentation links, link-checker regressions and all eight screenshot
   capture records pass. No visible design change needs gallery recapture.
 - The new `search-history` native suite is registered, syntax-checked and wired
@@ -81,8 +86,12 @@ Fresh verification in this Linux workspace:
 - Full named-package Go race/static checks and the Windows production
   executable/package cannot be certified by this Linux environment. The
   attempted full race run reports missing GTK/WebKit and libvips development
-  dependencies plus Windows-path test failures. Those results are retained;
-  no tests, dependency versions or benchmark budgets were weakened.
+  dependencies plus Windows-path test failures; it was stopped after those
+  blockers were established. The local large-library gate fails at the
+  Windows-path block setup (`invalid block`) and reports missing benchmark
+  cases. These are failures, not performance acceptance. Results are retained
+  under `work/issue31/`; no tests, dependency versions or benchmark budgets
+  were weakened.
 
 Implementation and verification status remain distinct from acceptance,
 integration and release. #39 and #31 stay open until the required evidence is
