@@ -160,11 +160,11 @@ Undo day read overwriting a newer single favourite save; committed flags now
 invalidate older cell reads without reloading unfiltered timeline groups.
 Existing album/date/place inverse repairs remain with #41.
 
-Fresh local evidence: the full frontend checkpoint passes 982 tests in 113
-files; the latest focused bridge/ownership/inverse/dialog checks, type checking,
-ESLint, formatting, documentation integrity and the revision-only store race
-test pass. The PR-base frontend builds for comparison. Windows native
-`favourite-undo` acceptance and final full-tree checks are pending; no desktop
+Fresh local evidence: all 985 frontend tests in 113 files, type checking,
+ESLint, formatting, the production frontend build, documentation integrity and
+the revision-only store race test/vet pass. The PR-base frontend builds for
+comparison. [#48](https://github.com/awaisjameel/lumen/pull/48) targets the parent;
+Windows native `favourite-undo` acceptance and full-tree checks are pending; no desktop
 responsiveness or latency improvement is claimed from mocked scheduling tests.
 The native suite records before/after calls, payloads, elapsed restoration time
 and frame gaps, then exercises cancellation, navigation, a blocked-row failure,
