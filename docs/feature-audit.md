@@ -225,6 +225,57 @@ frame gap 281.2 versus 15.7 ms. The unchanged latency gate still exceeds folder
 `SaveFaces64` 7.964/7 ms, combined-block `SaveFaces64` (rounded to 8.000/8 ms),
 unblocked `SaveEmbeddings64` 143.417/70 ms and unblocked `SaveFaces64` 8.066/8 ms.
 
+
+### #40 integration result and #41 accepted scope
+
+[#48](https://github.com/awaisjameel/lumen/pull/48) is merged at `f4309b3` and
+#40 is closed. [Final Windows CI](https://github.com/awaisjameel/lumen/actions/runs/41735275110)
+passes production, unchanged generated contracts/modules, static checks, 988
+frontend tests, all three Go race shards, native history 7/7 and favourite Undo
+22/22. The compact outcomes screenshot was inspected. The final synthetic
+comparison records 500 versus 3 inverse writes, maximum outstanding writes 500
+versus 1, 53,392 versus 4,426 request bytes, 1,580.16 versus 280.86 ms and maximum
+frame gaps 328.2 versus 15.7 ms. The unchanged reporting-only store gate exceeds
+unblocked `SaveEmbeddings64` 236.320/70 ms; parent performance acceptance remains
+open. Earlier pending entries above are intermediate checkpoints, not current
+acceptance. No installer, real-corpus, hardware or release result is inferred.
+
+The next child, [#41](https://github.com/awaisjameel/lumen/issues/41), starts from
+that parent head. Its accepted scope, before implementation:
+
+- Classify and reproduce partial inverses in selection album actions,
+  `details/AlbumPicker`, date/place correction sequences and the adjacent
+  `AlbumPhotoPicker`. Single date/place forward calls are atomic store writes;
+  their per-asset inverse sequences can commit before a later call fails.
+  The photo picker also loses its Undo offer after a partial forward success.
+- Reuse the session-local inverse/outcome/dialog owner from #40. Add per-item
+  units for heterogeneous corrections, accurate failed/cancelled outcomes,
+  failed-only retry, cancelled-item resume and independent refresh recovery.
+- Generalise the existing favourite turn/lease implementation for date, place
+  and album membership; do not duplicate its ownership logic. New explicit
+  edits supersede older inverses. Include adjacent membership actors so one
+  surface cannot bypass that policy. Album deletion invalidates its pending
+  membership inverses before a potentially reused album ID can be targeted.
+  Assets themselves are retained when their files disappear; do not retarget
+  an inverse to another selection, path or newly selected item.
+- Capture current correction metadata beside the forward write under its
+  field turn. Keep original/user provenance semantics: a prior user correction
+  is reinstated; a previously uncorrected value restores the latest metadata,
+  including absent GPS. Retain opaque inverse targets when a correction itself
+  covers its asset; keep the store's existing admission rules.
+- Report actual membership changes from the existing transactional batch path
+  with a small typed outcome field. Reuse that path for single and multiple
+  membership edits, eliminating whole-album capture and stale checkbox guesses.
+  Keep the canonical SQL mutation in store and regenerate the wire bindings.
+  Album inverses retain the batch path's visibility checks and recover refused
+  targets after unblocking; they never widen admission to hidden metadata.
+- Reconcile current grids/counts and album lists after every inverse outcome;
+  refresh errors must not replay committed mutations. Preserve current detail
+  error/retry presentation and live metadata invalidation after navigation.
+  Add real-control native partial-failure/retry/navigation/restart acceptance,
+  fresh applicable Go/frontend/build/static/performance checks and living-guide
+  evidence. Preserve #36 event-name semantics and #40 favourite acceptance.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:
