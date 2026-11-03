@@ -31,6 +31,7 @@ import { onBlocksChanged } from '../shared/block'
 import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { latestSave } from '../shared/latestSave'
+import { useFavouriteWrites } from '../shared/favouriteWrites'
 import type { LatestSave } from '../shared/latestSave'
 import { deleteFromDisk } from '../trash/actions'
 import { showTrashUndo } from '../trash/undo'
@@ -901,6 +902,7 @@ export const useLibrary = defineStore('library', () => {
    * engine has it.
    */
   const favouriting = new Map<number, { save: LatestSave<boolean>; refused: boolean; revision: number }>()
+  const favouriteWrites = useFavouriteWrites()
   async function toggleFavourite(p: Sel | null) {
     const it = itemAt(p)
     if (!p || !it) return
@@ -915,19 +917,29 @@ export const useLibrary = defineStore('library', () => {
     let status = favouriting.get(it.id)
     if (!status) {
       const state = { refused: false, revision: 0 }
-      const save = latestSave((value) => engine.setFavourite(it.id, value), it.f ?? false, {
-        rollback: set,
-        failed: (e) => {
-          state.refused = true
-          reportError(e)
+      const save = latestSave(
+        (value) => favouriteWrites.write([it.id], () => engine.setFavourite(it.id, value)),
+        it.f ?? false,
+        {
+          rollback: set,
+          failed: (e) => {
+            state.refused = true
+            reportError(e)
+          },
+          saved: async (value) => {
+            set(value)
+            const s = scope.value
+            if (s.kind === 'timeline' && s.view.filter !== Filter.FilterFavourites && !s.view.album) {
+              // An older Undo refresh may still be reading these cells.
+              // Keep the committed flag and re-read only visible days.
+              staleDays()
+              fresh.clear()
+              notifyDays()
+            } else await refresh().catch(logError)
+            await loadCounts()
+          },
         },
-        saved: async () => {
-          await loadCounts()
-          const s = scope.value
-          if (s.kind === 'timeline' && (s.view.filter === Filter.FilterFavourites || !!s.view.album))
-            await refresh().catch(logError)
-        },
-      })
+      )
       status = Object.assign(state, { save })
       favouriting.set(it.id, status)
     }
@@ -947,8 +959,8 @@ export const useLibrary = defineStore('library', () => {
           {
             label: t('settings.undo'),
             run: () => {
-              void engine
-                .setFavourite(it.id, !fav)
+              void favouriteWrites
+                .write([it.id], () => engine.setFavourite(it.id, !fav))
                 .then(async () => {
                   set(!fav)
                   await Promise.all([refresh(), loadCounts()])
@@ -995,6 +1007,12 @@ export const useLibrary = defineStore('library', () => {
   /** The Trash changed: the grid and the Trash's count show it now. */
   async function trashChanged() {
     await Promise.all([refresh().catch(logError), loadCounts()])
+  }
+
+  /** Inverse outcomes retain a separate, retryable refresh failure. */
+  async function reconcileChanges() {
+    const results = await Promise.allSettled([refresh(), readCounts()])
+    for (const result of results) if (result.status === 'rejected') throw result.reason
   }
 
   /**
@@ -1117,6 +1135,7 @@ export const useLibrary = defineStore('library', () => {
     counts,
     countsLoaded,
     trashChanged,
+    reconcileChanges,
     removeFromView,
     moveToTrash,
     restoreFromTrash,

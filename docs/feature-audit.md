@@ -132,6 +132,45 @@ that integration head. Accepted before implementation:
   and navigation. Add native large-selection acceptance and record measured
   calls/payloads and the actual platform gates without changing budgets.
 
+### #40 implementation checkpoint
+
+The controlled regressions reproduce 500 outstanding inverse writes, one
+500-item previous-value read and a validation request retransmitting all 500
+IDs on the original implementation. Capture/current-state reads and mutation
+units now carry at most 200 IDs; the bridge sends only the revision for
+admission, which the existing store contract validates. A new store race
+regression proves that omitting IDs still rejects a stale revision. The
+application's resolved selection identity remains with its existing owner.
+
+`favouriteBatch.ts` records only genuinely changed flags. Grid/viewer edits,
+batch tools and selection changes share per-app favourite turns and ownership;
+later explicit requests supersede earlier inverse ownership even if they later
+fail or are cancelled. Undo reads current flags before writing, so retry of an
+unconfirmed response can recognise an already committed inverse without
+replaying it. Transport failures are labelled unconfirmed rather than claiming
+that no mutation occurred. Normal batch admission still checks visibility
+beside each store write.
+
+The shared ephemeral inverse helper retains per-item outcomes, bounded units,
+cancellation/resume, failed-only retry and an independent refresh retry. Its
+global dialog survives originating-view disposal, pages 100 rows and resets
+pagination when switching jobs. It does not restore an old selection/focus or
+persist a second Undo journal. A loaded-grid regression also reproduces an old
+Undo day read overwriting a newer single favourite save; committed flags now
+invalidate older cell reads without reloading unfiltered timeline groups.
+Existing album/date/place inverse repairs remain with #41.
+
+Fresh local evidence: the full frontend checkpoint passes 982 tests in 113
+files; the latest focused bridge/ownership/inverse/dialog checks, type checking,
+ESLint, formatting, documentation integrity and the revision-only store race
+test pass. The PR-base frontend builds for comparison. Windows native
+`favourite-undo` acceptance and final full-tree checks are pending; no desktop
+responsiveness or latency improvement is claimed from mocked scheduling tests.
+The native suite records before/after calls, payloads, elapsed restoration time
+and frame gaps, then exercises cancellation, navigation, a blocked-row failure,
+retry, newer edits and restart. Its baseline uses compiled base frontend assets
+with the candidate's unchanged favourite engine on copied synthetic libraries.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

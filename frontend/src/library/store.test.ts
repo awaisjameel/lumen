@@ -355,6 +355,25 @@ it('keeps where each loaded day was taken for its heading, and forgets it with t
 })
 
 describe('optimistic actions', () => {
+  it('keeps the newest favourite visible when an older Undo day read finishes after its save', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+    await lib.ensureDays([day])
+    const staleRead = deferred<DayItems[]>()
+    await lib.reconcileChanges()
+    vi.mocked(engine.days).mockReturnValueOnce(staleRead.promise)
+    const reading = lib.ensureDays([day])
+    const selected = { day, id: 1 }
+    await lib.toggleFavourite(selected)
+    staleRead.resolve(result(1))
+    await reading
+    expect(lib.itemAt(selected)?.f).toBe(true)
+    vi.mocked(engine.days).mockResolvedValueOnce([{ day, items: [{ id: 1, w: 100, h: 100, t: 1, f: true }] }])
+    await lib.ensureDays([day])
+    expect(lib.itemAt(selected)?.f).toBe(true)
+  })
+
   it('restores the persisted favourite when two queued toggles both fail', async () => {
     const lib = shownLibrary()
     await lib.setScope(all)

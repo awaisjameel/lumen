@@ -49,6 +49,7 @@ it('uses a six-second polite toast, persistent assertive errors and readable act
   })
   await flushPromises()
   const success = w.findComponent(UToast)
+  expect(document.querySelector('[data-notification="success"]')).not.toBeNull()
   expect(success.props('duration')).toBe(6000)
   expect(success.props('type')).toBe('background')
   expect(success.props('actions')?.[0]).toMatchObject({ label: 'Undo', variant: 'ghost' })

@@ -103,7 +103,11 @@ export async function baseLibrary() {
 
 /** A fresh copy of the base library for one suite: whatever it does stays its own. */
 export async function libraryCopy(to) {
-  const base = await baseLibrary()
+  return copyLibrary(await baseLibrary(), to)
+}
+
+/** Copies a closed scratch library without another run's WebView profile or logs. */
+export function copyLibrary(base, to) {
   rmSync(to, { recursive: true, force: true })
   mkdirSync(to, { recursive: true })
   // The WebView's profile, the log and crash reports belong to the run that made them.

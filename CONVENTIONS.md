@@ -201,6 +201,15 @@ file covers how code is written.
   - Commands: an action offered in more than one place (toolbar, menu,
     palette, shortcut) is one `Command` registered with `useCommands`; its
     availability is computed, and the engine still validates every call.
+  - Favourite mutations: `shared/favouriteWrites.ts` owns their per-app turns
+    and inverse ownership. Use its `write` for an explicit edit; capture and
+    forward writes take the same turns. A newer request permanently supersedes
+    an older inverse for those targets, even if that request later fails or is
+    cancelled. Selection capture is `library/favouriteBatch.ts`; ephemeral
+    inverse progress/recovery is `shared/undo.ts`. Retry checks current flags
+    before writing, and completed rows are never scheduled again. Reconciliation
+    errors have a read-only retry. Do not add direct competing favourite writes
+    or a second persistent Undo owner.
 - **Pinia**
   - Only setup stores (`defineStore(id, () => …)`).
   - A list from the engine uses `defineListStore` or `defineCollectionStore`

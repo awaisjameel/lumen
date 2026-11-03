@@ -19,7 +19,7 @@ import type { CompressionInput, CompressionJob, CompressionOptions, CompressionR
 import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
 import FeatureState from '../shared/FeatureState.vue'
-import OutcomeList from '../media/OutcomeList.vue'
+import OutcomeList from '../shared/OutcomeList.vue'
 import { compressionRequest, compressionModes, compressionEfforts } from '../shared/compression'
 import { confirm } from '../shared/confirm'
 import { errorText } from '../shared/errors'

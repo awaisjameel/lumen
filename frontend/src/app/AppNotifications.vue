@@ -59,6 +59,7 @@ function show(n: Notification) {
   // toast: an action that keeps its notice is drawn below the description.
   const keeping = n.actions?.filter((a) => a.dismiss === false) ?? []
   const body = {
+    'data-notification': n.id,
     title: n.title,
     description:
       keeping.length || n.work

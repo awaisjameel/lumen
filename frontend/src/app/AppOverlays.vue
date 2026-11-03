@@ -12,6 +12,7 @@ import type { Command } from '../shared/commands'
 import ConfirmDialog from '../shared/ConfirmDialog.vue'
 import { t } from '../shared/i18n'
 import { startPortalLayers } from '../shared/overlay'
+import { undoOutcomes } from '../shared/undo'
 import { navEntries } from './nav'
 
 const router = useRouter()
@@ -21,6 +22,7 @@ const lib = useLibrary()
 // most sessions never open them, and the start should not wait for them.
 const CommandPalette = defineAsyncComponent(() => import('./CommandPalette.vue'))
 const ShortcutHelp = defineAsyncComponent(() => import('./ShortcutHelp.vue'))
+const UndoDialog = defineAsyncComponent(() => import('../shared/UndoDialog.vue'))
 const palette = ref(false)
 const shortcuts = ref(false)
 const paletteUsed = ref(false)
@@ -81,6 +83,7 @@ onBeforeUnmount(() => {
 <template>
   <ConfirmDialog />
   <BlockDialog />
+  <UndoDialog v-if="undoOutcomes" />
   <CommandPalette v-if="paletteUsed" v-model:open="palette" />
   <ShortcutHelp v-if="shortcutsUsed" v-model:open="shortcuts" />
 </template>

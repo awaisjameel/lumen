@@ -64,6 +64,18 @@ spikes/              Phase 0 experiments and later feasibility probes (own Go mo
 
 **Visibility.** One rule feeds grids, search, counts, covers, media URLs and the video server, so a blocked item disappears everywhere at once. Blocked media is served only while the PIN-protected Blocked settings are open.
 
+**Favourite writes and selection Undo.** `shared/favouriteWrites.ts` coordinates
+bounded favourite writes per Pinia app. Grid, viewer, batch tools and selection
+actions share its turns; a newer explicit request permanently supersedes older
+inverse ownership for those targets. `library/favouriteBatch.ts` captures flags
+beside each bounded forward write and uses the existing transactional batch
+inverse for genuinely changed items. `shared/undo.ts` owns ephemeral inverse
+outcomes and notification controls independently of view lifetime. It retains
+failed/cancelled rows separately and retries refreshes without replaying
+mutations. `UndoDialog` uses the shared paged `OutcomeList`; neither introduces
+another persisted library or durable Undo journal. SQL, visibility admission
+and transaction outcomes remain with the existing store/service owners.
+
 ## Deviations from the plan
 
 [The original plan](plan.md) set the vision and roadmap. These decisions depart from it:

@@ -90,11 +90,39 @@ jobs:
         shell: bash
         run: scripts/lint.sh --no-bench
 
-      - name: Native search history regression
+      # Compare the built base frontend and candidate on the same synthetic
+      # favourite fixture and candidate engine; no runtime download is added.
+      - name: Build the PR base frontend for native comparison
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags origin "$BASE_SHA"
+          mkdir -p e2e/.work/baseline
+          git archive "$BASE_SHA" frontend | tar -x -C e2e/.work/baseline
+          npm ci --prefix e2e/.work/baseline/frontend
+          npm run build --prefix e2e/.work/baseline/frontend
+          echo "LUMEN_FAVOURITE_BASELINE_FRONTEND=$(cygpath -m "$PWD/e2e/.work/baseline/frontend/dist")" >>"$GITHUB_ENV"
+
+      - name: Native history and favourite Undo regressions
         shell: bash
         run: |
           npm ci --prefix e2e
-          node e2e/run.mjs search-history
+          python -m pip install -r e2e/requirements.txt
+          node e2e/run.mjs search-history favourite-undo
+
+      - name: Preserve native regression reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-regressions
+          path: |
+            e2e/.work/results/search-history
+            e2e/.work/results/favourite-undo
+          retention-days: 14
+          include-hidden-files: true
+          if-no-files-found: ignore
 
       - if: ${{ !cancelled() }}
         uses: ./.github/actions/save-go-cache
