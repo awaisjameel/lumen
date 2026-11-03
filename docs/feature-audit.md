@@ -97,6 +97,41 @@ Implementation and verification status remain distinct from acceptance,
 integration and release. #39 and #31 stay open until the required evidence is
 available. The remaining children have not been implemented by this entry.
 
+### #39 integration result and #40 accepted scope
+
+[#47](https://github.com/awaisjameel/lumen/pull/47) is merged at `f9eeb2f` and
+#39 is closed. [Windows CI](https://github.com/awaisjameel/lumen/actions/runs/41696646790)
+passes the production build, unchanged generated contracts/modules, static
+checks, all three Go race shards, 958 frontend tests and native history
+acceptance (7/7). The earlier pending status above records the Linux checkpoint.
+The reporting-only latency job contains one over-budget measurement:
+unblocked `SaveEmbeddings64` 113.838/70 ms. The parent milestone's performance
+gate remains open; no package, real-corpus, hardware or release acceptance is
+inferred from this child run.
+
+The next child is [#40](https://github.com/awaisjameel/lumen/issues/40), based on
+that integration head. Accepted before implementation:
+
+- Capture previous favourite flags in bounded units, beside the corresponding
+  forward writes. Undo only targets flags actually changed by that action.
+- Reuse the existing transactional `ApplyBatch` inverse, with at most 200 IDs
+  in a call and one outstanding unit. No heterogeneous-value service or new
+  wire contract is needed for a uniform Favourite/Unfavourite action.
+- Keep ephemeral Undo ownership independent of the originating view. Reuse
+  notifications, progress, overlays and paged outcomes for cancellation,
+  failed-only retry and a separate cancelled remainder.
+- Coordinate favourite writes through one per-app owner. A newer explicit
+  favourite edit supersedes the older Undo for that target; queued/in-flight
+  writes must finish in that order. Completed inverses are never replayed.
+- Reconcile the current grid/counts after every outcome, retaining mutation
+  outcomes separately from refresh errors. Do not restore an old selection or
+  focus after navigation. This small inverse/outcome helper can support #41;
+  album/date/place inverse repairs remain in that later child.
+- Demonstrate the original scheduling failure, exact mixed-flag restoration,
+  bounded reads/writes/rendering, progress, cancellation, retries, newer edits
+  and navigation. Add native large-selection acceptance and record measured
+  calls/payloads and the actual platform gates without changing budgets.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:
