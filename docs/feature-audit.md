@@ -207,6 +207,24 @@ folder `SaveFaces64` 7.737/7 ms, folder `Things` 11.903/10 ms, combined-block
 `SaveFaces64` 8.008/8 ms, unblocked `SaveEmbeddings64` 141.542/70 ms and unblocked
 `SaveFaces64` 8.469/8 ms. The parent performance gate remains open.
 
+
+The [third Windows run](https://github.com/awaisjameel/lumen/actions/runs/41731572756)
+passes build/contracts/static checks, 988 frontend tests, all Go race shards and
+history acceptance (7/7). Favourite checks reach 17/18: progress has no invalid
+countdown and dialog controls stay above notifications. The Escape fix needs a
+further refinement: preventing the shared key in a toast registered before the
+dialog also prevents that dialog from closing. The mounted regression now
+reproduces the real mounting order, asserts the dialog closes and the same
+recovery toast survives its delayed-removal window, then verifies explicit
+dismissal still releases it. The presenter retains that toast synchronously
+through Nuxt's existing update/removal contract while leaving the keyboard event
+for the dialog. Final native retry/newer-edit/restart acceptance remains pending.
+The repeated comparison observes 500 versus 3 inverse writes and 53,392 versus
+4,426 request bytes; elapsed time is 1,342.05 versus 258.54 ms, maximum observed
+frame gap 281.2 versus 15.7 ms. The unchanged latency gate still exceeds folder
+`SaveFaces64` 7.964/7 ms, combined-block `SaveFaces64` (rounded to 8.000/8 ms),
+unblocked `SaveEmbeddings64` 143.417/70 ms and unblocked `SaveFaces64` 8.066/8 ms.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

@@ -215,7 +215,10 @@ try {
   )
   await page.screenshot({ path: join(s.out, 'partial-undo.png') })
   await page.keyboard.press('Escape')
-  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
+  await until(
+    () => page.evaluate(() => !document.querySelector('[role="dialog"]')),
+    'the outcomes dialog did not close on Escape',
+  )
   await lib(page, 'UnlockBlocks', PIN)
   await lib(page, 'RemoveBlock', block.id)
   await lib(page, 'LockBlocks')

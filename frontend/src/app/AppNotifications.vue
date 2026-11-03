@@ -59,10 +59,15 @@ function show(n: Notification) {
   // Nuxt UI wraps its actions in Reka's ToastAction, which always closes the
   // toast: an action that keeps its notice is drawn below the description.
   const keeping = n.actions?.filter((a) => a.dismiss === false) ?? []
+  let overlayEscape = false
   const body = {
     'data-notification': n.id,
     onEscapeKeyDown: (event: KeyboardEvent) => {
-      if (portalOpen()) event.preventDefault() // Escape belongs to the open dialog/menu.
+      // Reka sends Escape to every toast's window listener. Preventing its
+      // default also stops a dialog registered later from closing. Let the
+      // dialog handle the key and retain the notice in its close callback.
+      overlayEscape = portalOpen() && !event.defaultPrevented
+      setTimeout(() => (overlayEscape = false), 0)
     },
     title: n.title,
     description:
@@ -113,8 +118,15 @@ function show(n: Notification) {
     type: n.kind === 'error' ? ('foreground' as const) : ('background' as const),
     close: { 'aria-label': t('notify.dismiss'), class: 'text-(--lumen-toast-text)' },
     actions: n.actions?.filter((a) => a.dismiss !== false).map(button),
-    'onUpdate:open': (open: boolean) => {
-      if (!open) gone(n.id, toastID)
+    'onUpdate:open': (open: boolean): void => {
+      if (open) return
+      if (overlayEscape) {
+        overlayEscape = false
+        // Nuxt ignores the following automatic removal when updated in the
+        // same tick. Keep this toast and its focus/owner; do not cancel the
+        // shared keyboard event that the dialog still needs to receive.
+        if (shown.get(n.id)?.id === toastID) toast.update(toastID, body)
+      } else gone(n.id, toastID)
     },
   }
   // Removing and adding again would let the removal's delayed clean-up take

@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import type { Component } from 'vue'
-import { defineComponent, h, nextTick } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import UApp from '@nuxt/ui/components/App.vue'
 import UToast from '@nuxt/ui/components/Toast.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
@@ -119,19 +119,34 @@ it('replaces long-work progress in place and clears it on completion', async () 
 })
 
 it('retains recovery when Escape closes a portalled outcome dialog', async () => {
+  vi.useFakeTimers()
   const closed = vi.fn()
+  const opened = ref(false)
   const dialog = defineComponent(
-    () => () => h(UModal, { defaultOpen: true, title: 'Outcomes', description: 'Recovery outcomes' }),
+    () => () =>
+      opened.value ? h(UModal, { defaultOpen: true, title: 'Outcomes', description: 'Recovery outcomes' }) : null,
   )
   const w = mountToaster(dialog)
   notify({ id: 'recovery', kind: 'error', title: 'Retry available', closed })
   await flushPromises()
+  const original = document.querySelector('[data-notification="recovery"]')
+  opened.value = true // The recovery toast exists before its outcomes dialog opens.
+  await flushPromises()
   expect(document.querySelector('[role="dialog"][data-state="open"]')).not.toBeNull()
-  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  document.activeElement?.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+  )
   await flushPromises()
   expect(document.querySelector('[role="dialog"][data-state="open"]')).toBeNull()
+  await vi.advanceTimersByTimeAsync(300) // a delayed toast removal must not discard recovery
   expect(closed).not.toHaveBeenCalled()
-  expect(w.findComponent(UToast).exists()).toBe(true)
+  expect(document.querySelector('[data-notification="recovery"]')).toBe(original)
+  expect(w.findAllComponents(UToast)).toHaveLength(1)
+  dismiss('recovery')
+  await flushPromises()
+  expect(closed).toHaveBeenCalledOnce()
+  await vi.advanceTimersByTimeAsync(300)
+  expect(w.findAllComponents(UToast)).toHaveLength(0)
 })
 
 it('does not publish an invalid countdown when a live interactive notice completes', async () => {
