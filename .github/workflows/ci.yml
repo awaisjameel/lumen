@@ -90,6 +90,12 @@ jobs:
         shell: bash
         run: scripts/lint.sh --no-bench
 
+      - name: Native search history regression
+        shell: bash
+        run: |
+          npm ci --prefix e2e
+          node e2e/run.mjs search-history
+
       - if: ${{ !cancelled() }}
         uses: ./.github/actions/save-go-cache
 
