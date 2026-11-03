@@ -6,6 +6,7 @@ import UButton from '@nuxt/ui/components/Button.vue'
 import { useToast } from '@nuxt/ui/composables'
 import { h, nextTick, onBeforeUnmount } from 'vue'
 import { t } from '../shared/i18n'
+import { portalOpen } from '../shared/overlay'
 import { icons } from '../design/icons'
 import type { IconName } from '../design/icons'
 import { setPresenter } from '../shared/notify'
@@ -60,6 +61,9 @@ function show(n: Notification) {
   const keeping = n.actions?.filter((a) => a.dismiss === false) ?? []
   const body = {
     'data-notification': n.id,
+    onEscapeKeyDown: (event: KeyboardEvent) => {
+      if (portalOpen()) event.preventDefault() // Escape belongs to the open dialog/menu.
+    },
     title: n.title,
     description:
       keeping.length || n.work
@@ -96,9 +100,15 @@ function show(n: Notification) {
         : n.description,
     icon: icons[n.icon ?? look[n.kind].icon],
     color: look[n.kind].color,
+    // Interactive work has its own progress. Its duration changes from a
+    // timed offer to persistent work and back; Reka retains the old remaining
+    // time briefly, which can put a countdown above its maximum.
+    progress:
+      keeping.length || n.work
+        ? false
+        : { color: 'primary' as const, ui: { base: 'h-0.5', indicator: 'transition-none' } },
     // Nuxt UI keeps a toast with no duration for its default time: 0 is
     // "until dismissed".
-    progress: { color: 'primary' as const, ui: { base: 'h-0.5', indicator: 'transition-none' } },
     duration: n.duration ?? (n.kind === 'error' || n.work ? 0 : 6000),
     type: n.kind === 'error' ? ('foreground' as const) : ('background' as const),
     close: { 'aria-label': t('notify.dismiss'), class: 'text-(--lumen-toast-text)' },

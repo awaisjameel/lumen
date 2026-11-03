@@ -164,7 +164,7 @@ and enter the shared turn at the click; superseded queued edits are skipped,
 and a refused newest write reads its persisted flag before rolling back.
 Existing album/date/place inverse repairs remain with #41.
 
-Fresh local evidence: all 986 frontend tests in 113 files, type checking,
+Fresh local evidence: all 988 frontend tests in 113 files, type checking,
 ESLint, formatting, the production frontend build, documentation integrity and
 the revision-only store race test/vet pass. The PR-base frontend builds for
 comparison. [#48](https://github.com/awaisjameel/lumen/pull/48) targets the parent;
@@ -183,6 +183,29 @@ shortcut; it now uses the real **Select all results** menu. Native acceptance
 remains pending. The unchanged reporting-only latency gate exceeds folder
 `Events` 6.293/5 ms, unblocked `SaveEmbeddings64` 143.184/70 ms and unblocked
 `SaveFaces64` 8.122/8 ms; the parent performance gate remains open.
+
+
+The [second Windows run](https://github.com/awaisjameel/lumen/actions/runs/41727734809)
+passes build/contracts/static checks, 986 frontend tests and every Go race shard.
+On the same candidate engine and copied 500-photo fixture, the compiled parent
+frontend launches 500 inverse calls concurrently (53,392 request bytes,
+1,587.63 ms, maximum observed frame gap 343.8 ms). The candidate makes three
+200/200/100 writes with one outstanding write, plus three current-state reads
+(4,426 request bytes, 275.89 ms, maximum frame gap 15.7 ms). These are single
+instrumented synthetic observations, not a general latency or hardware claim.
+Navigation, cancellation/resume, retained focus, 100-row paging and compact
+layout pass. Native acceptance remains incomplete: Escape closes both the
+outcomes dialog and its recovery toast, so failed-only retry cannot proceed;
+an interactive toast's changing duration also briefly renders progress above
+100%. Both now have failing-then-passing mounted regressions. Notifications
+cede Escape to portalled overlays, interactive work uses its own progress, and
+a dedicated notification layer sits below dialogs so their controls stay clear.
+The history harness now restarts after fixture setup instead of reloading while
+startup requests may still be pending; uncaught errors remain a failing check.
+Final Windows acceptance is pending. This run's unchanged latency gate exceeds
+folder `SaveFaces64` 7.737/7 ms, folder `Things` 11.903/10 ms, combined-block
+`SaveFaces64` 8.008/8 ms, unblocked `SaveEmbeddings64` 141.542/70 ms and unblocked
+`SaveFaces64` 8.469/8 ms. The parent performance gate remains open.
 
 ## First milestone: collection recovery and event name Undo
 

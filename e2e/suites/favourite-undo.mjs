@@ -204,6 +204,15 @@ try {
     'compact outcomes have no sideways overflow',
     await page.$eval('[role="dialog"]', (el) => el.scrollWidth <= el.clientWidth),
   )
+  s.check(
+    'the outcomes dialog controls remain above notifications',
+    await page.$eval('[role="dialog"]', (dialog) => {
+      const retry = [...dialog.querySelectorAll('button')].find((el) => el.textContent.trim() === 'Retry failed items')
+      if (!retry) return false
+      const box = retry.getBoundingClientRect()
+      return retry.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2))
+    }),
+  )
   await page.screenshot({ path: join(s.out, 'partial-undo.png') })
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))

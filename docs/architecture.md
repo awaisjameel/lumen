@@ -64,6 +64,11 @@ spikes/              Phase 0 experiments and later feasibility probes (own Go mo
 
 **Visibility.** One rule feeds grids, search, counts, covers, media URLs and the video server, so a blocked item disappears everywhere at once. Blocked media is served only while the PIN-protected Blocked settings are open.
 
+Notifications sit above the work area and below portalled dialogs, using the
+shared layer tokens. Escape in a portalled overlay preserves its underlying
+recovery notices. Interactive work uses explicit work progress; its toast timer
+can change without showing a second countdown.
+
 **Favourite writes and selection Undo.** `shared/favouriteWrites.ts` coordinates
 bounded favourite writes per Pinia app. Grid, viewer, batch tools and selection
 actions share its turns; a newer explicit request permanently supersedes older

@@ -14,6 +14,10 @@ const requests = []
 
 function watch(page) {
   s.watch(page)
+  page.on('pageerror', (error) => console.log(`PAGE ERROR ${error.stack ?? error}`))
+  page.on('console', (message) => {
+    if (message.type() === 'error') console.log(`CONSOLE ERROR ${message.text()} ${JSON.stringify(message.location())}`)
+  })
   page.on('request', (request) => {
     const url = new URL(request.url())
     if (/^https?:$/.test(url.protocol) && !['wails.localhost', 'localhost', '127.0.0.1'].includes(url.hostname))
@@ -33,7 +37,10 @@ try {
   watch(app.page)
   await lib(app.page, 'AddSources', [photos])
   await search(app.page, 'RememberSearch', 'old search')
-  await app.page.reload()
+  await close(app)
+  app = undefined
+  app = await launch({ exe: s.exe, dataDir, port: s.port })
+  watch(app.page)
   await resize(app.page, 1440, 900)
   s.must('the empty search box offers persisted history', (await history(app.page)).includes('old search'))
   await app.page.click('[data-search-forget]')
