@@ -5,12 +5,18 @@ import type { VueWrapper } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { engine, TagKind } from '../bridge'
 import type * as Bridge from '../bridge'
+import type * as Errors from '../shared/errors'
+import { reportError } from '../shared/errors'
 import { mountInApp } from '../shared/testing'
 import { setShortcutOverrides } from '../shared/commands'
 import SearchBox from './SearchBox.vue'
 
 const scope = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 vi.mock('../library/store', () => ({ useLibrary: () => ({ setScope: scope }) }))
+vi.mock('../shared/errors', async (original) => ({
+  ...(await original<typeof Errors>()),
+  reportError: vi.fn(),
+}))
 vi.mock('../bridge', async (original) => ({
   ...(await original<typeof Bridge>()),
   engine: {
@@ -230,6 +236,26 @@ it('forgets the recent searches when asked', async () => {
   await flushPromises()
   expect(engine.clearRecentSearches).toHaveBeenCalledOnce()
   expect(wrapper?.text()).not.toContain('Recent searches')
+})
+
+it('keeps a newer query in the reopened box when an older clear fails', async () => {
+  let failClear: (reason: unknown) => void = vi.fn()
+  vi.mocked(engine.clearRecentSearches).mockReturnValue(new Promise<void>((_, reject) => (failClear = reject)))
+  vi.mocked(engine.recentSearches).mockResolvedValueOnce(['old search']).mockResolvedValue(['new search'])
+  vi.mocked(engine.rememberSearch).mockResolvedValue(['new search'])
+  const input = await start()
+  await flushPromises()
+  await wrapper?.get('[data-search-forget]').trigger('click')
+  await input.setValue('new search')
+  await input.trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  await router.push('/')
+  await input.trigger('focus')
+  await flushPromises()
+  failClear(new Error('busy'))
+  await flushPromises()
+  expect(wrapper?.findAll('[role="option"]').map((row) => row.text())).toEqual(['new search'])
+  expect(reportError).toHaveBeenCalledOnce()
 })
 
 it('offers a Search button on the search page that waits for words and starts the search unrefined', async () => {

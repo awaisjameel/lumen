@@ -29,6 +29,74 @@ The existing CI workflow checks pull requests regardless of their base branch,
 so child PRs retain the same checks. The open latency gate below still applies
 to PR #37 and the eventual integration acceptance.
 
+## Current child sequence, 3 November 2026
+
+PR #37 was merged into the integration branch at `6038d23`; #35 and #36 are
+closed. Their recorded native evidence and outstanding milestone latency gate
+below remain historical evidence, not new results from this checkout.
+
+Continue with one child branch and PR at a time: #39 (history ordering), #40
+(bounded favourite Undo), #41 (partial Undo reconciliation), #43 (tagging
+follow-up truthfulness), #42 (smart-album preview cost), #44 (place metadata),
+#45 (draft lifetime), #38 (navigation contracts), then #46 (command contracts).
+Each branch starts from the latest integration head after the preceding PR
+merges. The source-backed candidates must first be reproduced; #46 is preventive
+work. #38 establishes navigation identities before #46 coordinates command
+identities with them. Related #28, #29 and #30 retain their own scope. No final
+PR to `main` is opened while the user reviews the accumulated parent branch.
+
+### #39: Search history ordering
+
+Accepted scope is the bounded repair in
+[#39](https://github.com/awaisjameel/lumen/issues/39): keep optimistic clearing,
+prevent an older failure from replacing newer results, and recover from the
+engine's authoritative filtered history. No schema, service signature,
+generated binding or search-ranking change is needed.
+
+Tracing `SearchBox.vue` → `search/recent.ts` → bridge → `SearchService` →
+`store/recent.go` confirms that SQLite owns persisted history and the service
+filters blocked names on reads. The frontend's unconditional snapshot rollback
+is the defect. The new deterministic regressions fail ten cases on the original
+implementation, including both newer-operation paths and repeated clears.
+
+The repaired clear uses the same revision ownership as load/remember. Every
+clear failure is reported. Only a still-current failure starts an authoritative
+read; its result also yields to newer work. A failed recovery read logs its
+error and keeps the list empty. A newer pending operation owns recovery; if it
+also fails, reopening the search box retries the read. Cached names are never
+restored by clear failure. This defines frontend response ownership without
+adding another persistent history owner or changing store write ordering.
+
+Fresh verification in this Linux workspace:
+
+- The focused history store and mounted search-box tests pass 25/25, including
+  the reopened box after an older clear fails.
+- All 958 frontend tests in 110 files pass, as do type checking, ESLint,
+  formatting and the production frontend build. Its existing bundle-size
+  advisory remains; no build threshold was changed.
+- The history SQLite regression passes with the race detector:
+  `go test -race -count=1 -timeout 900s ./internal/store -run 'RecentSearch|RememberSearch|ClearRecent'`.
+  `go vet ./internal/core ./internal/store` also passes.
+- Documentation links, link-checker regressions and all eight screenshot
+  capture records pass. No visible design change needs gallery recapture.
+- The new `search-history` native suite is registered, syntax-checked and wired
+  into Windows CI after the production build. It exercises clear, a subsequent
+  query, navigation, reopening and restart using a scratch library. A syntax
+  check is not native acceptance; actual Windows results are pending.
+- Full named-package Go race/static checks and the Windows production
+  executable/package cannot be certified by this Linux environment. The
+  attempted full race run reports missing GTK/WebKit and libvips development
+  dependencies plus Windows-path test failures; it was stopped after those
+  blockers were established. The local large-library gate fails at the
+  Windows-path block setup (`invalid block`) and reports missing benchmark
+  cases. These are failures, not performance acceptance. Results are retained
+  under `work/issue31/`; no tests, dependency versions or benchmark budgets
+  were weakened.
+
+Implementation and verification status remain distinct from acceptance,
+integration and release. #39 and #31 stay open until the required evidence is
+available. The remaining children have not been implemented by this entry.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

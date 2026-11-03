@@ -61,6 +61,12 @@ open the best matching moment. Hidden/blocked content follows the same visibilit
 rules as the Library. Search is not a guarantee that a particular object,
 person or exact phrase will be recognised.
 
+An empty search box offers recent searches saved in your library. **Clear recent
+searches** forgets them; new searches are saved again. If clearing fails, Lumen
+reports the failure and reloads the engine's current, privacy-filtered history
+unless a newer search or reload has already taken over. If that read also fails,
+the list stays empty until you reopen the box and it can read the library again.
+
 ![Search results for snowy mountains at sunrise, best matches first](screenshots/search.webp)
 
 ## Name a person and correct faces
