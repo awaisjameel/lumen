@@ -17,6 +17,7 @@ import type * as Errors from '../shared/errors'
 import type { Changes, DayBucket, DayItems, GridItem, Progress, SearchResults, Selection } from '../bridge'
 import { affects, scopeKey, useLibrary } from './store'
 import { reportError } from '../shared/errors'
+import { useFavouriteWrites } from '../shared/favouriteWrites'
 
 vi.mock('../shared/errors', async (importOriginal) => ({
   ...(await importOriginal<typeof Errors>()),
@@ -355,6 +356,27 @@ it('keeps where each loaded day was taken for its heading, and forgets it with t
 })
 
 describe('optimistic actions', () => {
+  it('does not let a coalesced older click run after a newer batch edit', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+    await lib.ensureDays([day])
+    const firstWrite = deferred<undefined>()
+    let persisted = false
+    vi.mocked(engine.setFavourite).mockImplementation(async (_id, value) => {
+      if (vi.mocked(engine.setFavourite).mock.calls.length === 1) await firstWrite.promise
+      persisted = value
+    })
+    const selected = { day, id: 1 }
+    const first = lib.toggleFavourite(selected)
+    const second = lib.toggleFavourite(selected)
+    const batch = useFavouriteWrites().write([1], () => engine.setFavourite(1, true))
+    firstWrite.resolve(undefined)
+    await Promise.all([first, second, batch])
+    expect(persisted).toBe(true)
+    expect(engine.setFavourite).not.toHaveBeenCalledWith(1, false)
+  })
+
   it('keeps the newest favourite visible when an older Undo day read finishes after its save', async () => {
     const lib = shownLibrary()
     await lib.setScope(all)
@@ -375,6 +397,7 @@ describe('optimistic actions', () => {
   })
 
   it('restores the persisted favourite when two queued toggles both fail', async () => {
+    vi.mocked(engine.searchHits).mockResolvedValue(hits(1))
     const lib = shownLibrary()
     await lib.setScope(all)
     vi.mocked(engine.days).mockResolvedValueOnce(result(1))

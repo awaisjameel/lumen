@@ -158,9 +158,13 @@ pagination when switching jobs. It does not restore an old selection/focus or
 persist a second Undo journal. A loaded-grid regression also reproduces an old
 Undo day read overwriting a newer single favourite save; committed flags now
 invalidate older cell reads without reloading unfiltered timeline groups.
+A second regression confirms that an inner single-asset save queue could
+schedule an older click after a newer batch. Single edits now reserve ownership
+and enter the shared turn at the click; superseded queued edits are skipped,
+and a refused newest write reads its persisted flag before rolling back.
 Existing album/date/place inverse repairs remain with #41.
 
-Fresh local evidence: all 985 frontend tests in 113 files, type checking,
+Fresh local evidence: all 986 frontend tests in 113 files, type checking,
 ESLint, formatting, the production frontend build, documentation integrity and
 the revision-only store race test/vet pass. The PR-base frontend builds for
 comparison. [#48](https://github.com/awaisjameel/lumen/pull/48) targets the parent;
@@ -170,6 +174,15 @@ The native suite records before/after calls, payloads, elapsed restoration time
 and frame gaps, then exercises cancellation, navigation, a blocked-row failure,
 retry, newer edits and restart. Its baseline uses compiled base frontend assets
 with the candidate's unchanged favourite engine on copied synthetic libraries.
+
+The [first Windows run](https://github.com/awaisjameel/lumen/actions/runs/41716415864)
+passes production, contract/module cleanliness, static checks, 985 frontend
+tests, all Go race shards and history acceptance (7/7). Favourite acceptance
+stops in its harness before mutation because Ctrl+A is not a grid selection
+shortcut; it now uses the real **Select all results** menu. Native acceptance
+remains pending. The unchanged reporting-only latency gate exceeds folder
+`Events` 6.293/5 ms, unblocked `SaveEmbeddings64` 143.184/70 ms and unblocked
+`SaveFaces64` 8.122/8 ms; the parent performance gate remains open.
 
 ## First milestone: collection recovery and event name Undo
 

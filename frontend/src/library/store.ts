@@ -901,7 +901,7 @@ export const useLibrary = defineStore('library', () => {
    * refuses. Clicks on one asset take turns, so the flag always ends as the
    * engine has it.
    */
-  const favouriting = new Map<number, { save: LatestSave<boolean>; refused: boolean; revision: number }>()
+  const favouriting = new Map<number, { persisted: boolean; revision: number }>()
   const favouriteWrites = useFavouriteWrites()
   async function toggleFavourite(p: Sel | null) {
     const it = itemAt(p)
@@ -914,43 +914,49 @@ export const useLibrary = defineStore('library', () => {
         notifyDays()
       }
     }
-    let status = favouriting.get(it.id)
-    if (!status) {
-      const state = { refused: false, revision: 0 }
-      const save = latestSave(
-        (value) => favouriteWrites.write([it.id], () => engine.setFavourite(it.id, value)),
-        it.f ?? false,
-        {
-          rollback: set,
-          failed: (e) => {
-            state.refused = true
-            reportError(e)
-          },
-          saved: async (value) => {
-            set(value)
-            const s = scope.value
-            if (s.kind === 'timeline' && s.view.filter !== Filter.FilterFavourites && !s.view.album) {
-              // An older Undo refresh may still be reading these cells.
-              // Keep the committed flag and re-read only visible days.
-              staleDays()
-              fresh.clear()
-              notifyDays()
-            } else await refresh().catch(logError)
-            await loadCounts()
-          },
-        },
-      )
-      status = Object.assign(state, { save })
-      favouriting.set(it.id, status)
-    }
-    const current = status
-    const succeeded = () => !current.refused
+    const status = favouriting.get(it.id) ?? { persisted: !!it.f, revision: 0 }
+    favouriting.set(it.id, status)
     const revision = ++status.revision
-    status.refused = false
+    // Reserve at the click, before waiting. A per-asset latestSave queue
+    // inside these shared turns could enqueue an old click after a new batch.
+    const lease = favouriteWrites.begin([it.id])
     set(fav)
-    await status.save(fav)
-    if (revision !== status.revision) return
-    if (succeeded())
+    try {
+      const written = await favouriteWrites.take(async () => {
+        if (!lease.current(it.id)) return false
+        try {
+          await engine.setFavourite(it.id, fav)
+          status.persisted = fav
+          return true
+        } catch (e) {
+          if (!lease.current(it.id)) return false
+          // Another batch may have committed since this control first saved.
+          // Re-read under the same turn instead of rolling back a cached flag.
+          try {
+            const previous = (await engine.searchHits([it.id])).find((item) => item.id === it.id)
+            if (previous) status.persisted = !!previous.f
+          } catch (readError) {
+            logError(readError)
+          }
+          if (lease.current(it.id)) {
+            set(status.persisted)
+            reportError(e)
+          }
+          return false
+        }
+      })
+      if (!lease.current(it.id)) return
+      if (written) set(fav)
+      const s = scope.value
+      if (s.kind === 'timeline' && s.view.filter !== Filter.FilterFavourites && !s.view.album) {
+        // An older Undo refresh may still be reading these cells.
+        // Keep the committed flag and re-read only visible days.
+        staleDays()
+        fresh.clear()
+        notifyDays()
+      } else await refresh().catch(logError)
+      await loadCounts()
+      if (!written || !lease.current(it.id)) return
       notify({
         id: 'library.favourite',
         kind: 'success',
@@ -970,7 +976,10 @@ export const useLibrary = defineStore('library', () => {
           },
         ],
       })
-    if (favouriting.get(it.id) === status) favouriting.delete(it.id)
+    } finally {
+      lease.release()
+      if (favouriting.get(it.id) === status && status.revision === revision) favouriting.delete(it.id)
+    }
   }
 
   /**

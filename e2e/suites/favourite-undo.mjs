@@ -18,6 +18,10 @@ const measurements = {}
 const external = []
 function watch(page) {
   s.watch(page)
+  page.on('pageerror', (error) => console.log(`PAGE ERROR ${error.stack ?? error}`))
+  page.on('console', (message) => {
+    if (message.type() === 'error') console.log(`CONSOLE ERROR ${message.text()} ${JSON.stringify(message.location())}`)
+  })
   page.on('request', (request) => {
     const url = new URL(request.url())
     if (/^https?:$/.test(url.protocol) && !['wails.localhost', 'localhost', '127.0.0.1'].includes(url.hostname))
@@ -46,10 +50,9 @@ async function button(page, text, root = '') {
 async function favouriteAll(page) {
   const clear = await page.$('button[aria-label="Clear selection"]')
   if (clear) await clear.click()
-  await page.focus('.scroller')
-  await page.keyboard.down('Control')
-  await page.keyboard.press('A')
-  await page.keyboard.up('Control')
+  await page.click('button[aria-label="Selection options"]')
+  await page.waitForSelector('[role="menuitem"]::-p-text(Select all results)', { visible: true })
+  await page.click('[role="menuitem"]::-p-text(Select all results)')
   await page.waitForSelector('[data-command="library.favouriteSelection"]', { visible: true })
   await page.click('[data-command="library.favouriteSelection"]')
   await until(async () => (await lib(page, 'Counts')).favourites === N, 'batch favourite did not finish')
@@ -86,6 +89,7 @@ async function measure(label, baselineDir) {
   app = await launch({ exe: s.exe, dataDir: copyLibrary(seed, join(s.run, label)), port: s.port })
   watch(app.page)
   await lib(app.page, 'SetPaused', true)
+  await app.page.waitForSelector('.scroller .cell')
   trace = await favouriteTrace(app.page, baselineDir)
   if (baselineDir) await app.page.reload()
   await resize(app.page, 1440, 900)
@@ -134,7 +138,6 @@ try {
   watch(app.page)
   await unthrottle(app.page)
   await lib(app.page, 'AddSources', [photos])
-  await app.page.reload()
   await waitIndexed(app.page, { ai: true, atLeast: N, timeout: 900_000, log: console.log })
   await lib(app.page, 'SetPaused', true)
   await close(app)
@@ -223,9 +226,11 @@ try {
   await favouriteAll(page)
   const cell = await page.$eval('.scroller .cell[id]', (el) => el.id)
   const edited = Number(cell.slice('cell-'.length))
+  await page.hover(`#${cell}`)
   await page.waitForSelector(`#${cell} button[aria-label="Remove favourite"]`)
   await page.click(`#${cell} button[aria-label="Remove favourite"]`)
   await until(async () => !(await search(page, 'Hits', [edited]))[0]?.f, 'the new unfavourite did not persist')
+  await page.waitForSelector(`#${cell} button[aria-label="Favourite"]`)
   await page.click(`#${cell} button[aria-label="Favourite"]`)
   await until(async () => !!(await search(page, 'Hits', [edited]))[0]?.f, 'the later favourite did not persist')
   await trace.idle()

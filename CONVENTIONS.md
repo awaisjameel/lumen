@@ -202,8 +202,10 @@ file covers how code is written.
     palette, shortcut) is one `Command` registered with `useCommands`; its
     availability is computed, and the engine still validates every call.
   - Favourite mutations: `shared/favouriteWrites.ts` owns their per-app turns
-    and inverse ownership. Use its `write` for an explicit edit; capture and
-    forward writes take the same turns. A newer request permanently supersedes
+    and inverse ownership. Use its `write` for an explicit edit; a control that
+    skips superseded queued input reserves `begin` at input, uses `take`, then
+    releases its lease. Do not put another write queue inside those turns.
+    Capture and forward writes take the same turns. A newer request permanently supersedes
     an older inverse for those targets, even if that request later fails or is
     cancelled. Selection capture is `library/favouriteBatch.ts`; ephemeral
     inverse progress/recovery is `shared/undo.ts`. Retry checks current flags
