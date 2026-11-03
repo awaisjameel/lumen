@@ -44,6 +44,10 @@ export const SUITES = {
     port: 9416,
     about: 'clear recent searches, run a new query and preserve engine history through navigation and restart',
   },
+  'favourite-undo': {
+    port: 9417,
+    about: '500-item favourite Undo: bounded calls, progress, cancellation, failed-only retry, newer edits and restart',
+  },
   organise: {
     port: 9405,
     about: 'organise on disk: preview, move, Undo, on two isolated files',

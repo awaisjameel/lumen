@@ -21,7 +21,7 @@ import { reasonText } from '../shared/fileReasons'
 import { t } from '../shared/i18n'
 import { useLiveReload } from '../shared/liveReload'
 import { usePreferences } from '../shared/preferences'
-import OutcomeList from './OutcomeList.vue'
+import OutcomeList from '../shared/OutcomeList.vue'
 
 type Operation = ExportFormat | 'move' | 'rename'
 interface Choice {

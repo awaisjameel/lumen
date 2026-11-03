@@ -34,6 +34,7 @@ Install the pinned fixture tooling with `python -m pip install -r e2e/requiremen
 | `collections` | Makes an album, trashes and restores from the viewer, smart albums, custom Things, About | base library |
 | `collection-recovery` | Uses empty Things, Places and Events recovery links by keyboard in both themes at 1440 and 800 px, unblocks behind the PIN, undoes event name edits and restarts | twelve generated photos in its own library |
 | `search-history` | Clears recent searches, runs a new query and reopens the controls after navigation and restart | an empty source in its own library |
+| `favourite-undo` | Restores 500 favourite flags, cancels/resumes across navigation, retries a blocked target, preserves a newer edit and restarts; records bridge calls, payloads and frame gaps | 500 indexed synthetic photos, copied for each measurement |
 | `organise` | Organise on disk: preview, move, Undo, checked on the files themselves | base library + two files of its own |
 | `viewer` | Zoom, pan, rotate, full screen, filmstrip, compare, slideshow; selection and batch; export and rename with Undo; audio tracks, subtitles, frame export; playback history; blocks | `media` |
 | `file-tools` | The File tools dialog and its menu at every width, by keyboard, and inside a full-screen video | `media` |
@@ -91,7 +92,21 @@ Save the previous production executable before rebuilding, then run `LUMEN_PREVI
 
 ## Performance
 
-Not part of `run.mjs`: the figures need a quiet PC on mains power, and take minutes.
+The `favourite-undo` suite records forward capture and inverse call counts,
+maximum outstanding writes, IDs per request, JSON request bytes, elapsed
+restoration time and animation-frame gaps. It asserts bounded work, and reports
+timings without inventing a new machine-independent budget. Set
+`LUMEN_FAVOURITE_BASELINE_FRONTEND` to a production frontend's `dist` directory
+to compare it with the embedded candidate. The harness serves those compiled
+local assets in the native WebView for the baseline; both use the candidate's
+favourite service/store and separate copies of the same indexed scratch library.
+This isolates the frontend change and does not claim an old executable was run.
+PR CI builds that comparison frontend from its base commit. The trace follows
+method IDs from generated bindings; a missing binding fails instrumentation.
+Failed-row, cancellation and newer-edit acceptance use only the embedded
+candidate, through real controls and the existing PIN gate.
+
+The standalone commands below are not part of `run.mjs`: they need a quiet PC on mains power, and take minutes.
 
 ```bash
 node perf/perf.mjs [label]                               # the build under test, on a copy of the base library

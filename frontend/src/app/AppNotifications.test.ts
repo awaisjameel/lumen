@@ -1,9 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
-import { defineComponent, h, nextTick } from 'vue'
+import type { Component } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import UApp from '@nuxt/ui/components/App.vue'
 import UToast from '@nuxt/ui/components/Toast.vue'
+import UModal from '@nuxt/ui/components/Modal.vue'
 import ui from '@nuxt/ui/vue-plugin'
 import { useToast } from '@nuxt/ui/composables'
 import { createRouter, createMemoryHistory } from 'vue-router'
@@ -18,7 +20,7 @@ afterEach(() => {
   wrapper = undefined
   vi.useRealTimers()
 })
-function mountToaster() {
+function mountToaster(overlay?: Component) {
   const Host = defineComponent({
     setup() {
       const toast = useToast()
@@ -26,7 +28,7 @@ function mountToaster() {
         toast.clear()
         return undefined
       }
-      return () => h(AppNotifications)
+      return () => h('div', [h(AppNotifications), overlay ? h(overlay) : null])
     },
   })
   const router = createRouter({
@@ -49,6 +51,7 @@ it('uses a six-second polite toast, persistent assertive errors and readable act
   })
   await flushPromises()
   const success = w.findComponent(UToast)
+  expect(document.querySelector('[data-notification="success"]')).not.toBeNull()
   expect(success.props('duration')).toBe(6000)
   expect(success.props('type')).toBe('background')
   expect(success.props('actions')?.[0]).toMatchObject({ label: 'Undo', variant: 'ghost' })
@@ -113,4 +116,49 @@ it('replaces long-work progress in place and clears it on completion', async () 
   expect(progress()).toBeNull()
   expect(w.findComponent(UToast).props('duration')).toBe(6000)
   dismiss('moving')
+})
+
+it('retains recovery when Escape closes a portalled outcome dialog', async () => {
+  vi.useFakeTimers()
+  const closed = vi.fn()
+  const opened = ref(false)
+  const dialog = defineComponent(
+    () => () =>
+      opened.value ? h(UModal, { defaultOpen: true, title: 'Outcomes', description: 'Recovery outcomes' }) : null,
+  )
+  const w = mountToaster(dialog)
+  notify({ id: 'recovery', kind: 'error', title: 'Retry available', closed })
+  await flushPromises()
+  const original = document.querySelector('[data-notification="recovery"]')
+  opened.value = true // The recovery toast exists before its outcomes dialog opens.
+  await flushPromises()
+  expect(document.querySelector('[role="dialog"][data-state="open"]')).not.toBeNull()
+  document.activeElement?.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+  )
+  await flushPromises()
+  expect(document.querySelector('[role="dialog"][data-state="open"]')).toBeNull()
+  await vi.advanceTimersByTimeAsync(300) // a delayed toast removal must not discard recovery
+  expect(closed).not.toHaveBeenCalled()
+  expect(document.querySelector('[data-notification="recovery"]')).toBe(original)
+  expect(w.findAllComponents(UToast)).toHaveLength(1)
+  dismiss('recovery')
+  await flushPromises()
+  expect(closed).toHaveBeenCalledOnce()
+  await vi.advanceTimersByTimeAsync(300)
+  expect(w.findAllComponents(UToast)).toHaveLength(0)
+})
+
+it('does not publish an invalid countdown when a live interactive notice completes', async () => {
+  vi.useFakeTimers()
+  mountToaster()
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  const actions = [{ label: 'View outcomes', dismiss: false, run: () => undefined }]
+  notify({ id: 'inverse', kind: 'success', title: 'Saved', duration: 8000, actions })
+  await flushPromises()
+  notify({ id: 'inverse', kind: 'info', title: 'Undoing', duration: 0, actions, work: { done: 0, total: 500 } })
+  await flushPromises()
+  notify({ id: 'inverse', kind: 'success', title: 'Restored', duration: 6000, actions })
+  await flushPromises()
+  expect(errors).not.toHaveBeenCalled()
 })

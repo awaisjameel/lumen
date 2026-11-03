@@ -536,7 +536,9 @@ export const engine = {
     const result = await LibraryService.Selection(view, ids, search)
     return { ...result, ids: result.ids ?? [] }
   },
-  validateSelection: (sel: Selection): Promise<void> => LibraryService.ValidateSelection(sel),
+  // Store.ValidateSelection admits only the revision; resolved IDs remain with their UI owner.
+  validateSelection: (sel: Selection): Promise<void> =>
+    LibraryService.ValidateSelection({ ids: [], revision: sel.revision }),
   /** Does one thing to each asset; one that fails is in the outcomes, not thrown. albumID is the album actions'. */
   applyBatch: async (ids: number[], action: BatchAction, albumID = 0): Promise<BatchOutcome[]> =>
     (await LibraryService.ApplyBatch(ids, action, albumID)) ?? [],

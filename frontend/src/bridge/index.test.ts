@@ -25,12 +25,22 @@ vi.mock('../../bindings/lumen/services', () => ({
     RestoreLocation: vi.fn().mockResolvedValue(undefined),
     Unblock: vi.fn().mockResolvedValue(9),
     UndoUnblock: vi.fn().mockResolvedValue(undefined),
+    ValidateSelection: vi.fn().mockResolvedValue(undefined),
   },
   MediaService: {},
   PeopleService: {},
   SearchService: { Hits: vi.fn() },
   SystemService: { LogUIError: vi.fn() },
 }))
+
+it('admits a large selection by revision without retransmitting or mutating its resolved IDs', async () => {
+  const selection = { ids: Array.from({ length: 500 }, (_, index) => index + 1), revision: 25 }
+  await engine.validateSelection(selection)
+  const [sent] = vi.mocked(LibraryService.ValidateSelection).mock.calls.at(-1) ?? []
+  expect(sent?.revision).toBe(25)
+  expect(sent?.ids).toHaveLength(0)
+  expect(selection.ids).toHaveLength(500)
+})
 
 it('passes correction batches and the unblock receipt through without changing their arguments', async () => {
   await engine.setTakenAt([17, 43], 0)

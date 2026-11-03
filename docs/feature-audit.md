@@ -97,6 +97,134 @@ Implementation and verification status remain distinct from acceptance,
 integration and release. #39 and #31 stay open until the required evidence is
 available. The remaining children have not been implemented by this entry.
 
+### #39 integration result and #40 accepted scope
+
+[#47](https://github.com/awaisjameel/lumen/pull/47) is merged at `f9eeb2f` and
+#39 is closed. [Windows CI](https://github.com/awaisjameel/lumen/actions/runs/41696646790)
+passes the production build, unchanged generated contracts/modules, static
+checks, all three Go race shards, 958 frontend tests and native history
+acceptance (7/7). The earlier pending status above records the Linux checkpoint.
+The reporting-only latency job contains one over-budget measurement:
+unblocked `SaveEmbeddings64` 113.838/70 ms. The parent milestone's performance
+gate remains open; no package, real-corpus, hardware or release acceptance is
+inferred from this child run.
+
+The next child is [#40](https://github.com/awaisjameel/lumen/issues/40), based on
+that integration head. Accepted before implementation:
+
+- Capture previous favourite flags in bounded units, beside the corresponding
+  forward writes. Undo only targets flags actually changed by that action.
+- Reuse the existing transactional `ApplyBatch` inverse, with at most 200 IDs
+  in a call and one outstanding unit. No heterogeneous-value service or new
+  wire contract is needed for a uniform Favourite/Unfavourite action.
+- Keep ephemeral Undo ownership independent of the originating view. Reuse
+  notifications, progress, overlays and paged outcomes for cancellation,
+  failed-only retry and a separate cancelled remainder.
+- Coordinate favourite writes through one per-app owner. A newer explicit
+  favourite edit supersedes the older Undo for that target; queued/in-flight
+  writes must finish in that order. Completed inverses are never replayed.
+- Reconcile the current grid/counts after every outcome, retaining mutation
+  outcomes separately from refresh errors. Do not restore an old selection or
+  focus after navigation. This small inverse/outcome helper can support #41;
+  album/date/place inverse repairs remain in that later child.
+- Demonstrate the original scheduling failure, exact mixed-flag restoration,
+  bounded reads/writes/rendering, progress, cancellation, retries, newer edits
+  and navigation. Add native large-selection acceptance and record measured
+  calls/payloads and the actual platform gates without changing budgets.
+
+### #40 implementation checkpoint
+
+The controlled regressions reproduce 500 outstanding inverse writes, one
+500-item previous-value read and a validation request retransmitting all 500
+IDs on the original implementation. Capture/current-state reads and mutation
+units now carry at most 200 IDs; the bridge sends only the revision for
+admission, which the existing store contract validates. A new store race
+regression proves that omitting IDs still rejects a stale revision. The
+application's resolved selection identity remains with its existing owner.
+
+`favouriteBatch.ts` records only genuinely changed flags. Grid/viewer edits,
+batch tools and selection changes share per-app favourite turns and ownership;
+later explicit requests supersede earlier inverse ownership even if they later
+fail or are cancelled. Undo reads current flags before writing, so retry of an
+unconfirmed response can recognise an already committed inverse without
+replaying it. Transport failures are labelled unconfirmed rather than claiming
+that no mutation occurred. Normal batch admission still checks visibility
+beside each store write.
+
+The shared ephemeral inverse helper retains per-item outcomes, bounded units,
+cancellation/resume, failed-only retry and an independent refresh retry. Its
+global dialog survives originating-view disposal, pages 100 rows and resets
+pagination when switching jobs. It does not restore an old selection/focus or
+persist a second Undo journal. A loaded-grid regression also reproduces an old
+Undo day read overwriting a newer single favourite save; committed flags now
+invalidate older cell reads without reloading unfiltered timeline groups.
+A second regression confirms that an inner single-asset save queue could
+schedule an older click after a newer batch. Single edits now reserve ownership
+and enter the shared turn at the click; superseded queued edits are skipped,
+and a refused newest write reads its persisted flag before rolling back.
+Existing album/date/place inverse repairs remain with #41.
+
+Fresh local evidence: all 988 frontend tests in 113 files, type checking,
+ESLint, formatting, the production frontend build, documentation integrity and
+the revision-only store race test/vet pass. The PR-base frontend builds for
+comparison. [#48](https://github.com/awaisjameel/lumen/pull/48) targets the parent;
+Windows native `favourite-undo` acceptance and full-tree checks are pending; no desktop
+responsiveness or latency improvement is claimed from mocked scheduling tests.
+The native suite records before/after calls, payloads, elapsed restoration time
+and frame gaps, then exercises cancellation, navigation, a blocked-row failure,
+retry, newer edits and restart. Its baseline uses compiled base frontend assets
+with the candidate's unchanged favourite engine on copied synthetic libraries.
+
+The [first Windows run](https://github.com/awaisjameel/lumen/actions/runs/41716415864)
+passes production, contract/module cleanliness, static checks, 985 frontend
+tests, all Go race shards and history acceptance (7/7). Favourite acceptance
+stops in its harness before mutation because Ctrl+A is not a grid selection
+shortcut; it now uses the real **Select all results** menu. Native acceptance
+remains pending. The unchanged reporting-only latency gate exceeds folder
+`Events` 6.293/5 ms, unblocked `SaveEmbeddings64` 143.184/70 ms and unblocked
+`SaveFaces64` 8.122/8 ms; the parent performance gate remains open.
+
+
+The [second Windows run](https://github.com/awaisjameel/lumen/actions/runs/41727734809)
+passes build/contracts/static checks, 986 frontend tests and every Go race shard.
+On the same candidate engine and copied 500-photo fixture, the compiled parent
+frontend launches 500 inverse calls concurrently (53,392 request bytes,
+1,587.63 ms, maximum observed frame gap 343.8 ms). The candidate makes three
+200/200/100 writes with one outstanding write, plus three current-state reads
+(4,426 request bytes, 275.89 ms, maximum frame gap 15.7 ms). These are single
+instrumented synthetic observations, not a general latency or hardware claim.
+Navigation, cancellation/resume, retained focus, 100-row paging and compact
+layout pass. Native acceptance remains incomplete: Escape closes both the
+outcomes dialog and its recovery toast, so failed-only retry cannot proceed;
+an interactive toast's changing duration also briefly renders progress above
+100%. Both now have failing-then-passing mounted regressions. Notifications
+cede Escape to portalled overlays, interactive work uses its own progress, and
+a dedicated notification layer sits below dialogs so their controls stay clear.
+The history harness now restarts after fixture setup instead of reloading while
+startup requests may still be pending; uncaught errors remain a failing check.
+Final Windows acceptance is pending. This run's unchanged latency gate exceeds
+folder `SaveFaces64` 7.737/7 ms, folder `Things` 11.903/10 ms, combined-block
+`SaveFaces64` 8.008/8 ms, unblocked `SaveEmbeddings64` 141.542/70 ms and unblocked
+`SaveFaces64` 8.469/8 ms. The parent performance gate remains open.
+
+
+The [third Windows run](https://github.com/awaisjameel/lumen/actions/runs/41731572756)
+passes build/contracts/static checks, 988 frontend tests, all Go race shards and
+history acceptance (7/7). Favourite checks reach 17/18: progress has no invalid
+countdown and dialog controls stay above notifications. The Escape fix needs a
+further refinement: preventing the shared key in a toast registered before the
+dialog also prevents that dialog from closing. The mounted regression now
+reproduces the real mounting order, asserts the dialog closes and the same
+recovery toast survives its delayed-removal window, then verifies explicit
+dismissal still releases it. The presenter retains that toast synchronously
+through Nuxt's existing update/removal contract while leaving the keyboard event
+for the dialog. Final native retry/newer-edit/restart acceptance remains pending.
+The repeated comparison observes 500 versus 3 inverse writes and 53,392 versus
+4,426 request bytes; elapsed time is 1,342.05 versus 258.54 ms, maximum observed
+frame gap 281.2 versus 15.7 ms. The unchanged latency gate still exceeds folder
+`SaveFaces64` 7.964/7 ms, combined-block `SaveFaces64` (rounded to 8.000/8 ms),
+unblocked `SaveEmbeddings64` 143.417/70 ms and unblocked `SaveFaces64` 8.066/8 ms.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

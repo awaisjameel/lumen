@@ -4,11 +4,15 @@ import type { BatchOutcome } from '../bridge'
 import { errorText, failureText, reportError } from '../shared/errors'
 import { formatNumber, t } from '../shared/i18n'
 import { notify } from '../shared/notify'
+import { useFavouriteWrites } from '../shared/favouriteWrites'
+import { SELECTION_PART } from '../shared/undo'
 import { showTrashUndo } from '../trash/undo'
 import type { useLibrary } from './store'
+import { favouriteBatch } from './favouriteBatch'
 
 /** Bounded selection mutations keep completed work and report each failed item. */
 export function useSelectionActions(lib: ReturnType<typeof useLibrary>) {
+  const favouriteWrites = useFavouriteWrites()
   const busy = ref(false)
   const stopped = ref(false)
   const total = ref(0)
@@ -52,16 +56,16 @@ export function useSelectionActions(lib: ReturnType<typeof useLibrary>) {
     stopped.value = false
     outcomes.value = []
     total.value = ids.length
+    const favourite = action === BatchAction.BatchFavourite || action === BatchAction.BatchUnfavourite
+    let favourites: ReturnType<typeof favouriteBatch> | undefined
     try {
       if (snapshot) await engine.validateSelection(snapshot)
-      const previous =
-        action === BatchAction.BatchFavourite || action === BatchAction.BatchUnfavourite
-          ? await engine.searchHits(ids)
-          : []
-      const albumMembers = album
-        ? new Set((await engine.selection({ filter: Filter.FilterAll, album }, [], false)).ids)
-        : new Set<number>()
-      for (let i = 0; i < ids.length; i += 200) {
+      if (favourite) favourites = favouriteBatch(favouriteWrites, ids, action === BatchAction.BatchFavourite)
+      const albumMembers =
+        album && !favourite
+          ? new Set((await engine.selection({ filter: Filter.FilterAll, album }, [], false)).ids)
+          : new Set<number>()
+      for (let i = 0; i < ids.length; i += SELECTION_PART) {
         if (isStopped()) {
           outcomes.value = [
             ...outcomes.value,
@@ -69,9 +73,11 @@ export function useSelectionActions(lib: ReturnType<typeof useLibrary>) {
           ]
           break
         }
-        const part = ids.slice(i, i + 200)
+        const part = ids.slice(i, i + SELECTION_PART)
         try {
-          const result = await engine.applyBatch(part, action, album)
+          const result = favourites
+            ? await favourites.apply(part, isStopped)
+            : await engine.applyBatch(part, action, album)
           outcomes.value = [...outcomes.value, ...result]
         } catch (e) {
           outcomes.value = [...outcomes.value, ...part.map((id) => ({ id, code: '', error: errorText(e) }))]
@@ -90,54 +96,40 @@ export function useSelectionActions(lib: ReturnType<typeof useLibrary>) {
         const membershipChanged = succeeded.filter((id) =>
           action === BatchAction.BatchAlbum ? !albumMembers.has(id) : albumMembers.has(id),
         )
-        const before = previous.filter((item) => succeeded.includes(item.id))
-        notify({
-          id: 'library.batch',
-          kind: 'success',
-          title: t(
-            action === BatchAction.BatchUnfavourite
-              ? 'library.unfavourited'
-              : action === BatchAction.BatchFavourite
-                ? 'library.favourited'
-                : 'albums.saved',
-          ),
-          actions: before.length
-            ? [
-                {
-                  label: t('settings.undo'),
-                  run: () => {
-                    void Promise.all(before.map((item) => engine.setFavourite(item.id, !!item.f)))
-                      .then(() => lib.trashChanged())
-                      .catch(reportError)
-                  },
-                },
-              ]
-            : album && membershipChanged.length
-              ? [
-                  {
-                    label: t('settings.undo'),
-                    run: () => {
-                      void (async () => {
-                        for (let i = 0; i < membershipChanged.length; i += 200) {
-                          const outcomes = await engine.applyBatch(
-                            membershipChanged.slice(i, i + 200),
-                            action === BatchAction.BatchAlbum ? BatchAction.BatchRemoveAlbum : BatchAction.BatchAlbum,
-                            album,
-                          )
-                          const failure = outcomes.find((row) => row.error)
-                          if (failure) throw new Error(failureText(failure.code, failure.error))
-                        }
-                        await lib.trashChanged()
-                      })().catch(reportError)
+        if (!favourites?.offer(() => lib.reconcileChanges())) {
+          notify({
+            id: 'library.batch',
+            kind: 'success',
+            title: favourites?.title ?? t('albums.saved'),
+            actions:
+              album && membershipChanged.length
+                ? [
+                    {
+                      label: t('settings.undo'),
+                      run: () => {
+                        void (async () => {
+                          for (let i = 0; i < membershipChanged.length; i += SELECTION_PART) {
+                            const outcomes = await engine.applyBatch(
+                              membershipChanged.slice(i, i + SELECTION_PART),
+                              action === BatchAction.BatchAlbum ? BatchAction.BatchRemoveAlbum : BatchAction.BatchAlbum,
+                              album,
+                            )
+                            const failure = outcomes.find((row) => row.error)
+                            if (failure) throw new Error(failureText(failure.code, failure.error))
+                          }
+                          await lib.trashChanged()
+                        })().catch(reportError)
+                      },
                     },
-                  },
-                ]
-              : undefined,
-        })
+                  ]
+                : undefined,
+          })
+        }
       }
     } catch (e) {
       reportError(e)
     } finally {
+      favourites?.release()
       busy.value = false
       await lib.trashChanged()
     }

@@ -31,6 +31,7 @@ import { onBlocksChanged } from '../shared/block'
 import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad } from '../shared/listStore'
 import { latestSave } from '../shared/latestSave'
+import { useFavouriteWrites } from '../shared/favouriteWrites'
 import type { LatestSave } from '../shared/latestSave'
 import { deleteFromDisk } from '../trash/actions'
 import { showTrashUndo } from '../trash/undo'
@@ -900,7 +901,8 @@ export const useLibrary = defineStore('library', () => {
    * refuses. Clicks on one asset take turns, so the flag always ends as the
    * engine has it.
    */
-  const favouriting = new Map<number, { save: LatestSave<boolean>; refused: boolean; revision: number }>()
+  const favouriting = new Map<number, { persisted: boolean; revision: number }>()
+  const favouriteWrites = useFavouriteWrites()
   async function toggleFavourite(p: Sel | null) {
     const it = itemAt(p)
     if (!p || !it) return
@@ -912,33 +914,49 @@ export const useLibrary = defineStore('library', () => {
         notifyDays()
       }
     }
-    let status = favouriting.get(it.id)
-    if (!status) {
-      const state = { refused: false, revision: 0 }
-      const save = latestSave((value) => engine.setFavourite(it.id, value), it.f ?? false, {
-        rollback: set,
-        failed: (e) => {
-          state.refused = true
-          reportError(e)
-        },
-        saved: async () => {
-          await loadCounts()
-          const s = scope.value
-          if (s.kind === 'timeline' && (s.view.filter === Filter.FilterFavourites || !!s.view.album))
-            await refresh().catch(logError)
-        },
-      })
-      status = Object.assign(state, { save })
-      favouriting.set(it.id, status)
-    }
-    const current = status
-    const succeeded = () => !current.refused
+    const status = favouriting.get(it.id) ?? { persisted: !!it.f, revision: 0 }
+    favouriting.set(it.id, status)
     const revision = ++status.revision
-    status.refused = false
+    // Reserve at the click, before waiting. A per-asset latestSave queue
+    // inside these shared turns could enqueue an old click after a new batch.
+    const lease = favouriteWrites.begin([it.id])
     set(fav)
-    await status.save(fav)
-    if (revision !== status.revision) return
-    if (succeeded())
+    try {
+      const written = await favouriteWrites.take(async () => {
+        if (!lease.current(it.id)) return false
+        try {
+          await engine.setFavourite(it.id, fav)
+          status.persisted = fav
+          return true
+        } catch (e) {
+          if (!lease.current(it.id)) return false
+          // Another batch may have committed since this control first saved.
+          // Re-read under the same turn instead of rolling back a cached flag.
+          try {
+            const previous = (await engine.searchHits([it.id])).find((item) => item.id === it.id)
+            if (previous) status.persisted = !!previous.f
+          } catch (readError) {
+            logError(readError)
+          }
+          if (lease.current(it.id)) {
+            set(status.persisted)
+            reportError(e)
+          }
+          return false
+        }
+      })
+      if (!lease.current(it.id)) return
+      if (written) set(fav)
+      const s = scope.value
+      if (s.kind === 'timeline' && s.view.filter !== Filter.FilterFavourites && !s.view.album) {
+        // An older Undo refresh may still be reading these cells.
+        // Keep the committed flag and re-read only visible days.
+        staleDays()
+        fresh.clear()
+        notifyDays()
+      } else await refresh().catch(logError)
+      await loadCounts()
+      if (!written || !lease.current(it.id)) return
       notify({
         id: 'library.favourite',
         kind: 'success',
@@ -947,8 +965,8 @@ export const useLibrary = defineStore('library', () => {
           {
             label: t('settings.undo'),
             run: () => {
-              void engine
-                .setFavourite(it.id, !fav)
+              void favouriteWrites
+                .write([it.id], () => engine.setFavourite(it.id, !fav))
                 .then(async () => {
                   set(!fav)
                   await Promise.all([refresh(), loadCounts()])
@@ -958,7 +976,10 @@ export const useLibrary = defineStore('library', () => {
           },
         ],
       })
-    if (favouriting.get(it.id) === status) favouriting.delete(it.id)
+    } finally {
+      lease.release()
+      if (favouriting.get(it.id) === status && status.revision === revision) favouriting.delete(it.id)
+    }
   }
 
   /**
@@ -995,6 +1016,12 @@ export const useLibrary = defineStore('library', () => {
   /** The Trash changed: the grid and the Trash's count show it now. */
   async function trashChanged() {
     await Promise.all([refresh().catch(logError), loadCounts()])
+  }
+
+  /** Inverse outcomes retain a separate, retryable refresh failure. */
+  async function reconcileChanges() {
+    const results = await Promise.allSettled([refresh(), readCounts()])
+    for (const result of results) if (result.status === 'rejected') throw result.reason
   }
 
   /**
@@ -1117,6 +1144,7 @@ export const useLibrary = defineStore('library', () => {
     counts,
     countsLoaded,
     trashChanged,
+    reconcileChanges,
     removeFromView,
     moveToTrash,
     restoreFromTrash,

@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { defineComponent, h, nextTick, shallowRef } from 'vue'
-import { mountInApp } from '../shared/testing'
-import { t } from '../shared/i18n'
+import { mountInApp } from './testing'
+import { t } from './i18n'
 import OutcomeList from './OutcomeList.vue'
 
 it('shows a long list a page at a time and returns to the first page when it shrinks', async () => {

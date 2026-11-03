@@ -12,9 +12,11 @@ import { confirm } from '../shared/confirm'
 import { errorText, failureText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { nameTooLong, trimName } from '../shared/names'
+import { useFavouriteWrites } from '../shared/favouriteWrites'
+import { SELECTION_PART } from '../shared/undo'
 import { showTrashUndo } from '../trash/undo'
 import { blockAssets } from '../shared/block'
-import OutcomeList from './OutcomeList.vue'
+import OutcomeList from '../shared/OutcomeList.vue'
 
 type Operation = BatchAction | 'tag' | 'block' | 'delete'
 interface Result {
@@ -33,8 +35,9 @@ const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>('open', { default: false })
 // How many assets one call to the engine takes: few enough that Cancel and the
 // progress line keep up, enough that a whole library is not a call per photo.
-const PART = 200
+const PART = SELECTION_PART
 const albums = useAlbums()
+const favouriteWrites = useFavouriteWrites()
 const operation = ref<Operation>(BatchAction.BatchFavourite)
 const tag = ref('')
 const album = ref(0)
@@ -195,8 +198,16 @@ async function apply(retryIDs?: number[]) {
           const outcomes =
             selectedOperation === 'tag'
               ? await engine.tagAssets(part, name)
-              : await engine.applyBatch(part, selectedOperation, albumID)
+              : selectedOperation === BatchAction.BatchFavourite || selectedOperation === BatchAction.BatchUnfavourite
+                ? await favouriteWrites.write(part, () =>
+                    isStopped() ? Promise.resolve(null) : engine.applyBatch(part, selectedOperation, albumID),
+                  )
+                : await engine.applyBatch(part, selectedOperation, albumID)
           if (mine !== generation) return
+          if (outcomes === null) {
+            results.value.push(...cancelled(part))
+            continue
+          }
           results.value.push(
             ...outcomes.map((o): Result => ({
               id: o.id,
