@@ -5,7 +5,7 @@ import { t } from './i18n'
 import { recordNotifications } from './testing'
 import type { RecordedNotifications } from './testing'
 import { offerBatchUndo, undoOutcomes } from './undo'
-import type { UndoResult } from './undo'
+import type { UndoJob, UndoResult } from './undo'
 
 const range = (n: number) => Array.from({ length: n }, (_, i) => i + 1)
 const done = (ids: number[]): UndoResult[] => ids.map((id) => ({ id, state: 'done', error: '' }))
@@ -177,4 +177,28 @@ it('opens live outcomes without cancelling the operation', async () => {
   await job.run()
   await flushPromises()
   expect(undoOutcomes.value?.counts.done).toBe(1)
+})
+
+it('pages composite targets through cancellable single-item units while retaining their labels on resume', async () => {
+  const ids = ['album:8:asset:1', 'album:9:asset:1', 'album:9:asset:2']
+  const apply = vi.fn((part: string[]) => {
+    job.cancel()
+    return Promise.resolve(part.map((id) => ({ id, state: 'done' as const, error: '' })))
+  })
+  const job: UndoJob<string> = offerBatchUndo({
+    title: 'Saved',
+    undoTitle: 'Memberships',
+    ids,
+    unitSize: 1,
+    label: (id) => `Original ${id}`,
+    apply,
+    reconcile: () => Promise.resolve(),
+  })
+  await job.run()
+  expect(apply).toHaveBeenCalledExactlyOnceWith([ids[0]], expect.any(Function))
+  expect(job.counts).toMatchObject({ done: 1, cancelled: 2 })
+  apply.mockImplementation((part) => Promise.resolve(part.map((id) => ({ id, state: 'done', error: '' }))))
+  await job.resume()
+  expect(apply.mock.calls.map(([part]) => part)).toEqual([[ids[0]], [ids[1]], [ids[2]]])
+  expect(job.outcomes.map((row) => row.label)).toEqual(ids.map((id) => `Original ${id}`))
 })

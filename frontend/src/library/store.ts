@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, onScopeDispose, ref, shallowRef } from 'vue'
+import { computed, nextTick, onScopeDispose, ref, shallowRef } from 'vue'
 import {
   engine,
   ErrorCode,
@@ -29,7 +29,7 @@ import type {
 } from '../bridge'
 import { onBlocksChanged } from '../shared/block'
 import { errorText, logError, reportError } from '../shared/errors'
-import { coalescedLoad } from '../shared/listStore'
+import { coalescedLoad, refreshAll } from '../shared/listStore'
 import { latestSave } from '../shared/latestSave'
 import { useFavouriteWrites } from '../shared/favouriteWrites'
 import type { LatestSave } from '../shared/latestSave'
@@ -1018,10 +1018,37 @@ export const useLibrary = defineStore('library', () => {
     await Promise.all([refresh().catch(logError), loadCounts()])
   }
 
+  const reconcilers = new Set<() => Promise<unknown>>()
+  /** A mounted inspector contributes reads of its current entity, never a captured selection. */
+  function onReconcile(read: () => Promise<unknown>): () => void {
+    reconcilers.add(read)
+    return () => reconcilers.delete(read)
+  }
+  onScopeDispose(() => reconcilers.clear())
+
   /** Inverse outcomes retain a separate, retryable refresh failure. */
-  async function reconcileChanges() {
-    const results = await Promise.allSettled([refresh(), readCounts()])
-    for (const result of results) if (result.status === 'rejected') throw result.reason
+  function reconcileChanges() {
+    const grid = refresh()
+    // A correction can hide or move the selected item. Let the current grid
+    // and its mounted inspector settle before asking for metadata again.
+    const metadata = grid
+      .catch(() => undefined)
+      .then(async () => {
+        await nextTick()
+        while (
+          !disposed &&
+          shown &&
+          scope.value.kind === 'timeline' &&
+          selected.value &&
+          !fresh.has(selected.value.day)
+        ) {
+          await ensureDays([selected.value.day])
+          if (daysError.value) throw new Error(daysError.value)
+          await nextTick()
+        }
+        await refreshAll(...[...reconcilers].map((read) => Promise.resolve().then(read)))
+      })
+    return refreshAll(grid, readCounts(), metadata)
   }
 
   /**
@@ -1145,6 +1172,7 @@ export const useLibrary = defineStore('library', () => {
     countsLoaded,
     trashChanged,
     reconcileChanges,
+    onReconcile,
     removeFromView,
     moveToTrash,
     restoreFromTrash,

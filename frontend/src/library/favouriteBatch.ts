@@ -1,9 +1,8 @@
 import { BatchAction, engine, ErrorCode } from '../bridge'
-import type { BatchOutcome } from '../bridge'
-import { failureText } from '../shared/errors'
+import { errorText, failureText } from '../shared/errors'
 import type { useFavouriteWrites } from '../shared/favouriteWrites'
 import { t } from '../shared/i18n'
-import { batchUndoOutcomes, offerBatchUndo } from '../shared/undo'
+import { attemptBatchUndo, offerBatchUndo } from '../shared/undo'
 
 /** Capture flags beside their writes; the inverse only owns genuinely changed targets. */
 export function favouriteBatch(writes: ReturnType<typeof useFavouriteWrites>, ids: number[], favourite: boolean) {
@@ -49,24 +48,29 @@ export function favouriteBatch(writes: ReturnType<typeof useFavouriteWrites>, id
           writes.take(async () => {
             if (stopped()) return part.map((id) => ({ id, state: 'cancelled', error: '' }))
             const eligible = part.filter(lease.current)
-            const previous = new Map(
-              (eligible.length ? await engine.searchHits(eligible) : []).map((item) => [item.id, !!item.f]),
-            )
+            let previous: Map<number, boolean>
+            try {
+              previous = new Map(
+                (eligible.length ? await engine.searchHits(eligible) : []).map((item) => [item.id, !!item.f]),
+              )
+            } catch (e) {
+              return part.map((id) => ({
+                id,
+                state: lease.current(id) ? 'failed' : 'superseded',
+                error: lease.current(id) ? errorText(e) : '',
+              }))
+            }
             if (stopped()) return part.map((id) => ({ id, state: 'cancelled', error: '' }))
             const current = eligible.filter(lease.current)
             const owned = new Set(current)
             // A failed response can hide a committed write. Checking the
             // current flag makes retry idempotent without another journal.
             const targets = current.filter((id) => previous.get(id) !== !favourite)
-            const rows: BatchOutcome[] = targets.length
-              ? await engine.applyBatch(
-                  targets,
-                  favourite ? BatchAction.BatchUnfavourite : BatchAction.BatchFavourite,
-                  0,
-                )
-              : []
+            const rows = await attemptBatchUndo(targets, () =>
+              engine.applyBatch(targets, favourite ? BatchAction.BatchUnfavourite : BatchAction.BatchFavourite, 0),
+            )
             return [
-              ...batchUndoOutcomes(rows),
+              ...rows,
               ...current
                 .filter((id) => previous.get(id) === !favourite)
                 .map((id) => ({ id, state: 'done' as const, error: '' })),

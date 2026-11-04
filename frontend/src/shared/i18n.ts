@@ -1050,6 +1050,10 @@ const en = {
   'library.batchTitle': 'Selection outcomes',
   'undo.outcomes': 'Undo outcomes',
   'undo.favourites': 'Undo favourite changes',
+  'undo.albums': 'Undo album membership changes',
+  'undo.albumTarget': 'Asset {asset} · album {album}',
+  'undo.dates': 'Undo date corrections',
+  'undo.places': 'Undo place corrections',
   'undo.description': 'Completed changes are kept. Retry failed items or resume cancelled items separately.',
   'undo.summary':
     '{done} restored · {failed} failed · {cancelled} cancelled · newer edits kept: {superseded} · {pending} waiting',

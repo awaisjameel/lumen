@@ -4,15 +4,19 @@ import UButton from '@nuxt/ui/components/Button.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { BatchAction, engine, Filter, isCancelled } from '../bridge'
+import { engine, Filter, isCancelled } from '../bridge'
 import type { GridItem } from '../bridge'
 import MediaTile from '../shared/MediaTile.vue'
 import { errorText, reportError } from '../shared/errors'
 import { formatNumber, t } from '../shared/i18n'
 import { notify } from '../shared/notify'
+import { useAlbumChanges } from '../albums/changes'
+import { SELECTION_PART } from '../shared/undo'
 
 const props = defineProps<{ albumId: number; name: string }>()
 const emit = defineEmits<{ changed: [] }>()
+const albumChanges = useAlbumChanges()
+let alive = true
 const open = defineModel<boolean>('open', { required: true })
 const items = shallowRef<GridItem[]>([])
 const selected = shallowRef(new Set<number>())
@@ -78,7 +82,10 @@ watch(
   },
   { immediate: true },
 )
-onBeforeUnmount(() => controller?.abort())
+onBeforeUnmount(() => {
+  alive = false
+  controller?.abort()
+})
 function toggle(id: number) {
   const ids = new Set(selected.value)
   if (ids.has(id)) ids.delete(id)
@@ -87,57 +94,44 @@ function toggle(id: number) {
 }
 async function add() {
   if (!selected.value.size || busy.value) return
+  const ids = [...selected.value]
+  const albumId = props.albumId
+  const name = props.name
+  const current = () => alive && open.value && props.albumId === albumId
+  const change = albumChanges.begin(albumId, ids, true)
+  let completed = false
   busy.value = true
   error.value = ''
   try {
-    const ids = [...selected.value]
-    const albumId = props.albumId
-    const before = new Set((await engine.selection({ filter: Filter.FilterAll, album: albumId }, [], false)).ids)
-    const added: number[] = []
-    for (let i = 0; i < ids.length; i += 200) {
-      const result = await engine.applyBatch(ids.slice(i, i + 200), BatchAction.BatchAlbum, albumId)
-      const succeeded = result.filter((row) => !row.error).map((row) => row.id)
-      added.push(...succeeded.filter((id) => !before.has(id)))
-      selected.value = new Set([...selected.value].filter((id) => !succeeded.includes(id)))
-      const failures = result.filter((row) => row.error)
-      if (failures.length) {
-        error.value = failures.map((row) => row.error).join('\n')
-        emit('changed')
-        return
+    for (let i = 0; i < ids.length; i += SELECTION_PART) {
+      if (!current()) return
+      const result = await change.apply(ids.slice(i, i + SELECTION_PART), () => !current())
+      if (current()) {
+        const succeeded = new Set(result.filter((row) => !row.error && !row.cancelled).map((row) => row.id))
+        selected.value = new Set([...selected.value].filter((id) => !succeeded.has(id)))
+        const failures = result.filter((row) => row.error)
+        if (failures.length) {
+          error.value = failures.map((row) => row.error).join('\n')
+          return
+        }
       }
     }
-    notify({
-      id: 'collection.added',
-      kind: 'success',
-      title: t('collection.photosAdded', { n: formatNumber(ids.length), name: props.name }),
-      actions: added.length
-        ? [
-            {
-              label: t('settings.undo'),
-              run: () => {
-                void (async () => {
-                  for (let i = 0; i < added.length; i += 200) {
-                    const result = await engine.applyBatch(
-                      added.slice(i, i + 200),
-                      BatchAction.BatchRemoveAlbum,
-                      albumId,
-                    )
-                    const failed = result.find((row) => row.error)
-                    if (failed) throw new Error(failed.error)
-                  }
-                  emit('changed')
-                })().catch(reportError)
-              },
-            },
-          ]
-        : undefined,
-    })
-    emit('changed')
-    open.value = false
+    completed = true
   } catch (e) {
-    error.value = errorText(e)
+    if (current()) error.value = errorText(e)
   } finally {
-    busy.value = false
+    const title = change.changed.size
+      ? t('collection.photosAdded', { n: formatNumber(change.changed.size), name })
+      : t('albums.saved')
+    const offered = albumChanges.offer([change], title, () => emit('changed'))
+    change.release()
+    if (completed && !offered && !change.changed.size) notify({ id: 'collection.added', kind: 'success', title })
+    if (alive) {
+      emit('changed')
+      busy.value = false
+      if (completed && current()) open.value = false
+    }
+    await albumChanges.reconcile().catch(reportError)
   }
 }
 </script>

@@ -69,8 +69,8 @@ func TestCancelledBatchRollsBackEarlierItemsAndReportsNoCommittedSuccesses(t *te
 	st, ids := viewingFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	results, err := st.batch(ctx, ids, visible, func(tx *sql.Tx, id int64) error {
-		err := setFavourite(ctx, tx, id, true)
+	results, err := st.batch(ctx, ids, visible, func(tx *sql.Tx, row *BatchResult) error {
+		err := setFavourite(ctx, tx, row.ID, true)
 		cancel()
 		return err
 	})
@@ -82,6 +82,47 @@ func TestCancelledBatchRollsBackEarlierItemsAndReportsNoCommittedSuccesses(t *te
 		check(t, err)
 		if d.Favourite {
 			t.Fatal("cancelled part committed an earlier item")
+		}
+	}
+}
+
+func TestBatchAlbumOutcomesCaptureActualChangesIncludingRepeatedIDs(t *testing.T) {
+	st, ids := viewingFixture(t)
+	ctx := t.Context()
+	album, err := st.CreateAlbum(ctx, "Membership", core.AlbumManual, core.AlbumRule{}, ids[:1])
+	check(t, err)
+	for _, action := range []core.BatchAction{core.BatchAlbum, core.BatchRemoveAlbum} {
+		rows, err := st.ApplyBatch(ctx, []int64{ids[0], ids[1], ids[1], 99999}, action, album)
+		check(t, err)
+		want := []bool{action == core.BatchRemoveAlbum, true, false, false}
+		for i, row := range rows {
+			if row.Changed != want[i] || (i < 3 && row.Err != nil) || (i == 3 && !errors.Is(row.Err, ErrNotFound)) {
+				t.Fatalf("%s row %d: %+v, want changed %v", action, i, row, want[i])
+			}
+		}
+	}
+}
+
+func TestCancelledMembershipBatchPublishesNoChangedFlags(t *testing.T) {
+	st, ids := viewingFixture(t)
+	album, err := st.CreateAlbum(t.Context(), "Cancelled", core.AlbumManual, core.AlbumRule{}, nil)
+	check(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	rows, err := st.batch(ctx, ids, visible, func(tx *sql.Tx, row *BatchResult) error {
+		changed, err := setAlbumItem(ctx, tx, row.ID, album, true)
+		row.Changed = changed
+		cancel()
+		return err
+	})
+	if !errors.Is(err, context.Canceled) || rows != nil {
+		t.Fatalf("rolled-back membership outcomes: %+v, %v", rows, err)
+	}
+	for _, id := range ids {
+		memberships, err := st.AssetAlbums(t.Context(), id)
+		check(t, err)
+		if len(memberships) != 0 {
+			t.Fatalf("rolled-back asset %d memberships: %v", id, memberships)
 		}
 	}
 }

@@ -5,7 +5,7 @@ import { extname, join, relative, resolve } from 'node:path'
 import { ROOT } from './suite.mjs'
 import { sleep } from './app.mjs'
 
-function bindingID(service, name) {
+export function bindingID(service, name) {
   const source = readFileSync(join(ROOT, 'frontend', 'bindings', 'lumen', 'services', `${service}.ts`), 'utf8')
   const method = source.split(`export function ${name}(`)[1]?.split('export function ')[0]
   const id = /\$Call\.ByID\((\d+)/.exec(method ?? '')?.[1]
@@ -18,6 +18,12 @@ const methods = new Map([
   [bindingID('libraryservice', 'SetFavourite'), 'SetFavourite'],
   [bindingID('libraryservice', 'ValidateSelection'), 'ValidateSelection'],
   [bindingID('searchservice', 'Hits'), 'Hits'],
+  [bindingID('libraryservice', 'Asset'), 'Asset'],
+  [bindingID('mediaservice', 'Inspect'), 'Inspect'],
+  [bindingID('libraryservice', 'SetTakenAt'), 'SetTakenAt'],
+  [bindingID('libraryservice', 'RestoreTakenAt'), 'RestoreTakenAt'],
+  [bindingID('libraryservice', 'SetLocation'), 'SetLocation'],
+  [bindingID('libraryservice', 'RestoreLocation'), 'RestoreLocation'],
 ])
 const types = {
   '.js': 'text/javascript',
@@ -29,11 +35,11 @@ const types = {
   '.woff2': 'font/woff2',
 }
 
-export async function favouriteTrace(page, baselineDir) {
+export async function mutationTrace(page, baselineDir) {
   let calls = []
   const pending = new Map()
   let maximum = 0
-  let hold = false
+  let hold = null
   let held = null
   const errors = []
   await page.setRequestInterception(true)
@@ -59,20 +65,21 @@ export async function favouriteTrace(page, baselineDir) {
     const name = body?.object === 0 && body.method === 0 ? methods.get(body.args?.methodID) : undefined
     if (name) {
       const args = body.args.args
-      const ids = name === 'SetFavourite' ? [args[0]] : name === 'ValidateSelection' ? (args[0].ids ?? []) : args[0]
+      const ids = ['SetFavourite', 'Asset', 'Inspect'].includes(name) ? [args[0]] : name === 'ValidateSelection' ? (args[0].ids ?? []) : args[0]
       const record = {
         name,
-        write: name === 'SetFavourite' || name === 'ApplyBatch',
+        write: !['Asset', 'Inspect', 'Hits', 'ValidateSelection'].includes(name),
         ids,
         action: args[1],
+        album: name === 'ApplyBatch' ? args[2] : undefined,
         bytes: Buffer.byteLength(request.postData()),
         start: performance.now(),
       }
       calls.push(record)
       pending.set(request, record)
       maximum = Math.max(maximum, [...pending.values()].filter((row) => row.write).length)
-      if (hold && name === 'ApplyBatch' && args[1] === 'unfavourite') {
-        hold = false
+      if (hold?.(record)) {
+        hold = null
         held = request
         return
       }
@@ -100,8 +107,11 @@ export async function favouriteTrace(page, baselineDir) {
       calls = []
       maximum = 0
     },
+    holdNext(match) {
+      hold = match
+    },
     holdUndo() {
-      hold = true
+      hold = (record) => record.name === 'ApplyBatch' && record.action === 'unfavourite'
     },
     async release() {
       const request = held
@@ -111,13 +121,13 @@ export async function favouriteTrace(page, baselineDir) {
     async idle() {
       const until = Date.now() + 30_000
       while (pending.size && Date.now() < until) await sleep(20)
-      if (pending.size) throw new Error('favourite calls did not settle')
+      if (pending.size) throw new Error('mutation calls did not settle')
     },
     summary() {
       return {
         calls: calls.length,
         writes: calls.filter((row) => row.write).length,
-        reads: calls.filter((row) => row.name === 'Hits').length,
+        reads: calls.filter((row) => ['Hits', 'Asset', 'Inspect'].includes(row.name)).length,
         admissions: calls.filter((row) => row.name === 'ValidateSelection').length,
         maxOutstandingWrites: maximum,
         maxIDs: Math.max(0, ...calls.map((row) => row.ids.length)),

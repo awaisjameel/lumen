@@ -69,9 +69,10 @@ shared layer tokens. Escape in a portalled overlay preserves its underlying
 recovery notices. Interactive work uses explicit work progress; its toast timer
 can change without showing a second countdown.
 
-**Favourite writes and selection Undo.** `shared/favouriteWrites.ts` coordinates
-bounded favourite writes per Pinia app. Grid, viewer, batch tools and selection
-actions share its turns; a newer explicit request permanently supersedes older
+**Field writes and session Undo.** `shared/mutationWrites.ts` coordinates
+bounded writes per Pinia app and field (favourites, date, place or one album).
+`shared/favouriteWrites.ts` exposes the favourite owner to grid, viewer, batch
+tools and selection actions. A newer explicit request permanently supersedes older
 inverse ownership for those targets. `library/favouriteBatch.ts` captures flags
 beside each bounded forward write and uses the existing transactional batch
 inverse for genuinely changed items. `shared/undo.ts` owns ephemeral inverse
@@ -80,6 +81,21 @@ failed/cancelled rows separately and retries refreshes without replaying
 mutations. `UndoDialog` uses the shared paged `OutcomeList`; neither introduces
 another persisted library or durable Undo journal. SQL, visibility admission
 and transaction outcomes remain with the existing store/service owners.
+
+`albums/changes.ts` captures actual changed memberships from transactional batch
+outcomes, avoiding whole-album snapshots and stale checkbox guesses. Every
+membership surface shares that owner. Compound album/asset outcome identities
+keep separate inverses for a photo in several albums; deleting an album retires
+its inverses before SQLite can reuse its ID. Corrections capture current values
+under their field turn and restore a previous user correction or the latest
+underlying metadata, including absent GPS. Their inverse keeps opaque original
+targets when the correction itself covers an asset. The existing store admission
+rules still govern every write. Reconciliation settles the current grid and its
+selected day before refreshing a mounted inspector's current metadata; a read
+failure is recoverable independently of committed inverse outcomes.
+An inspector that loses file/privacy access uses its existing unavailable/retry
+state and retires pending metadata reads; obsolete inspection failures cannot
+affect a newer selection. Current unexpected inspection failures remain logged.
 
 ## Deviations from the plan
 

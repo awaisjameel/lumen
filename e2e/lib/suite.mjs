@@ -48,6 +48,10 @@ export const SUITES = {
     port: 9417,
     about: '500-item favourite Undo: bounded calls, progress, cancellation, failed-only retry, newer edits and restart',
   },
+  'undo-recovery': {
+    port: 9418,
+    about: 'partial album inverses, failed-only retry, correction provenance, privacy, deleted identities and restart',
+  },
   organise: {
     port: 9405,
     about: 'organise on disk: preview, move, Undo, on two isolated files',

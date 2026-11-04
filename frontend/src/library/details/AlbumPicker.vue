@@ -7,15 +7,16 @@ import UInput from '@nuxt/ui/components/Input.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import { AlbumKind, engine } from '../../bridge'
 import { emptyRule, useAlbums } from '../../albums/store'
-import { errorText, reportError } from '../../shared/errors'
+import { errorText, failureText, reportError } from '../../shared/errors'
 import { nameTooLong, trimName } from '../../shared/names'
-import { notify } from '../../shared/notify'
+import { useAlbumChanges } from '../../albums/changes'
 import { t } from '../../shared/i18n'
 
 const props = defineProps<{ id: number; membership: number[] }>()
 const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>('open', { default: false })
 const albums = useAlbums()
+const albumChanges = useAlbumChanges()
 const query = ref('')
 const chosen = ref<number[]>([])
 const busy = ref(false)
@@ -63,49 +64,36 @@ async function apply(create = false) {
   if (create && (!name || nameTooLong(name))) return
   const id = props.id
   const mine = generation
-  const current = () => mine === generation && open.value
-  const previous = [...props.membership]
-  const changes: { album: number; include: boolean }[] = []
+  const current = () => mine === generation && open.value && props.id === id
+  const planned = manual.value
+    .filter((album) => chosen.value.includes(album.id) !== props.membership.includes(album.id))
+    .map((album) => albumChanges.begin(album.id, [id], chosen.value.includes(album.id)))
+  const changes = [...planned]
   busy.value = true
   error.value = ''
   try {
     if (create) {
       const album = await engine.createAlbum(name, AlbumKind.AlbumManual, emptyRule(), [id])
-      changes.push({ album, include: true })
-      chosen.value = [...chosen.value, album]
+      changes.push(albumChanges.created(album, [id]))
+      if (current()) chosen.value = [...chosen.value, album]
     }
-    for (const album of manual.value) {
+    for (const change of planned) {
       if (!current()) return
-      const include = chosen.value.includes(album.id)
-      if (include === previous.includes(album.id)) continue
-      await engine.setAlbumItem(id, album.id, include)
-      changes.push({ album: album.id, include })
+      const rows = await change.apply([id], () => !current())
+      const failure = rows.find((row) => row.error)
+      if (failure) throw new Error(failureText(failure.code, failure.error))
     }
-    emit('changed')
     if (current()) open.value = false
   } catch (e) {
     if (current()) error.value = errorText(e)
-    // Retain partial successes so retry never reverses changes that were already saved.
-    emit('changed')
   } finally {
-    if (current()) busy.value = false
-    if (changes.length)
-      notify({
-        id: `albums-${id}`,
-        kind: 'success',
-        title: t('details.album.saved'),
-        actions: [
-          {
-            label: t('settings.undo'),
-            run: () => {
-              void Promise.all(changes.map((change) => engine.setAlbumItem(id, change.album, !change.include)))
-                .then(() => emit('changed'))
-                .catch(reportError)
-            },
-          },
-        ],
-      })
-    void albums.load().catch(reportError)
+    albumChanges.offer(changes, t('details.album.saved'), () => emit('changed'))
+    for (const change of changes) change.release()
+    if (mine === generation) {
+      busy.value = false
+      emit('changed')
+    }
+    await albumChanges.reconcile().catch(reportError)
   }
 }
 </script>

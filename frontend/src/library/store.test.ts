@@ -1037,3 +1037,58 @@ describe('the folders', () => {
     await vi.waitFor(() => expect(lib.sources[0]?.availability).toBe(SourceAvailability.SourceUnavailable))
   })
 })
+
+it('reconciles metadata only after the current grid and selection settle, and releases disposed inspectors', async () => {
+  const lib = shownLibrary()
+  await lib.setScope(all)
+  vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+  await lib.ensureDays([day])
+  lib.selected = { day, id: 1 }
+  const reading = deferred<DayBucket[]>()
+  vi.mocked(engine.timeline).mockReturnValueOnce(reading.promise)
+  const inspector = vi.fn(() => Promise.resolve(lib.selected?.id))
+  const stop = lib.onReconcile(inspector)
+  const pending = lib.reconcileChanges()
+  await nextTick()
+  expect(inspector).not.toHaveBeenCalled()
+  reading.resolve([])
+  await pending
+  expect(await inspector.mock.results[0]?.value).toBeUndefined()
+  expect(lib.selected).toBeNull()
+  stop()
+  await lib.reconcileChanges()
+  expect(inspector).toHaveBeenCalledOnce()
+})
+
+it('retains a current inspector refresh failure independently of the grid and counts', async () => {
+  const lib = shownLibrary()
+  await lib.setScope(all)
+  const failure = new Error('Current metadata unavailable')
+  const inspector = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined)
+  lib.onReconcile(inspector)
+  await expect(lib.reconcileChanges()).rejects.toBe(failure)
+  await expect(lib.reconcileChanges()).resolves.toBeUndefined()
+  expect(inspector).toHaveBeenCalledTimes(2)
+  expect(engine.counts).toHaveBeenCalledTimes(2)
+})
+
+it('settles a selected item leaving a retained day before an inspector reads it', async () => {
+  const lib = shownLibrary()
+  vi.mocked(engine.timeline).mockResolvedValue([{ day, count: 2 }])
+  await lib.setScope(all)
+  vi.mocked(engine.days).mockResolvedValueOnce([{ day, items: hits(1, 2) }])
+  await lib.ensureDays([day])
+  lib.selected = { day, id: 1 }
+  vi.mocked(engine.timeline).mockResolvedValueOnce([{ day, count: 1 }])
+  const rows = deferred<DayItems[]>()
+  vi.mocked(engine.days).mockReturnValueOnce(rows.promise)
+  const read = vi.fn(() => Promise.resolve(lib.selected?.id))
+  lib.onReconcile(read)
+  const pending = lib.reconcileChanges()
+  await nextTick()
+  expect(read).not.toHaveBeenCalled()
+  rows.resolve([{ day, items: hits(2) }])
+  await pending
+  expect(lib.selected).toBeNull()
+  expect(await read.mock.results[0]?.value).toBeUndefined()
+})

@@ -225,6 +225,158 @@ frame gap 281.2 versus 15.7 ms. The unchanged latency gate still exceeds folder
 `SaveFaces64` 7.964/7 ms, combined-block `SaveFaces64` (rounded to 8.000/8 ms),
 unblocked `SaveEmbeddings64` 143.417/70 ms and unblocked `SaveFaces64` 8.066/8 ms.
 
+
+### #40 integration result and #41 accepted scope
+
+[#48](https://github.com/awaisjameel/lumen/pull/48) is merged at `f4309b3` and
+#40 is closed. [Final Windows CI](https://github.com/awaisjameel/lumen/actions/runs/41735275110)
+passes production, unchanged generated contracts/modules, static checks, 988
+frontend tests, all three Go race shards, native history 7/7 and favourite Undo
+22/22. The compact outcomes screenshot was inspected. The final synthetic
+comparison records 500 versus 3 inverse writes, maximum outstanding writes 500
+versus 1, 53,392 versus 4,426 request bytes, 1,580.16 versus 280.86 ms and maximum
+frame gaps 328.2 versus 15.7 ms. The unchanged reporting-only store gate exceeds
+unblocked `SaveEmbeddings64` 236.320/70 ms; parent performance acceptance remains
+open. Earlier pending entries above are intermediate checkpoints, not current
+acceptance. No installer, real-corpus, hardware or release result is inferred.
+
+The next child, [#41](https://github.com/awaisjameel/lumen/issues/41), starts from
+that parent head. Its accepted scope, before implementation:
+
+- Classify and reproduce partial inverses in selection album actions,
+  `details/AlbumPicker`, date/place correction sequences and the adjacent
+  `AlbumPhotoPicker`. Single date/place forward calls are atomic store writes;
+  their array-based component inverse sequences can commit before a later call
+  fails. The current details-panel UI opens date/place for one asset; no bulk
+  correction control is added or claimed. The photo picker also loses its Undo
+  offer after a partial forward success.
+- Reuse the session-local inverse/outcome/dialog owner from #40. Add per-item
+  units for heterogeneous corrections, accurate failed/cancelled outcomes,
+  failed-only retry, cancelled-item resume and independent refresh recovery.
+- Generalise the existing favourite turn/lease implementation for date, place
+  and album membership; do not duplicate its ownership logic. New explicit
+  edits supersede older inverses. Include adjacent membership actors so one
+  surface cannot bypass that policy. Album deletion invalidates its pending
+  membership inverses before a potentially reused album ID can be targeted.
+  Assets themselves are retained when their files disappear; do not retarget
+  an inverse to another selection, path or newly selected item.
+- Capture current correction metadata beside the forward write under its
+  field turn. Keep original/user provenance semantics: a prior user correction
+  is reinstated; a previously uncorrected value restores the latest metadata,
+  including absent GPS. Retain opaque inverse targets when a correction itself
+  covers its asset; keep the store's existing admission rules.
+- Report actual membership changes from the existing transactional batch path
+  with a small typed outcome field. Reuse that path for single and multiple
+  membership edits, eliminating whole-album capture and stale checkbox guesses.
+  Keep the canonical SQL mutation in store and regenerate the wire bindings.
+  Album inverses retain the batch path's visibility checks and recover refused
+  targets after unblocking; they never widen admission to hidden metadata.
+- Reconcile current grids/counts and album lists after every inverse outcome;
+  refresh errors must not replay committed mutations. Preserve current detail
+  error/retry presentation and live metadata invalidation after navigation.
+  Add real-control native partial-failure/retry/navigation/restart acceptance,
+  fresh applicable Go/frontend/build/static/performance checks and living-guide
+  evidence. Preserve #36 event-name semantics and #40 favourite acceptance.
+
+### #41 implementation checkpoint
+
+The focused before-repair regressions fail for selection membership, the
+multi-album details picker and array-based date/place inverses. The photo
+picker also omits Undo for the subset committed before a forward failure.
+The correction forward calls are atomic, and the production details panel
+opens each correction for one photo; array tests establish component recovery
+without claiming a bulk correction UI.
+
+The implementation reuses the #40 outcome owner with typed compound identities
+and one-item heterogeneous units. Membership capture now comes from the
+canonical SQL mutation's committed `changed` result, including no-op/repeated
+targets, with regenerated bindings. One field/album turn registry serves all
+membership controls, corrections and favourite controls. Deletion retires old
+album leases before ID reuse. Current metadata is captured beside correction
+writes; original/user provenance and self-covering correction admission remain
+unchanged. Reconciliation waits for the selected day's lazy rows before reading
+the current inspector, and read failures retain independent retry.
+
+Local regression coverage includes partial success, failed-only retry,
+cancellation/resume, composite identities, no-op/newer edits, ID reuse,
+unconfirmed submitted subsets, stale correction props, refresh-only retry and
+current inspector failure/selection settlement. On 4 November 2026, all 1,012
+frontend tests across 115 files, frontend type/lint/format checks, the production
+frontend build, documentation checks, focused store race tests (2.139 s) and
+core/store vet pass. Native Windows acceptance and fresh full-tree gates remain
+pending in [PR #49](https://github.com/awaisjameel/lumen/pull/49); the new `undo-recovery` real-control suite
+covers partial membership inverses, navigation, provenance, self-coverage,
+album deletion/replacement and restart. No parent completion, installer or
+machine-independent performance acceptance is claimed by this checkpoint.
+
+The first Windows run, [41845808446](https://github.com/awaisjameel/lumen/actions/runs/41845808446),
+passes the production build, clean binding/module check, static/frontend/docs
+checks and both store race shards. Service/contract tests pass in the remaining
+shard, which fails an unchanged XMP shutdown test's nonblocking caller-signal
+assertion; the export releases its internal lifetime wait before the calling
+goroutine sends that signal. No indexer code or assertion is changed; a bounded
+fresh run is required. Native history passes 7/7 and favourite Undo 22/22.
+The new native harness initially clicks before the album modal mounts; its
+failure screenshot confirms the modal. It now waits for that real control,
+without bypassing the flow. Partial-inverse native acceptance remains pending.
+The reporting-only store benchmark still exceeds the unchanged unblocked
+`SaveEmbeddings64` ceiling: 172.782/70 ms. The parent performance gate remains
+open; no budget is raised.
+
+The second run, [41849133172](https://github.com/awaisjameel/lumen/actions/runs/41849133172),
+passes every Go race shard, including the unchanged shutdown test, and repeats
+the clean build, static/frontend/docs checks, native history 7/7 and favourite
+Undo 22/22. The new native suite confirms the mixed selection inverse, original
+failed-only retry, navigation and current focus (5 passing checks), then stops
+at a harness label mismatch: the actual picker control is **Apply albums**.
+That selector is corrected against the current i18n source, alongside a review
+of every remaining control label. CI runs the new recovery suite first to
+surface its acceptance failures earlier; all three suites remain enabled.
+The second reporting-only benchmark exceeds `SaveEmbeddings64` unblocked
+(157.591/70 ms) and `SaveFaces64` unblocked/folder (8.069/8 and 8.430/7 ms).
+These actual measurements remain recorded with the parent gate open.
+
+The third run, [41852230572](https://github.com/awaisjameel/lumen/actions/runs/41852230572),
+passes every Go race shard, the clean production build and static/frontend/docs
+checks. Native history passes 7/7 and favourite Undo 22/22. All 18 behavioural
+checks of `undo-recovery` pass: partial selection/picker results and failed-only
+retry, provenance, newer edits, self-coverage, deleted/reused album IDs and
+restart. Its strict frontend-error check still fails on two `not found`
+console errors. Acceptance remains open. Focused reproduction finds that late
+file-inspection rejections are logged after selection changes or inspector
+disposal; two new tests fail before a request/signal ownership guard and pass
+after it. A third test preserves reporting of current inspection failures.
+The native report now retains phase/read diagnostics for any remaining refusal;
+the error check is not filtered or relaxed.
+
+The fourth completed run, [41856887336](https://github.com/awaisjameel/lumen/actions/runs/41856887336),
+passes the clean Windows build, static/frontend/docs checks (1,015 tests) and
+all Go race shards. Native history is 7/7 and favourite Undo 22/22. The new
+suite again passes all 18 behavioural checks. Diagnostics identify its one
+remaining console error precisely: a current `Media.Inspect` refusal after the
+photo is blocked during the deleted-album scenario. The obsolete inspection
+guard removed the other error. Two further regressions fail before handling
+this known refusal through the inspector's existing unavailable/retry state;
+both pass after it, including retirement of pending tag/face/membership reads
+and a read-only retry. Current unexpected inspection errors still report.
+No runtime error filter or native acceptance assertion is weakened. The latest
+reported budget overruns are unblocked `SaveEmbeddings64` 218.628/70 ms and
+folder `SetEventName` 45.554/5 ms; the parent performance gate stays open.
+
+The delayed run finalises after the confirmed GitHub Actions incident. Its
+first recovery fixture could not open a cold WebView's DevTools port; no
+functional acceptance is claimed for that attempt. A bounded failed-job retry
+of [41861257245](https://github.com/awaisjameel/lumen/actions/runs/41861257245/attempts/2)
+passes native recovery 19/19 and history 7/7. The recovery report has no
+unexpected frontend errors. The preserved favourite suite passes its benchmark
+checks, then hits a clickability race with its selection menu open (screenshot
+retained). Shared control helpers now use Puppeteer's stable-geometry locators
+for real clicks; no JavaScript bypass or relaxed assertion is introduced.
+Favourite failures also retain their phase and stack. The recovery fixture
+holds a real inspection while blocking its target, making the discovered
+visibility refusal deterministic rather than dependent on timing. Full native
+acceptance of that harness refinement remains pending.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

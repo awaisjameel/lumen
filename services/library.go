@@ -375,7 +375,11 @@ func (s *LibraryService) UpdateAlbum(ctx context.Context, id int64, name string,
 
 // DeleteAlbum removes an album without touching media files.
 func (s *LibraryService) DeleteAlbum(ctx context.Context, id int64) error {
-	return s.store.DeleteAlbum(ctx, id)
+	if err := s.store.DeleteAlbum(ctx, id); err != nil {
+		return err
+	}
+	s.viewsChanged()
+	return nil
 }
 
 // AssetAlbums lists the manual albums containing an asset.
@@ -385,7 +389,11 @@ func (s *LibraryService) AssetAlbums(ctx context.Context, id int64) ([]int64, er
 
 // SetAlbumItem changes membership in a manual album.
 func (s *LibraryService) SetAlbumItem(ctx context.Context, assetID, albumID int64, include bool) error {
-	return s.store.SetAlbumItem(ctx, assetID, albumID, include)
+	if err := s.store.SetAlbumItem(ctx, assetID, albumID, include); err != nil {
+		return err
+	}
+	s.viewsChanged()
+	return nil
 }
 
 // ShowInFolder opens Explorer with one of the asset's files selected: path,

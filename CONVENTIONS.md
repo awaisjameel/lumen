@@ -212,6 +212,15 @@ file covers how code is written.
     before writing, and completed rows are never scheduled again. Reconciliation
     errors have a read-only retry. Do not add direct competing favourite writes
     or a second persistent Undo owner.
+  - Date/place and membership mutations reuse `shared/mutationWrites.ts` with
+    separate field/album owners. Use `albums/changes.ts` for every membership
+    surface and album deletion; capture actual changed rows from the batch
+    transaction. Never infer an inverse from an old checkbox or read the whole
+    album to capture a selection. Date/place correction capture and writes use
+    the same field turn, preserving user-versus-metadata provenance. Composite
+    targets and heterogeneous inverses use labelled outcomes and one-item units
+    in the shared Undo owner. Current inspector reads register with
+    `lib.onReconcile`; view/count/metadata failures never replay mutations.
 - **Pinia**
   - Only setup stores (`defineStore(id, () => …)`).
   - A list from the engine uses `defineListStore` or `defineCollectionStore`

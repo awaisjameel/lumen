@@ -20,6 +20,7 @@ vi.mock('../bridge', async (original) => ({
     setFavourite: vi.fn(),
     searchHits: vi.fn(),
     counts: vi.fn(),
+    albums: vi.fn(),
     selection: vi.fn(),
     timeline: vi.fn(),
   },
@@ -28,6 +29,7 @@ let notifications: RecordedNotifications
 beforeEach(() => {
   setActivePinia(createPinia())
   notifications = recordNotifications()
+  vi.mocked(engine.albums).mockResolvedValue([])
   vi.mocked(engine.searchHits).mockResolvedValue([])
   vi.mocked(engine.setFavourite).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.timeline).mockResolvedValue([])
@@ -35,7 +37,7 @@ beforeEach(() => {
   vi.mocked(engine.counts).mockResolvedValue({ photos: 0, videos: 0, favourites: 0, people: 0, trash: 0 })
   vi.mocked(engine.applyBatch)
     .mockReset()
-    .mockImplementation((ids) => Promise.resolve(ids.map((id) => ({ id, code: '', error: '' }))))
+    .mockImplementation((ids) => Promise.resolve(ids.map((id) => ({ id, code: '', error: '', changed: true }))))
 })
 afterEach(() => {
   for (const notice of notifications.shown) notice.closed?.()
@@ -336,4 +338,44 @@ it('retries only failed items after partial success', async () => {
   expect(engine.applyBatch).toHaveBeenLastCalledWith([2], BatchAction.BatchAlbum, 8)
   expect(actions.failed.value).toEqual([])
   scope.stop()
+})
+
+it('reconciles a partially committed album inverse and retains failed-only recovery', async () => {
+  const scope = effectScope()
+  const lib = useLibrary()
+  lib.selectVisible([1, 2])
+  const work = scope.run(() => useSelectionActions(lib))
+  if (!work) throw new Error('Missing selection actions')
+  await work.apply(BatchAction.BatchAlbum, 8)
+  vi.mocked(engine.counts).mockClear()
+  vi.mocked(engine.applyBatch).mockResolvedValueOnce([
+    { id: 1, code: '', error: '' },
+    { id: 2, code: 'not_found', error: 'Unavailable asset' },
+  ])
+  startUndo()
+  await flushPromises()
+  expect(engine.counts).toHaveBeenCalledOnce()
+  expect(notifications.shown.flatMap((notice) => notice.actions ?? []).some((a) => a.label === t('undo.retry'))).toBe(
+    true,
+  )
+  scope.stop()
+})
+
+it('does not report a superseded favourite target as a failed unconfirmed write', async () => {
+  const fixture = favouriteFixture([false, false])
+  await fixture.actions.apply(BatchAction.BatchFavourite)
+  await useFavouriteWrites().write([1], () => engine.setFavourite(1, true))
+  vi.mocked(engine.applyBatch).mockRejectedValueOnce(new Error('Inverse response lost'))
+  startUndo()
+  await flushPromises()
+  const job = currentUndo()
+  await vi.waitFor(() => expect(job.busy).toBe(false))
+  expect(job.outcomes.map((row) => [row.id, row.state])).toEqual([
+    [1, 'superseded'],
+    [2, 'failed'],
+  ])
+  vi.mocked(engine.applyBatch).mockClear()
+  await job.retry()
+  expect(engine.applyBatch).toHaveBeenCalledExactlyOnceWith([2], BatchAction.BatchUnfavourite, 0)
+  fixture.scope.stop()
 })

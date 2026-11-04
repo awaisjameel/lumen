@@ -35,11 +35,13 @@ import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
 import { useThings } from '../things/store'
 import { emptyRule, useAlbums } from './store'
+import { useAlbumChanges } from './changes'
 
 const mode = useLayoutMode()
 const router = useRouter()
 const route = useRoute()
 const albums = useAlbums()
+const albumChanges = useAlbumChanges()
 const smartCount = computed(() => albums.list.filter((album) => album.kind === AlbumKind.AlbumSmart).length)
 const things = useThings()
 const people = usePeople()
@@ -204,7 +206,7 @@ async function remove(album: Album) {
   error.value = ''
   busy.value = true
   try {
-    await engine.deleteAlbum(album.id)
+    await albumChanges.remove(album.id)
     if (editing.value === album.id) reset()
     await albums.load().catch(logError)
     notify({ id: 'albums.deleted', kind: 'success', title: t('albums.deleted') })

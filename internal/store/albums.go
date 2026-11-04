@@ -110,7 +110,7 @@ func (s *Store) CreateAlbum(ctx context.Context, name string, kind core.AlbumKin
 		}
 		for _, asset := range items {
 			if err == nil {
-				err = setAlbumItem(ctx, tx, asset, id, true)
+				_, err = setAlbumItem(ctx, tx, asset, id, true)
 			}
 		}
 		return err
@@ -250,27 +250,35 @@ func (s *Store) AssetAlbums(ctx context.Context, assetID int64) ([]int64, error)
 // SetAlbumItem adds or removes an asset from a manual album. Like tagging
 // (TagAsset), it takes the asset first.
 func (s *Store) SetAlbumItem(ctx context.Context, assetID, albumID int64, include bool) error {
-	return s.tx(ctx, func(tx *sql.Tx) error { return setAlbumItem(ctx, tx, assetID, albumID, include) })
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		_, err := setAlbumItem(ctx, tx, assetID, albumID, include)
+		return err
+	})
 }
 
-func setAlbumItem(ctx context.Context, tx *sql.Tx, assetID, albumID int64, include bool) error {
+func setAlbumItem(ctx context.Context, tx *sql.Tx, assetID, albumID int64, include bool) (bool, error) {
 	var kind core.AlbumKind
 	err := tx.QueryRowContext(ctx, `SELECT kind FROM albums WHERE id = ?
 		AND EXISTS (SELECT 1 FROM assets WHERE id = ? AND `+present+`)`, albumID, assetID).Scan(&kind)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return false, ErrNotFound
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if kind != core.AlbumManual {
-		return ErrAlbumManualOnly
+		return false, ErrAlbumManualOnly
 	}
+	var result sql.Result
 	if include {
-		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO album_items (album_id, asset_id, added_at) VALUES (?, ?, ?)`,
+		result, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO album_items (album_id, asset_id, added_at) VALUES (?, ?, ?)`,
 			albumID, assetID, time.Now().Unix())
 	} else {
-		_, err = tx.ExecContext(ctx, `DELETE FROM album_items WHERE album_id = ? AND asset_id = ?`, albumID, assetID)
+		result, err = tx.ExecContext(ctx, `DELETE FROM album_items WHERE album_id = ? AND asset_id = ?`, albumID, assetID)
 	}
-	return err
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	return changed > 0, err
 }

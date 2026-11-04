@@ -1,9 +1,12 @@
+import { vi } from 'vitest'
+import { t } from './i18n'
+import { undoOutcomes } from './undo'
 // What tests of components built on Nuxt UI need: the app's providers around
 // the component (tooltips, portals, the theme), and a way to see what was
 // notified without a toaster. Only test files import this.
 import UApp from '@nuxt/ui/components/App.vue'
 import ui from '@nuxt/ui/vue-plugin'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import type { Component, Plugin } from 'vue'
@@ -69,4 +72,25 @@ export function recordNotifications(): RecordedNotifications {
       shown.length = 0
     },
   }
+}
+
+export async function undo(notices: RecordedNotifications) {
+  const action = notices.shown
+    .flatMap((notice) => notice.actions ?? [])
+    .find((action) => action.label === t('settings.undo'))
+  if (!action) throw new Error('Missing Undo offer')
+  action.run()
+  await flushPromises()
+  const outcomes = notices.shown
+    .flatMap((notice) => notice.actions ?? [])
+    .find((action) => action.label === t('library.outcomes'))
+  if (!outcomes) throw new Error('Missing inverse outcomes')
+  outcomes.run()
+  const job = undoOutcomes.value
+  if (!job) throw new Error('Missing inverse job')
+  await vi.waitFor(() => {
+    if (job.busy) throw new Error('Inverse is still running')
+  })
+  undoOutcomes.value = null
+  return job
 }
