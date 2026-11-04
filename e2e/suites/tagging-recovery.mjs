@@ -108,7 +108,13 @@ try {
   await until(async () => (await lib(app.page, 'Progress')).ocrQueueRetry === true, 'the failed follow-up was not retained for retry')
   await app.page.locator('[data-activity-trigger]').click()
   await app.page.waitForSelector('[data-activity-details]', { visible: true })
-  s.check('activity explains that saved tags are safe and text reading will retry', await app.page.$eval('[data-activity-details]', (el) => el.innerText.includes('Text reading will retry')))
+  // Progress events are deliberately coalesced; the direct RPC snapshot can
+  // precede the sidebar's next event. Wait for the real rendered feedback.
+  const feedbackStarted = Date.now()
+  await until(() => app.page.$eval('[data-activity-details]', (el) => el.innerText.includes('Text reading will retry')),
+    'activity did not receive the pending scheduling recovery', 10_000)
+  s.check('activity explains that saved tags are safe and text reading will retry', await app.page.$eval('[data-ocr-retry]', (el) => el.innerText.includes('Your tags are saved.')),
+    { millisecondsAfterOpening: Date.now() - feedbackStarted })
   await app.page.screenshot({ path: join(s.out, 'committed-tag-retry.png') })
   await app.page.keyboard.press('Escape')
 
@@ -116,6 +122,9 @@ try {
   fixture('allow-queue')
   await until(() => fixture('state').ocr.length === 1, 'the in-session retry did not queue persisted eligibility')
   await until(async () => !(await lib(app.page, 'Progress')).ocrQueueRetry, 'in-session recovery did not clear retry feedback')
+  await until(() => app.page.$eval('[data-activity-trigger]', (el) => !el.innerText.includes('Text reading will retry')),
+    'activity did not clear the recovered scheduling feedback', 10_000)
+  s.check('activity clears retry feedback after scheduling recovers', await app.page.$eval('[data-activity-trigger]', (el) => !el.innerText.includes('Text reading will retry')))
   s.check('scheduling recovers independently of paused processing', (await lib(app.page, 'Progress')).paused && fixture('state').text === '')
   s.check('in-session recovery preserves exactly one user annotation', fixture('state').tags.filter(([name, source]) => name === 'Screenshots' && source === 'user').length === 1)
 
