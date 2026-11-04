@@ -441,6 +441,41 @@ references are recorded in PR #50 and [issue #43](https://github.com/awaisjameel
 only a verified child is merged into the parent. The parent hardware performance
 gate remains open and its budgets are unchanged.
 
+### #43 integration and #42 accepted scope
+
+PR #50 is merged into the parent at `fcd81324`, verified head `f9e016eb`.
+[Run 41904815481](https://github.com/awaisjameel/lumen/actions/runs/41904815481)
+passes every job: clean Windows production/bindings/modules, zero Go lint
+issues, static/docs checks, 1,019 frontend tests and all Go race shards.
+Native tagging recovery passes 18/18, Undo recovery 20/20, favourite Undo 22/22
+and history 7/7; artifact `13360237689` retains reports/screenshots. The rendered
+retry notice appears and is removed after recovery; both documents retain their
+user tags and real recognised text through restart. This supersedes the initial
+early-event assertion above. Hosted budget overruns remain in SaveEmbeddings64
+(unblocked 248.399/70 ms, folder/tag/person 100.551/70) and SaveFaces64
+(folder 11.702/7 ms, folder/tag/person 8.236/8); no budget is loosened.
+
+[#42](https://github.com/awaisjameel/lumen/issues/42) starts from `fcd81324` on
+`perf/42-smart-album-preview`. Its current frontend composes timeline filters
+and reads every matching day for photo/favourite intersections. The repair
+will remove rule evaluation from that frontend and reuse the store's saved
+smart-album `assetFilter`, rule/reference validation, visibility predicates and
+grid fields. One typed read returns an exact count and at most three newest
+matching items, in a read-only snapshot. Missing/blocked references fail closed;
+SQL remains in store, and generated access remains in the bridge.
+
+Keep the existing 200 ms debounce, cancellation, revision ownership and immediate
+clear on privacy invalidation. Failed reads retain no old images; the editor
+offers the existing retry control pattern without changing draft/reset policy
+(#45 owns that separate issue). Verify inclusive dates, mixed media/favourites,
+Thing/person combinations, corrections, visibility, grid thumbnail metadata
+and concurrent-write snapshot consistency against independent saved membership.
+First retain a failing 100-day call-count regression. Native acceptance will
+compare the built parent and candidate frontends against the same synthetic
+large fixture and engine, recording real call counts, response bytes and
+latency. Synthetic measurements do not replace the configured-machine gate;
+existing budgets remain unchanged.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:
