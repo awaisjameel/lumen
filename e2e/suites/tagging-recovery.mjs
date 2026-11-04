@@ -107,6 +107,7 @@ try {
   s.check('the details list reloads the committed annotation immediately', await app.page.$eval('.inspector-body', (el) => el.innerText.includes('Screenshots')))
   await until(async () => (await lib(app.page, 'Progress')).ocrQueueRetry === true, 'the failed follow-up was not retained for retry')
   await app.page.locator('[data-activity-trigger]').click()
+  await app.page.waitForSelector('[data-activity-details]', { visible: true })
   s.check('activity explains that saved tags are safe and text reading will retry', await app.page.$eval('[data-activity-details]', (el) => el.innerText.includes('Text reading will retry')))
   await app.page.screenshot({ path: join(s.out, 'committed-tag-retry.png') })
   await app.page.keyboard.press('Escape')
