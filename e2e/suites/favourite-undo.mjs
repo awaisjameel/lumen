@@ -15,6 +15,8 @@ const N = 500
 const PIN = '624815'
 let app
 let trace
+let phase = 'fixture'
+let failure
 const measurements = {}
 const external = []
 function watch(page) {
@@ -63,6 +65,7 @@ async function frames(page) {
   })
 }
 async function measure(label, baselineDir) {
+  phase = `${label} measurement`
   app = await launch({ exe: s.exe, dataDir: copyLibrary(seed, join(s.run, label)), port: s.port })
   watch(app.page)
   await lib(app.page, 'SetPaused', true)
@@ -127,6 +130,7 @@ try {
   }
   await measure('candidate')
   const { page } = app
+  phase = 'cancellation and resume'
   await dismissNotices(page)
   trace.reset()
   await favouriteAll(page)
@@ -196,6 +200,7 @@ try {
     () => page.evaluate(() => !document.querySelector('[role="dialog"]')),
     'the outcomes dialog did not close on Escape',
   )
+  phase = 'failed-only retry'
   await lib(page, 'UnlockBlocks', PIN)
   await lib(page, 'RemoveBlock', block.id)
   await lib(page, 'LockBlocks')
@@ -210,6 +215,7 @@ try {
     trace.summary(),
   )
 
+  phase = 'newer edit'
   await dismissNotices(page)
   trace.reset()
   await favouriteAll(page)
@@ -234,6 +240,7 @@ try {
     (await lib(page, 'Counts')).favourites === 1 && !trace.calls.some((row) => row.ids.includes(edited)),
     { edited, inverse: trace.summary() },
   )
+  phase = 'restart'
   await close(app)
   app = undefined
   app = await launch({ exe: s.exe, dataDir: join(s.run, 'candidate'), port: s.port })
@@ -245,10 +252,11 @@ try {
   s.check('no external requests', external.length === 0, external)
   s.check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
+  failure = { phase, stack: error.stack ?? String(error) }
   s.check('favourite Undo acceptance ran to the end', false, String(error))
   if (app) await app.page.screenshot({ path: join(s.out, 'failure.png') }).catch(() => {})
 } finally {
   await trace?.release().catch(() => {})
   if (app) await close(app)
-  s.finish({ measurements })
+  s.finish({ measurements, failure })
 }

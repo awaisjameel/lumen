@@ -363,6 +363,20 @@ No runtime error filter or native acceptance assertion is weakened. The latest
 reported budget overruns are unblocked `SaveEmbeddings64` 218.628/70 ms and
 folder `SetEventName` 45.554/5 ms; the parent performance gate stays open.
 
+The delayed run finalises after the confirmed GitHub Actions incident. Its
+first recovery fixture could not open a cold WebView's DevTools port; no
+functional acceptance is claimed for that attempt. A bounded failed-job retry
+of [41861257245](https://github.com/awaisjameel/lumen/actions/runs/41861257245/attempts/2)
+passes native recovery 19/19 and history 7/7. The recovery report has no
+unexpected frontend errors. The preserved favourite suite passes its benchmark
+checks, then hits a clickability race with its selection menu open (screenshot
+retained). Shared control helpers now use Puppeteer's stable-geometry locators
+for real clicks; no JavaScript bypass or relaxed assertion is introduced.
+Favourite failures also retain their phase and stack. The recovery fixture
+holds a real inspection while blocking its target, making the discovered
+visibility refusal deterministic rather than dependent on timing. Full native
+acceptance of that harness refinement remains pending.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

@@ -15,18 +15,18 @@ export async function button(page, text, root = '') {
   await page.waitForSelector(selector, { visible: true })
   for (const element of await page.$$(selector))
     if (await element.evaluate((node, text) => node.textContent.trim() === text, text)) {
-      await element.click()
+      await element.asLocator().click()
       return
     }
   throw new Error(`missing button: ${text}`)
 }
 
 export async function dismissNotices(page) {
-  for (const close of await page.$$('button[aria-label="Dismiss notification"]')) await close.click()
+  for (const close of await page.$$('button[aria-label="Dismiss notification"]')) await close.asLocator().click()
 }
 
 export async function selectAllResults(page) {
-  await page.click('button[aria-label="Selection options"]')
-  await page.waitForSelector('[role="menuitem"]::-p-text(Select all results)', { visible: true })
-  await page.click('[role="menuitem"]::-p-text(Select all results)')
+  // Portalled controls animate: wait for stable geometry before a real click.
+  await page.locator('button[aria-label="Selection options"]').click()
+  await page.locator('[role="menuitem"]::-p-text(Select all results)').click()
 }

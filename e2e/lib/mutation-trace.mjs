@@ -19,6 +19,7 @@ const methods = new Map([
   [bindingID('libraryservice', 'ValidateSelection'), 'ValidateSelection'],
   [bindingID('searchservice', 'Hits'), 'Hits'],
   [bindingID('libraryservice', 'Asset'), 'Asset'],
+  [bindingID('mediaservice', 'Inspect'), 'Inspect'],
   [bindingID('libraryservice', 'SetTakenAt'), 'SetTakenAt'],
   [bindingID('libraryservice', 'RestoreTakenAt'), 'RestoreTakenAt'],
   [bindingID('libraryservice', 'SetLocation'), 'SetLocation'],
@@ -64,10 +65,10 @@ export async function mutationTrace(page, baselineDir) {
     const name = body?.object === 0 && body.method === 0 ? methods.get(body.args?.methodID) : undefined
     if (name) {
       const args = body.args.args
-      const ids = name === 'SetFavourite' || name === 'Asset' ? [args[0]] : name === 'ValidateSelection' ? (args[0].ids ?? []) : args[0]
+      const ids = ['SetFavourite', 'Asset', 'Inspect'].includes(name) ? [args[0]] : name === 'ValidateSelection' ? (args[0].ids ?? []) : args[0]
       const record = {
         name,
-        write: !['Asset', 'Hits', 'ValidateSelection'].includes(name),
+        write: !['Asset', 'Inspect', 'Hits', 'ValidateSelection'].includes(name),
         ids,
         action: args[1],
         album: name === 'ApplyBatch' ? args[2] : undefined,
@@ -126,7 +127,7 @@ export async function mutationTrace(page, baselineDir) {
       return {
         calls: calls.length,
         writes: calls.filter((row) => row.write).length,
-        reads: calls.filter((row) => row.name === 'Hits' || row.name === 'Asset').length,
+        reads: calls.filter((row) => ['Hits', 'Asset', 'Inspect'].includes(row.name)).length,
         admissions: calls.filter((row) => row.name === 'ValidateSelection').length,
         maxOutstandingWrites: maximum,
         maxIDs: Math.max(0, ...calls.map((row) => row.ids.length)),

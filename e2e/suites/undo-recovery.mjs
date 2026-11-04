@@ -246,9 +246,17 @@ try {
 
   phase = 'deleted album identity and failed-item recovery'
   await selectPhoto(page, first)
+  await trace.idle()
+  trace.holdNext((row) => row.name === 'Inspect' && row.ids[0] === first)
   await membershipBox(page, 'Native album B', false)
   const obsolete = await notice(page)
+  await until(() => trace.held, 'the current inspection did not reach its read')
   const identityBlock = await lib(page, 'SetBlock', 'asset', first, '', 'photos')
+  await trace.release()
+  await until(() => refusedReads.some((row) => row.phase === phase && row.read === 'Inspect' && row.id === first && row.status === 422),
+    'the blocked inspection did not return its real visibility refusal')
+  s.check('an in-flight inspection is refused when its original photo becomes blocked',
+    refusedReads.some((row) => row.phase === phase && row.read === 'Inspect' && row.id === first && row.status === 422))
   await button(page, 'Undo', root(obsolete))
   await caption(page, obsolete, '1 failed')
   await page.click('aside a[href="/albums"]')
