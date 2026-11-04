@@ -984,6 +984,9 @@ const en = {
   'status.faces': 'Finding people',
   'status.videos': 'Understanding your videos',
   'status.ocr': 'Reading text in your photos',
+  'status.ocrRetry': 'Text reading will retry',
+  'status.ocrRetryHint':
+    'Your tags are saved. Lumen will retry text reading automatically. If this continues, save a problem report in Settings.',
   'status.upToDate': 'Up to date',
   'status.paused': 'Paused',
   'status.battery': 'Waiting for mains power',

@@ -299,6 +299,31 @@ it('validates full Unicode tag names in the add tag dialog without truncation', 
   expect(engine.tagAsset).toHaveBeenCalledWith(1, valid)
 })
 
+it('keeps a failed tag draft and reloads only after the annotation is confirmed', async () => {
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  await press(t('details.addTag'))
+  const body = new DOMWrapper(document.body)
+  await body.get('[data-tag-draft]').setValue('Screenshots')
+  vi.mocked(engine.assetTags).mockClear()
+  vi.mocked(engine.tagAsset).mockRejectedValueOnce(new Error('Write unavailable'))
+  await press(t('details.tag.save'))
+  expect(body.get<HTMLInputElement>('[data-tag-draft]').element.value).toBe('Screenshots')
+  expect(body.get('[role="dialog"]').text()).toContain('Write unavailable')
+  expect(engine.assetTags).not.toHaveBeenCalled()
+
+  vi.mocked(engine.assetTags).mockResolvedValue([
+    { id: 7, name: 'Screenshots', source: TagSource.TagByUser, kind: TagKind.TagBuiltin, score: 1 },
+  ])
+  await press(t('details.tag.save'))
+  expect(engine.tagAsset).toHaveBeenCalledTimes(2)
+  expect(engine.assetTags).toHaveBeenCalledWith(1)
+  expect(body.find('[data-tag-draft]').exists()).toBe(false)
+  expect(wrapper.get('.inspector-body').text()).toContain('Screenshots')
+  await press(t('details.addTag'))
+  expect(body.get<HTMLInputElement>('[data-tag-draft]').element.value).toBe('')
+})
+
 it('validates full Unicode album names in the creation dialog without truncation', async () => {
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()

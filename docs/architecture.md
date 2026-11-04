@@ -58,6 +58,16 @@ spikes/              Phase 0 experiments and later feasibility probes (own Go mo
 
 **Tags.** A Thing applies to a photo when SigLIP's probability for its best prompt passes the confidence setting (default 0.02; scores from 0.002 up are stored, so the slider needs no re-scan). Generic concepts rarely pass on probability alone, because SigLIP learned from specific web captions, so ten broad kinds of photo are also assigned by best fit. On one real library this found 94% of the people photos, against 16% on probability alone. Prompts were chosen by measuring them on that library.
 
+Single and bulk manual tagging share a post-commit outcome policy: an OCR
+scheduling failure cannot change a committed annotation into a failed edit.
+The indexer serialises OCR scheduling with opt-in changes and owns one
+coalesced recovery loop. It reconciles saved eligibility at startup and retries
+database failures every five seconds until recovery or shutdown. Healthy idle
+libraries perform no periodic scheduling query. Recovery applies current store
+eligibility and settings, never replays annotations, and hands actual work to
+the existing durable OCR jobs. Optional progress feedback distinguishes pending
+scheduling recovery from a counted stage job; pause still controls processing.
+
 **People.** The following figures are historical tuning evidence, not a promise of recognition accuracy on another library. Clustering joins groups of faces while their average cosine similarity is at least 0.42 (Phase 0 found every group at that threshold held one person). A new person needs clear faces in three photos: sharpness (variance of the Laplacian of the aligned face) at least 15, head turn at most 0.45 eye distances. On 204 office photos with 1,000 faces, 92% were placed into 28 people, each checked by eye to hold one person; the rest wait, unplaced, for more photos of them. The faces stage and clustering never undo the user: see `internal/people/cluster.go`.
 
 **Places.** City names come from [GeoNames](https://www.geonames.org/), licensed under CC BY 4.0. Lumen bundles a reduced 30 September 2026 `cities5000` snapshot (69,760 populated places), with region and country names, so lookups make no network request. A city within 75 km is an approximate label, not an exact administrative boundary. See [data provenance](geonames.md).

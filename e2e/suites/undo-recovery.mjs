@@ -15,6 +15,7 @@ const rule = { kind: '', favourites: false, from: '', to: '', tag: 0, person: 0 
 let app
 let trace
 let phase = 'fixture'
+let failure
 const external = []
 const consoleErrors = []
 const refusedReads = []
@@ -261,9 +262,9 @@ try {
   await caption(page, obsolete, '1 failed')
   await page.click('aside a[href="/albums"]')
   await page.waitForSelector('button[aria-label="Actions for Native album B"]')
-  await page.click('button[aria-label="Actions for Native album B"]')
+  await page.locator('button[aria-label="Actions for Native album B"]').click()
   await page.waitForSelector('[role="menuitem"]::-p-text(Delete “Native album B”)')
-  await page.click('[role="menuitem"]::-p-text(Delete “Native album B”)')
+  await page.locator('[role="menuitem"]::-p-text(Delete “Native album B”)').click()
   await button(page, 'Delete album')
   await until(async () => !(await lib(page, 'Albums')).some((album) => album.id === albumB), 'album deletion did not persist')
   await unblock(page, identityBlock)
@@ -296,6 +297,7 @@ try {
   s.check('bridge instrumentation completed without errors', trace.errors.length === 0, trace.errors)
   s.check('no unexpected frontend errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
+  failure = { phase, stack: error.stack ?? String(error) }
   console.log(error.stack ?? error)
   s.check(`Undo recovery completed (${phase})`, false, String(error))
   if (app) await app.page.screenshot({ path: join(s.out, 'failure.png') }).catch(() => {})
@@ -303,5 +305,5 @@ try {
   await trace?.release().catch(() => {})
   if (app) await close(app)
   await Promise.allSettled(diagnostics)
-  s.finish({ diagnostics: { consoleErrors, refusedReads } })
+  s.finish({ failure, diagnostics: { consoleErrors, refusedReads } })
 }

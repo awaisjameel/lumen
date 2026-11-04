@@ -36,6 +36,7 @@ Install the pinned fixture tooling with `python -m pip install -r e2e/requiremen
 | `search-history` | Clears recent searches, runs a new query and reopens the controls after navigation and restart | an empty source in its own library |
 | `favourite-undo` | Restores 500 favourite flags, cancels/resumes across navigation, retries a blocked target, preserves a newer edit and restarts; records bridge calls, payloads and frame gaps | 500 indexed synthetic photos, copied for each measurement |
 | `undo-recovery` | Retries partial selection and multi-album inverses, preserves correction provenance and newer edits, reverses a self-covering place correction, retires deleted-album inverses and restarts | three generated photos in its own library |
+| `tagging-recovery` | Injects annotation and OCR queue faults, checks draft retention versus committed tags, and verifies owned scheduling and text recovery in-session and across restart | two generated documents in their own library |
 | `organise` | Organise on disk: preview, move, Undo, checked on the files themselves | base library + two files of its own |
 | `viewer` | Zoom, pan, rotate, full screen, filmstrip, compare, slideshow; selection and batch; export and rename with Undo; audio tracks, subtitles, frame export; playback history; blocks | `media` |
 | `file-tools` | The File tools dialog and its menu at every width, by keyboard, and inside a full-screen video | `media` |

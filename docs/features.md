@@ -68,6 +68,10 @@ sequential chain for every photo.
 - About **180 built-in labels**, each kept because it performed well on a real library. The AI also sorts every photo into one of ten broad kinds: People, Screenshots, Documents and so on.
 - **Custom labels:** type something like "Eiffel Tower" and Lumen finds it across the whole library immediately.
 - **Manual tags:** add or remove tags on any photo. Your edits always override the AI.
+- A saved tag remains a successful edit if text reading cannot be scheduled.
+  The activity card explains that text reading will retry; recovery uses saved
+  eligibility, including after restarting, and still honours the OCR opt-in
+  and later tag corrections. Genuine save failures keep the editor's draft.
 - A **confidence slider** controls how strict tagging is. It takes effect without rescanning.
 - **Pin** Things to keep them at the top, and **rename** built-in ones. A renamed Thing keeps its AI matching, search uses the new name, and "Reset name" brings back the original.
 
