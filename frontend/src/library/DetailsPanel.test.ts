@@ -509,7 +509,7 @@ it('discards an inspection refusal after its original selection has moved on', a
   await flushPromises()
   expect(logged).not.toHaveBeenCalled()
   expect(wrapper.text()).toContain('Current')
-  expect(wrapper.get('[data-edit-date]').exists()).toBe(true)
+  expect(wrapper.find('[data-edit-date]').exists()).toBe(true)
 })
 
 it('discards an inspection refusal after its inspector is disposed', async () => {
