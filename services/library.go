@@ -361,6 +361,15 @@ func (s *LibraryService) Albums(ctx context.Context) ([]core.Album, error) {
 	return s.store.Albums(ctx, minScore)
 }
 
+// PreviewAlbum counts and samples the visible members of an unsaved smart rule.
+func (s *LibraryService) PreviewAlbum(ctx context.Context, rule core.AlbumRule) (core.AlbumPreview, error) {
+	minScore, err := tagConfidence(ctx, s.store)
+	if err != nil {
+		return core.AlbumPreview{}, err
+	}
+	return s.store.PreviewAlbum(ctx, rule, minScore)
+}
+
 // CreateAlbum saves a new manual album holding items, or a smart rule (no
 // items), in one step.
 func (s *LibraryService) CreateAlbum(ctx context.Context, name string, kind core.AlbumKind, rule core.AlbumRule,

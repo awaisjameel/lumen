@@ -35,8 +35,13 @@ const types = {
   '.woff2': 'font/woff2',
 }
 
-export async function mutationTrace(page, baselineDir) {
+// Extra read methods opt into response-byte and latency measurements. Their
+// arguments contain only the explicitly observed read contracts, never PINs.
+export async function mutationTrace(page, baselineDir, readMethods = new Map()) {
   let calls = []
+  const observed = new Map([...methods, ...readMethods])
+  const extraReads = new Set(readMethods.values())
+  const responseReads = new Set()
   const pending = new Map()
   let maximum = 0
   let hold = null
@@ -62,13 +67,14 @@ export async function mutationTrace(page, baselineDir) {
     } catch {
       /* A media request is not a bridge call. */
     }
-    const name = body?.object === 0 && body.method === 0 ? methods.get(body.args?.methodID) : undefined
+    const name = body?.object === 0 && body.method === 0 ? observed.get(body.args?.methodID) : undefined
     if (name) {
       const args = body.args.args
-      const ids = ['SetFavourite', 'Asset', 'Inspect'].includes(name) ? [args[0]] : name === 'ValidateSelection' ? (args[0].ids ?? []) : args[0]
+      const ids = extraReads.has(name) ? [] : ['SetFavourite', 'Asset', 'Inspect'].includes(name) ? [args[0]] : name === 'ValidateSelection' ? (args[0].ids ?? []) : args[0]
       const record = {
         name,
-        write: !['Asset', 'Inspect', 'Hits', 'ValidateSelection'].includes(name),
+        write: !extraReads.has(name) && !['Asset', 'Inspect', 'Hits', 'ValidateSelection'].includes(name),
+        parameters: extraReads.has(name) ? args : undefined,
         ids,
         action: args[1],
         album: name === 'ApplyBatch' ? args[2] : undefined,
@@ -91,6 +97,20 @@ export async function mutationTrace(page, baselineDir) {
       errors.push(String(error))
       void request.abort().catch(() => {})
     })
+  })
+  page.on('response', (response) => {
+    const record = pending.get(response.request())
+    if (!record || !extraReads.has(record.name)) return
+    record.status = response.status()
+    const read = response.text().then(
+      (body) => {
+        record.responseBytes = Buffer.byteLength(body)
+        record.milliseconds = performance.now() - record.start
+      },
+      (error) => { record.responseError = String(error) },
+    )
+    responseReads.add(read)
+    void read.finally(() => responseReads.delete(read))
   })
   const ended = (request) => pending.delete(request)
   page.on('requestfinished', ended)
@@ -122,6 +142,7 @@ export async function mutationTrace(page, baselineDir) {
       const until = Date.now() + 30_000
       while (pending.size && Date.now() < until) await sleep(20)
       if (pending.size) throw new Error('mutation calls did not settle')
+      await Promise.all(responseReads)
     },
     summary() {
       return {

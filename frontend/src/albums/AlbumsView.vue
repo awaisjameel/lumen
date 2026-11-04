@@ -564,7 +564,13 @@ useCommands([
                 </div>
               </div>
               <p v-if="preview.count.value === 0">{{ t('albums.noMatches') }}</p>
-              <UAlert v-if="preview.error.value" role="alert" color="warning" :title="preview.error.value" />
+              <UAlert v-if="preview.error.value" role="alert" color="warning" :title="preview.error.value">
+                <template #actions>
+                  <UButton color="neutral" variant="outline" @click="preview.refresh()">{{
+                    t('welcome.retry')
+                  }}</UButton>
+                </template>
+              </UAlert>
               <p>{{ t('albums.localRules') }}</p>
             </section>
             <UAlert

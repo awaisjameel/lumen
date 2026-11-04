@@ -90,8 +90,8 @@ jobs:
         shell: bash
         run: scripts/lint.sh --no-bench
 
-      # Compare the built base frontend and candidate on the same synthetic
-      # favourite fixture and candidate engine; no runtime download is added.
+      # Compare built base and candidate frontends against the same synthetic
+      # preview/favourite fixtures and candidate engine; no runtime download.
       - name: Build the PR base frontend for native comparison
         if: github.event_name == 'pull_request'
         shell: bash
@@ -103,14 +103,14 @@ jobs:
           git archive "$BASE_SHA" frontend | tar -x -C e2e/.work/baseline
           npm ci --prefix e2e/.work/baseline/frontend
           npm run build --prefix e2e/.work/baseline/frontend
-          echo "LUMEN_FAVOURITE_BASELINE_FRONTEND=$(cygpath -m "$PWD/e2e/.work/baseline/frontend/dist")" >>"$GITHUB_ENV"
+          echo "LUMEN_BASELINE_FRONTEND=$(cygpath -m "$PWD/e2e/.work/baseline/frontend/dist")" >>"$GITHUB_ENV"
 
-      - name: Native tagging, history and recoverable Undo regressions
+      - name: Native album, tagging, history and recoverable Undo regressions
         shell: bash
         run: |
           npm ci --prefix e2e
           python -m pip install -r e2e/requirements.txt
-          node e2e/run.mjs tagging-recovery undo-recovery search-history favourite-undo
+          node e2e/run.mjs smart-album-preview tagging-recovery undo-recovery search-history favourite-undo
 
       - name: Preserve native regression reports
         if: always()
@@ -122,6 +122,7 @@ jobs:
             e2e/.work/results/favourite-undo
             e2e/.work/results/undo-recovery
             e2e/.work/results/tagging-recovery
+            e2e/.work/results/smart-album-preview
           retention-days: 14
           include-hidden-files: true
           if-no-files-found: ignore

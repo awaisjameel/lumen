@@ -73,6 +73,7 @@ import type {
   XMPDelete,
   XMPExport,
   AlbumRule,
+  AlbumPreview as RawAlbumPreview,
   AssetDetail as RawAssetDetail,
   AssetTag,
   Changes,
@@ -221,6 +222,8 @@ type NonNullLists<T, K extends keyof T> = Omit<T, K> & { [P in K]-?: NonNullable
 export type AssetDetail = NonNullLists<RawAssetDetail, 'paths'>
 /** One day of the grid. */
 export type DayItems = NonNullLists<RawDayItems, 'items'>
+/** An exact smart-rule count with a bounded representative sample. */
+export type AlbumPreview = NonNullLists<RawAlbumPreview, 'items'>
 /** A search's results, best first. */
 export type SearchResults = NonNullLists<SearchResult, 'items' | 'people'>
 
@@ -622,6 +625,10 @@ export const engine = {
   setEventPinned: (id: number, pinned: boolean): Promise<void> => LibraryService.SetEventPinned(id, pinned),
   setFavourite: (id: number, fav: boolean): Promise<void> => LibraryService.SetFavourite(id, fav),
   albums: async (): Promise<Album[]> => (await LibraryService.Albums()) ?? [],
+  previewAlbum: async (rule: AlbumRule, signal?: AbortSignal): Promise<AlbumPreview> => {
+    const result = await cancellable(LibraryService.PreviewAlbum(rule), signal)
+    return { ...result, items: result.items ?? [] }
+  },
   /** Creates a manual album holding items, or a smart album (no items). */
   createAlbum: (name: string, kind: AlbumKind, rule: AlbumRule, items: number[] = []): Promise<number> =>
     LibraryService.CreateAlbum(name, kind, rule, items),

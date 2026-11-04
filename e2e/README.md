@@ -37,6 +37,7 @@ Install the pinned fixture tooling with `python -m pip install -r e2e/requiremen
 | `favourite-undo` | Restores 500 favourite flags, cancels/resumes across navigation, retries a blocked target, preserves a newer edit and restarts; records bridge calls, payloads and frame gaps | 500 indexed synthetic photos, copied for each measurement |
 | `undo-recovery` | Retries partial selection and multi-album inverses, preserves correction provenance and newer edits, reverses a self-covering place correction, retires deleted-album inverses and restarts | three generated photos in its own library |
 | `tagging-recovery` | Injects annotation and OCR queue faults, checks draft retention versus committed tags, and verifies owned scheduling and text recovery in-session and across restart | two generated documents in their own library |
+| `smart-album-preview` | Compares parent/candidate request counts, payloads and latency on 100,000 synthetic rows over 100 days; real editor rules, privacy/retry and cancellation | generated photos/videos and an isolated metadata fixture |
 | `organise` | Organise on disk: preview, move, Undo, checked on the files themselves | base library + two files of its own |
 | `viewer` | Zoom, pan, rotate, full screen, filmstrip, compare, slideshow; selection and batch; export and rename with Undo; audio tracks, subtitles, frame export; playback history; blocks | `media` |
 | `file-tools` | The File tools dialog and its menu at every width, by keyboard, and inside a full-screen video | `media` |
@@ -98,7 +99,7 @@ The `favourite-undo` suite records forward capture and inverse call counts,
 maximum outstanding writes, IDs per request, JSON request bytes, elapsed
 restoration time and animation-frame gaps. It asserts bounded work, and reports
 timings without inventing a new machine-independent budget. Set
-`LUMEN_FAVOURITE_BASELINE_FRONTEND` to a production frontend's `dist` directory
+`LUMEN_BASELINE_FRONTEND` to a production frontend's `dist` directory
 to compare it with the embedded candidate. The harness serves those compiled
 local assets in the native WebView for the baseline; both use the candidate's
 favourite service/store and separate copies of the same indexed scratch library.
@@ -107,6 +108,19 @@ PR CI builds that comparison frontend from its base commit. The trace follows
 method IDs from generated bindings; a missing binding fails instrumentation.
 Failed-row, cancellation and newer-edit acceptance use only the embedded
 candidate, through real controls and the existing PIN gate.
+
+`smart-album-preview` uses the same compiled baseline mechanism and records
+five samples each for photo-only and favourite-video rules. Its scratch
+metadata fixture has 100,000 rows over 100 days, with real generated sample
+thumbnails. A newly scanned image provides a startup-scan barrier before
+injection; no media files change while the metadata fixture is measured.
+Both frontends use copies of the same seed and the candidate's existing
+timeline services. The candidate additionally uses the bounded preview read.
+Reports contain bridge-call counts, request/response bytes and read/total
+latency. This measures synthetic metadata transport, not decoding, scanning,
+an old executable or latency on a user's library. Existing hardware budgets
+remain separate. Native rule/privacy/retry/cancellation checks use generated
+photos and videos, through real editor controls and normal service contracts.
 
 `undo-recovery` shares the bridge instrumentation in `lib/mutation-trace.mjs`
 and control helpers in `lib/controls.mjs`. Its held requests make partial

@@ -95,6 +95,15 @@ export enum AlbumKind {
 };
 
 /**
+ * AlbumPreview is an exact visible count and a bounded newest-first sample
+ * from the same read snapshot, without saving an album.
+ */
+export interface AlbumPreview {
+    "count": number;
+    "items": GridItem[] | null;
+}
+
+/**
  * AlbumRule is a conjunction of optional filters, saved for a smart album.
  * Dates are inclusive camera-clock calendar days (YYYY-MM-DD).
  */

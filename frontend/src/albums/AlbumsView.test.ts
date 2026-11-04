@@ -20,7 +20,14 @@ vi.mock('vue-router', async (importOriginal) => ({
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
-  engine: { albums: vi.fn(), things: vi.fn(), people: vi.fn(), createAlbum: vi.fn(), updateAlbum: vi.fn() },
+  engine: {
+    albums: vi.fn(),
+    things: vi.fn(),
+    people: vi.fn(),
+    createAlbum: vi.fn(),
+    updateAlbum: vi.fn(),
+    previewAlbum: vi.fn(),
+  },
 }))
 
 const album: Album = {
@@ -41,12 +48,14 @@ beforeEach(() => {
   vi.mocked(engine.people).mockResolvedValue([])
   vi.mocked(engine.createAlbum).mockReset().mockResolvedValue(2)
   vi.mocked(engine.updateAlbum).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.previewAlbum).mockReset().mockResolvedValue({ count: 0, items: [] })
 })
 
 afterEach(() => {
   blockRequest.value?.answer(false)
   blockRequest.value = null
   wrapper?.unmount()
+  vi.useRealTimers()
 })
 
 async function mounted() {
@@ -107,6 +116,30 @@ it('validates names by code point before creating an album', async () => {
   await editor().get('form').trigger('submit')
   await flushPromises()
   expect(engine.createAlbum).toHaveBeenCalledOnce()
+})
+
+it('retries a failed smart preview without saving or replacing its draft', async () => {
+  vi.useFakeTimers()
+  vi.mocked(engine.albums).mockResolvedValue([{ ...album, kind: AlbumKind.AlbumSmart }])
+  vi.mocked(engine.previewAlbum)
+    .mockRejectedValueOnce(new Error('Preview refused'))
+    .mockResolvedValue({ count: 2, items: [{ id: 7, w: 1, h: 1, t: 1 }] })
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  await vi.advanceTimersByTimeAsync(200)
+  await flushPromises()
+  const preview = editor().get('[data-album-preview]')
+  expect(preview.text()).toContain('Preview refused')
+  expect(preview.findAll('.preview-grid > div')).toHaveLength(0)
+  const retry = preview.findAll('button').find((button) => button.text() === t('welcome.retry'))
+  if (!retry) throw new Error('The preview retry control is missing')
+  await retry.trigger('click')
+  await flushPromises()
+  expect(preview.text()).toContain(t('albums.matches', { n: 2 }))
+  expect(preview.text()).not.toContain('Preview refused')
+  expect(preview.findAll('.preview-grid > div')).toHaveLength(1)
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe(album.name)
+  expect(engine.updateAlbum).not.toHaveBeenCalled()
 })
 
 it('keeps every smart rule field and maps all media back to the engine zero value', async () => {

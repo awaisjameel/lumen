@@ -155,7 +155,8 @@ func (s *Store) UpdateAlbum(ctx context.Context, id int64, name string, rule cor
 	return err
 }
 
-// Validate references in the write transaction so deletion cannot race a save.
+// albumReferences checks existence in the caller's snapshot. Saves use their
+// write transaction, so deletion cannot race the saved rule.
 func albumReferences(ctx context.Context, tx *sql.Tx, rule core.AlbumRule) error {
 	var valid bool
 	err := tx.QueryRowContext(ctx, `SELECT
@@ -168,6 +169,51 @@ func albumReferences(ctx context.Context, tx *sql.Tx, rule core.AlbumRule) error
 		return ErrAlbumReference
 	}
 	return nil
+}
+
+// PreviewAlbum evaluates an unsaved smart rule with the saved album's
+// canonical predicate. Validation, count and sample share one snapshot, so
+// concurrent indexing or privacy changes cannot mix their results.
+func (s *Store) PreviewAlbum(ctx context.Context, rule core.AlbumRule, minScore float64) (core.AlbumPreview, error) {
+	if err := validateAlbumRule(rule); err != nil {
+		return core.AlbumPreview{}, err
+	}
+	var out core.AlbumPreview
+	err := s.read(ctx, func(tx *sql.Tx) error {
+		for _, target := range []struct {
+			kind core.BlockKind
+			id   int64
+		}{{core.BlockTag, rule.Tag}, {core.BlockPerson, rule.Person}} {
+			if target.id == 0 {
+				continue
+			}
+			blocked, err := isBlocked(ctx, tx, target.kind, target.id)
+			if err != nil {
+				return err
+			}
+			if blocked {
+				return ErrNotFound
+			}
+		}
+		if err := albumReferences(ctx, tx, rule); err != nil {
+			return err
+		}
+		where, args := albumFilter(core.Album{Kind: core.AlbumSmart, Rule: rule}).where(minScore)
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM assets WHERE "+where, args...).Scan(&out.Count); err != nil {
+			return err
+		}
+		var err error
+		out.Items, err = queryAll(ctx, tx, func(r *sql.Rows) (it core.GridItem, err error) {
+			err = r.Scan(append([]any{&it.ID}, gridFields(&it)...)...)
+			return it, err
+		}, "SELECT id, "+gridColumns+" FROM assets WHERE "+where+
+			" ORDER BY taken_at DESC, id DESC LIMIT ?", append(args, core.AlbumPreviewSize)...)
+		return err
+	})
+	if err != nil {
+		return core.AlbumPreview{}, err
+	}
+	return out, nil
 }
 
 // DeleteAlbum removes a collection and its memberships, leaving assets untouched.

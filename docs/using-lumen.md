@@ -117,7 +117,10 @@ without moving files. A **Smart album** saves rules instead and follows the
 library as it changes: for example, turn on **Favourites only** and set **Media**
 to **Photos** for a live view of your favourite photos, or choose a **Thing**
 such as Mountains. Deleting an album does not delete its originals, and
-membership follows files renamed or moved through Lumen.
+membership follows files renamed or moved through Lumen. As you edit a smart
+rule, its preview shows the current matching count and up to three sample
+items. If the preview cannot be read, **Try again** retries the same draft;
+the previous images are cleared until a current read succeeds.
 
 Undo of favourite selections, album memberships and date/place corrections
 shows progress and **Cancel remaining**.

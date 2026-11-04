@@ -48,6 +48,7 @@ export type {
     AI,
     About,
     Album,
+    AlbumPreview,
     AlbumRule,
     AssetDetail,
     AssetTag,
