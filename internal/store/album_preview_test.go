@@ -254,11 +254,12 @@ func TestSmartAlbumPreviewKeepsTheCountSnapshotWhileFavouritesChange(t *testing.
 			return value, changeErr
 		}, false)
 	}))
-	rows, err := conn.QueryContext(ctx, "SELECT * FROM main.assets LIMIT 0")
+	columns, err := queryAll(ctx, conn, func(rows *sql.Rows) (string, error) {
+		var column string
+		err := rows.Scan(&column)
+		return column, err
+	}, "SELECT name FROM pragma_table_info('assets') ORDER BY cid")
 	check(t, err)
-	columns, err := rows.Columns()
-	check(t, err)
-	check(t, rows.Close())
 	for i, column := range columns {
 		columns[i] = `"` + strings.ReplaceAll(column, `"`, `""`) + `"`
 		if column == "favourite" {
