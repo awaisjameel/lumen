@@ -114,16 +114,24 @@ to **Photos** for a live view of your favourite photos, or choose a **Thing**
 such as Mountains. Deleting an album does not delete its originals, and
 membership follows files renamed or moved through Lumen.
 
-Undo of a selection's favourite changes shows progress and **Cancel remaining**.
+Undo of favourite selections, album memberships and date/place corrections
+shows progress and **Cancel remaining**.
 Completed changes stay in place. **View outcomes** lists results a page at a
 time; **Retry failed items** retries failures, while **Resume cancelled items**
-continues the remainder. A newer favourite action for a photo supersedes its
-older Undo, so later choices are kept. This includes a newer request that later
+continues the remainder. A newer edit to the same photo's field or album membership
+supersedes its older Undo, so later choices are kept. This includes a newer request that later
 fails or is cancelled; use that action's feedback to recover it. Undo continues
 when you browse elsewhere and leaves the current selection alone. Dismissing
 its notice stops future work and discards its remaining recovery; these offers
 are kept only for the current app session. A failed view refresh has its own
 retry and never repeats completed changes.
+
+Album Undo includes only memberships that action actually changed; memberships
+already present stay in place. Deleting an album retires its pending membership
+Undo. A blocked target can fail and be retried after unblocking. Date/place Undo
+restores an earlier user correction when present, or returns to the underlying
+metadata (including no GPS). It can reverse a correction that hid its own photo
+under a place block. The details panel currently corrects one photo at a time.
 
 ![Three smart albums, By the sea, City walks and Mountain views, each following a Thing](screenshots/albums.webp)
 

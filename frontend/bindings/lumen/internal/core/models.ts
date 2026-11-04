@@ -202,6 +202,13 @@ export interface BatchOutcome {
     "id": number;
     "code": string;
     "error": string;
+
+    /**
+     * Changed is true only when a successful album membership action changed
+     * the stored value. Other actions leave it false. It is captured beside
+     * the write so Undo never reverses a pre-existing membership.
+     */
+    "changed"?: boolean;
 }
 
 /**

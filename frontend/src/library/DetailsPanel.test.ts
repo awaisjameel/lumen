@@ -23,7 +23,7 @@ import {
 } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Block from '../shared/block'
-import type { AssetDetail, Changes, Event, Face } from '../bridge'
+import type { AssetDetail, BatchOutcome, Changes, Event, Face } from '../bridge'
 import { emptyRule } from '../albums/store'
 import { block } from '../shared/block'
 import { useLibrary } from './store'
@@ -59,7 +59,8 @@ vi.mock('../bridge', async (importOriginal) => ({
     assetAlbums: vi.fn(),
     albums: vi.fn(),
     createAlbum: vi.fn(),
-    setAlbumItem: vi.fn(),
+    applyBatch: vi.fn(),
+    counts: vi.fn(),
     place: vi.fn(),
     untagAsset: vi.fn().mockResolvedValue(undefined),
     rejectFaces: vi.fn().mockResolvedValue(undefined),
@@ -147,7 +148,10 @@ beforeEach(() => {
   vi.mocked(engine.assetFaces).mockReset().mockResolvedValue([])
   vi.mocked(engine.assetAlbums).mockReset().mockResolvedValue([])
   vi.mocked(engine.albums).mockReset().mockResolvedValue([])
-  vi.mocked(engine.setAlbumItem).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.applyBatch)
+    .mockReset()
+    .mockImplementation((ids) => Promise.resolve(ids.map((id) => ({ id, code: '', error: '', changed: true }))))
+  vi.mocked(engine.counts).mockResolvedValue({ photos: 2, videos: 0, favourites: 0, people: 0, trash: 0 })
   vi.mocked(engine.createAlbum).mockReset().mockResolvedValue(4)
   vi.mocked(engine.place).mockReset()
   vi.mocked(engine.tagAsset).mockReset().mockResolvedValue(undefined)
@@ -201,7 +205,7 @@ it('refreshes metadata and the place action on asset changes without clearing an
   vi.useFakeTimers()
   const changed = liveChanges()
   vi.mocked(engine.asset).mockResolvedValueOnce({ ...detail(1), width: 0, height: 0 })
-  vi.mocked(engine.setAlbumItem).mockRejectedValueOnce(new Error('album edit failed'))
+  vi.mocked(engine.applyBatch).mockRejectedValueOnce(new Error('album edit failed'))
   vi.mocked(engine.albums).mockResolvedValue([
     { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
   ])
@@ -346,7 +350,7 @@ it('puts an album checkbox back when the change fails', async () => {
   vi.mocked(engine.albums).mockResolvedValue([
     { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
   ])
-  vi.mocked(engine.setAlbumItem).mockRejectedValueOnce(new Error('album deleted'))
+  vi.mocked(engine.applyBatch).mockRejectedValueOnce(new Error('album deleted'))
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
   const box = wrapper.get('.album-option [role="checkbox"]')
@@ -509,13 +513,13 @@ it('replaces metadata with a not-found state when a live read loses access to th
 
 it('does not roll back an album checkbox on the next photo when an earlier edit fails', async () => {
   let rejectEdit: ((reason: Error) => void) | undefined
-  const pending = new Promise<void>((_resolve, reject) => {
+  const pending = new Promise<BatchOutcome[]>((_resolve, reject) => {
     rejectEdit = reject
   })
   vi.mocked(engine.albums).mockResolvedValue([
     { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
   ])
-  vi.mocked(engine.setAlbumItem).mockReturnValueOnce(pending)
+  vi.mocked(engine.applyBatch).mockReturnValueOnce(pending)
   vi.mocked(engine.assetAlbums).mockResolvedValueOnce([7]).mockResolvedValueOnce([])
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
@@ -708,4 +712,18 @@ it('offers recovery with the exact local path after a Windows hand-off fails', a
   expect(body.get('[role="alert"]').text()).toContain('Drive disconnected')
   await press(t('common.retry'))
   expect(engine.openMedia).toHaveBeenLastCalledWith(1, 'C:/Photos/a.jpg', false)
+})
+
+it('participates in inverse reconciliation and reports a current metadata read failure independently', async () => {
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  const failure = new Error('Current metadata read failed')
+  vi.mocked(engine.asset).mockRejectedValueOnce(failure)
+  await expect(useLibrary().reconcileChanges()).rejects.toBe(failure)
+  expect(wrapper.text()).toContain('Current metadata read failed')
+  vi.mocked(engine.asset).mockResolvedValueOnce(detail(1, 'Refreshed metadata'))
+  await useLibrary().reconcileChanges()
+  expect(wrapper.text()).toContain('Refreshed metadata')
+  expect(wrapper.text()).not.toContain('Current metadata read failed')
+  expect(engine.applyBatch).not.toHaveBeenCalled()
 })

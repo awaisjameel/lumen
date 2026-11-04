@@ -105,12 +105,12 @@ jobs:
           npm run build --prefix e2e/.work/baseline/frontend
           echo "LUMEN_FAVOURITE_BASELINE_FRONTEND=$(cygpath -m "$PWD/e2e/.work/baseline/frontend/dist")" >>"$GITHUB_ENV"
 
-      - name: Native history and favourite Undo regressions
+      - name: Native history and recoverable Undo regressions
         shell: bash
         run: |
           npm ci --prefix e2e
           python -m pip install -r e2e/requirements.txt
-          node e2e/run.mjs search-history favourite-undo
+          node e2e/run.mjs search-history favourite-undo undo-recovery
 
       - name: Preserve native regression reports
         if: always()
@@ -120,6 +120,7 @@ jobs:
           path: |
             e2e/.work/results/search-history
             e2e/.work/results/favourite-undo
+            e2e/.work/results/undo-recovery
           retention-days: 14
           include-hidden-files: true
           if-no-files-found: ignore

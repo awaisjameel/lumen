@@ -1,5 +1,5 @@
 import { computed, onScopeDispose, ref, shallowRef } from 'vue'
-import { BatchAction, engine, Filter } from '../bridge'
+import { BatchAction, engine } from '../bridge'
 import type { BatchOutcome } from '../bridge'
 import { errorText, failureText, reportError } from '../shared/errors'
 import { formatNumber, t } from '../shared/i18n'
@@ -9,10 +9,12 @@ import { SELECTION_PART } from '../shared/undo'
 import { showTrashUndo } from '../trash/undo'
 import type { useLibrary } from './store'
 import { favouriteBatch } from './favouriteBatch'
+import { useAlbumChanges } from '../albums/changes'
 
 /** Bounded selection mutations keep completed work and report each failed item. */
 export function useSelectionActions(lib: ReturnType<typeof useLibrary>) {
   const favouriteWrites = useFavouriteWrites()
+  const albumChanges = useAlbumChanges()
   const busy = ref(false)
   const stopped = ref(false)
   const total = ref(0)
@@ -58,13 +60,12 @@ export function useSelectionActions(lib: ReturnType<typeof useLibrary>) {
     total.value = ids.length
     const favourite = action === BatchAction.BatchFavourite || action === BatchAction.BatchUnfavourite
     let favourites: ReturnType<typeof favouriteBatch> | undefined
+    let membership: ReturnType<typeof albumChanges.begin> | undefined
     try {
       if (snapshot) await engine.validateSelection(snapshot)
       if (favourite) favourites = favouriteBatch(favouriteWrites, ids, action === BatchAction.BatchFavourite)
-      const albumMembers =
-        album && !favourite
-          ? new Set((await engine.selection({ filter: Filter.FilterAll, album }, [], false)).ids)
-          : new Set<number>()
+      if (action === BatchAction.BatchAlbum || action === BatchAction.BatchRemoveAlbum)
+        membership = albumChanges.begin(album, ids, action === BatchAction.BatchAlbum)
       for (let i = 0; i < ids.length; i += SELECTION_PART) {
         if (isStopped()) {
           outcomes.value = [
@@ -77,7 +78,9 @@ export function useSelectionActions(lib: ReturnType<typeof useLibrary>) {
         try {
           const result = favourites
             ? await favourites.apply(part, isStopped)
-            : await engine.applyBatch(part, action, album)
+            : membership
+              ? await membership.apply(part, isStopped)
+              : await engine.applyBatch(part, action, album)
           outcomes.value = [...outcomes.value, ...result]
         } catch (e) {
           outcomes.value = [...outcomes.value, ...part.map((id) => ({ id, code: '', error: errorText(e) }))]
@@ -93,45 +96,20 @@ export function useSelectionActions(lib: ReturnType<typeof useLibrary>) {
           lib.selected = previousFocus
         })
       } else if (succeeded.length) {
-        const membershipChanged = succeeded.filter((id) =>
-          action === BatchAction.BatchAlbum ? !albumMembers.has(id) : albumMembers.has(id),
-        )
-        if (!favourites?.offer(() => lib.reconcileChanges())) {
-          notify({
-            id: 'library.batch',
-            kind: 'success',
-            title: favourites?.title ?? t('albums.saved'),
-            actions:
-              album && membershipChanged.length
-                ? [
-                    {
-                      label: t('settings.undo'),
-                      run: () => {
-                        void (async () => {
-                          for (let i = 0; i < membershipChanged.length; i += SELECTION_PART) {
-                            const outcomes = await engine.applyBatch(
-                              membershipChanged.slice(i, i + SELECTION_PART),
-                              action === BatchAction.BatchAlbum ? BatchAction.BatchRemoveAlbum : BatchAction.BatchAlbum,
-                              album,
-                            )
-                            const failure = outcomes.find((row) => row.error)
-                            if (failure) throw new Error(failureText(failure.code, failure.error))
-                          }
-                          await lib.trashChanged()
-                        })().catch(reportError)
-                      },
-                    },
-                  ]
-                : undefined,
-          })
-        }
+        const title = favourites?.title ?? t('albums.saved')
+        const offered = favourites
+          ? favourites.offer(() => lib.reconcileChanges())
+          : membership && albumChanges.offer([membership], title)
+        if (!offered) notify({ id: 'library.batch', kind: 'success', title })
       }
     } catch (e) {
       reportError(e)
     } finally {
       favourites?.release()
+      membership?.release()
       busy.value = false
-      await lib.trashChanged()
+      if (membership) await albumChanges.reconcile().catch(reportError)
+      else await lib.trashChanged()
     }
   }
   return {

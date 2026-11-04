@@ -14,6 +14,7 @@ const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>('open', { default: false })
 const draft = ref('')
 const { busy, error, save } = useCorrection(
+  'date',
   () => emit('changed'),
   () => (open.value = false),
 )
@@ -33,32 +34,21 @@ async function apply(restore = false) {
     error.value = t('details.date.invalid')
     return
   }
-  const previous = props.assets.map((asset) => ({
-    id: asset.id,
-    takenAt: asset.takenAt,
-    corrected: !!asset.originalDate,
-  }))
-  const ids = previous.map((asset) => asset.id)
+  const ids = props.assets.map((asset) => asset.id)
   await save(
-    'correct-date',
     t(restore ? 'details.date.restored' : 'details.date.saved'),
+    ids,
     async (current) => {
       if (props.selection) await engine.validateSelection(props.selection)
-      if (
-        !current() ||
-        !open.value ||
-        props.assets.map((asset) => asset.id).join(',') !== previous.map((asset) => asset.id).join(',')
-      )
-        return false
+      if (!current() || !open.value || props.assets.map((asset) => asset.id).join(',') !== ids.join(',')) return false
       if (restore) await engine.restoreTakenAt(ids)
       else if (value !== undefined) await engine.setTakenAt(ids, value)
       return true
     },
-    async () => {
-      for (const asset of previous) {
-        if (asset.corrected) await engine.setTakenAt([asset.id], asset.takenAt)
-        else await engine.restoreTakenAt([asset.id])
-      }
+    (asset) => ({ takenAt: asset.takenAt, corrected: !!asset.originalDate }),
+    async (id, previous) => {
+      if (previous.corrected) await engine.setTakenAt([id], previous.takenAt)
+      else await engine.restoreTakenAt([id])
     },
   )
 }

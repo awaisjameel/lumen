@@ -36,7 +36,9 @@ const open = computed({
         :title="t('undo.expired')"
       />
       <OutcomeList :key="undoOutcomes.id" v-slot="{ item }" :items="undoOutcomes.outcomes">
-        <p :key="item.id" data-undo-item>{{ item.id }}: {{ t(`undo.state.${item.state}`) }} {{ item.error }}</p>
+        <p :key="item.id" data-undo-item>
+          {{ item.label ?? item.id }}: {{ t(`undo.state.${item.state}`) }} {{ item.error }}
+        </p>
       </OutcomeList>
     </template>
     <template v-if="undoOutcomes" #footer>

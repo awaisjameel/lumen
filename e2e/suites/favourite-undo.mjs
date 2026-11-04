@@ -2,9 +2,10 @@
 // the candidate's unchanged favourite service/store. No user media is read.
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
-import { close, launch, lib, resize, search, sleep, unthrottle, waitIndexed } from '../lib/app.mjs'
+import { close, launch, lib, resize, search, unthrottle, waitIndexed } from '../lib/app.mjs'
 import { copyLibrary } from '../lib/fixtures.mjs'
-import { favouriteTrace } from '../lib/favourite-trace.mjs'
+import { mutationTrace } from '../lib/mutation-trace.mjs'
+import { button, dismissNotices, selectAllResults, until } from '../lib/controls.mjs'
 import { E2E, suite } from '../lib/suite.mjs'
 
 const s = suite('favourite-undo')
@@ -28,31 +29,10 @@ function watch(page) {
       external.push(request.url())
   })
 }
-async function until(test, message) {
-  const end = Date.now() + 30_000
-  while (Date.now() < end) {
-    if (await test()) return
-    await sleep(30)
-  }
-  throw new Error(message)
-}
-async function button(page, text, root = '') {
-  const selector = `${root ? `${root} ` : ''}button::-p-text(${text})`
-  await page.waitForSelector(selector, { visible: true })
-  const buttons = await page.$$(selector)
-  for (const element of buttons)
-    if (await element.evaluate((node, text) => node.textContent.trim() === text, text)) {
-      await element.click()
-      return
-    }
-  throw new Error(`missing button: ${text}`)
-}
 async function favouriteAll(page) {
   const clear = await page.$('button[aria-label="Clear selection"]')
   if (clear) await clear.click()
-  await page.click('button[aria-label="Selection options"]')
-  await page.waitForSelector('[role="menuitem"]::-p-text(Select all results)', { visible: true })
-  await page.click('[role="menuitem"]::-p-text(Select all results)')
+  await selectAllResults(page)
   await page.waitForSelector('[data-command="library.favouriteSelection"]', { visible: true })
   await page.click('[data-command="library.favouriteSelection"]')
   await until(async () => (await lib(page, 'Counts')).favourites === N, 'batch favourite did not finish')
@@ -60,9 +40,6 @@ async function favouriteAll(page) {
   await page.waitForFunction(() =>
     [...document.querySelectorAll('button')].some((el) => el.textContent.trim() === 'Undo'),
   )
-}
-async function dismissNotices(page) {
-  for (const close of await page.$$('button[aria-label="Dismiss notification"]')) await close.click()
 }
 async function startFrames(page) {
   await page.evaluate(() => {
@@ -90,7 +67,7 @@ async function measure(label, baselineDir) {
   watch(app.page)
   await lib(app.page, 'SetPaused', true)
   await app.page.waitForSelector('.scroller .cell')
-  trace = await favouriteTrace(app.page, baselineDir)
+  trace = await mutationTrace(app.page, baselineDir)
   if (baselineDir) await app.page.reload()
   await resize(app.page, 1440, 900)
   await app.page.waitForSelector('.scroller .cell')

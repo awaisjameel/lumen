@@ -13,6 +13,8 @@ import {
   BlockKind,
   DateSource,
   engine,
+  ErrorCode,
+  errorCode,
   INSPECTOR_WIDTH_MAX,
   INSPECTOR_WIDTH_MIN,
   isCancelled,
@@ -24,7 +26,7 @@ import {
 } from '../bridge'
 import type { AssetDetail, AssetTag, Face, MediaInspection } from '../bridge'
 import { FileTools } from '../media/lazy'
-import { errorText, logError, orFallback, reportError } from '../shared/errors'
+import { errorText, logError, reportError } from '../shared/errors'
 import { block } from '../shared/block'
 import { bytes, dateTime, duration, megapixels, fileName } from '../shared/format'
 import { t, formatNumber } from '../shared/i18n'
@@ -41,12 +43,14 @@ import MetaRow from '../shared/MetaRow.vue'
 import { usePreferences } from '../shared/preferences'
 import ResizeHandle from '../shared/ResizeHandle.vue'
 import { useLiveReload } from '../shared/liveReload'
+import { refreshAll } from '../shared/listStore'
 import { nameTooLong, trimName } from '../shared/names'
 import FaceThumb from '../people/FaceThumb.vue'
 import PersonPicker from '../people/PersonPicker.vue'
 import { deleteFromDisk } from '../trash/actions'
 import { useLibrary } from './store'
 import { emptyRule, useAlbums } from '../albums/store'
+import { useAlbumChanges } from '../albums/changes'
 import type { Sel } from './store'
 
 const props = defineProps<{ sel: Sel | null }>()
@@ -57,6 +61,7 @@ const [InspectorContent, ReuseInspectorContent] = createReusableTemplate()
 const trigger = document.activeElement
 const loading = ref(false)
 const albums = useAlbums()
+const albumChanges = useAlbumChanges()
 const detail = ref<AssetDetail | null>(null)
 const inspection = ref<MediaInspection | null>(null)
 const filesOpen = ref(false)
@@ -137,7 +142,7 @@ watch(
   { immediate: true },
 )
 
-async function loadDetails(id: number | undefined) {
+async function loadDetails(id: number | undefined, strict = false) {
   inspectionAbort?.abort()
   inspectionAbort = new AbortController()
   const signal = inspectionAbort.signal
@@ -159,7 +164,13 @@ async function loadDetails(id: number | undefined) {
           if (!isCancelled(e)) logError(e)
         })
     }
-    const place = d.placeId ? await orFallback(engine.place(d.placeId), null) : null
+    const place = d.placeId
+      ? await engine.place(d.placeId).catch((e: unknown) => {
+          if (strict && errorCode(e) !== ErrorCode.NotFound) throw e
+          logError(e)
+          return null
+        })
+      : null
     if (request === detailRequest) placeName.value = place?.name ?? ''
   } catch (e) {
     if (request === detailRequest && !isCancelled(e)) {
@@ -169,6 +180,7 @@ async function loadDetails(id: number | undefined) {
       faces.value = []
       albumIDs.value = []
       detailError.value = errorText(e)
+      if (strict) throw e
     }
   } finally {
     if (request === detailRequest) loading.value = false
@@ -182,8 +194,8 @@ useLiveReload(
 // Tags and faces: load with the photo, and again as the library changes
 // while the panel is open (the AI adds tags, finds faces, groups people).
 // A trashed photo can't be edited, so its tags, people and albums are not shown.
-const loadExtras = (id: number | undefined) =>
-  lib.inTrash ? Promise.resolve([]) : Promise.all([loadTags(id), loadFaces(id), loadAlbums(id)])
+const loadExtras = (id: number | undefined, strict = false) =>
+  lib.inTrash ? Promise.resolve() : refreshAll(loadTags(id), loadFaces(id), loadAlbums(id, strict))
 watch(
   () => props.sel?.id,
   (id) => {
@@ -214,7 +226,7 @@ useLiveReload(
 )
 void albums.load().catch(logError)
 
-async function loadAlbums(id: number | undefined) {
+async function loadAlbums(id: number | undefined, strict = false) {
   if (id !== props.sel?.id) return
   const request = ++albumsRequest
   if (!id) {
@@ -226,6 +238,7 @@ async function loadAlbums(id: number | undefined) {
     if (request === albumsRequest) albumIDs.value = got
   } catch (e) {
     logError(e)
+    if (strict && request === albumsRequest && id === props.sel?.id) throw e
   }
 }
 
@@ -239,38 +252,29 @@ function toggleAlbum(albumID: number, checked: boolean | 'indeterminate') {
   if (!assetID || checked === 'indeterminate' || savingAlbums.value.has(albumID)) return
   const include = checked
   const revision = selectionRevision
+  const change = albumChanges.begin(albumID, [assetID], include)
   showInAlbum(albumID, include)
   savingAlbums.value = new Set(savingAlbums.value).add(albumID)
   void edit(
-    () => engine.setAlbumItem(assetID, albumID, include),
     async () => {
-      await Promise.all([loadAlbums(assetID), albums.load()])
+      const rows = await change.apply([assetID])
+      const failure = rows.find((row) => row.error)
+      if (failure) throw new Error(failure.error)
     },
-  ).then((ok) => {
-    // Another photo's boxes are its own: this one's outcome is not theirs.
-    if (revision !== selectionRevision) return
-    if (!ok) showInAlbum(albumID, !include)
-    else
-      notify({
-        id: `album-${assetID}-${albumID}`,
-        kind: 'success',
-        title: t('details.album.saved'),
-        actions: [
-          {
-            label: t('settings.undo'),
-            run: () =>
-              void engine
-                .setAlbumItem(assetID, albumID, !include)
-                .then(() => loadAlbums(assetID))
-                .then(() => albums.load())
-                .catch(reportError),
-          },
-        ],
-      })
-    const saving = new Set(savingAlbums.value)
-    saving.delete(albumID)
-    savingAlbums.value = saving
-  })
+    () => albumChanges.reconcile().catch(reportError),
+  )
+    .then((ok) => {
+      if (ok && !albumChanges.offer([change], t('details.album.saved')))
+        notify({ id: `album-${assetID}-${albumID}`, kind: 'success', title: t('details.album.saved') })
+      // A late completion only refreshes the current inspector; it never puts
+      // the original photo's boxes back onto another selected photo.
+      if (revision !== selectionRevision) return
+      if (!ok) showInAlbum(albumID, !include)
+      const saving = new Set(savingAlbums.value)
+      saving.delete(albumID)
+      savingAlbums.value = saving
+    })
+    .finally(change.release)
 }
 
 async function createAlbumForItem() {
@@ -481,6 +485,13 @@ async function notThem(face: Face) {
         : [],
     })
 }
+
+onBeforeUnmount(
+  lib.onReconcile(() => {
+    const id = props.sel?.id
+    return refreshAll(loadDetails(id, true), loadExtras(id, true))
+  }),
+)
 
 async function correctionsChanged() {
   await loadDetails(props.sel?.id)

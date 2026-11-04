@@ -246,8 +246,10 @@ that parent head. Its accepted scope, before implementation:
 - Classify and reproduce partial inverses in selection album actions,
   `details/AlbumPicker`, date/place correction sequences and the adjacent
   `AlbumPhotoPicker`. Single date/place forward calls are atomic store writes;
-  their per-asset inverse sequences can commit before a later call fails.
-  The photo picker also loses its Undo offer after a partial forward success.
+  their array-based component inverse sequences can commit before a later call
+  fails. The current details-panel UI opens date/place for one asset; no bulk
+  correction control is added or claimed. The photo picker also loses its Undo
+  offer after a partial forward success.
 - Reuse the session-local inverse/outcome/dialog owner from #40. Add per-item
   units for heterogeneous corrections, accurate failed/cancelled outcomes,
   failed-only retry, cancelled-item resume and independent refresh recovery.
@@ -275,6 +277,34 @@ that parent head. Its accepted scope, before implementation:
   Add real-control native partial-failure/retry/navigation/restart acceptance,
   fresh applicable Go/frontend/build/static/performance checks and living-guide
   evidence. Preserve #36 event-name semantics and #40 favourite acceptance.
+
+### #41 implementation checkpoint
+
+The focused before-repair regressions fail for selection membership, the
+multi-album details picker and array-based date/place inverses. The photo
+picker also omits Undo for the subset committed before a forward failure.
+The correction forward calls are atomic, and the production details panel
+opens each correction for one photo; array tests establish component recovery
+without claiming a bulk correction UI.
+
+The implementation reuses the #40 outcome owner with typed compound identities
+and one-item heterogeneous units. Membership capture now comes from the
+canonical SQL mutation's committed `changed` result, including no-op/repeated
+targets, with regenerated bindings. One field/album turn registry serves all
+membership controls, corrections and favourite controls. Deletion retires old
+album leases before ID reuse. Current metadata is captured beside correction
+writes; original/user provenance and self-covering correction admission remain
+unchanged. Reconciliation waits for the selected day's lazy rows before reading
+the current inspector, and read failures retain independent retry.
+
+Local regression coverage includes partial success, failed-only retry,
+cancellation/resume, composite identities, no-op/newer edits, ID reuse,
+unconfirmed submitted subsets, stale correction props, refresh-only retry and
+current inspector failure/selection settlement. Native Windows acceptance and
+fresh full-tree gates are pending; the new `undo-recovery` real-control suite
+covers partial membership inverses, navigation, provenance, self-coverage,
+album deletion/replacement and restart. No parent completion, installer or
+machine-independent performance acceptance is claimed by this checkpoint.
 
 ## First milestone: collection recovery and event name Undo
 
