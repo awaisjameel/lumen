@@ -20,10 +20,10 @@ is the integration branch for #31, created from `main` at `bae949c`.
 - Review and merge accepted child PRs into the integration branch. Keep
   implementation/verification status distinct from delivery to `main`;
   merging a child PR does not complete #31 or establish a shipped release.
-- After all accepted #31 work and its verification gates are complete, open
-  one PR from `feat/31-feature-completion` to `main`. Record the accepted
-  scope, child PRs, final validation and explicit deferrals in that PR.
-  Until then, child PRs target the integration branch and the final PR waits.
+- After all accepted #31 work and its verification gates are complete, notify
+  the owner to review `feat/31-feature-completion`. Record the accepted scope,
+  child PRs, validation and explicit deferrals for that review. Do not create
+  or merge a final PR to `main` without further instructions.
 
 The existing CI workflow checks pull requests regardless of their base branch,
 so child PRs retain the same checks. The open latency gate below still applies
@@ -394,48 +394,52 @@ was bypassed. Hosted budget overruns remain: unblocked `SaveEmbeddings64`
 126.181/70 ms and `SaveFaces64` unblocked/folder 8.231/8 and 7.890/7 ms. The
 parent performance gate remains open.
 
-[#43](https://github.com/awaisjameel/lumen/issues/43) starts from that parent on
-`fix/43-tagging-follow-up`. Before implementation, trace and reproduce the
-single-item commit/queue/UI sequence with the existing SQLite queue-failure
-fixture used by the bulk service regression. Distinguish pre-commit failure,
-post-commit cancellation and background failure. Preserve user drafts on real
-mutation failures and reload confirmed annotations immediately.
+### #43: Truthful tagging and owned text scheduling recovery
 
-The durable input is persisted tag eligibility; the existing OCR queue
-reconciles it at startup, but currently makes only one attempt. The proposed
-repair must preserve that source of truth, coalesce owned retry requests under
-the indexer lifetime, retry failed startup reconciliation and retain opt-in,
-pause/privacy and stage ownership. It must not replay annotations or add a
-second annotation journal. Single/bulk services share one post-commit outcome
-policy; background diagnostics and activity feedback must remain truthful.
-Select the final repair only after fault/native UI reproduction, then verify
-recovery both in-session and across restart with the queue fault held.
+Accepted scope, recorded before implementation: reproduce the single-item
+commit/queue/UI sequence, distinguish pre-commit failure from post-commit
+cancellation or scheduling failure, and preserve drafts only for genuine
+mutation failures. Recover from persisted eligibility under the indexer
+lifetime, with current opt-ins/corrections and truthful activity feedback.
+No second annotation journal or annotation replay is introduced.
 
 The original behaviour is reproduced at `c218f19` in
 [run 41883020481](https://github.com/awaisjameel/lumen/actions/runs/41883020481),
 artifact `13350513665`. A real Details-panel save first rejects an annotation
 write and preserves its draft; a second attempt commits `Screenshots/user`
 while the injected OCR INSERT failure returns HTTP 422. The modal remains open
-with **Something went wrong: queue unavailable**, and the activity card says
-**Up to date** despite the missing job. Service race regressions independently
-fail for both that post-commit fault and post-commit cancellation; the bulk and
-pre-commit controls pass. Production build/bindings/modules and static/frontend
-checks pass on that reproduction head. This is baseline evidence, not acceptance.
+with **Something went wrong: queue unavailable**, and activity says **Up to
+date** despite the missing job. Service race regressions independently fail
+for that fault and post-commit cancellation; bulk/pre-commit controls pass.
 
-The repair now shares the committed-outcome policy, adds one indexer-owned
-coalesced scheduling retry loop and optional typed progress feedback, and
-preserves saved eligibility as the recovery source. Startup retries its own
-failed reconciliation; opt-in changes and scheduling take turns, while stage
-processing retains its existing pause controls. Local Details/activity tests,
-frontend checks and targeted store race/vet checks pass. Native acceptance is
-pending for two distinct documents: in-session recovery, then a second fault
-held across restart, followed by actual OCR and persistence checks. No fixture
-replays annotations or downloads runtime models.
+The implementation in [PR #50](https://github.com/awaisjameel/lumen/pull/50)
+starts from parent `e0ddcabc`. Single and bulk tagging share one committed
+outcome policy. The indexer owns one coalesced recovery loop, retries failed
+startup reconciliation and serialises scheduling with opt-in changes.
+`passState` reuses the XMP pass's cancellable admission and wake-up mechanism;
+its two owners retain separate state and policy. Recovery reads current store
+eligibility and hands work to durable OCR jobs. Healthy idle libraries do no
+periodic scheduling query; pause continues to control processing. Optional
+canonical progress feedback explains automatic retry and local reporting.
 
-The baseline also exposes two harness races: an animated album menu item is
-not yet clickable, and keyboard selection's asynchronous day load has not
-settled before its focus assertion. Stable locators and an observable focus
-wait retain the same acceptance assertions; fresh native results are required.
+At `5020a8d`, [run 41901058715](https://github.com/awaisjameel/lumen/actions/runs/41901058715)
+passes the Windows production build, clean bindings/modules, static/docs checks,
+all 1,019 frontend tests and all Go race shards. Native tagging establishes
+successful committed saves, failed-write draft retention, in-session recovery,
+a second fault held across restart, real recognised text and persistence without
+duplicating annotations. Its initial activity assertion reads before the next
+coalesced event and fails (16/17); artifact `13357874526` preserves that evidence.
+The refined suite waits for rendered retry feedback, measures its arrival and
+also verifies its removal after recovery. This retains the product assertions.
+Native Undo passes 20/20, favourite Undo 22/22 and history 7/7 in that run.
+
+The native suite uses two generated documents in a scratch library. No fixture
+replays annotations, touches originals or downloads runtime models. The same
+acceptance suite retains stable menu geometry and waits for asynchronous grid
+selection before checking focus. Final current-head verification and artifact
+references are recorded in PR #50 and [issue #43](https://github.com/awaisjameel/lumen/issues/43);
+only a verified child is merged into the parent. The parent hardware performance
+gate remains open and its budgets are unchanged.
 
 ## First milestone: collection recovery and event name Undo
 
