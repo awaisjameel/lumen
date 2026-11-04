@@ -377,6 +377,40 @@ holds a real inspection while blocking its target, making the discovered
 visibility refusal deterministic rather than dependent on timing. Full native
 acceptance of that harness refinement remains pending.
 
+### #41 integration and #43 scope
+
+[#41](https://github.com/awaisjameel/lumen/issues/41) is integrated through
+[PR #49](https://github.com/awaisjameel/lumen/pull/49), parent `e0ddcabc`, tested
+head `845ca6a`. Native recovery passes 20/20, favourite Undo 22/22 and history
+7/7 in [run 41875612779](https://github.com/awaisjameel/lumen/actions/runs/41875612779).
+The held inspection returns the real typed `not_found` refusal; no unexpected
+frontend error or external request is recorded. Reports/screenshots are in
+artifact `13348670335`. All 1,017 frontend tests, clean Windows production
+build/bindings/modules, static/docs checks and all Go race command logs pass.
+Every job step, including cleanup, reports completed/success (or intentional
+skipped); three job summaries were still finalising after the Actions incident
+at merge. No test/build/cleanup step remained pending, and no check or protection
+was bypassed. Hosted budget overruns remain: unblocked `SaveEmbeddings64`
+126.181/70 ms and `SaveFaces64` unblocked/folder 8.231/8 and 7.890/7 ms. The
+parent performance gate remains open.
+
+[#43](https://github.com/awaisjameel/lumen/issues/43) starts from that parent on
+`fix/43-tagging-follow-up`. Before implementation, trace and reproduce the
+single-item commit/queue/UI sequence with the existing SQLite queue-failure
+fixture used by the bulk service regression. Distinguish pre-commit failure,
+post-commit cancellation and background failure. Preserve user drafts on real
+mutation failures and reload confirmed annotations immediately.
+
+The durable input is persisted tag eligibility; the existing OCR queue
+reconciles it at startup, but currently makes only one attempt. The proposed
+repair must preserve that source of truth, coalesce owned retry requests under
+the indexer lifetime, retry failed startup reconciliation and retain opt-in,
+pause/privacy and stage ownership. It must not replay annotations or add a
+second annotation journal. Single/bulk services share one post-commit outcome
+policy; background diagnostics and activity feedback must remain truthful.
+Select the final repair only after fault/native UI reproduction, then verify
+recovery both in-session and across restart with the queue fault held.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:
