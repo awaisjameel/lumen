@@ -411,6 +411,32 @@ policy; background diagnostics and activity feedback must remain truthful.
 Select the final repair only after fault/native UI reproduction, then verify
 recovery both in-session and across restart with the queue fault held.
 
+The original behaviour is reproduced at `c218f19` in
+[run 41883020481](https://github.com/awaisjameel/lumen/actions/runs/41883020481),
+artifact `13350513665`. A real Details-panel save first rejects an annotation
+write and preserves its draft; a second attempt commits `Screenshots/user`
+while the injected OCR INSERT failure returns HTTP 422. The modal remains open
+with **Something went wrong: queue unavailable**, and the activity card says
+**Up to date** despite the missing job. Service race regressions independently
+fail for both that post-commit fault and post-commit cancellation; the bulk and
+pre-commit controls pass. Production build/bindings/modules and static/frontend
+checks pass on that reproduction head. This is baseline evidence, not acceptance.
+
+The repair now shares the committed-outcome policy, adds one indexer-owned
+coalesced scheduling retry loop and optional typed progress feedback, and
+preserves saved eligibility as the recovery source. Startup retries its own
+failed reconciliation; opt-in changes and scheduling take turns, while stage
+processing retains its existing pause controls. Local Details/activity tests,
+frontend checks and targeted store race/vet checks pass. Native acceptance is
+pending for two distinct documents: in-session recovery, then a second fault
+held across restart, followed by actual OCR and persistence checks. No fixture
+replays annotations or downloads runtime models.
+
+The baseline also exposes two harness races: an animated album menu item is
+not yet clickable, and keyboard selection's asynchronous day load has not
+settled before its focus assertion. Stable locators and an observable focus
+wait retain the same acceptance assertions; fresh native results are required.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

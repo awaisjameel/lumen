@@ -715,21 +715,22 @@ var (
 
 // Progress is the payload of the index:progress event.
 type Progress struct {
-	Scanning  bool    `json:"scanning"`
-	ScanPath  string  `json:"scanPath"`  // the folder being looked through, while scanning
-	ScanSeen  int     `json:"scanSeen"`  // photos and videos found in it so far
-	Total     int     `json:"total"`     // assets in the library
-	Metadata  int     `json:"metadata"`  // assets still waiting for metadata
-	Thumbnail int     `json:"thumbnail"` // assets still waiting for thumbnails
-	Embedding int     `json:"embedding"` // photos still waiting for the AI
-	Faces     int     `json:"faces"`     // photos still waiting for face recognition
-	Videos    int     `json:"videos"`    // videos still waiting for the AI or face recognition
-	OCR       int     `json:"ocr"`       // photos still waiting for their text to be read
-	Working   Working `json:"working"`   // the stages at work right now; the rest wait their turn
-	Errors    int     `json:"errors"`
-	Skipped   int     `json:"skipped"`
-	Paused    bool    `json:"paused"`
-	OnBattery bool    `json:"onBattery"` // AI work is waiting for mains power
+	Scanning      bool    `json:"scanning"`
+	ScanPath      string  `json:"scanPath"`                // the folder being looked through, while scanning
+	ScanSeen      int     `json:"scanSeen"`                // photos and videos found in it so far
+	Total         int     `json:"total"`                   // assets in the library
+	Metadata      int     `json:"metadata"`                // assets still waiting for metadata
+	Thumbnail     int     `json:"thumbnail"`               // assets still waiting for thumbnails
+	Embedding     int     `json:"embedding"`               // photos still waiting for the AI
+	Faces         int     `json:"faces"`                   // photos still waiting for face recognition
+	Videos        int     `json:"videos"`                  // videos still waiting for the AI or face recognition
+	OCR           int     `json:"ocr"`                     // photos still waiting for their text to be read
+	OCRQueueRetry bool    `json:"ocrQueueRetry,omitempty"` // saved eligibility is waiting for scheduling to recover
+	Working       Working `json:"working"`                 // the stages at work right now; the rest wait their turn
+	Errors        int     `json:"errors"`
+	Skipped       int     `json:"skipped"`
+	Paused        bool    `json:"paused"`
+	OnBattery     bool    `json:"onBattery"` // AI work is waiting for mains power
 	// Waiting is why every stage waits for the PC, though not paused:
 	// WaitNone when nothing holds them.
 	Waiting WaitReason `json:"waiting"`

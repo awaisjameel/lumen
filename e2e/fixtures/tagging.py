@@ -16,7 +16,10 @@ def document(folder: Path) -> None:
     font = ImageFont.truetype(str(font_file), 72) if font_file.exists() else ImageFont.load_default(size=72)
     draw.text((80, 120), "INVOICE LUMEN", fill="black", font=font)
     draw.text((80, 250), "Payment received", fill="black", font=font)
-    image.save(folder / "document.png")
+    for number in (1, 2):
+        copy = image.copy()
+        ImageDraw.Draw(copy).text((80, 400), f"Reference {number}", fill="black", font=font)
+        copy.save(folder / f"document-{number}.png")
 
 
 def library(path: Path, action: str, asset: int) -> None:
@@ -24,7 +27,7 @@ def library(path: Path, action: str, asset: int) -> None:
         db.create_function("fold", 1, lambda text: str(text).casefold(), deterministic=True)
         if action == "prepare":
             # Only the fixture's AI guesses are removed, before manual tagging.
-            db.execute("DELETE FROM asset_tags WHERE asset_id = ? AND source = 'ai'", (asset,))
+            db.execute("DELETE FROM asset_tags WHERE source = 'ai'")
         elif action == "refuse-tag":
             db.execute("""CREATE TRIGGER refuse_tag_write BEFORE INSERT ON asset_tags
                 WHEN NEW.source = 'user' BEGIN SELECT RAISE(ABORT, 'tag write unavailable'); END""")

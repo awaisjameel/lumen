@@ -73,6 +73,7 @@ const label = computed(() => {
   const task = shown.value
   if (paused.value) return t('status.paused')
   if (waiting.value) return t(`status.wait.${waiting.value}`)
+  if (!task && p.value?.ocrQueueRetry) return t('status.ocrRetry')
   if (!task)
     return p.value?.ai.error ? t('status.aiOff') : p.value?.ai.facesError ? t('status.peopleOff') : t('status.upToDate')
   if (!task.now && onBattery.value && isAI(task.kind)) return t('status.battery')
@@ -175,7 +176,7 @@ watch(expanded, (open) => {
         <span class="line"
           ><span
             class="lumen-light-dot"
-            :class="{ idle: !list.length && !stopped, paused: stopped }"
+            :class="{ idle: !list.length && !stopped && !p.ocrQueueRetry, paused: stopped || p.ocrQueueRetry }"
             aria-hidden="true"
           /><span class="label" role="status">{{ label }}</span></span
         >
@@ -194,7 +195,10 @@ watch(expanded, (open) => {
       <template #content>
         <section :id="id" class="queue" :aria-label="t('status.details')" data-activity-details>
           <header class="queue-head">
-            <span class="lumen-light-dot" :class="{ idle: !list.length && !stopped, paused: stopped }" />
+            <span
+              class="lumen-light-dot"
+              :class="{ idle: !list.length && !stopped && !p.ocrQueueRetry, paused: stopped || p.ocrQueueRetry }"
+            />
             <h2>{{ label }}</h2>
             <IconButton
               :icon="icons.close"
@@ -223,6 +227,13 @@ watch(expanded, (open) => {
           </p>
           <p v-else-if="waiting" class="note" data-wait-note>{{ t(`status.waitNote.${waiting}`) }}</p>
           <p v-else-if="onBattery" class="note" data-wait-note>{{ t('status.batteryNote') }}</p>
+          <div v-if="p.ocrQueueRetry" class="notice" data-ocr-retry>
+            <p>
+              <strong>{{ t('status.ocrRetry') }}</strong>
+              <span>{{ t('status.ocrRetryHint') }}</span>
+            </p>
+            <UButton to="/settings?section=about" color="neutral" variant="outline">{{ t('status.settings') }}</UButton>
+          </div>
           <div v-if="p.ai.error || p.ai.facesError" class="notice">
             <p v-if="p.ai.error">
               <strong>{{ t('status.aiOff') }}</strong

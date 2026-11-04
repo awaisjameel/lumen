@@ -101,7 +101,12 @@ tracks that work. Recheck these instructions and the People screenshots after it
 ## Correct Things and make albums
 
 Open a photo's details to add a manual tag such as `Weekend`, or remove an
-incorrect Thing. A manual correction overrides AI tagging. On **Things**, a
+incorrect Thing. A manual correction overrides AI tagging. If scheduling text
+reading fails after a tag saves, the tag appears immediately and the activity
+card says **Text reading will retry**. Lumen retries automatically, including
+after a restart. If the notice persists, follow **Review Settings** to save a
+local problem report. A failed tag save keeps your draft for another attempt.
+On **Things**, a
 custom label such as `red bicycle` searches the existing library immediately;
 it is a semantic prompt, not a newly trained model. The confidence control in
 **AI and search** changes automatic matching without rescanning files.

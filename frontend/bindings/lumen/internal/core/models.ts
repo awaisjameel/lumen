@@ -1685,6 +1685,11 @@ export interface Progress {
     "ocr": number;
 
     /**
+     * saved eligibility is waiting for scheduling to recover
+     */
+    "ocrQueueRetry"?: boolean;
+
+    /**
      * the stages at work right now; the rest wait their turn
      */
     "working": Working;

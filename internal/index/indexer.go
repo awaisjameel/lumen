@@ -86,12 +86,13 @@ type Indexer struct {
 	onScanTurn func()                  // a test's hook, called when a scan has its turn; nil otherwise
 	before     []func(context.Context) // run before the first scan (BeforeFirstScan); guarded by mu
 
-	encoder *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
-	faces   *model[*ai.Faces]        // YuNet and SFace, while their stage has work
-	ocr     *model[textReader]       // PP-OCRv5's detector and recogniser, while their stage has work
-	pixels  decoded                  // photos the thumbnail stage decoded for the faces stage
-	cpu     *cpuBudget               // the CPU threads the stages' heavy work shares
-	xmp     xmpState                 // the XMP sidecar pass's lock and wake-up
+	encoder  *model[*ai.ImageEncoder] // SigLIP's image tower, while its stage has work
+	faces    *model[*ai.Faces]        // YuNet and SFace, while their stage has work
+	ocr      *model[textReader]       // PP-OCRv5's detector and recogniser, while their stage has work
+	pixels   decoded                  // photos the thumbnail stage decoded for the faces stage
+	cpu      *cpuBudget               // the CPU threads the stages' heavy work shares
+	xmp      xmpState                 // the XMP sidecar pass's lock and wake-up
+	ocrQueue ocrQueueState            // serialises scheduling and owns coalesced retries
 
 	videoEmbedRetry stageBackoff // used only by the video coordinator
 	videoFaceRetry  stageBackoff
@@ -100,21 +101,22 @@ type Indexer struct {
 
 	rescanMu sync.Mutex // one RescanAll at a time, so the watchers match the sources
 
-	mu         sync.Mutex
-	resume     chan struct{} // closed (and replaced) whenever a hold may have lifted
-	focus      *store.TimeRange
-	paused     bool
-	pcState    // what else holds the stages: battery, full screen, a busy PC, idle-only (politeness.go)
-	aiDevice   core.Device
-	aiError    string
-	facesError string
-	scanning   bool
-	scanPath   string          // the folder the running scan looks through
-	scanSeen   int             // the media files it has found so far
-	pendingFS  map[string]bool // changed paths waiting for the debounce
-	fsSince    time.Time       // when the oldest of them arrived
-	fsDue      time.Time       // the next flush's deadline (mu)
-	watchStop  context.CancelFunc
+	mu            sync.Mutex
+	resume        chan struct{} // closed (and replaced) whenever a hold may have lifted
+	focus         *store.TimeRange
+	paused        bool
+	pcState       // what else holds the stages: battery, full screen, a busy PC, idle-only (politeness.go)
+	aiDevice      core.Device
+	aiError       string
+	facesError    string
+	ocrQueueRetry bool // scheduling failed; guarded by mu, like the rest of progress
+	scanning      bool
+	scanPath      string          // the folder the running scan looks through
+	scanSeen      int             // the media files it has found so far
+	pendingFS     map[string]bool // changed paths waiting for the debounce
+	fsSince       time.Time       // when the oldest of them arrived
+	fsDue         time.Time       // the next flush's deadline (mu)
+	watchStop     context.CancelFunc
 
 	// Set by whoever changes things and cleared by reportLoop, which only then
 	// recomputes progress, so an idle library costs no queries.
@@ -354,15 +356,6 @@ func (ix *Indexer) Start(ctx context.Context) {
 			slog.Info("re-running stages after an upgrade", "jobs", n)
 			ix.wakeStages()
 		}
-		// Photos that became screenshots or documents while nothing was
-		// watching (a changed tag confidence, a tag the user added) still get
-		// their text read.
-		if n, err := ix.store.QueueOCR(ctx); err != nil {
-			slog.Error("queue text reading", "err", err)
-		} else if n > 0 {
-			slog.Info("queued photos for text reading", "photos", n)
-			nudge(ix.wakeOCR)
-		}
 		for _, before := range ix.beforeScan() {
 			before(ctx)
 		}
@@ -437,6 +430,7 @@ func (ix *Indexer) Start(ctx context.Context) {
 		})
 	}
 	ix.run(func() { ix.sourceLoop(ctx) })
+	ix.run(func() { ix.runOCRQueue(ctx, retryDelay) })
 	ix.run(func() { ix.reportLoop(ctx) })
 	ix.run(func() { ix.pcLoop(ctx) })
 	ix.run(func() { ix.thumbCacheLoop(ctx) })
@@ -1026,7 +1020,7 @@ func (ix *Indexer) reportLoop(ctx context.Context) {
 		wait = max(time.Second, 4*time.Since(start))
 		ix.mu.Lock()
 		idle := !p.Scanning && len(ix.scanReqs) == 0 && len(ix.pendingFS) == 0 && ix.working.Load() == 0 &&
-			p.Metadata == 0 && p.Thumbnail == 0 && p.Embedding == 0 && p.Faces == 0 && p.Videos == 0 && p.OCR == 0
+			p.Metadata == 0 && p.Thumbnail == 0 && p.Embedding == 0 && p.Faces == 0 && p.Videos == 0 && p.OCR == 0 && !p.OCRQueueRetry
 		ix.mu.Unlock()
 		if idle && !wasIdle {
 			started := time.Now()
@@ -1067,10 +1061,11 @@ func (ix *Indexer) Progress(ctx context.Context) core.Progress {
 	ix.mu.Lock()
 	p := core.Progress{
 		Scanning: ix.scanning, ScanPath: ix.scanPath, ScanSeen: ix.scanSeen, Paused: ix.paused,
-		Working:   ix.workingNow(),
-		OnBattery: ix.aiWaitsForMains(), // narrowed below to the AI that is there
-		Waiting:   ix.waiting(),
-		AI:        core.AI{Device: ix.aiDevice, Error: ix.aiError, FacesError: ix.facesError},
+		Working:       ix.workingNow(),
+		OCRQueueRetry: ix.ocrQueueRetry,
+		OnBattery:     ix.aiWaitsForMains(), // narrowed below to the AI that is there
+		Waiting:       ix.waiting(),
+		AI:            core.AI{Device: ix.aiDevice, Error: ix.aiError, FacesError: ix.facesError},
 	}
 	ix.mu.Unlock()
 	if c, err := ix.store.JobCounts(ctx); err == nil {

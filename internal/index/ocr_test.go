@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"image"
@@ -64,6 +65,89 @@ func (f *fakeReader) widths() []int {
 }
 
 func line(text string) ai.OCRLine { return ai.OCRLine{Text: text, Conf: 0.9} }
+
+// newOCRQueueFault leaves a committed eligible annotation whose scheduling
+// fails. The fixture needs no models or original files to reconcile it.
+func newOCRQueueFault(t *testing.T) (*Indexer, func()) {
+	t.Helper()
+	f := newThumbFixture(t, 1)
+	ctx := t.Context()
+	check(t, f.st.SyncVocabulary(ctx, []store.VocabLabel{
+		{Name: "Screenshots", Prompts: []string{"a screenshot"}, Exclusive: true},
+	}))
+	check(t, f.ix.SetOCR(ctx, true))
+	tag, _, err := f.st.TagByName(ctx, "Screenshots")
+	check(t, err)
+	check(t, f.st.TagAsset(ctx, 1, tag))
+	raw, err := sql.Open("sqlite3", f.ix.paths.DBPath)
+	check(t, err)
+	t.Cleanup(func() { raw.Close() })
+	_, err = raw.ExecContext(ctx, `CREATE TRIGGER refuse_ocr_queue BEFORE INSERT ON asset_jobs
+		WHEN NEW.stage = 'ocr' BEGIN SELECT RAISE(ABORT, 'queue unavailable'); END`)
+	check(t, err)
+	return f.ix, func() {
+		_, err := raw.ExecContext(ctx, "DROP TRIGGER refuse_ocr_queue")
+		check(t, err)
+	}
+}
+
+func TestOwnedOCRReconciliationRecoversStartupAndCancelledScheduling(t *testing.T) {
+	ix, recoverQueue := newOCRQueueFault(t)
+	ix.rootCtx, ix.cancel = context.WithCancel(t.Context())
+	ix.run(func() { ix.runOCRQueue(ix.rootCtx, 10*time.Millisecond) })
+	t.Cleanup(ix.Stop)
+	eventually(t, "failed startup scheduling feedback", func() bool { return ix.Progress(t.Context()).OCRQueueRetry })
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := ix.QueueOCR(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled scheduling = %v", err)
+	}
+	recoverQueue()
+	eventually(t, "owned recovery after the caller ended", func() bool {
+		p := ix.Progress(t.Context())
+		return p.OCR == 1 && !p.OCRQueueRetry
+	})
+	tags, err := ix.store.AssetTags(t.Context(), 1, core.TagConfidenceDefault)
+	check(t, err)
+	if len(tags) != 1 || tags[0].Source != core.TagByUser {
+		t.Fatalf("recovered annotations = %+v", tags)
+	}
+}
+
+func TestTurningOCROffClearsFailedSchedulingWithoutLosingTheAnnotation(t *testing.T) {
+	ix, _ := newOCRQueueFault(t)
+	if err := ix.QueueOCR(t.Context()); err == nil {
+		t.Fatal("scheduling fault was not reached")
+	}
+	if !ix.Progress(t.Context()).OCRQueueRetry {
+		t.Fatal("failed scheduling has no recovery feedback")
+	}
+	check(t, ix.SetOCR(t.Context(), false))
+	if p := ix.Progress(t.Context()); p.OCRQueueRetry || p.OCR != 0 {
+		t.Fatalf("opt-out left scheduling feedback or jobs: %+v", p)
+	}
+	check(t, ix.QueueOCR(t.Context())) // The failed INSERT must not be reached while off.
+	tags, err := ix.store.AssetTags(t.Context(), 1, core.TagConfidenceDefault)
+	check(t, err)
+	if len(tags) != 1 || tags[0].Source != core.TagByUser {
+		t.Fatalf("opt-out changed annotations: %+v", tags)
+	}
+}
+
+func TestStopCancelsAndWaitsForPendingOCRSchedulingRecovery(t *testing.T) {
+	ix, _ := newOCRQueueFault(t)
+	ix.rootCtx, ix.cancel = context.WithCancel(t.Context())
+	ix.run(func() { ix.runOCRQueue(ix.rootCtx, time.Hour) })
+	t.Cleanup(ix.Stop)
+	eventually(t, "pending scheduling retry", func() bool { return ix.Progress(t.Context()).OCRQueueRetry })
+	done := make(chan struct{})
+	go func() { ix.Stop(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not cancel and wait for scheduling recovery")
+	}
+}
 
 func writePNG(t *testing.T, path string, w, h int) {
 	t.Helper()

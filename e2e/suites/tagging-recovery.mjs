@@ -17,9 +17,10 @@ const external = []
 let app
 let phase = 'fixture'
 let asset
+let assets
 let failure
-function fixture(action) {
-  const output = execFileSync(process.env.PYTHON ?? 'python', [helper, action, action === 'document' ? photos : db, String(asset ?? 0)],
+function fixture(action, id = asset) {
+  const output = execFileSync(process.env.PYTHON ?? 'python', [helper, action, action === 'document' ? photos : db, String(id ?? 0)],
     { encoding: 'utf8' })
   return action === 'state' ? JSON.parse(output) : undefined
 }
@@ -43,6 +44,9 @@ async function selectDocument(page) {
   const details = 'button[aria-label="Details"]'
   if ((await page.$eval(details, (el) => el.getAttribute('aria-pressed'))) !== 'true') await page.locator(details).click()
   await page.waitForSelector('.inspector-body [data-edit-date]')
+  const name = (await lib(page, 'Asset', asset)).paths[0].split(/[\\/]/).at(-1)
+  await until(() => page.$eval('.preview-caption h3', (el, name) => el.textContent.trim() === name, name),
+    'the inspector did not settle on the document')
 }
 async function submitTag(page) {
   const response = page.waitForResponse((reply) => {
@@ -52,9 +56,17 @@ async function submitTag(page) {
   })
   await button(page, 'Add tag', '[role="dialog"]')
   const reply = await response
-  observations.push({ phase, status: reply.status(), response: await reply.text(), persisted: fixture('state') })
-  await until(() => page.evaluate(() => !document.querySelector('[role="dialog"] button[disabled][data-loading="true"]')),
-    'tag save did not settle')
+  await until(() => page.evaluate(() => {
+    const save = [...document.querySelectorAll('[role="dialog"] button')].find((el) => el.textContent.trim() === 'Add tag')
+    return !save || !save.disabled
+  }), 'tag save did not settle')
+  observations.push({ phase, status: reply.status(), response: await reply.text(), persisted: fixture('state'),
+    ui: await page.evaluate(() => ({
+      draft: document.querySelector('[data-tag-draft]')?.value,
+      error: document.querySelector('[role="dialog"] [role="alert"]')?.textContent,
+      tags: document.querySelector('.inspector-body')?.textContent,
+    })),
+  })
   return reply.status()
 }
 try {
@@ -63,10 +75,11 @@ try {
   watch(app.page)
   await unthrottle(app.page)
   await lib(app.page, 'AddSources', [photos])
-  await waitIndexed(app.page, { ai: true, atLeast: 1, timeout: 180_000, log: console.log })
+  await waitIndexed(app.page, { ai: true, atLeast: 2, timeout: 180_000, log: console.log })
   await lib(app.page, 'SetPaused', true)
-  asset = (await lib(app.page, 'Selection', { filter: '' }, [], false)).ids[0]
-  s.must('the synthetic document is indexed', Number.isInteger(asset), asset)
+  assets = (await lib(app.page, 'Selection', { filter: '' }, [], false)).ids
+  asset = assets[0]
+  s.must('two distinct synthetic documents are indexed', assets.length === 2 && assets.every(Number.isInteger), assets)
   await close(app)
   app = undefined
   fixture('prepare')
@@ -98,6 +111,23 @@ try {
   await app.page.screenshot({ path: join(s.out, 'committed-tag-retry.png') })
   await app.page.keyboard.press('Escape')
 
+  phase = 'in-session scheduling recovery'
+  fixture('allow-queue')
+  await until(() => fixture('state').ocr.length === 1, 'the in-session retry did not queue persisted eligibility')
+  await until(async () => !(await lib(app.page, 'Progress')).ocrQueueRetry, 'in-session recovery did not clear retry feedback')
+  s.check('scheduling recovers independently of paused processing', (await lib(app.page, 'Progress')).paused && fixture('state').text === '')
+  s.check('in-session recovery preserves exactly one user annotation', fixture('state').tags.filter(([name, source]) => name === 'Screenshots' && source === 'user').length === 1)
+
+  phase = 'a second committed tag and refused queue'
+  asset = assets[1]
+  fixture('refuse-queue')
+  await selectDocument(app.page)
+  await button(app.page, 'Add a tag…', '.inspector-body')
+  await app.page.locator('[data-tag-draft]').fill('Screenshots')
+  s.must('another committed annotation remains a successful save', await submitTag(app.page) === 200, observations.at(-1))
+  await until(() => app.page.evaluate(() => !document.querySelector('[data-tag-draft]')), 'the second committed editor did not close')
+  await until(async () => (await lib(app.page, 'Progress')).ocrQueueRetry === true, 'the second follow-up was not retained')
+
   phase = 'restart with queue fault still present'
   await restart()
   s.check('restart preserves exactly one user annotation', fixture('state').tags.filter(([name, source]) => name === 'Screenshots' && source === 'user').length === 1)
@@ -107,10 +137,13 @@ try {
   await until(async () => !(await lib(app.page, 'Progress')).ocrQueueRetry, 'successful scheduling did not clear retry feedback')
   s.check('scheduling recovers while processing remains paused', (await lib(app.page, 'Progress')).paused && fixture('state').text === '')
   await lib(app.page, 'SetPaused', false)
-  await until(() => fixture('state').text.toLowerCase().includes('invoice'), 'the recovered OCR job did not persist the document text', 120_000)
-  s.check('OCR recovery never duplicates or replaces the user annotation', fixture('state').tags.filter(([name, source]) => name === 'Screenshots' && source === 'user').length === 1)
+  await until(() => assets.every((id) => fixture('state', id).text.toLowerCase().includes('invoice')), 'the recovered OCR jobs did not persist both documents’ text', 120_000)
+  s.check('both recovery paths preserve exactly one user annotation per photo', assets.every((id) => fixture('state', id).tags.filter(([name, source]) => name === 'Screenshots' && source === 'user').length === 1))
   await restart()
-  s.check('annotation and independently recovered text survive restart', fixture('state').tags.some(([name, source]) => name === 'Screenshots' && source === 'user') && fixture('state').text.toLowerCase().includes('invoice'))
+  s.check('both annotations and independently recovered text survive restart', assets.every((id) => {
+    const state = fixture('state', id)
+    return state.tags.some(([name, source]) => name === 'Screenshots' && source === 'user') && state.text.toLowerCase().includes('invoice')
+  }))
   s.check('no external requests', external.length === 0, external)
   s.check('no unexpected frontend errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
