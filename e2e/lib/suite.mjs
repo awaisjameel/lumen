@@ -52,6 +52,10 @@ export const SUITES = {
     port: 9418,
     about: 'partial album inverses, failed-only retry, correction provenance, privacy, deleted identities and restart',
   },
+  'tagging-recovery': {
+    port: 9419,
+    about: 'annotation commit/queue faults, draft retention and owned OCR recovery through restart',
+  },
   organise: {
     port: 9405,
     about: 'organise on disk: preview, move, Undo, on two isolated files',

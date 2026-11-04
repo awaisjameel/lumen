@@ -31,19 +31,29 @@ type semanticSearch interface {
 	Search(ctx context.Context, query string, allow func(id int64) bool) (hits []search.Hit, complete bool, err error)
 }
 
+// tagIndexer is the pipeline follow-up and invalidation Things needs.
+// Tests can fail its scheduling call after the annotation has committed.
+type tagIndexer interface {
+	QueueOCR(context.Context) error
+	LibraryChanged(core.Changes)
+}
+
 // SearchService is natural-language search and Things (tags).
 type SearchService struct {
 	store    *store.Store
 	engine   *search.Engine // nil when the AI can't run
 	semantic semanticSearch // engine, but nil (not a nil engine in an interface) when the AI can't run
 	faces    bool           // faces are being recognised (the people engine runs)
-	ix       *index.Indexer // tells the UI what changed; nil in tests
+	ix       tagIndexer     // reports tag changes and queues text; nil in store-only tests
 }
 
 // NewSearchService returns the search service (engine is nil without the AI;
 // faces says whether faces are recognised).
 func NewSearchService(st *store.Store, engine *search.Engine, faces bool, ix *index.Indexer) *SearchService {
-	s := &SearchService{store: st, engine: engine, faces: faces, ix: ix}
+	s := &SearchService{store: st, engine: engine, faces: faces}
+	if ix != nil {
+		s.ix = ix
+	}
 	if engine != nil {
 		s.semantic = engine
 	}
