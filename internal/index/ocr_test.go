@@ -68,7 +68,7 @@ func line(text string) ai.OCRLine { return ai.OCRLine{Text: text, Conf: 0.9} }
 
 // newOCRQueueFault leaves a committed eligible annotation whose scheduling
 // fails. The fixture needs no models or original files to reconcile it.
-func newOCRQueueFault(t *testing.T) (*Indexer, func()) {
+func newOCRQueueFault(t *testing.T) (ix *Indexer, recoverQueue func()) {
 	t.Helper()
 	f := newThumbFixture(t, 1)
 	ctx := t.Context()
