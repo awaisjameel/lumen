@@ -497,6 +497,43 @@ it('renders a narrow inspector as a sheet and closes it without closing the view
   expect(lib.viewer).toEqual({ day: 'results', id: 1 })
 })
 
+it('discards an inspection refusal after its original selection has moved on', async () => {
+  let refuse!: (error: Error) => void
+  vi.mocked(engine.inspect).mockReturnValueOnce(new Promise((_resolve, reject) => (refuse = reject)))
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  await select({ day: 'results', id: 2 })
+  await flushPromises()
+  refuse(new Error('not found'))
+  await flushPromises()
+  expect(logged).not.toHaveBeenCalled()
+  expect(wrapper.text()).toContain('Current')
+  expect(wrapper.get('[data-edit-date]').exists()).toBe(true)
+})
+
+it('discards an inspection refusal after its inspector is disposed', async () => {
+  let refuse!: (error: Error) => void
+  vi.mocked(engine.inspect).mockReturnValueOnce(new Promise((_resolve, reject) => (refuse = reject)))
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  wrapper.unmount()
+  wrapper = undefined
+  refuse(new Error('not found'))
+  await flushPromises()
+  expect(logged).not.toHaveBeenCalled()
+})
+
+it('still reports a current inspection failure', async () => {
+  const failure = new Error('Current file inspection failed')
+  vi.mocked(engine.inspect).mockRejectedValueOnce(failure)
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(logged).toHaveBeenCalledWith(failure)
+})
+
 it('replaces metadata with a not-found state when a live read loses access to the photo', async () => {
   vi.useFakeTimers()
   const changed = liveChanges()

@@ -5,7 +5,7 @@ import { extname, join, relative, resolve } from 'node:path'
 import { ROOT } from './suite.mjs'
 import { sleep } from './app.mjs'
 
-function bindingID(service, name) {
+export function bindingID(service, name) {
   const source = readFileSync(join(ROOT, 'frontend', 'bindings', 'lumen', 'services', `${service}.ts`), 'utf8')
   const method = source.split(`export function ${name}(`)[1]?.split('export function ')[0]
   const id = /\$Call\.ByID\((\d+)/.exec(method ?? '')?.[1]

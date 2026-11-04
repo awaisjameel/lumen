@@ -336,6 +336,19 @@ The second reporting-only benchmark exceeds `SaveEmbeddings64` unblocked
 (157.591/70 ms) and `SaveFaces64` unblocked/folder (8.069/8 and 8.430/7 ms).
 These actual measurements remain recorded with the parent gate open.
 
+The third run, [41852230572](https://github.com/awaisjameel/lumen/actions/runs/41852230572),
+passes every Go race shard, the clean production build and static/frontend/docs
+checks. Native history passes 7/7 and favourite Undo 22/22. All 18 behavioural
+checks of `undo-recovery` pass: partial selection/picker results and failed-only
+retry, provenance, newer edits, self-coverage, deleted/reused album IDs and
+restart. Its strict frontend-error check still fails on two `not found`
+console errors. Acceptance remains open. Focused reproduction finds that late
+file-inspection rejections are logged after selection changes or inspector
+disposal; two new tests fail before a request/signal ownership guard and pass
+after it. A third test preserves reporting of current inspection failures.
+The native report now retains phase/read diagnostics for any remaining refusal;
+the error check is not filtered or relaxed.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

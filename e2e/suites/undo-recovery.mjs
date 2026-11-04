@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { close, launch, lib, resize, unthrottle, waitIndexed } from '../lib/app.mjs'
 import { button, dismissNotices, selectAllResults, until } from '../lib/controls.mjs'
-import { mutationTrace } from '../lib/mutation-trace.mjs'
+import { bindingID, mutationTrace } from '../lib/mutation-trace.mjs'
 import { E2E, suite } from '../lib/suite.mjs'
 
 const s = suite('undo-recovery')
@@ -16,11 +16,34 @@ let app
 let trace
 let phase = 'fixture'
 const external = []
+const consoleErrors = []
+const refusedReads = []
+const diagnostics = []
+const reads = new Map([
+  ...['Asset', 'AssetAlbums', 'Place'].map((name) => [bindingID('libraryservice', name), name]),
+  [bindingID('searchservice', 'AssetTags'), 'AssetTags'],
+  [bindingID('peopleservice', 'AssetFaces'), 'AssetFaces'],
+  [bindingID('mediaservice', 'Inspect'), 'Inspect'],
+])
 function watch(page) {
   s.watch(page)
   page.on('pageerror', (error) => console.log(`PAGE ERROR ${error.stack ?? error}`))
   page.on('console', (message) => {
-    if (message.type() === 'error') console.log(`CONSOLE ERROR ${message.text()} ${JSON.stringify(message.location())}`)
+    if (message.type() === 'error') {
+      consoleErrors.push({ phase, text: message.text(), location: message.location(), stack: message.stackTrace() })
+      console.log(`CONSOLE ERROR ${message.text()} ${JSON.stringify(message.location())}`)
+    }
+  })
+  page.on('response', (response) => {
+    if (response.status() < 400 || new URL(response.url()).pathname !== '/wails/runtime') return
+    const request = JSON.parse(response.request().postData() ?? 'null')
+    const name = reads.get(request?.args?.methodID)
+    if (!name) return
+    const current = { phase, read: name, id: request.args.args[0], status: response.status() }
+    diagnostics.push(response.text().then(
+      (error) => refusedReads.push({ ...current, error }),
+      () => refusedReads.push(current),
+    ))
   })
   page.on('request', (request) => {
     const url = new URL(request.url())
@@ -271,5 +294,6 @@ try {
 } finally {
   await trace?.release().catch(() => {})
   if (app) await close(app)
-  s.finish()
+  await Promise.allSettled(diagnostics)
+  s.finish({ diagnostics: { consoleErrors, refusedReads } })
 }

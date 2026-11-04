@@ -161,7 +161,7 @@ async function loadDetails(id: number | undefined, strict = false) {
           if (request === detailRequest) inspection.value = value
         })
         .catch((e: unknown) => {
-          if (!isCancelled(e)) logError(e)
+          if (request === detailRequest && !signal.aborted && !isCancelled(e)) logError(e)
         })
     }
     const place = d.placeId
