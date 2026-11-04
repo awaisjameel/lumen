@@ -48,6 +48,10 @@ async function selectDocument(page) {
   await until(() => page.$eval('.preview-caption h3', (el, name) => el.textContent.trim() === name, name),
     'the inspector did not settle on the document')
 }
+async function openActivity(page) {
+  await page.locator('[data-activity-trigger]').click()
+  await page.waitForSelector('[data-activity-details]', { visible: true })
+}
 async function submitTag(page) {
   const response = page.waitForResponse((reply) => {
     if (new URL(reply.url()).pathname !== '/wails/runtime') return false
@@ -106,8 +110,7 @@ try {
   await until(() => app.page.evaluate(() => !document.querySelector('[data-tag-draft]')), 'the committed editor did not close')
   s.check('the details list reloads the committed annotation immediately', await app.page.$eval('.inspector-body', (el) => el.innerText.includes('Screenshots')))
   await until(async () => (await lib(app.page, 'Progress')).ocrQueueRetry === true, 'the failed follow-up was not retained for retry')
-  await app.page.locator('[data-activity-trigger]').click()
-  await app.page.waitForSelector('[data-activity-details]', { visible: true })
+  await openActivity(app.page)
   // Progress events are deliberately coalesced; the direct RPC snapshot can
   // precede the sidebar's next event. Wait for the real rendered feedback.
   const feedbackStarted = Date.now()
@@ -122,9 +125,11 @@ try {
   fixture('allow-queue')
   await until(() => fixture('state').ocr.length === 1, 'the in-session retry did not queue persisted eligibility')
   await until(async () => !(await lib(app.page, 'Progress')).ocrQueueRetry, 'in-session recovery did not clear retry feedback')
-  await until(() => app.page.$eval('[data-activity-trigger]', (el) => !el.innerText.includes('Text reading will retry')),
+  await openActivity(app.page)
+  await until(() => app.page.evaluate(() => !document.querySelector('[data-activity-details] [data-ocr-retry]')),
     'activity did not clear the recovered scheduling feedback', 10_000)
-  s.check('activity clears retry feedback after scheduling recovers', await app.page.$eval('[data-activity-trigger]', (el) => !el.innerText.includes('Text reading will retry')))
+  s.check('activity clears retry feedback after scheduling recovers', !(await app.page.$('[data-activity-details] [data-ocr-retry]')))
+  await app.page.keyboard.press('Escape')
   s.check('scheduling recovers independently of paused processing', (await lib(app.page, 'Progress')).paused && fixture('state').text === '')
   s.check('in-session recovery preserves exactly one user annotation', fixture('state').tags.filter(([name, source]) => name === 'Screenshots' && source === 'user').length === 1)
 
