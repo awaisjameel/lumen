@@ -110,7 +110,7 @@ jobs:
         run: |
           npm ci --prefix e2e
           python -m pip install -r e2e/requirements.txt
-          node e2e/run.mjs search-history favourite-undo undo-recovery
+          node e2e/run.mjs undo-recovery search-history favourite-undo
 
       - name: Preserve native regression reports
         if: always()

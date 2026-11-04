@@ -323,6 +323,19 @@ The reporting-only store benchmark still exceeds the unchanged unblocked
 `SaveEmbeddings64` ceiling: 172.782/70 ms. The parent performance gate remains
 open; no budget is raised.
 
+The second run, [41849133172](https://github.com/awaisjameel/lumen/actions/runs/41849133172),
+passes every Go race shard, including the unchanged shutdown test, and repeats
+the clean build, static/frontend/docs checks, native history 7/7 and favourite
+Undo 22/22. The new native suite confirms the mixed selection inverse, original
+failed-only retry, navigation and current focus (5 passing checks), then stops
+at a harness label mismatch: the actual picker control is **Apply albums**.
+That selector is corrected against the current i18n source, alongside a review
+of every remaining control label. CI runs the new recovery suite first to
+surface its acceptance failures earlier; all three suites remain enabled.
+The second reporting-only benchmark exceeds `SaveEmbeddings64` unblocked
+(157.591/70 ms) and `SaveFaces64` unblocked/folder (8.069/8 and 8.430/7 ms).
+These actual measurements remain recorded with the parent gate open.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

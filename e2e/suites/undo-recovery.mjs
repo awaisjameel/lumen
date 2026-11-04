@@ -148,7 +148,7 @@ try {
   await button(page, 'Add to album…', '.inspector-body')
   await membershipBox(page, 'Native album A')
   await membershipBox(page, 'Native album B')
-  await button(page, 'Apply', '[role="dialog"]')
+  await button(page, 'Apply albums', '[role="dialog"]')
   const pickerUndo = await notice(page)
   await until(async () => (await lib(page, 'AssetAlbums', first)).length === 2, 'picker membership did not persist')
   trace.reset()
