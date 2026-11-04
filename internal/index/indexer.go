@@ -91,8 +91,8 @@ type Indexer struct {
 	ocr      *model[textReader]       // PP-OCRv5's detector and recogniser, while their stage has work
 	pixels   decoded                  // photos the thumbnail stage decoded for the faces stage
 	cpu      *cpuBudget               // the CPU threads the stages' heavy work shares
-	xmp      xmpState                 // the XMP sidecar pass's lock and wake-up
-	ocrQueue ocrQueueState            // serialises scheduling and owns coalesced retries
+	xmp      passState                // the XMP sidecar pass's lock and wake-up
+	ocrQueue passState                // serialises scheduling and owns coalesced retries
 
 	videoEmbedRetry stageBackoff // used only by the video coordinator
 	videoFaceRetry  stageBackoff

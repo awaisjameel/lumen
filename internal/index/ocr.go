@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -109,42 +108,6 @@ func (ix *Indexer) QueueOCR(ctx context.Context) error {
 		nudge(ix.ocrQueue.wakeCh())
 	}
 	return err
-}
-
-// ocrQueueState bounds recovery to one worker and one coalesced wake-up.
-// Scheduling and opt-in changes take turns so an older attempt cannot
-// overwrite feedback for a newer successful reconciliation or opt-out.
-type ocrQueueState struct {
-	once sync.Once
-	turn chan struct{}
-	wake chan struct{}
-}
-
-func (q *ocrQueueState) init() {
-	q.once.Do(func() {
-		q.turn = make(chan struct{}, 1)
-		q.wake = make(chan struct{}, 1)
-	})
-}
-
-func (q *ocrQueueState) acquire(ctx context.Context) error {
-	q.init()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	select {
-	case q.turn <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (q *ocrQueueState) release() { <-q.turn }
-
-func (q *ocrQueueState) wakeCh() chan struct{} {
-	q.init()
-	return q.wake
 }
 
 func (ix *Indexer) setOCRQueueRetry(retry bool) {
