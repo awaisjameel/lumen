@@ -142,6 +142,19 @@ watch(
   { immediate: true },
 )
 
+function detailsUnavailable(e: unknown) {
+  detail.value = null
+  inspection.value = null
+  placeName.value = ''
+  tags.value = []
+  faces.value = []
+  albumIDs.value = []
+  tagsRequest++
+  facesRequest++
+  albumsRequest++
+  detailError.value = errorText(e)
+}
+
 async function loadDetails(id: number | undefined, strict = false) {
   inspectionAbort?.abort()
   inspectionAbort = new AbortController()
@@ -161,7 +174,13 @@ async function loadDetails(id: number | undefined, strict = false) {
           if (request === detailRequest) inspection.value = value
         })
         .catch((e: unknown) => {
-          if (request === detailRequest && !signal.aborted && !isCancelled(e)) logError(e)
+          if (request !== detailRequest || signal.aborted || isCancelled(e)) return
+          if (errorCode(e) === ErrorCode.NotFound) {
+            // Access can change while file inspection runs. Use the same
+            // unavailable/retry state as a refused metadata read.
+            detailsUnavailable(e)
+            void lib.refresh().catch(logError)
+          } else logError(e)
         })
     }
     const place = d.placeId
@@ -174,12 +193,7 @@ async function loadDetails(id: number | undefined, strict = false) {
     if (request === detailRequest) placeName.value = place?.name ?? ''
   } catch (e) {
     if (request === detailRequest && !isCancelled(e)) {
-      detail.value = null
-      placeName.value = ''
-      tags.value = []
-      faces.value = []
-      albumIDs.value = []
-      detailError.value = errorText(e)
+      detailsUnavailable(e)
       if (strict) throw e
     }
   } finally {
@@ -237,8 +251,9 @@ async function loadAlbums(id: number | undefined, strict = false) {
     const got = await engine.assetAlbums(id)
     if (request === albumsRequest) albumIDs.value = got
   } catch (e) {
+    if (request !== albumsRequest || id !== props.sel?.id) return
     logError(e)
-    if (strict && request === albumsRequest && id === props.sel?.id) throw e
+    if (strict) throw e
   }
 }
 
@@ -309,7 +324,7 @@ async function loadTags(id: number | undefined) {
     const got = await engine.assetTags(id)
     if (request === tagsRequest) tags.value = got
   } catch (e) {
-    logError(e)
+    if (request === tagsRequest && id === props.sel?.id) logError(e)
   }
 }
 
@@ -324,7 +339,7 @@ async function loadFaces(id: number | undefined) {
     const got = await engine.assetFaces(id)
     if (request === facesRequest) faces.value = got
   } catch (e) {
-    logError(e)
+    if (request === facesRequest && id === props.sel?.id) logError(e)
   }
 }
 

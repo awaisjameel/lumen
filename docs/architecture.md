@@ -93,6 +93,9 @@ targets when the correction itself covers an asset. The existing store admission
 rules still govern every write. Reconciliation settles the current grid and its
 selected day before refreshing a mounted inspector's current metadata; a read
 failure is recoverable independently of committed inverse outcomes.
+An inspector that loses file/privacy access uses its existing unavailable/retry
+state and retires pending metadata reads; obsolete inspection failures cannot
+affect a newer selection. Current unexpected inspection failures remain logged.
 
 ## Deviations from the plan
 

@@ -349,6 +349,20 @@ after it. A third test preserves reporting of current inspection failures.
 The native report now retains phase/read diagnostics for any remaining refusal;
 the error check is not filtered or relaxed.
 
+The fourth completed run, [41856887336](https://github.com/awaisjameel/lumen/actions/runs/41856887336),
+passes the clean Windows build, static/frontend/docs checks (1,015 tests) and
+all Go race shards. Native history is 7/7 and favourite Undo 22/22. The new
+suite again passes all 18 behavioural checks. Diagnostics identify its one
+remaining console error precisely: a current `Media.Inspect` refusal after the
+photo is blocked during the deleted-album scenario. The obsolete inspection
+guard removed the other error. Two further regressions fail before handling
+this known refusal through the inspector's existing unavailable/retry state;
+both pass after it, including retirement of pending tag/face/membership reads
+and a read-only retry. Current unexpected inspection errors still report.
+No runtime error filter or native acceptance assertion is weakened. The latest
+reported budget overruns are unblocked `SaveEmbeddings64` 218.628/70 ms and
+folder `SetEventName` 45.554/5 ms; the parent performance gate stays open.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

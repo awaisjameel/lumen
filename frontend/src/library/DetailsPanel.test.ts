@@ -13,6 +13,7 @@ import {
   BlockKind,
   DateSource,
   engine,
+  ErrorCode,
   INSPECTOR_WIDTH_DEFAULT,
   Kind,
   MAX_NAME_LEN,
@@ -76,14 +77,20 @@ vi.mock('../bridge', async (importOriginal) => ({
 
 function deferred<T>() {
   let complete: ((value: T) => void) | undefined
-  const promise = new Promise<T>((done) => {
+  let refuse: ((error: unknown) => void) | undefined
+  const promise = new Promise<T>((done, reject) => {
     complete = done
+    refuse = reject
   })
   return {
     promise,
     resolve(value: T) {
       if (!complete) throw new Error('Deferred promise was not initialised')
       complete(value)
+    },
+    reject(error: unknown) {
+      if (!refuse) throw new Error('Deferred promise was not initialised')
+      refuse(error)
     },
   }
 }
@@ -532,6 +539,44 @@ it('still reports a current inspection failure', async () => {
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
   expect(logged).toHaveBeenCalledWith(failure)
+})
+
+it('shows a current privacy refusal as unavailable and retries reads without repeating the edit', async () => {
+  const failure = new Error('not found', { cause: { code: ErrorCode.NotFound } })
+  vi.mocked(engine.inspect).mockRejectedValueOnce(failure)
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  const refreshed = vi.spyOn(useLibrary(), 'refresh')
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(logged).not.toHaveBeenCalled()
+  expect(wrapper.get('[role="alert"]').text()).toContain(t('error.notFound'))
+  expect(wrapper.find('[data-edit-date]').exists()).toBe(false)
+  expect(refreshed).toHaveBeenCalledOnce()
+  expect(engine.inspect).toHaveBeenCalledOnce()
+  await wrapper.get('[role="alert"] button').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('[data-edit-date]').exists()).toBe(true)
+  expect(engine.inspect).toHaveBeenCalledTimes(2)
+  expect(engine.applyBatch).not.toHaveBeenCalled()
+  expect(engine.setTakenAt).not.toHaveBeenCalled()
+})
+
+it('retires pending membership, face and tag reads when the current file becomes unavailable', async () => {
+  const tags = deferred<Awaited<ReturnType<typeof engine.assetTags>>>()
+  const faces = deferred<Awaited<ReturnType<typeof engine.assetFaces>>>()
+  const memberships = deferred<number[]>()
+  vi.mocked(engine.assetTags).mockReturnValueOnce(tags.promise)
+  vi.mocked(engine.assetFaces).mockReturnValueOnce(faces.promise)
+  vi.mocked(engine.assetAlbums).mockReturnValueOnce(memberships.promise)
+  vi.mocked(engine.inspect).mockRejectedValueOnce(new Error('not found', { cause: { code: ErrorCode.NotFound } }))
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  for (const read of [tags, faces, memberships]) read.reject(new Error('Obsolete metadata read refused'))
+  await flushPromises()
+  expect(logged).not.toHaveBeenCalled()
+  expect(wrapper.get('[role="alert"]').text()).toContain(t('error.notFound'))
+  expect(wrapper.text()).not.toContain('Current')
 })
 
 it('replaces metadata with a not-found state when a live read loses access to the photo', async () => {
