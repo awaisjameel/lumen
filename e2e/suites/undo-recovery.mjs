@@ -109,6 +109,7 @@ try {
   await selectAllResults(page)
   await page.waitForSelector('[data-command="library.albumSelection"]')
   await page.click('[data-command="library.albumSelection"]')
+  await page.waitForSelector('[aria-label="Choose an album"]', { visible: true })
   await page.click('[aria-label="Choose an album"]')
   await page.waitForSelector('[role="option"]::-p-text(Native album A)')
   await page.click('[role="option"]::-p-text(Native album A)')

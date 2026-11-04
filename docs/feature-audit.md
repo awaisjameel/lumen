@@ -300,11 +300,28 @@ the current inspector, and read failures retain independent retry.
 Local regression coverage includes partial success, failed-only retry,
 cancellation/resume, composite identities, no-op/newer edits, ID reuse,
 unconfirmed submitted subsets, stale correction props, refresh-only retry and
-current inspector failure/selection settlement. Native Windows acceptance and
-fresh full-tree gates are pending; the new `undo-recovery` real-control suite
+current inspector failure/selection settlement. On 4 November 2026, all 1,012
+frontend tests across 115 files, frontend type/lint/format checks, the production
+frontend build, documentation checks, focused store race tests (2.139 s) and
+core/store vet pass. Native Windows acceptance and fresh full-tree gates remain
+pending in [PR #49](https://github.com/awaisjameel/lumen/pull/49); the new `undo-recovery` real-control suite
 covers partial membership inverses, navigation, provenance, self-coverage,
 album deletion/replacement and restart. No parent completion, installer or
 machine-independent performance acceptance is claimed by this checkpoint.
+
+The first Windows run, [41845808446](https://github.com/awaisjameel/lumen/actions/runs/41845808446),
+passes the production build, clean binding/module check, static/frontend/docs
+checks and both store race shards. Service/contract tests pass in the remaining
+shard, which fails an unchanged XMP shutdown test's nonblocking caller-signal
+assertion; the export releases its internal lifetime wait before the calling
+goroutine sends that signal. No indexer code or assertion is changed; a bounded
+fresh run is required. Native history passes 7/7 and favourite Undo 22/22.
+The new native harness initially clicks before the album modal mounts; its
+failure screenshot confirms the modal. It now waits for that real control,
+without bypassing the flow. Partial-inverse native acceptance remains pending.
+The reporting-only store benchmark still exceeds the unchanged unblocked
+`SaveEmbeddings64` ceiling: 172.782/70 ms. The parent performance gate remains
+open; no budget is raised.
 
 ## First milestone: collection recovery and event name Undo
 
