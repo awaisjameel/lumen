@@ -345,6 +345,13 @@ export function Preferences(): $CancellablePromise<core$0.Preferences> {
 }
 
 /**
+ * PreviewAlbum counts and samples the visible members of an unsaved smart rule.
+ */
+export function PreviewAlbum(rule: core$0.AlbumRule): $CancellablePromise<core$0.AlbumPreview> {
+    return $Call.ByID(3086506886, rule);
+}
+
+/**
  * Progress returns the current indexing state.
  */
 export function Progress(): $CancellablePromise<core$0.Progress> {

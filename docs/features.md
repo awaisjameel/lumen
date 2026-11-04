@@ -96,6 +96,8 @@ sequential chain for every photo.
 
 - **Manual albums** collect photos and videos without moving any files. Membership follows a file when you rename or move it.
 - **Smart albums** save a rule (media type, favourites, a date range, a Thing, a person) and update automatically as the library changes.
+- Their editor shows an exact visible count and up to three sample items.
+  A failed preview can be retried without changing or saving the draft.
 - Albums have live counts, covers, rename, editing and deletion.
 
 ## 9. Places and Events

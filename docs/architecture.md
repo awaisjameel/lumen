@@ -68,6 +68,15 @@ eligibility and settings, never replays annotations, and hands actual work to
 the existing durable OCR jobs. Optional progress feedback distinguishes pending
 scheduling recovery from a counted stage job; pause still controls processing.
 
+**Smart-album previews.** `Store.PreviewAlbum` evaluates the same validated
+`albumFilter` as saved smart albums. Reference visibility, exact count and the
+newest three grid items share one read-only snapshot. The thin service applies
+the current tag confidence, and the bridge normalises the generated result.
+The editor debounces and cancels these bounded reads, rejects superseded
+results, and clears samples before privacy refreshes or failed reads. It never
+counts or filters timeline days itself. Preview retry does not save an album
+or replace the editor's draft.
+
 **People.** The following figures are historical tuning evidence, not a promise of recognition accuracy on another library. Clustering joins groups of faces while their average cosine similarity is at least 0.42 (Phase 0 found every group at that threshold held one person). A new person needs clear faces in three photos: sharpness (variance of the Laplacian of the aligned face) at least 15, head turn at most 0.45 eye distances. On 204 office photos with 1,000 faces, 92% were placed into 28 people, each checked by eye to hold one person; the rest wait, unplaced, for more photos of them. The faces stage and clustering never undo the user: see `internal/people/cluster.go`.
 
 **Places.** City names come from [GeoNames](https://www.geonames.org/), licensed under CC BY 4.0. Lumen bundles a reduced 30 September 2026 `cities5000` snapshot (69,760 populated places), with region and country names, so lookups make no network request. A city within 75 km is an approximate label, not an exact administrative boundary. See [data provenance](geonames.md).

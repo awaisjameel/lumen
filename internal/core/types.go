@@ -467,6 +467,16 @@ type AlbumRule struct {
 	Person     int64  `json:"person"`
 }
 
+// AlbumPreviewSize bounds the sample returned for an unsaved smart rule.
+const AlbumPreviewSize = 3
+
+// AlbumPreview is an exact visible count and a bounded newest-first sample
+// from the same read snapshot, without saving an album.
+type AlbumPreview struct {
+	Count int        `json:"count"`
+	Items []GridItem `json:"items"`
+}
+
 // AlbumKind identifies how an album selects its members.
 type AlbumKind string
 
