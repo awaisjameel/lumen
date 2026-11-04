@@ -476,6 +476,25 @@ large fixture and engine, recording real call counts, response bytes and
 latency. Synthetic measurements do not replace the configured-machine gate;
 existing budgets remain unchanged.
 
+The retained 100-day regression fails on the parent with 100 day calls while
+returning count 300 and three samples. The bounded frontend uses one
+`PreviewAlbum` call and no timeline/day reads. Local verification passes all
+1,022 frontend tests, type/lint/format checks, four new store race regressions
+and store vet. The store matrix checks 288 combinations against independent
+fixture membership and saved albums, plus rotated thumbnail metadata, invalid
+and blocked references, bounded payloads and a concurrent-write snapshot seam.
+A local fixture preflight confirms 100 days and 100,000 rows: 80,000 photos and
+6,666 favourite videos, three samples and 139/213-byte preview bodies. Those
+development-host reads are not configured-machine latency acceptance.
+
+The native suite compares five reads of each amplified draft in the built
+parent and candidate, recording actual bridge requests, response bytes and
+latency. Generated photos/videos separately exercise date boundaries,
+Unicode references, membership parity, failed-read retry and stale/cancelled
+work. Final Windows/native results and artifact references are recorded in
+[#42](https://github.com/awaisjameel/lumen/issues/42) and its child PR; the parent
+performance gate is separate and remains open until its own acceptance.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

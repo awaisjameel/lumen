@@ -56,6 +56,10 @@ export const SUITES = {
     port: 9419,
     about: 'annotation commit/queue faults, draft retention and owned OCR recovery through restart',
   },
+  'smart-album-preview': {
+    port: 9421,
+    about: 'bounded smart-rule previews: real mixed media, privacy/retry, cancellation and 100,000-row parent comparison',
+  },
   organise: {
     port: 9405,
     about: 'organise on disk: preview, move, Undo, on two isolated files',

@@ -123,8 +123,8 @@ try {
   await close(app)
   app = undefined
 
-  if (process.env.LUMEN_FAVOURITE_BASELINE_FRONTEND) {
-    await measure('baseline', process.env.LUMEN_FAVOURITE_BASELINE_FRONTEND)
+  if (process.env.LUMEN_BASELINE_FRONTEND) {
+    await measure('baseline', process.env.LUMEN_BASELINE_FRONTEND)
     await close(app)
     app = undefined
   }
