@@ -106,7 +106,13 @@ async function loadPlaces(cancel = false) {
     placesPending.value--
   }
 }
-watch(view, () => void loadPlaces(true).catch(logError), { immediate: true })
+// Album kind is presentation: clearing its list during privacy refresh can
+// switch smart/manual temporarily without changing the wire view's identity.
+watch(
+  () => JSON.stringify(view.value),
+  () => void loadPlaces(true).catch(logError),
+  { immediate: true },
+)
 // The library owns change admission. Reuse its revision rather than adding
 // another event subscription or guessing changes from count/day equality.
 watch(

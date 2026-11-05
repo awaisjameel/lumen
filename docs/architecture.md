@@ -83,8 +83,10 @@ The header adds no library-event subscription: background revisions share a
 three-second trailing read, while the existing mutation reconciliation owner
 refreshes corrections and Undo immediately. Both use one `coalescedLoad` owner:
 same-view invalidations let its active read settle and reject obsolete results;
-identity/privacy changes and unmount cancel I/O. Privacy invalidation
-clears names and destinations before I/O; failed reads expose retry and never
+identity/privacy changes and unmount cancel I/O. Identity follows the wire
+view, so temporarily losing a cached smart/manual presentation does not change
+the target. Privacy invalidation clears names and destinations before I/O;
+failed reads expose retry and never
 restore old metadata. Place links use the existing place route.
 
 **People.** The following figures are historical tuning evidence, not a promise of recognition accuracy on another library. Clustering joins groups of faces while their average cosine similarity is at least 0.42 (Phase 0 found every group at that threshold held one person). A new person needs clear faces in three photos: sharpness (variance of the Laplacian of the aligned face) at least 15, head turn at most 0.45 eye distances. On 204 office photos with 1,000 faces, 92% were placed into 28 people, each checked by eye to hold one person; the rest wait, unplaced, for more photos of them. The faces stage and clustering never undo the user: see `internal/people/cluster.go`.

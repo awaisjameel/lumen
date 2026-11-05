@@ -564,6 +564,12 @@ Undo recovery 20/20, favourite Undo 22/22 and history 7/7. The hosted report
 retains SaveEmbeddings64 unblocked 181.463/70 ms; budgets remain unchanged.
 Fresh verification of these refinements is pending.
 
+A further focused regression reproduces a false identity change when an album's
+privacy invalidation briefly loses its cached smart kind. Both presentations
+still resolve the same album wire view. Metadata identity now follows that
+stable view, matching the existing mosaic convention; the native privacy fault
+case runs in the smart album to retain coverage of the invalidation interval.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

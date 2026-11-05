@@ -197,6 +197,10 @@ try {
     background.length > 0 && background.length <= 2 && await membership(page, collections[0]), background)
 
   phase = 'privacy clearing and failed-read recovery'
+  const privacyCollection = collections[1]
+  await openCollection(page, privacyCollection)
+  await header(page, corrected)
+  await trace.idle()
   await selectPhoto(page, first)
   trace.holdNext((row) => row.name === 'TopPlaces')
   await button(page, 'Block this place', '.inspector-body')
@@ -226,7 +230,8 @@ try {
   await button(page, 'Undo', '[data-notification="block.undo"]')
   await header(page, corrected)
   s.check('normal block Undo restores the current city in place',
-    await membership(page, collections[0]) && (await lib(page, 'Asset', first)).placeId === corrected.id)
+    await membership(page, privacyCollection) && (await lib(page, 'Asset', first)).placeId === corrected.id &&
+    await page.evaluate((path) => location.pathname === path, privacyCollection.path))
   await dismissNotices(page)
 
   phase = 'old read after navigation'

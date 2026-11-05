@@ -240,6 +240,26 @@ it('lets one same-view read settle while coalescing a newer revision behind it',
   wrapper.unmount()
 })
 
+it('keeps the same album read when privacy invalidation temporarily loses its smart presentation', async () => {
+  const { wrapper, props } = await mountHead()
+  Object.assign(props, { kind: 'smart' })
+  await flushPromises()
+  const pending = deferred<NamedPlace[]>()
+  vi.mocked(engine.topPlaces).mockClear().mockReturnValueOnce(pending.promise)
+  const refreshing = useLibrary().reconcileChanges()
+  await flushPromises()
+  const signal = vi.mocked(engine.topPlaces).mock.calls[0]?.[1]
+  Object.assign(props, { kind: 'album' })
+  await flushPromises()
+  expect(signal?.aborted).toBe(false)
+  expect(engine.topPlaces).toHaveBeenCalledOnce()
+  pending.resolve([{ id: 8, name: 'Lahore' }])
+  await refreshing
+  await flushPromises()
+  expect(wrapper.get('[data-collection-place]').text()).toBe('Lahore')
+  wrapper.unmount()
+})
+
 it('clears private metadata before a failed privacy read and offers an accessible retry', async () => {
   vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 7, name: 'Karachi' }])
   const { wrapper } = await mountHead()
