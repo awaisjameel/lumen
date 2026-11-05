@@ -89,6 +89,10 @@ refresh arrives, its existing read owner exposes that classified failure.
 The editor invalidates its selected reference lists immediately and uses the
 same visibility admission; an obsolete preview cannot retire newer choices.
 Reference retry reads current choices without restoring a retired selection.
+A pending reference read is unknown even if an earlier cache was loaded;
+missing-ID reconciliation waits until that read settles. Confirmed definition
+reload refreshes album and reference data together before adopting a rule.
+Deferred first rendering retains the intended field focus.
 
 Album definitions carry an immutable creation identity (migration 0040) and a
 derived revision over their name, kind and rule; counts/covers do not conflict

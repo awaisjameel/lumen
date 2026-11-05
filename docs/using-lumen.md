@@ -130,7 +130,8 @@ an explicit replacement. A preview that detects an unavailable reference also
 clears its old name while checking the current choices. **Try again** reloads
 those choices; choose a replacement explicitly before saving. If the saved definition changed elsewhere, your draft
 stays visible but cannot overwrite it: **Reload saved version** asks before
-discarding your unsaved changes, or **Cancel** closes the draft.
+discarding your unsaved changes and waits for the current album and choices,
+or **Cancel** closes the draft.
 
 Undo of favourite selections, album memberships and date/place corrections
 shows progress and **Cancel remaining**.

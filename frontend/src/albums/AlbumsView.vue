@@ -83,8 +83,8 @@ const suspended = computed(
     editorOpen.value &&
     ((editing.value !== null && (!albums.loaded || !!albums.error)) ||
       (kind.value === AlbumKind.AlbumSmart &&
-        ((rule.value.tag !== 0 && (!things.loaded || !!things.error)) ||
-          (rule.value.person !== 0 && (!people.loaded || !!people.error))))),
+        ((rule.value.tag !== 0 && (!things.loaded || things.loading || !!things.error)) ||
+          (rule.value.person !== 0 && (!people.loaded || people.loading || !!people.error))))),
 )
 const draftReadError = computed(() => suspended.value && (albums.error || things.error || people.error))
 const invalid = computed(
@@ -182,15 +182,30 @@ watch([() => albums.list, () => albums.loaded, () => albums.loading], () => {
   if (!busy.value && current.version.revision !== version.value.revision) conflict.value = true
 })
 watch(
-  [() => things.list, () => things.loaded, () => people.list, () => people.loaded, rule],
+  [
+    () => things.list,
+    () => things.loaded,
+    () => things.loading,
+    () => people.list,
+    () => people.loaded,
+    () => people.loading,
+    rule,
+  ],
   () => {
     if (!editorOpen.value || kind.value !== AlbumKind.AlbumSmart) return
-    if (things.loaded && !things.error && rule.value.tag && !things.list.some((item) => item.id === rule.value.tag)) {
+    if (
+      things.loaded &&
+      !things.loading &&
+      !things.error &&
+      rule.value.tag &&
+      !things.list.some((item) => item.id === rule.value.tag)
+    ) {
       rule.value.tag = 0
       missingTag.value = true
     }
     if (
       people.loaded &&
+      !people.loading &&
       !people.error &&
       rule.value.person &&
       !people.list.some((item) => item.id === rule.value.person)
@@ -238,10 +253,10 @@ async function reloadSaved() {
   if (!(await confirm(t('albums.reloadTitle'), t('albums.reloadText'), t('albums.reloadSaved')))) return
   if (!stillCurrent()) return
   // A server conflict can arrive before its background event. Reload the
-  // authoritative definition rather than adopting the still-stale list entry.
+  // authoritative definition and its choices rather than adopting stale lists.
   busy.value = true
   try {
-    await albums.load()
+    await refreshAll(albums.load(), things.load(), people.load())
   } catch (e) {
     logError(e)
     return
@@ -257,6 +272,9 @@ async function edit(album: Album) {
   if (busy.value) return
   reset()
   version.value = { ...album.version }
+  // Initial reference reads can defer the form's first render. Keep its
+  // intended focus without moving focus away from a newer user action.
+  focusedField = { label: t('albums.name'), start: 0, end: album.name.length }
   editing.value = album.id
   name.value = album.name
   kind.value = album.kind

@@ -134,6 +134,8 @@ before outcomes are observed. It blocks unrelated B, edits A, and uses the real
 global Undo while holding the album read. Scratch-only schema/trigger faults
 refuse actual reads/writes; retry does not replay committed state. Held saves
 exercise a conflicting definition, navigation and a deleted/recreated numeric ID.
+The conflicting rule selects a Thing created after the editor opened, so its
+confirmed reload must fetch current choices before adopting that selection.
 The suite restores its scratch schema, restarts the app and leaves originals
 unchanged. Keep the baseline's sibling `src/` directory, as PR CI does.
 

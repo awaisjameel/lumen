@@ -706,6 +706,35 @@ Fresh full frontend/Windows/native acceptance of these final changes is pending.
 The unchanged hosted overrun on this head is SaveEmbeddings64 unblocked
 116.973/70 ms; the configured-machine gate remains open.
 
+Two final mounted regressions confirm that cached loaded choices cannot admit
+a pending reference read, and that confirmed saved-version reload must refresh
+its reference choices along with the album. Both fail before the repair by
+retiring a still-valid new Thing ID. Reference admission now includes loading,
+missing-ID reconciliation waits for settlement, and confirmed reload reads all
+three existing list owners together. A delayed first render also lost its
+initial field focus; its assertion fails before seeding the intended generic
+name-field focus and selection. Current focused tests pass 61/61, with a full
+1,051-test frontend pass. The native conflict fixture now creates its selected
+Thing after the editor opens and asserts that reload adopts the valid new
+choice. Fresh final-head acceptance remains pending; no budget is changed.
+
+[Run 42058774883](https://github.com/awaisjameel/lumen/actions/runs/42058774883),
+verified head `38c208ce`, passes every Windows job: production/current bindings/
+modules, static/frontend and all Go race shards. Artifact `13432725928` records
+album drafts 25/25, metadata 22/22, previews 27/27, tagging 18/18, Undo recovery
+20/20, history 7/7 and favourite Undo 22/22. There are no uncaught page errors or
+unexpected instrumentation errors. The inspected paused-editor screenshot has
+no private fields, and the parent metadata report records one atomic Lahore
+caption/link snapshot (`/places/1172451`) matching the store and membership.
+The revised preview suite confirms immediate reference-name/sample redaction
+and explicit restoration after read-only retry. The unchanged hosted overrun
+is SaveEmbeddings64 unblocked 185.861/70 ms; hardware acceptance remains open.
+
+The seven final admission/focus/native-fixture/documentation changes above are
+now prepared for their own full Windows/native run, including the new 26th
+draft case. This record accepts the verified candidate's results without
+claiming runtime acceptance for those final refinements yet.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

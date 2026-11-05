@@ -32,6 +32,7 @@ let a
 let tag
 let initialName = 'Native draft A'
 const otherName = 'Native draft B'
+let selectedReferenceName = 'Native draft reference'
 const input = '#album-editor input[aria-label="Album name"]'
 
 function step(value) {
@@ -131,8 +132,8 @@ try {
   await lib(app.page, 'SetPaused', true)
   const ids = (await lib(app.page, 'Selection', { filter: '' }, [], false)).ids
   s.must('two generated originals are indexed', ids.length === 2, ids)
-  await search(app.page, 'TagAssets', ids, 'Native draft reference')
-  tag = (await search(app.page, 'Things')).find(thing => thing.name === 'Native draft reference').id
+  await search(app.page, 'TagAssets', ids, selectedReferenceName)
+  tag = (await search(app.page, 'Things')).find(thing => thing.name === selectedReferenceName).id
   await lib(app.page, 'CreateAlbum', otherName, 'manual', rule, ids)
   // Delete the highest ID later, so SQLite's normal ID reuse is exercised.
   a = await lib(app.page, 'CreateAlbum', initialName, 'smart', { ...rule, tag }, [])
@@ -238,7 +239,12 @@ try {
   await saveDraft()
   await until(() => trace.held, 'the editor did not reach its guarded save')
   const before = await saved()
-  await lib(app.page, 'SaveAlbum', { id: a, version: before.version, name: 'Concurrent saved name', rule: null })
+  // This choice did not exist when the editor loaded its reference list.
+  // Confirmed reload must adopt the current rule against fresh choices.
+  selectedReferenceName = 'Concurrent saved reference'
+  await search(app.page, 'TagAsset', ids[0], selectedReferenceName)
+  const currentReference = (await search(app.page, 'Things')).find(thing => thing.name === selectedReferenceName)
+  await lib(app.page, 'SaveAlbum', { id: a, version: before.version, name: 'Concurrent saved name', rule: { ...before.rule, tag: currentReference.id } })
   await trace.release()
   await app.page.waitForSelector('[data-action="reload-album"]', { visible: true })
   s.check('a save-window conflict preserves local input and cannot overwrite the newer definition', await nameValue() === 'Stale local draft' &&
@@ -247,20 +253,23 @@ try {
   await app.page.locator('[data-confirm="ok"]').click()
   await until(() => nameValue().then(value => value === 'Concurrent saved name'), 'explicit reload did not load the saved definition')
   s.check('explicit confirmed reload adopts the current saved version', await nameValue() === 'Concurrent saved name')
+  s.check('confirmed reload admits a newly created valid rule choice without retiring it',
+    await app.page.$eval('#album-editor button[aria-label="Thing"]', (node, name) => node.textContent.includes(name), selectedReferenceName) &&
+    await app.page.$eval('button[form="album-editor"]', node => !node.disabled))
   await app.page.locator('[data-action="cancel-album"]').click()
   await closed()
   initialName = 'Concurrent saved name'
 
   phase = 'hidden selected reference'
   await app.page.locator('aside a[href="/things"]').click()
-  await menu('Native draft reference', 'Block “Native draft reference”?')
+  await menu(selectedReferenceName, `Block “${selectedReferenceName}”?`)
   await app.page.locator('label::-p-text(Hide the name only)').click()
   await app.page.locator('[data-block="save"]').click()
   await app.page.waitForSelector('[data-notification="block.undo"]', { visible: true })
   await app.page.locator('aside a[href="/albums"]').click()
   await edit()
   s.check('a hidden selected Thing loses its name and requires explicit replacement',
-    !(await app.page.$eval('#album-editor', node => node.textContent.includes('Native draft reference'))) &&
+    !(await app.page.$eval('#album-editor', (node, name) => node.textContent.includes(name), selectedReferenceName)) &&
     await app.page.$eval('#album-editor', node => node.textContent.includes('Unavailable — choose another option')) &&
     await app.page.$eval('button[form="album-editor"]', node => node.disabled))
   await app.page.locator('#album-editor button[aria-label="Thing"]').click()

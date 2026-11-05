@@ -11,6 +11,7 @@ import { AlbumKind, engine, ErrorCode, Kind, MAX_NAME_LEN, TagKind, thumbUrl } f
 import type * as Bridge from '../bridge'
 import type { Album } from '../bridge'
 import { blockRequest, showBlocksChanged } from '../shared/block'
+import { useThings } from '../things/store'
 import { personFixture } from '../people/testing'
 import { emptyRule, useAlbums } from './store'
 import AlbumsView from './AlbumsView.vue'
@@ -622,3 +623,71 @@ it.each([ErrorCode.NotFound, ErrorCode.AlbumReference])(
     expect(engine.previewAlbum).toHaveBeenCalledOnce()
   },
 )
+
+it('does not retire a valid reference from stale choices while its authoritative refresh is pending', async () => {
+  const oldTag = {
+    id: 7,
+    name: 'Earlier choice',
+    kind: TagKind.TagManual,
+    original: '',
+    count: 0,
+    cover: 0,
+    coverThumb: 0,
+    pinned: false,
+  }
+  const currentTag = { ...oldTag, id: 8, name: 'Current valid choice' }
+  vi.mocked(engine.things).mockResolvedValue([oldTag])
+  await useThings().load()
+  const pending = deferred<Bridge.Tag[]>()
+  vi.mocked(engine.things).mockReturnValueOnce(pending.promise)
+  const smart = { ...album, kind: AlbumKind.AlbumSmart, rule: { ...emptyRule(), tag: currentTag.id } }
+  vi.mocked(engine.albums).mockResolvedValue([smart])
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  pending.resolve([currentTag])
+  await flushPromises()
+  expect(editor().text()).toContain(currentTag.name)
+  expect(editor().text()).not.toContain(t('albums.referenceMissing'))
+  expect(document.activeElement).toBe(editor().get('form input').element)
+  await editor().get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.saveAlbum).toHaveBeenCalledExactlyOnceWith({
+    id: album.id,
+    version: album.version,
+    name: album.name,
+    rule: smart.rule,
+  })
+})
+
+it('refreshes current reference choices before adopting a changed saved definition', async () => {
+  const oldTag = {
+    id: 7,
+    name: 'Earlier choice',
+    kind: TagKind.TagManual,
+    original: '',
+    count: 0,
+    cover: 0,
+    coverThumb: 0,
+    pinned: false,
+  }
+  const currentTag = { ...oldTag, id: 8, name: 'New saved choice' }
+  vi.mocked(engine.things).mockResolvedValue([oldTag])
+  const smart = { ...album, kind: AlbumKind.AlbumSmart, rule: { ...emptyRule(), tag: oldTag.id } }
+  vi.mocked(engine.albums).mockResolvedValue([smart])
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  const changed = {
+    ...smart,
+    version: { ...album.version, revision: 'new-rule' },
+    rule: { ...emptyRule(), tag: currentTag.id },
+  }
+  vi.mocked(engine.albums).mockResolvedValue([changed])
+  await useAlbums().load()
+  await flushPromises()
+  vi.mocked(engine.things).mockResolvedValue([currentTag])
+  await editor().get('[data-action="reload-album"]').trigger('click')
+  question.value?.answer(true)
+  await flushPromises()
+  expect(editor().text()).toContain(currentTag.name)
+  expect(editor().text()).not.toContain(t('albums.referenceMissing'))
+})
