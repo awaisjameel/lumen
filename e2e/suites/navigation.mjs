@@ -37,10 +37,10 @@ function watch(page) {
   page.on('pageerror', error => errors.push({ phase, error: String(error) }))
   page.on('console', message => {
     if (message.type() !== 'error') return
-    const current = phase
+    const current = { phase, location: message.location().url }
     consoleReads.push(Promise.all(message.args().map(value => value.evaluate(value =>
       value && typeof value.message === 'string' ? value.message : String(value)).catch(() => message.text()))).then(parts =>
-      diagnostics.push({ phase: current, error: parts.join(' ') || message.text() })))
+      diagnostics.push({ ...current, error: parts.join(' ') || message.text() })))
   })
   page.on('request', request => {
     const url = new URL(request.url())
@@ -63,9 +63,14 @@ async function path(expected) {
 }
 async function incoming(url, ready) {
   step(`incoming ${url}`)
+  // A browser-input case starts from a rendered, settled page, rather than
+  // aborting the previous fixture's startup before its UI exists.
+  await app.page.waitForNetworkIdle()
   const response = await app.page.goto(origin + url)
   s.must(`the embedded server serves ${url}`, response?.status() === 200, response?.status())
   await path(ready ?? url)
+  await app.page.waitForSelector('main', { visible: true })
+  await app.page.waitForNetworkIdle()
 }
 async function sidebar(url) {
   step(`sidebar ${url}`)
@@ -268,8 +273,11 @@ try {
   s.check('every production destination was exercised independently of the contract table', expected.every(name => visited.has(name)) && visited.size === expected.length, [...visited])
   s.check('no external requests', external.length === 0, external)
   await Promise.all(consoleReads)
-  const unexpected = diagnostics.filter(row => !/custom\.js/.test(row.error) &&
-    !(['privacy and navigation-away relock', 'malformed incoming locations'].includes(row.phase) && /^Failed to load resource/.test(row.error)))
+  const unexpected = diagnostics.filter(row =>
+    !(row.location?.endsWith('/wails/custom.js') && /^Failed to load resource:.*404/.test(row.error)) &&
+    !(row.phase === 'privacy and navigation-away relock' &&
+      ((row.location === protectedURL && /^Failed to load resource:.*40[34]/.test(row.error)) ||
+       (row.location === origin + '/wails/runtime' && /^Failed to load resource:.*422/.test(row.error)))))
   s.check('no uncaught, unexpected console or navigation errors', errors.length === 0 && unexpected.length === 0, { errors, unexpected })
 } catch (error) {
   failure = { phase, stack: error.stack ?? String(error) }

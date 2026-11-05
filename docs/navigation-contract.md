@@ -135,7 +135,7 @@ refinement/media replacements retain existing history semantics; detail routes
 inherit their declared sidebar parent. Overlays and original media are unchanged.
 No Go-to-TypeScript service or wire type changes are needed.
 
-The current full frontend run passes 1,141 tests in 118 files. Additional
+The current full frontend run passes 1,144 tests in 118 files. Additional
 history/failure, exact recovery-control and date-input tests pass, as do 19 AST enforcement examples and the 18 negative
 TypeScript/Vue fixtures. Production frontend build emits all 21 path shapes and
 no production Showcase chunk. A fresh final run, Windows named-package race and

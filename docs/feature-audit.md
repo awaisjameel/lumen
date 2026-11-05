@@ -706,12 +706,46 @@ Navigation completes real onboarding but its fixture then calls a store-only
 method name as a bound service; it stops at 3/4 checks. The fixture now uses
 the existing batch-tagging service and verifies every committed outcome.
 Collection recovery passes 50/51, including every recovery destination, PIN,
-unblocking and name-Undo check, but records one uncaught fetch error. Added
-phase, stack and argument-free pending-request diagnostics will identify it;
+unblocking and name-Undo check, but records one fetch error. Separate
+console/page stacks and argument-free request diagnostics classify its source;
 no error is suppressed and no interaction deadline or assertion is weakened.
 Native acceptance and installer packaging remain pending. Hosted overruns are
 folder SaveFaces64 7.744/7 ms and unblocked SaveEmbeddings64 120.075/70 ms;
 budgets and configured-machine acceptance remain unchanged.
+
+### #38 complete destination run and follow-up
+
+Head `49dd2280`, [run 42125867302](https://github.com/awaisjameel/lumen/actions/runs/42125867302),
+passes production/current bindings/modules, static/frontend checks and every Go
+race shard. Artifact `13462421379` records all 21 production destinations and
+73/74 navigation checks: onboarding, startup, history, aliases, exact entities,
+malformed/stale input, themes/drawer and PIN/service/media relocking all pass.
+Its error assertion catches optional Wails `custom.js` 404s because the intended
+exception used generic message text rather than the resource location. The
+follow-up records that location and matches only the optional file's 404; explicit
+protected-media denials and locked-service responses are scoped by endpoint.
+
+The new diagnostics classify collection recovery's error as a handled console
+`logError` during its initial fixture reload. Request failures are `ERR_ABORTED`
+for startup sources/settings/video/progress and preference migration, with no
+uncaught page error. Navigation's rapid incoming-page fixtures and the built
+parent comparison similarly replace pages while their startup reads remain
+pending. These fixtures now await rendered/settled page transitions without
+changing deadlines or weakening their error assertions.
+
+Undo acceptance also exposes a genuine late-response race: a cancelled inspection
+returns the coded `not_found` visibility refusal after its target is blocked.
+Wails reports that separately as `CancelledRejectionError`, producing an erroneous
+unexpected-error notice. A regression fails before the repair. The bridge now
+recognises that specific coded runtime refusal only inside the cancelled wrapper;
+uncancelled refusals, arbitrary runtime failures and fetch/type errors remain
+reportable. The remaining Undo interaction now records its concrete control step.
+The follow-up passes all 1,144 frontend tests in 118 files, 57 focused bridge/
+error/inspector tests, complete type/lint/format and compiler/mutation checks,
+production frontend build, docs and native-script syntax. All nine native suites
+and installer packaging still require a fresh passing run.
+Hosted unblocked SaveEmbeddings64 is 161.737/70 ms; budgets and configured-machine
+acceptance remain unchanged.
 
 ### #45 implementation checkpoint
 

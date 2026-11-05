@@ -488,14 +488,15 @@ export function errorCode(e: unknown): ErrorCode | undefined {
  * no longer wanted the answer, so there is nothing to report.
  */
 export function isCancelled(e: unknown): boolean {
-  // Wails beta.30 reports a late Go cancellation response separately from
-  // the CancelError already handled by the read's owner. Only that known
-  // response is cancellation; other late rejections remain failures.
+  // Wails beta.30 reports late responses separately from the CancelError
+  // already handled by the read's owner. Visibility can retire an inspection
+  // before Go refuses its original target; that coded refusal is expected
+  // only after cancellation. Other late failures still reach the error owner.
   return (
     e instanceof CancelError ||
     (e instanceof CancelledRejectionError &&
       e.cause instanceof Call.RuntimeError &&
-      e.cause.message === 'context canceled')
+      (e.cause.message === 'context canceled' || errorCode(e.cause) === ErrorCode.NotFound))
   )
 }
 

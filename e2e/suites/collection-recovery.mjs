@@ -102,6 +102,9 @@ try {
   await unthrottle(app.page)
   await lib(app.page, 'AddSources', [photos])
   await lib(app.page, 'CreateBlockPIN', PIN)
+  // Fixture writes can finish before the initial UI's migration/read calls.
+  // Settle that page before replacing it with the configured library.
+  await app.page.waitForNetworkIdle()
   await app.page.reload()
   await app.page.waitForSelector('aside.sidebar')
 
