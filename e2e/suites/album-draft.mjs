@@ -251,7 +251,8 @@ try {
     (await saved()).name === 'Concurrent saved name')
   await app.page.locator('[data-action="reload-album"]').click()
   await app.page.locator('[data-confirm="ok"]').click()
-  await until(() => nameValue().then(value => value === 'Concurrent saved name'), 'explicit reload did not load the saved definition')
+  await until(() => app.page.evaluate((selector, name) => document.querySelector(selector)?.value === name, input, 'Concurrent saved name'),
+    'explicit reload did not load the saved definition')
   s.check('explicit confirmed reload adopts the current saved version', await nameValue() === 'Concurrent saved name')
   s.check('confirmed reload admits a newly created valid rule choice without retiring it',
     await app.page.$eval('#album-editor button[aria-label="Thing"]', (node, name) => node.textContent.includes(name), selectedReferenceName) &&

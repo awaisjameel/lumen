@@ -735,6 +735,21 @@ now prepared for their own full Windows/native run, including the new 26th
 draft case. This record accepts the verified candidate's results without
 claiming runtime acceptance for those final refinements yet.
 
+The final admission candidate, head `885de9de` in
+[run 42062544358](https://github.com/awaisjameel/lumen/actions/runs/42062544358),
+passes production/current bindings/modules, static checks, 1,051 frontend tests
+and every Go race shard. Metadata 22/22, preview 27/27, tagging 18/18, Undo
+recovery 20/20, history 7/7 and favourite Undo 22/22 pass. The extended draft
+suite stops at 14/15 during its confirmed-reload wait: immediate `$eval` throws
+while the form is deliberately absent for reference admission. Artifact
+`13434896530` has no page errors; its inspected failure screenshot/DOM show the
+correct current name, newly created Thing and enabled Save after readmission.
+The predicate now observes temporary absence as pending via one DOM evaluation
+under the unchanged timeout. No application code or assertion is weakened.
+Full completion of the extended 26-check journey remains pending. Hosted
+reports retain folder SaveFaces64 7.048/7 ms and unblocked SaveEmbeddings64
+166.493/70 ms; budgets and the configured-machine gate remain unchanged.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:
