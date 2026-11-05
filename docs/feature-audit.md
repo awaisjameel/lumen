@@ -569,6 +569,9 @@ privacy invalidation briefly loses its cached smart kind. Both presentations
 still resolve the same album wire view. Metadata identity now follows that
 stable view, matching the existing mosaic convention; the native privacy fault
 case runs in the smart album to retain coverage of the invalidation interval.
+The metadata baseline also reads its parent's public header revision-prop
+contract before measuring outcomes: original parents must demonstrate the stale
+header, while later parents must retain live metadata and current destinations.
 
 ## First milestone: collection recovery and event name Undo
 

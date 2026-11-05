@@ -134,6 +134,10 @@ exercise bounded refresh work. A scratch-only column rename temporarily refuses
 actual backend place-name reads after a block, then restores the schema for
 retry. Held reads check privacy clearing and navigation ownership. The original
 files are unchanged; only reports and screenshots are uploaded.
+The checkout's header revision-prop contract identifies legacy versus live
+metadata before the correction outcome is measured. Later parents must retain
+the live names/destinations; the historical stale-parent comparison is retained
+for checkouts before the repair.
 
 `undo-recovery` shares the bridge instrumentation in `lib/mutation-trace.mjs`
 and control helpers in `lib/controls.mjs`. Its held requests make partial

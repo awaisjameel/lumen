@@ -1,5 +1,6 @@
 // Current place metadata across corrections, privacy and collection lifetimes.
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { close, launch, lib, resize, search, unthrottle, waitIndexed } from '../lib/app.mjs'
 import { button, dismissNotices, selectPhoto, undoNotice, until } from '../lib/controls.mjs'
@@ -127,6 +128,10 @@ try {
 
   if (process.env.LUMEN_BASELINE_FRONTEND) {
     phase = 'built parent reproduction'
+    // Later children inherit this repair. The header's public revision prop
+    // identifies the live contract before we measure its correction outcome.
+    const liveHeader = /\brevision:\s*number\b/.test(readFileSync(join(process.env.LUMEN_BASELINE_FRONTEND,
+      '..', 'src', 'library', 'CollectionHead.vue'), 'utf8'))
     await start('baseline', process.env.LUMEN_BASELINE_FRONTEND)
     const page = app.page
     await openCollection(page, collections[0])
@@ -140,10 +145,16 @@ try {
     await page.waitForFunction((started) => performance.now() - started > 3500, {}, started)
     const caption = await page.$eval('.collection-hero .meta', (node) => node.textContent)
     const stored = await lib(page, 'TopPlaces', collections[0].view)
-    const observation = { caption, stored, sameMembership: await membership(page, collections[0]) }
+    const observation = { contract: liveHeader ? 'live-metadata' : 'identity-count-only', caption, stored,
+      sameMembership: await membership(page, collections[0]) }
     observations.push({ phase, ...observation })
-    s.check('the built parent retains the old city after a completed same-count correction',
-      caption.includes(origin.name) && !caption.includes(corrected.name) && stored.length === 1 &&
+    const correctHeader = liveHeader
+      ? caption.includes(corrected.name) && !caption.includes(origin.name) &&
+        await page.$eval('[data-collection-place]', (node, id) => node.getAttribute('href') === `/places/${id}`, corrected.id)
+      : caption.includes(origin.name) && !caption.includes(corrected.name)
+    s.check(liveHeader ? 'the built parent retains live same-count metadata and destinations'
+      : 'the built parent retains the old city after a completed same-count correction',
+      correctHeader && stored.length === 1 &&
       stored[0].id === corrected.id && observation.sameMembership, observation)
     await page.screenshot({ path: join(s.out, 'parent-stale-place.png') })
     s.check('parent tracing has no errors', trace.errors.length === 0, trace.errors)
