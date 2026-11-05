@@ -673,6 +673,14 @@ exercises SQLite ID reuse. No production admission, assertion, deadline or
 performance budget is loosened. Fresh full native acceptance remains pending.
 The unchanged hosted overrun is SaveEmbeddings64 unblocked 103.061/70 ms.
 
+A further mounted regression confirms that a save-window conflict can precede
+its background event: the first reload implementation reapplied the stale list
+entry. **Reload saved version** now reads the authoritative list after explicit
+confirmation, keeps the editor busy during that read, and checks the same
+session/visibility before adopting its result. A refused read retains the local
+conflict draft behind read-only recovery. The regression fails before the fix;
+fresh focused/full frontend and Windows/native verification are pending.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

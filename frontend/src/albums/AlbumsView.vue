@@ -224,7 +224,18 @@ async function reloadSaved() {
   const stillCurrent = () => session === currentSession && !suspended.value
   if (!(await confirm(t('albums.reloadTitle'), t('albums.reloadText'), t('albums.reloadSaved')))) return
   if (!stillCurrent()) return
-  // Read the current object after confirmation; no stale snapshot is reapplied.
+  // A server conflict can arrive before its background event. Reload the
+  // authoritative definition rather than adopting the still-stale list entry.
+  busy.value = true
+  try {
+    await albums.load()
+  } catch (e) {
+    logError(e)
+    return
+  } finally {
+    busy.value = false
+  }
+  if (!active || !stillCurrent()) return
   const fresh = albums.byId.get(current.id)
   if (fresh && fresh.version.identity === version.value?.identity) await edit(fresh)
 }

@@ -228,6 +228,7 @@ try {
   await saveDraft()
   await closed()
   s.check('retry saves exactly that draft to the original entity', (await saved()).name === 'Retried native save' &&
+    trace.calls.filter(row => row.name === 'SaveAlbum').length === 2 &&
     trace.calls.filter(row => row.name === 'SaveAlbum').every(row => row.parameters[0].id === a) && !trace.calls.some(row => row.name === 'CreateAlbum'))
   initialName = 'Retried native save'
 
