@@ -2,8 +2,8 @@
 import UButton from '@nuxt/ui/components/Button.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { AlbumKind, BlockKind, engine, Filter, TagKind, thumbUrl } from '../bridge'
+import { RouterLink, useRouter } from 'vue-router'
+import { AlbumKind, BlockKind, engine, Filter, isCancelled, TagKind, thumbUrl } from '../bridge'
 import type { Event, NamedPlace, Place, View } from '../bridge'
 import { useAlbums } from '../albums/store'
 import CoverMosaic from '../shared/CoverMosaic.vue'
@@ -18,12 +18,15 @@ import { nameTooLong, trimName } from '../shared/names'
 import { notify } from '../shared/notify'
 import { icons } from '../design/icons'
 import AlbumPhotoPicker from './AlbumPhotoPicker.vue'
+import { coalescedLoad } from '../shared/listStore'
+import { useLibrary } from './store'
 
 const props = defineProps<{
   kind: 'thing' | 'place' | 'event' | 'album' | 'smart' | 'favourites'
   id: number
   name: string
   count: number
+  revision: number
   days: string[]
   group?: Event | Place | null
 }>()
@@ -31,6 +34,7 @@ const emit = defineEmits<{ changed: [] }>()
 const router = useRouter()
 const things = useThings()
 const albums = useAlbums()
+const library = useLibrary()
 const thing = computed(() => things.byId.get(props.id))
 const album = computed(() => albums.byId.get(props.id))
 const event = computed(() => (props.group && 'startAt' in props.group ? props.group : null))
@@ -57,21 +61,78 @@ const view = computed((): View | null => {
   return null
 })
 const places = shallowRef<NamedPlace[]>([])
+const placesError = ref('')
+const placesPending = ref(0)
 let placesAsked = 0
-async function loadPlaces() {
-  const asked = ++placesAsked
-  const scope = view.value
+let placesActive = true
+let placesAbort: AbortController | undefined
+let placesTimer: ReturnType<typeof setTimeout> | undefined
+// A privacy refresh also emits an ordinary library change. Let same-view
+// reads settle under their coalesced owner instead of aborting them again.
+// Identity, privacy and unmount still end the underlying read's context.
+function clearPlaces(cancel = false) {
+  placesAsked++
+  if (cancel) placesAbort?.abort()
+  places.value = []
+  placesError.value = ''
+}
+const readPlaces = coalescedLoad(
+  async () => {
+    const asked = placesAsked
+    const scope = view.value
+    const request = new AbortController()
+    placesAbort = request
+    try {
+      const top = placesActive && scope ? await engine.topPlaces(scope, request.signal) : []
+      return { asked, top }
+    } catch (e) {
+      if (!placesActive || asked !== placesAsked || isCancelled(e)) return { asked, top: [] }
+      placesError.value = errorText(e)
+      throw e
+    }
+  },
+  ({ asked, top }) => {
+    if (placesActive && asked === placesAsked) places.value = top
+  },
+)
+async function loadPlaces(cancel = false) {
+  clearTimeout(placesTimer)
+  placesTimer = undefined
+  clearPlaces(cancel)
+  placesPending.value++
   try {
-    const top = scope ? await engine.topPlaces(scope) : []
-    if (asked === placesAsked) places.value = top
-  } catch (e) {
-    if (asked === placesAsked) places.value = []
-    logError(e)
+    await readPlaces()
+  } finally {
+    placesPending.value--
   }
 }
-// The count changes whenever what the collection holds does.
-watch([view, () => props.count], () => void loadPlaces(), { immediate: true })
-onBeforeUnmount(onBlocksChanged(loadPlaces))
+// Album kind is presentation: clearing its list during privacy refresh can
+// switch smart/manual temporarily without changing the wire view's identity.
+watch(
+  () => JSON.stringify(view.value),
+  () => void loadPlaces(true).catch(logError),
+  { immediate: true },
+)
+// The library owns change admission. Reuse its revision rather than adding
+// another event subscription or guessing changes from count/day equality.
+watch(
+  [() => props.revision, () => props.count],
+  () => {
+    clearPlaces()
+    if (!view.value || placesTimer !== undefined) return
+    placesTimer = setTimeout(() => void loadPlaces().catch(logError), 3000)
+  },
+  { flush: 'sync' },
+)
+onBeforeUnmount(onBlocksChanged(() => loadPlaces(true)))
+// Explicit corrections and Undo reconcile immediately; background bursts
+// share the trailing read above. Both paths use the same coalesced owner.
+onBeforeUnmount(library.onReconcile(loadPlaces))
+onBeforeUnmount(() => {
+  placesActive = false
+  clearPlaces(true)
+  clearTimeout(placesTimer)
+})
 
 const meta = computed(() => {
   return [
@@ -82,7 +143,6 @@ const meta = computed(() => {
       : props.kind === 'favourites'
         ? t('collection.favouritesHint')
         : '',
-    ...places.value.map((p) => p.name),
   ]
     .filter(Boolean)
     .join(' · ')
@@ -213,6 +273,18 @@ defineExpose({ addPhotos, editRule })
 
 <template>
   <CollectionHero :kind="eyebrow" :name="name" :meta="meta">
+    <template #meta>
+      {{ meta }}
+      <template v-for="p in places" :key="p.id">
+        <span aria-hidden="true"> · </span>
+        <RouterLink
+          :to="{ name: 'place', params: { id: p.id } }"
+          class="underline decoration-dotted underline-offset-2 hover:text-highlighted"
+          data-collection-place
+          ><bdi>{{ p.name }}</bdi></RouterLink
+        >
+      </template>
+    </template>
     <template #cover>
       <CoverMosaic
         v-if="album && (kind === 'album' || kind === 'smart')"
@@ -281,6 +353,12 @@ defineExpose({ addPhotos, editRule })
       }}</UButton>
     </template>
   </CollectionHero>
+  <p v-if="placesError" role="alert" class="error" data-collection-places-error>
+    {{ placesError }}
+    <UButton color="neutral" variant="outline" :loading="placesPending > 0" @click="loadPlaces().catch(logError)">{{
+      t('common.retry')
+    }}</UButton>
+  </p>
   <p v-if="error" role="alert" class="error">{{ error }}</p>
   <AlbumPhotoPicker v-if="picker" v-model:open="picker" :album-id="id" :name="name" @changed="refresh" />
 </template>

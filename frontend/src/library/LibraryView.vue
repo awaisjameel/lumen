@@ -993,6 +993,7 @@ function resultsHead(day: string): [string, string] {
           :kind="collectionKind"
           :name="title"
           :count="lib.total"
+          :revision="lib.contentRevision"
           :days="lib.buckets.map((b) => b.day)"
           :group="group"
           @changed="reloadCollection"

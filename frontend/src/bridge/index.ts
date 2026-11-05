@@ -615,7 +615,8 @@ export const engine = {
     })),
   places: async (): Promise<Place[]> => (await LibraryService.Places()) ?? [],
   place: (id: number): Promise<Place> => LibraryService.Place(id),
-  topPlaces: async (view: View): Promise<NamedPlace[]> => (await LibraryService.TopPlaces(view)) ?? [],
+  topPlaces: async (view: View, signal?: AbortSignal): Promise<NamedPlace[]> =>
+    (await cancellable(LibraryService.TopPlaces(view), signal)) ?? [],
   events: async (): Promise<Event[]> => (await LibraryService.Events()) ?? [],
   event: (id: number): Promise<Event> => LibraryService.Event(id),
   /** How many events a time gap would make, without saving it; a newer preview cancels this one. */

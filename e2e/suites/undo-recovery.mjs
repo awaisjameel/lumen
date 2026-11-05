@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { close, launch, lib, resize, unthrottle, waitIndexed } from '../lib/app.mjs'
-import { button, dismissNotices, selectAllResults, until } from '../lib/controls.mjs'
+import { button, dismissNotices, selectAllResults, selectPhoto, undoNotice as notice, until } from '../lib/controls.mjs'
 import { bindingID, mutationTrace } from '../lib/mutation-trace.mjs'
 import { E2E, suite } from '../lib/suite.mjs'
 
@@ -52,12 +52,6 @@ function watch(page) {
   })
 }
 const root = (id) => `[data-notification="${id}"]`
-async function notice(page) {
-  await until(() => page.$$eval('[data-notification^="undo."][data-state="open"]', (rows) => rows.some((row) =>
-    [...row.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Undo'))), 'no captured Undo was offered')
-  return page.$$eval('[data-notification^="undo."][data-state="open"]', (rows) => rows.filter((row) =>
-    [...row.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Undo')).at(-1).getAttribute('data-notification'))
-}
 async function caption(page, id, ...parts) {
   await until(() => page.$eval(root(id), (el, parts) => parts.every((part) => el.innerText.includes(part)), parts),
     `inverse ${id} did not report ${parts.join(', ')}`)
@@ -65,19 +59,6 @@ async function caption(page, id, ...parts) {
 async function library(page) {
   await page.click('aside a[href="/"]')
   await page.waitForSelector('.scroller')
-}
-async function selectPhoto(page, id) {
-  const clear = await page.$('button[aria-label="Clear selection"]')
-  if (clear) await clear.click()
-  if (!(await page.$(`#cell-${id}`))) await page.$eval('.scroller', (el) => { el.scrollTop = el.scrollHeight })
-  await page.waitForSelector(`#cell-${id}`)
-  await page.click(`#cell-${id}`)
-  const details = 'button[aria-label="Details"]'
-  if ((await page.$eval(details, (el) => el.getAttribute('aria-pressed'))) !== 'true') await page.click(details)
-  await page.waitForSelector('[data-edit-date]', { visible: true })
-  const name = (await lib(page, 'Asset', id)).paths[0].split(/[\\/]/).at(-1)
-  await until(() => page.$eval('.preview-caption h3', (el, name) => el.textContent.trim() === name, name),
-    'the inspector did not settle on the current target')
 }
 async function unblock(page, block) {
   await lib(page, 'UnlockBlocks', PIN)

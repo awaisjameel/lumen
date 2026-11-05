@@ -38,6 +38,7 @@ Install the pinned fixture tooling with `python -m pip install -r e2e/requiremen
 | `undo-recovery` | Retries partial selection and multi-album inverses, preserves correction provenance and newer edits, reverses a self-covering place correction, retires deleted-album inverses and restarts | three generated photos in its own library |
 | `tagging-recovery` | Injects annotation and OCR queue faults, checks draft retention versus committed tags, and verifies owned scheduling and text recovery in-session and across restart | two generated documents in their own library |
 | `smart-album-preview` | Compares parent/candidate request counts, payloads and latency on 100,000 synthetic rows over 100 days; real editor rules, privacy/retry and cancellation | generated photos/videos and an isolated metadata fixture |
+| `collection-places` | Reproduces stale parent metadata, then checks same-count correction/Undo, current place links, coalescing, privacy/read retry and back/forward/lifetime ownership | two generated photos in copied scratch libraries |
 | `organise` | Organise on disk: preview, move, Undo, checked on the files themselves | base library + two files of its own |
 | `viewer` | Zoom, pan, rotate, full screen, filmstrip, compare, slideshow; selection and batch; export and rename with Undo; audio tracks, subtitles, frame export; playback history; blocks | `media` |
 | `file-tools` | The File tools dialog and its menu at every width, by keyboard, and inside a full-screen video | `media` |
@@ -121,6 +122,22 @@ latency. This measures synthetic metadata transport, not decoding, scanning,
 an old executable or latency on a user's library. Existing hardware budgets
 remain separate. Native rule/privacy/retry/cancellation checks use generated
 photos and videos, through real editor controls and normal service contracts.
+The baseline's sibling generated bindings identify its contract: a checkout
+before `PreviewAlbum` must reproduce day amplification; a later parent must
+retain the one-call/three-sample bounded contract. Supply the baseline from a
+frontend checkout with those bindings, as PR CI does.
+
+`collection-places` also uses the compiled parent frontend for a native
+before/after comparison. Manual/smart albums, Things and single-photo events
+keep their membership during correction and Undo. Ten background corrections
+exercise bounded refresh work. A scratch-only column rename temporarily refuses
+actual backend place-name reads after a block, then restores the schema for
+retry. Held reads check privacy clearing and navigation ownership. The original
+files are unchanged; only reports and screenshots are uploaded.
+The checkout's header revision-prop contract identifies legacy versus live
+metadata before the correction outcome is measured. Later parents must retain
+the live names/destinations; the historical stale-parent comparison is retained
+for checkouts before the repair.
 
 `undo-recovery` shares the bridge instrumentation in `lib/mutation-trace.mjs`
 and control helpers in `lib/controls.mjs`. Its held requests make partial

@@ -16,6 +16,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   engine: {
     timeline: vi.fn<typeof Bridge.engine.timeline>().mockResolvedValue([]),
     event: vi.fn<typeof Bridge.engine.event>(),
+    topPlaces: vi.fn<typeof Bridge.engine.topPlaces>().mockResolvedValue([]),
     days: vi.fn<typeof Bridge.engine.days>().mockResolvedValue([]),
     trashSelection: vi.fn<typeof Bridge.engine.trashSelection>(),
     focus: vi.fn<typeof Bridge.engine.focus>().mockResolvedValue(undefined),
@@ -63,6 +64,8 @@ beforeEach(() => {
   listeners.clear()
   vi.useFakeTimers()
   vi.mocked(engine.event).mockReset()
+  vi.mocked(engine.topPlaces).mockReset().mockResolvedValue([])
+  vi.mocked(engine.timeline).mockReset().mockResolvedValue([])
   vi.mocked(onLibraryChanged).mockImplementation((callback) => {
     listeners.add(callback)
     return () => {
@@ -90,6 +93,7 @@ async function mountedTimeline() {
     routes: [
       { path: '/events/:id', name: 'event', component: LibraryView },
       { path: '/events', name: 'events', component: { template: '<div />' } },
+      { path: '/places/:id', name: 'place', component: { template: '<div />' } },
     ],
   })
   await router.push('/events/1')
@@ -107,6 +111,49 @@ it('refreshes an event heading after relevant library changes', async () => {
   await flushPromises()
   expect(wrapper.get('h1').text()).toBe('After')
   expect(engine.event).toHaveBeenCalledTimes(2)
+  wrapper.unmount()
+})
+
+it('refreshes collection places after a correction and Undo keep the same count and days', async () => {
+  vi.mocked(engine.event).mockResolvedValue(event(1, 'Weekend'))
+  vi.mocked(engine.timeline).mockResolvedValue([{ day: '2026-10-04', count: 2 }])
+  let city = { id: 7, name: 'Karachi' }
+  vi.mocked(engine.topPlaces).mockImplementation(() => Promise.resolve([{ ...city }]))
+  const { wrapper } = await mountedTimeline()
+  const lib = useLibrary()
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  const caption = () => wrapper.get('.collection-hero .meta').text().replace(/\s+/g, ' ')
+  expect(caption()).toContain('2 items · Karachi')
+  city = { id: 8, name: 'Lahore' }
+  await lib.refresh()
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(lib.total).toBe(2)
+  expect(caption()).toContain('2 items · Lahore')
+  expect(wrapper.get('[data-collection-place]').attributes('href')).toBe('/places/8')
+  city = { id: 7, name: 'Karachi' }
+  await lib.refresh()
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(caption()).toContain('2 items · Karachi')
+  expect(wrapper.get('[data-collection-place]').attributes('href')).toBe('/places/7')
+  wrapper.unmount()
+})
+
+it('does not reread collection place names for thumbnail-only changes', async () => {
+  vi.mocked(engine.event).mockResolvedValue(event(1, 'Weekend'))
+  vi.mocked(engine.timeline).mockResolvedValue([{ day: '2026-10-04', count: 2 }])
+  vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 7, name: 'Karachi' }])
+  const { wrapper } = await mountedTimeline()
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  vi.mocked(engine.topPlaces).mockClear()
+  await useLibrary().refresh({ assets: false, thumbs: true, tags: false, people: false })
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(engine.topPlaces).not.toHaveBeenCalled()
+  expect(wrapper.get('[data-collection-place]').text()).toBe('Karachi')
   wrapper.unmount()
 })
 

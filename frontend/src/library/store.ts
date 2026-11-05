@@ -686,7 +686,8 @@ export const useLibrary = defineStore('library', () => {
    * photos without reshuffling a live search.
    */
   let refreshing: Promise<void> | null = null
-  let refreshRevision = 0
+  // Metadata can change while the scope's count and day buckets stay the same.
+  const contentRevision = ref(0)
   async function refresh(c?: Changes) {
     const s = scope.value
     if (s.kind === 'search') {
@@ -713,21 +714,21 @@ export const useLibrary = defineStore('library', () => {
       notifyDays()
       return
     }
-    refreshRevision++
+    contentRevision.value++
     if (refreshing) return refreshing
     refreshing = (async () => {
       try {
         for (;;) {
-          const revision = refreshRevision
+          const revision = contentRevision.value
           try {
             await load()
           } catch (e) {
-            if (revision === refreshRevision || isSearch.value || disposed) throw e
+            if (revision === contentRevision.value || isSearch.value || disposed) throw e
             // A failed older read must not discard a newer library change.
             continue
           }
           notifyDays() // the view re-requests what it shows
-          if (revision === refreshRevision || isSearch.value || disposed) break
+          if (revision === contentRevision.value || isSearch.value || disposed) break
         }
       } finally {
         refreshing = null
@@ -1019,7 +1020,7 @@ export const useLibrary = defineStore('library', () => {
   }
 
   const reconcilers = new Set<() => Promise<unknown>>()
-  /** A mounted inspector contributes reads of its current entity, never a captured selection. */
+  /** Mounted metadata contributes reads of its current entity, never a captured selection. */
   function onReconcile(read: () => Promise<unknown>): () => void {
     reconcilers.add(read)
     return () => reconcilers.delete(read)
@@ -1155,6 +1156,7 @@ export const useLibrary = defineStore('library', () => {
     selAt,
     init,
     refresh,
+    contentRevision,
     refreshVisibility,
     needsDays,
     ensureDays,

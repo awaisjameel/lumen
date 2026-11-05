@@ -495,6 +495,98 @@ work. Final Windows/native results and artifact references are recorded in
 [#42](https://github.com/awaisjameel/lumen/issues/42) and its child PR; the parent
 performance gate is separate and remains open until its own acceptance.
 
+### #42 integration and #44 accepted scope
+
+PR #51 is merged into the parent at `5123a7f8`, verified head `52d1c329`.
+[Run 41918558533](https://github.com/awaisjameel/lumen/actions/runs/41918558533)
+passes production/bindings/modules, static/docs checks, all 1,022 frontend
+tests and all Windows Go race shards. Artifact `13368105341` retains native
+preview 26/26, tagging 18/18, Undo recovery 20/20, favourite Undo 22/22 and
+history 7/7, with inspected screenshots.
+
+Five readings per amplified rule on equivalent 100,000-row/100-day scratch
+metadata fixtures show 101 calls becoming one. Photo response bytes fall from
+4,175,493 to 139; favourite-video bytes from 1,596,105 to 213. Median summed
+bridge read times are 952.14 to 21.15 ms and 612.35 to 20.87 ms respectively;
+control-to-preview medians are 1,231.13 to 373.22 ms and 877.44 to 292.65 ms.
+Every parent reading makes 100 day calls; every candidate reading makes one
+bounded preview and no timeline/day calls. This is synthetic hosted evidence.
+The unchanged budgets still report SaveFaces64 folder 8.375/7 ms,
+SaveEmbeddings64 unblocked 188.659/70 ms, SaveFaces64 unblocked 11.956/8 ms
+and Things unblocked 11.331/10 ms. Configured-machine acceptance remains open.
+
+[#44](https://github.com/awaisjameel/lumen/issues/44) starts at `5123a7f8` on
+`fix/44-collection-place-refresh`. A mounted real `LibraryView` regression
+confirms that a completed same-count/day correction refresh leaves Karachi in
+the header after the metadata source changes to Lahore. The original header
+watches identity/count and has no admission for content-only changes. Its top
+place names are plain text, so stale link behaviour is not claimed for that
+original surface.
+
+The accepted repair reuses the library's existing refresh revision and mutation
+reconciliation owner, without another library-event subscription. Background
+changes share a trailing three-second read; correction and Undo reconciliation
+read immediately through the same coalesced owner. Cancel superseded I/O and
+guard current view/unmount, clear private names before reads, and provide
+accessible read-only retry. Current names become links using the existing
+place route; route contracts remain in #38. Store query/visibility semantics,
+generated contracts, originals and automatic event-name Undo are unchanged.
+
+Targeted header/library/store coverage passes 83 tests, including the repaired
+mounted regression, a 100-revision coalescing test, failed privacy refresh/retry,
+late identity reads, thumbnail-only admission and unmount cleanup. A scratch fault preflight confirms the
+backend query refuses `p.name` while its fixture column is renamed and reads
+normally after restoration. The native suite compares the built parent and
+candidate in copied generated libraries, then checks manual/smart albums,
+Things/events, Undo, current destinations, burst work, privacy/error/retry and
+back/forward navigation. Fresh full Windows/native acceptance is pending;
+final results are recorded in #44 and its child PR before integration.
+
+The first [Windows run 42008684964](https://github.com/awaisjameel/lumen/actions/runs/42008684964)
+passes production/current bindings/modules, static/docs, 1,029 frontend tests
+and every Go race shard. Native artifact `13406424909` confirms the built
+parent's stale Karachi header beside a corrected Lahore inspector. All four
+candidate collection kinds pass correction/Undo and current destinations;
+ten background corrections make one top-place read. Privacy clearing, actual
+backend refusal, retry, block Undo and abandoned-view checks also pass.
+Collection acceptance is 21/22 because aborting a same-view read again on the
+ordinary change from a privacy refresh produces Wails' late rejection report.
+The repair now lets its coalesced same-view read settle; identity, privacy
+and unmount still cancel. A new regression preserves that distinction.
+
+The preview suite's candidate passes, but its parent assertion still expected
+pre-#42 amplification even though the parent now includes #42. The harness
+now selects its expected contract from that checkout's generated bindings:
+legacy parents must amplify; bounded parents and candidates must retain one
+call, no timeline/day reads and a response below 1 KiB. Historical before/after
+evidence above is unchanged. Existing other native suites pass tagging 18/18,
+Undo recovery 20/20, favourite Undo 22/22 and history 7/7. The hosted report
+retains SaveEmbeddings64 unblocked 181.463/70 ms; budgets remain unchanged.
+Fresh verification of these refinements is pending.
+
+A further focused regression reproduces a false identity change when an album's
+privacy invalidation briefly loses its cached smart kind. Both presentations
+still resolve the same album wire view. Metadata identity now follows that
+stable view, matching the existing mosaic convention; the native privacy fault
+case runs in the smart album to retain coverage of the invalidation interval.
+The metadata baseline also reads its parent's public header revision-prop
+contract before measuring outcomes: original parents must demonstrate the stale
+header, while later parents must retain live metadata and current destinations.
+
+The next [run 42013873221](https://github.com/awaisjameel/lumen/actions/runs/42013873221)
+at `965ca66` passes Windows production/current bindings, static/docs checks,
+all 1,031 frontend tests and every Go race shard. Preview now passes 27/27;
+tagging 18/18, Undo recovery 20/20, favourite Undo 22/22 and history 7/7 remain
+passing. Metadata reproduces the original parent defect but stops at an
+unspecified candidate control timeout (4/5 before completion); its trace was
+reset before that step and screenshot capture did not finish. Artifact
+`13408554758` retains those actual results. The native harness now waits for
+the first rendered grid before enabling interception, reloads both frontends
+under the installed observer, and records control stages plus bounded failure
+diagnostics. Interaction deadlines and assertions are unchanged. Fresh native
+acceptance remains pending. The hosted report retains SaveEmbeddings64 folder
+63.089/60 ms and unblocked 185.352/70 ms; budgets remain unchanged.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

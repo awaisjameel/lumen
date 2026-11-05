@@ -103,6 +103,9 @@ sequential chain for every photo.
 ## 9. Places and Events
 
 - **Places** groups GPS-tagged media by the nearest city (within 75 km), using a bundled offline copy of GeoNames with about 70,000 places.
+- Collection headers link to their current top places after corrections and
+  Undo, even when membership stays the same. Failed place reads offer a retry;
+  privacy changes clear earlier names before reading again.
 - **Events** start a new group after a time gap (12 hours by default, configurable) or a jump of more than 100 km in location.
   - Names, pins and blocks you set follow the photos when events regroup. If an event splits, both halves keep them.
   - Reset brings back the automatic name.

@@ -60,6 +60,10 @@ export const SUITES = {
     port: 9421,
     about: 'bounded smart-rule previews: real mixed media, privacy/retry, cancellation and 100,000-row parent comparison',
   },
+  'collection-places': {
+    port: 9422,
+    about: 'same-count collection place corrections/Undo, privacy/read recovery and navigation ownership',
+  },
   organise: {
     port: 9405,
     about: 'organise on disk: preview, move, Undo, on two isolated files',

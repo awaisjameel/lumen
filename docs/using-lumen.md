@@ -148,6 +148,11 @@ nearest-city grouping, not an online street map. Events group photos by time
 gaps and location changes. You can rename or pin an event without changing
 the source files' metadata. See [Places and Events](features.md#9-places-and-events).
 
+An album, Thing or event names its top places in the header. Select a place
+name to open its photos. These links follow location corrections and Undo
+without reopening the collection. If place metadata cannot be read, **Try
+again** reloads it; blocked place names stay hidden during a failed refresh.
+
 On an event's page, **Reset name** restores its automatic title. **Undo** after
 a rename restores the previous naming choice: an automatic title follows later
 date or location corrections, while a custom title keeps your wording.
