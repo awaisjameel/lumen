@@ -219,6 +219,27 @@ it('reconciles correction and Undo metadata immediately without a new event subs
   wrapper.unmount()
 })
 
+it('lets one same-view read settle while coalescing a newer revision behind it', async () => {
+  vi.useFakeTimers()
+  const older = deferred<NamedPlace[]>()
+  vi.mocked(engine.topPlaces)
+    .mockReturnValueOnce(older.promise)
+    .mockResolvedValue([{ id: 8, name: 'Lahore' }])
+  const { wrapper, props } = await mountHead()
+  const signal = vi.mocked(engine.topPlaces).mock.calls[0]?.[1]
+  props.revision++
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(signal?.aborted).toBe(false)
+  expect(engine.topPlaces).toHaveBeenCalledOnce()
+  older.reject(new Error('obsolete read failed'))
+  await flushPromises()
+  expect(engine.topPlaces).toHaveBeenCalledTimes(2)
+  expect(wrapper.get('[data-collection-place]').text()).toBe('Lahore')
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  wrapper.unmount()
+})
+
 it('clears private metadata before a failed privacy read and offers an accessible retry', async () => {
   vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 7, name: 'Karachi' }])
   const { wrapper } = await mountHead()

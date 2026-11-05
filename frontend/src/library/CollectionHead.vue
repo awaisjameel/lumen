@@ -67,9 +67,12 @@ let placesAsked = 0
 let placesActive = true
 let placesAbort: AbortController | undefined
 let placesTimer: ReturnType<typeof setTimeout> | undefined
-function clearPlaces() {
+// A privacy refresh also emits an ordinary library change. Let same-view
+// reads settle under their coalesced owner instead of aborting them again.
+// Identity, privacy and unmount still end the underlying read's context.
+function clearPlaces(cancel = false) {
   placesAsked++
-  placesAbort?.abort()
+  if (cancel) placesAbort?.abort()
   places.value = []
   placesError.value = ''
 }
@@ -92,10 +95,10 @@ const readPlaces = coalescedLoad(
     if (placesActive && asked === placesAsked) places.value = top
   },
 )
-async function loadPlaces() {
+async function loadPlaces(cancel = false) {
   clearTimeout(placesTimer)
   placesTimer = undefined
-  clearPlaces()
+  clearPlaces(cancel)
   placesPending.value++
   try {
     await readPlaces()
@@ -103,7 +106,7 @@ async function loadPlaces() {
     placesPending.value--
   }
 }
-watch(view, () => void loadPlaces().catch(logError), { immediate: true })
+watch(view, () => void loadPlaces(true).catch(logError), { immediate: true })
 // The library owns change admission. Reuse its revision rather than adding
 // another event subscription or guessing changes from count/day equality.
 watch(
@@ -115,13 +118,13 @@ watch(
   },
   { flush: 'sync' },
 )
-onBeforeUnmount(onBlocksChanged(loadPlaces))
+onBeforeUnmount(onBlocksChanged(() => loadPlaces(true)))
 // Explicit corrections and Undo reconcile immediately; background bursts
 // share the trailing read above. Both paths use the same coalesced owner.
 onBeforeUnmount(library.onReconcile(loadPlaces))
 onBeforeUnmount(() => {
   placesActive = false
-  clearPlaces()
+  clearPlaces(true)
   clearTimeout(placesTimer)
 })
 

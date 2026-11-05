@@ -81,8 +81,9 @@ or replace the editor's draft.
 invalidates header places even when counts and day buckets are unchanged.
 The header adds no library-event subscription: background revisions share a
 three-second trailing read, while the existing mutation reconciliation owner
-refreshes corrections and Undo immediately. Both use one `coalescedLoad` owner,
-cancellable bridge reads and current-view/lifetime guards. Privacy invalidation
+refreshes corrections and Undo immediately. Both use one `coalescedLoad` owner:
+same-view invalidations let its active read settle and reject obsolete results;
+identity/privacy changes and unmount cancel I/O. Privacy invalidation
 clears names and destinations before I/O; failed reads expose retry and never
 restore old metadata. Place links use the existing place route.
 

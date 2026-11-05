@@ -542,6 +542,28 @@ Things/events, Undo, current destinations, burst work, privacy/error/retry and
 back/forward navigation. Fresh full Windows/native acceptance is pending;
 final results are recorded in #44 and its child PR before integration.
 
+The first [Windows run 42008684964](https://github.com/awaisjameel/lumen/actions/runs/42008684964)
+passes production/current bindings/modules, static/docs, 1,029 frontend tests
+and every Go race shard. Native artifact `13406424909` confirms the built
+parent's stale Karachi header beside a corrected Lahore inspector. All four
+candidate collection kinds pass correction/Undo and current destinations;
+ten background corrections make one top-place read. Privacy clearing, actual
+backend refusal, retry, block Undo and abandoned-view checks also pass.
+Collection acceptance is 21/22 because aborting a same-view read again on the
+ordinary change from a privacy refresh produces Wails' late rejection report.
+The repair now lets its coalesced same-view read settle; identity, privacy
+and unmount still cancel. A new regression preserves that distinction.
+
+The preview suite's candidate passes, but its parent assertion still expected
+pre-#42 amplification even though the parent now includes #42. The harness
+now selects its expected contract from that checkout's generated bindings:
+legacy parents must amplify; bounded parents and candidates must retain one
+call, no timeline/day reads and a response below 1 KiB. Historical before/after
+evidence above is unchanged. Existing other native suites pass tagging 18/18,
+Undo recovery 20/20, favourite Undo 22/22 and history 7/7. The hosted report
+retains SaveEmbeddings64 unblocked 181.463/70 ms; budgets remain unchanged.
+Fresh verification of these refinements is pending.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

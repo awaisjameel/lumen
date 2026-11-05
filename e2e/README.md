@@ -122,6 +122,10 @@ latency. This measures synthetic metadata transport, not decoding, scanning,
 an old executable or latency on a user's library. Existing hardware budgets
 remain separate. Native rule/privacy/retry/cancellation checks use generated
 photos and videos, through real editor controls and normal service contracts.
+The baseline's sibling generated bindings identify its contract: a checkout
+before `PreviewAlbum` must reproduce day amplification; a later parent must
+retain the one-call/three-sample bounded contract. Supply the baseline from a
+frontend checkout with those bindings, as PR CI does.
 
 `collection-places` also uses the compiled parent frontend for a native
 before/after comparison. Manual/smart albums, Things and single-photo events

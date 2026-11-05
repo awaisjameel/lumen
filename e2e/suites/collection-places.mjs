@@ -244,9 +244,12 @@ try {
   s.check('candidate bridge instrumentation has no errors', trace.errors.length === 0, trace.errors)
   s.check('no external requests', external.length === 0, external)
   await Promise.all(consoleReads)
+  // The scratch column fault also refuses the grid's unqualified place-name
+  // read. Only these exact injected failures are expected; uncaught promise
+  // failures and every other error still fail acceptance.
   const unexpected = diagnostics.filter((row) => !/custom\.js|Failed to load resource/.test(row.error) &&
-    !(row.phase === 'privacy clearing and failed-read recovery' && /no such column: p\.name/.test(row.error)))
-  s.check('only the deliberately refused place read is logged', pageErrors.length === 0 && unexpected.length === 0, { pageErrors, unexpected })
+    !(row.phase === 'privacy clearing and failed-read recovery' && /^no such column: (?:p\.)?name$/.test(row.error)))
+  s.check('only the deliberately refused place-name reads are logged', pageErrors.length === 0 && unexpected.length === 0, { pageErrors, unexpected })
 } catch (error) {
   failure = { phase, stack: error.stack ?? String(error) }
   s.check(`collection metadata completed (${phase})`, false, String(error))
@@ -258,5 +261,5 @@ try {
   await trace?.release().catch(() => {})
   await stop()
   await Promise.allSettled(consoleReads)
-  s.finish({ failure, observations, diagnostics, reads: failure ? trace?.calls.filter((row) => row.name === 'TopPlaces') : undefined })
+  s.finish({ failure, observations, diagnostics, pageErrors, reads: failure ? trace?.calls.filter((row) => row.name === 'TopPlaces') : undefined })
 }

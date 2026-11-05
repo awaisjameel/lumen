@@ -1,6 +1,6 @@
 // Bounded smart rules through the real editor and the parent/candidate builds.
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { close, launch, lib, people, resize, search, unthrottle, waitIndexed } from '../lib/app.mjs'
 import { button, option as chooseOption, until } from '../lib/controls.mjs'
@@ -102,6 +102,10 @@ function statistics(started) {
 }
 async function measure(label, baselineDir) {
   phase = `${label} large-fixture measurement`
+  // Later children inherit #42. Their built parent must retain the bounded
+  // contract; only a parent whose generated API predates it should amplify.
+  const bounded = !baselineDir || readFileSync(join(baselineDir, '..', 'bindings', 'lumen', 'services', 'libraryservice.ts'), 'utf8')
+    .includes('export function PreviewAlbum(')
   await start(label, baselineDir)
   const page = app.page
   await lib(page, 'CreateAlbum', 'Preview warm-up', 'smart', rule(), [])
@@ -117,7 +121,7 @@ async function measure(label, baselineDir) {
   await editor(page, 'Measured preview')
   await count(page, population.total)
   await trace.idle()
-  const result = { population, photos: [], favouriteVideos: [] }
+  const result = { population, contract: bounded ? 'bounded' : 'legacy-days', photos: [], favouriteVideos: [] }
   for (let repetition = 0; repetition < 5; repetition++) {
     await choose(page, 'Media', 'Photos and videos')
     await count(page, population.total)
@@ -146,11 +150,11 @@ async function measure(label, baselineDir) {
   }
   const samples = [...result.photos, ...result.favouriteVideos]
   s.check(`${label} records complete response payload and timing measurements`, samples.every((row) => row.responsesComplete), result)
-  if (baselineDir) {
+  if (baselineDir && !bounded) {
     s.check('the built parent reproduces 100 day reads for each final draft', samples.every((row) => row.days === 100 && row.calls === 101), result)
   } else {
-    s.check('every candidate draft uses one bounded preview call and no timeline/day calls', samples.every((row) => row.calls === 1 && row.previews === 1 && row.days === 0), result)
-    s.check('every candidate response is below 1 KiB with three samples', samples.every((row) => row.responseBytes < 1024), result)
+    s.check(`every ${label} draft uses one bounded preview call and no timeline/day calls`, samples.every((row) => row.calls === 1 && row.previews === 1 && row.days === 0), result)
+    s.check(`every ${label} response is below 1 KiB with three samples`, samples.every((row) => row.responseBytes < 1024), result)
   }
   metrics[label] = result
   s.check(`${label} bridge instrumentation has no errors`, trace.errors.length === 0, trace.errors)
