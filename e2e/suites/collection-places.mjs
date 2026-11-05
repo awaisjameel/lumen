@@ -162,9 +162,17 @@ try {
     await correctPlace(page, corrected)
     await until(() => page.$eval('.inspector-body', (node, name) => node.textContent.includes(name), corrected.name),
       'the corrected inspector did not refresh')
-    // Give the parent's existing three-second event path its full window.
-    const started = await page.evaluate(() => performance.now())
-    await page.waitForFunction((started) => performance.now() - started > 3500, {}, started)
+    if (liveHeader) {
+      // A repaired parent may be clearing its header for a trailing refresh.
+      // Await the observable destination under the normal interaction deadline.
+      await header(page, corrected)
+      await trace.idle()
+    } else {
+      // Give the legacy parent's event path its full window before observing
+      // the reproduced stale metadata, without granting it a repaired contract.
+      const started = await page.evaluate(() => performance.now())
+      await page.waitForFunction((started) => performance.now() - started > 3500, {}, started)
+    }
     const caption = await page.$eval('.collection-hero .meta', (node) => node.textContent)
     const stored = await lib(page, 'TopPlaces', collections[0].view)
     const observation = { contract: liveHeader ? 'live-metadata' : 'identity-count-only', caption, stored,

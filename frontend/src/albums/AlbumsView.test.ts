@@ -476,7 +476,7 @@ it('retires hidden rule identities and requires an explicit replacement rather t
   })
 })
 
-it('does not close a replacement editor after a saved write finishes its delayed reload', async () => {
+it('does not resurrect a removed target after its in-flight save settles', async () => {
   const w = await mounted()
   await menuAction(w, t('albums.editNamed', { name: album.name }))
   const pending = deferred<Bridge.AlbumVersion>()

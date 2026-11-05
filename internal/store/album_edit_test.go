@@ -11,6 +11,8 @@ import (
 
 func TestAlbumEditsRefuseConflictsAndReusedIdentities(t *testing.T) {
 	st, ctx := openTest(t), t.Context()
+	_, err := st.CreateAlbum(ctx, "Unrelated", core.AlbumManual, core.AlbumRule{}, nil)
+	check(t, err)
 	id, err := st.CreateAlbum(ctx, "Original", core.AlbumSmart, core.AlbumRule{}, nil)
 	check(t, err)
 	read := func() core.Album { t.Helper(); a, err := album(ctx, st.r, id); check(t, err); return a }
@@ -128,5 +130,28 @@ func TestAlbumIdentityMigrationPreservesDefinitionsAndMemberships(t *testing.T) 
 	check(t, err)
 	if a.Version != before {
 		t.Fatal("reading changed identity")
+	}
+}
+
+func TestAlbumCountsAndCoversDoNotInvalidateAnOpenDefinition(t *testing.T) {
+	st, ctx := openTest(t), t.Context()
+	source, err := st.AddSource(ctx, `C:\Photos`)
+	check(t, err)
+	check(t, errOf(st.Ingest(ctx, []IngestItem{item(source.ID, `C:\Photos\one.jpg`, "count-change")})))
+	var asset int64
+	check(t, st.r.QueryRowContext(ctx, `SELECT id FROM assets`).Scan(&asset))
+	_, err = st.CreateAlbum(ctx, "Favourites", core.AlbumSmart, core.AlbumRule{Favourites: true}, nil)
+	check(t, err)
+	before, err := st.Albums(ctx, 0.02)
+	check(t, err)
+	check(t, st.SetFavourite(ctx, asset, true))
+	check(t, st.SaveThumbnails(ctx, "fixture", []ThumbResult{{AssetID: asset}}))
+	after, err := st.Albums(ctx, 0.02)
+	check(t, err)
+	if len(before) != 1 || len(after) != 1 || before[0].Count != 0 || after[0].Count != 1 || after[0].Cover != asset || after[0].CoverThumb == 0 {
+		t.Fatalf("count/cover fixture: before=%+v after=%+v", before, after)
+	}
+	if before[0].Version != after[0].Version {
+		t.Fatalf("background metadata conflicted with draft: before=%+v after=%+v", before[0].Version, after[0].Version)
 	}
 }

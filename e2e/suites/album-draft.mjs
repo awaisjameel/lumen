@@ -132,10 +132,11 @@ try {
   await lib(app.page, 'SetPaused', true)
   const ids = (await lib(app.page, 'Selection', { filter: '' }, [], false)).ids
   s.must('two generated originals are indexed', ids.length === 2, ids)
-  await search(app.page, 'TagByName', ids, 'Native draft reference')
+  await search(app.page, 'TagAssets', ids, 'Native draft reference')
   tag = (await search(app.page, 'Things')).find(thing => thing.name === 'Native draft reference').id
-  a = await lib(app.page, 'CreateAlbum', initialName, 'smart', { ...rule, tag }, [])
   b = await lib(app.page, 'CreateAlbum', otherName, 'manual', rule, ids)
+  // Delete the highest ID later, so SQLite's normal ID reuse is exercised.
+  a = await lib(app.page, 'CreateAlbum', initialName, 'smart', { ...rule, tag }, [])
   await lib(app.page, 'CreateBlockPIN', '612435')
   await stop()
 

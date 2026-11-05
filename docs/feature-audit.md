@@ -654,6 +654,25 @@ is wired before the six existing regression suites in Windows CI. Native,
 full Windows and final local results remain pending; this checkpoint claims no
 runtime acceptance or completion of #45. Existing latency budgets are unchanged.
 
+The first Windows run [42027465896](https://github.com/awaisjameel/lumen/actions/runs/42027465896)
+passes production/current bindings/modules, static checks, 1,043 frontend tests,
+service/core and store-oracle race checks. The remaining store shard finds that
+`downgradeToV18` retained migration 0040's column while rewinding `user_version`.
+Its shared fixture now removes both the column and trigger; the failure is
+reproduced locally before this correction, and album/place/upgrade race tests
+pass afterwards (4.821 s). A separate regression establishes that count/cover
+changes do not invalidate a definition version.
+
+Native album-draft setup incorrectly called the store-only `TagByName` name;
+it now uses the existing bound `TagAssets` API. The inherited collection-place
+parent comparison also sampled an empty header during its refresh. Repaired
+parents now await the actual current destination under the existing interaction
+deadline; legacy parents retain the original delayed stale-state reproduction.
+The draft fixture creates its edited album last so its later deletion actually
+exercises SQLite ID reuse. No production admission, assertion, deadline or
+performance budget is loosened. Fresh full native acceptance remains pending.
+The unchanged hosted overrun is SaveEmbeddings64 unblocked 103.061/70 ms.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:
