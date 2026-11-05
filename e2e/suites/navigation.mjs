@@ -109,7 +109,8 @@ try {
   const ids = (await lib(app.page, 'Selection', { filter: '' }, [], false)).ids
   first = ids[0]
   await lib(app.page, 'SetFavourite', first, true)
-  await search(app.page, 'TagByName', ids, 'Navigation Thing')
+  const tagged = await search(app.page, 'TagAssets', ids, 'Navigation Thing')
+  s.must('the real batch tagging service prepares every navigation fixture', tagged.length === ids.length && tagged.every(row => !row.code))
   tag = (await search(app.page, 'Things')).find(t => t.name === 'Navigation Thing').id
   const faces = JSON.parse(execFileSync(process.env.PYTHON ?? 'python', [join(E2E, 'fixtures', 'album_preview.py'), 'faces', join(dataDir, 'library.db'), JSON.stringify(ids)], { encoding: 'utf8' }))
   person = await people(app.page, 'NameFaces', faces, 'Navigation Person')

@@ -694,6 +694,25 @@ preserved collection-recovery suite before the seven existing child suites,
 retaining reports and screenshots. No historical result certifies this child;
 latency budgets and configured-machine acceptance remain unchanged.
 
+### #38 first native checkpoint
+
+Head `d5e69813` in run
+[42121561205](https://github.com/awaisjameel/lumen/actions/runs/42121561205)
+passes production/current bindings/modules, full static checks, all 1,143
+frontend tests and every Go race shard. The native artifact `13458829112`
+retains passing album-draft 26/26, collection-place 22/22, preview 27/27,
+tagging 18/18, Undo recovery 20/20, history 7/7 and favourite Undo 22/22.
+Navigation completes real onboarding but its fixture then calls a store-only
+method name as a bound service; it stops at 3/4 checks. The fixture now uses
+the existing batch-tagging service and verifies every committed outcome.
+Collection recovery passes 50/51, including every recovery destination, PIN,
+unblocking and name-Undo check, but records one uncaught fetch error. Added
+phase, stack and argument-free pending-request diagnostics will identify it;
+no error is suppressed and no interaction deadline or assertion is weakened.
+Native acceptance and installer packaging remain pending. Hosted overruns are
+folder SaveFaces64 7.744/7 ms and unblocked SaveEmbeddings64 120.075/70 ms;
+budgets and configured-machine acceptance remain unchanged.
+
 ### #45 implementation checkpoint
 
 The confirmed mounted regressions fail on parent `e80a1d08`: unrelated privacy
