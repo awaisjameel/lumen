@@ -98,6 +98,10 @@ sequential chain for every photo.
 - **Smart albums** save a rule (media type, favourites, a date range, a Thing, a person) and update automatically as the library changes.
 - Their editor shows an exact visible count and up to three sample items.
   A failed preview can be retried without changing or saving the draft.
+- **Album drafts** survive unrelated privacy refreshes. Visibility checks pause
+  private fields; read retry preserves local input. Hidden/deleted targets close,
+  unavailable rule references require a choice, and concurrent saved changes
+  require an explicit confirmed reload before another save.
 - Albums have live counts, covers, rename, editing and deletion.
 
 ## 9. Places and Events

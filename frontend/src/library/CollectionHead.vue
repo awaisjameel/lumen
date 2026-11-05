@@ -41,6 +41,7 @@ const event = computed(() => (props.group && 'startAt' in props.group ? props.gr
 const place = computed(() => (props.group && 'country' in props.group ? props.group : null))
 const cover = computed(() => (props.kind === 'thing' ? thing.value : props.group))
 const renaming = ref(false)
+let writeDraftName: ((name: string) => Promise<void>) | undefined
 const draft = ref('')
 const error = ref('')
 const busy = ref(false)
@@ -156,11 +157,13 @@ watch(
   () => [props.kind, props.id],
   () => {
     renaming.value = false
+    writeDraftName = undefined
     error.value = ''
     picker.value = false
   },
 )
 async function rename() {
+  writeDraftName = nameWriter()
   draft.value = props.name
   error.value = ''
   renaming.value = true
@@ -176,11 +179,14 @@ async function refresh() {
 function nameWriter() {
   const id = props.id
   const kind = props.kind
-  const rule = album.value ? { ...album.value.rule } : null
+  let version = album.value?.version
   return async (name: string) => {
     if (kind === 'thing') await engine.renameThing(id, name)
     else if (kind === 'event') await engine.setEventName(id, name)
-    else if (rule) await engine.updateAlbum(id, name, rule)
+    else {
+      if (!version) throw new Error(t('error.notFound'))
+      version = await engine.saveAlbum({ id, version, name, rule: null })
+    }
   }
 }
 async function saveName(reset = false) {
@@ -193,7 +199,7 @@ async function saveName(reset = false) {
   // An automatic title has no override; storing its displayed name on Undo
   // would stop it following later date or location corrections.
   const previous = props.kind === 'event' ? (event.value?.nameOverride ?? '') : props.name
-  const writeName = nameWriter()
+  const writeName = writeDraftName ?? nameWriter()
   busy.value = true
   error.value = ''
   try {

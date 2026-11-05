@@ -488,13 +488,30 @@ const (
 
 // Album is a manual collection or a saved rule with its current visible count and cover.
 type Album struct {
-	ID         int64     `json:"id"`
-	Name       string    `json:"name"`
-	Kind       AlbumKind `json:"kind"`
-	Rule       AlbumRule `json:"rule"`
-	Count      int       `json:"count"`
-	Cover      int64     `json:"cover"`
-	CoverThumb int       `json:"coverThumb"`
+	ID         int64        `json:"id"`
+	Name       string       `json:"name"`
+	Kind       AlbumKind    `json:"kind"`
+	Rule       AlbumRule    `json:"rule"`
+	Count      int          `json:"count"`
+	Cover      int64        `json:"cover"`
+	CoverThumb int          `json:"coverThumb"`
+	Version    AlbumVersion `json:"version"`
+}
+
+// AlbumVersion separates a persistent creation identity from its current
+// definition. Counts and covers do not invalidate an unsaved definition.
+type AlbumVersion struct {
+	Identity string `json:"identity"`
+	Revision string `json:"revision"`
+}
+
+// AlbumEdit guards a write against deletion, numeric ID reuse and conflicting
+// definitions. A nil rule changes only the name, retaining the current rule.
+type AlbumEdit struct {
+	ID      int64        `json:"id"`
+	Version AlbumVersion `json:"version"`
+	Name    string       `json:"name"`
+	Rule    *AlbumRule   `json:"rule"`
 }
 
 // DuplicateItem is one indexed asset and all of its visible file copies.

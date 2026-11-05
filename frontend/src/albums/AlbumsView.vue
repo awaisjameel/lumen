@@ -12,11 +12,12 @@ import { useLayoutMode } from '../shared/layout'
 import USelect from '@nuxt/ui/components/Select.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { AlbumKind, BlockKind, engine, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
-import type { Album, AlbumRule } from '../bridge'
+import { AlbumKind, BlockKind, engine, errorCode, ErrorCode, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
+import type { Album, AlbumRule, AlbumVersion } from '../bridge'
 import { usePeople } from '../people/store'
 import { confirm } from '../shared/confirm'
 import { block } from '../shared/block'
+import { refreshAll } from '../shared/listStore'
 import { errorText, logError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { notify } from '../shared/notify'
@@ -49,6 +50,13 @@ const name = ref('')
 const kind = ref(AlbumKind.AlbumManual)
 const rule = ref<AlbumRule>(emptyRule())
 const editing = ref<number | null>(null)
+const version = ref<AlbumVersion | null>(null)
+const conflict = ref(false)
+const missingTag = ref(false)
+const missingPerson = ref(false)
+let session = 0
+const newAlbumButton = ref<{ $el: HTMLElement } | null>(null)
+let focusedField: { label: string; start: number | null; end: number | null } | null = null
 const nameField = ref<{ inputRef: HTMLInputElement | null } | null>(null)
 const editorOpen = ref(false)
 let editorTrigger: HTMLElement | null = null
@@ -67,20 +75,46 @@ const filters = computed(() => [
 const dateError = computed(
   () => kind.value === AlbumKind.AlbumSmart && !!rule.value.from && !!rule.value.to && rule.value.from > rule.value.to,
 )
-const referenceError = computed(
+const referenceError = computed(() => missingTag.value || missingPerson.value)
+// Private shared lists still clear immediately. Only this editor owns the draft;
+// until fresh reads admit it, none of its fields or preview are rendered.
+const suspended = computed(
   () =>
-    kind.value === AlbumKind.AlbumSmart &&
-    ((things.loaded && rule.value.tag !== 0 && !things.list.some((item) => item.id === rule.value.tag)) ||
-      (people.loaded && rule.value.person !== 0 && !people.list.some((item) => item.id === rule.value.person))),
+    editorOpen.value &&
+    ((editing.value !== null && (!albums.loaded || !!albums.error)) ||
+      (kind.value === AlbumKind.AlbumSmart &&
+        ((rule.value.tag !== 0 && (!things.loaded || things.loading || !!things.error)) ||
+          (rule.value.person !== 0 && (!people.loaded || people.loading || !!people.error))))),
 )
+const draftReadError = computed(() => suspended.value && (albums.error || things.error || people.error))
 const invalid = computed(
-  () => !trimName(name.value) || nameTooLong(name.value) || dateError.value || referenceError.value,
+  () =>
+    suspended.value ||
+    conflict.value ||
+    !trimName(name.value) ||
+    nameTooLong(name.value) ||
+    dateError.value ||
+    referenceError.value,
 )
 const preview = useAlbumPreview(() =>
-  editorOpen.value && kind.value === AlbumKind.AlbumSmart && !dateError.value && !referenceError.value
+  editorOpen.value &&
+  !suspended.value &&
+  !conflict.value &&
+  kind.value === AlbumKind.AlbumSmart &&
+  !dateError.value &&
+  !referenceError.value
     ? rule.value
     : null,
 )
+watch(preview.referenceUnavailable, (unavailable) => {
+  if (!unavailable) return
+  // A preview can learn of privacy/deletion before its library event arrives.
+  // Clear the existing reference caches immediately, then admit only fresh data.
+  const reads: Promise<void>[] = []
+  if (rule.value.tag) reads.push(things.invalidate())
+  if (rule.value.person) reads.push(people.invalidate())
+  void refreshAll(...reads).catch(logError)
+})
 function ruleSummary(value: AlbumRule) {
   return [
     t(
@@ -113,6 +147,12 @@ useLiveReload(async () => {
 })
 
 function reset() {
+  session++
+  version.value = null
+  conflict.value = false
+  missingTag.value = false
+  missingPerson.value = false
+  focusedField = null
   error.value = ''
   attempted.value = false
   editing.value = null
@@ -121,18 +161,120 @@ function reset() {
   rule.value = emptyRule()
 }
 
+function closeEditor() {
+  editorOpen.value = false
+  reset()
+}
+function retireDraft() {
+  editorTrigger = null
+  closeEditor()
+  notify({ id: 'albums.unavailable', kind: 'info', title: t('albums.draftUnavailable') })
+}
+// list=[] during invalidation says nothing about the target's existence. Only
+// a completed successful read can remove a draft or declare a conflict.
+watch([() => albums.list, () => albums.loaded, () => albums.loading], () => {
+  if (editing.value === null || !version.value || !albums.loaded || albums.loading || albums.error) return
+  const current = albums.byId.get(editing.value)
+  if (current?.version.identity !== version.value.identity) {
+    retireDraft()
+    return
+  }
+  if (!busy.value && current.version.revision !== version.value.revision) conflict.value = true
+})
 watch(
-  () => albums.list,
-  (list) => {
-    if (editing.value !== null && !list.some((album) => album.id === editing.value)) reset()
+  [
+    () => things.list,
+    () => things.loaded,
+    () => things.loading,
+    () => people.list,
+    () => people.loaded,
+    () => people.loading,
+    rule,
+  ],
+  () => {
+    if (!editorOpen.value || kind.value !== AlbumKind.AlbumSmart) return
+    if (
+      things.loaded &&
+      !things.loading &&
+      !things.error &&
+      rule.value.tag &&
+      !things.list.some((item) => item.id === rule.value.tag)
+    ) {
+      rule.value.tag = 0
+      missingTag.value = true
+    }
+    if (
+      people.loaded &&
+      !people.loading &&
+      !people.error &&
+      rule.value.person &&
+      !people.list.some((item) => item.id === rule.value.person)
+    ) {
+      rule.value.person = 0
+      missingPerson.value = true
+    }
   },
+  { deep: true },
 )
-
+function rememberField(e: Event) {
+  const target = e.target
+  if (!(target instanceof HTMLElement)) return
+  const label = target.getAttribute('aria-label')
+  if (!label) return
+  focusedField = {
+    label,
+    start: target instanceof HTMLInputElement ? target.selectionStart : null,
+    end: target instanceof HTMLInputElement ? target.selectionEnd : null,
+  }
+}
+watch(suspended, async (paused, wasPaused) => {
+  if (paused || !wasPaused || !focusedField) return
+  const currentSession = session
+  await nextTick()
+  if (!active || session !== currentSession || !editorOpen.value) return
+  // Do not take focus back from a control the user deliberately chose meanwhile.
+  if (document.activeElement !== document.body && !document.activeElement?.closest('[data-draft-state]')) return
+  const selection = focusedField
+  const field = [...document.querySelectorAll<HTMLElement>('#album-editor [aria-label]')].find(
+    (element) => element.getAttribute('aria-label') === selection.label,
+  )
+  field?.focus()
+  if (field instanceof HTMLInputElement && selection.start !== null)
+    field.setSelectionRange(selection.start, selection.end)
+})
+async function retryDraft() {
+  await refreshAll(albums.load(), things.load(), people.load()).catch(logError)
+}
+async function reloadSaved() {
+  const current = editing.value === null ? undefined : albums.byId.get(editing.value)
+  if (!current || suspended.value || busy.value) return
+  const currentSession = session
+  const stillCurrent = () => session === currentSession && !suspended.value
+  if (!(await confirm(t('albums.reloadTitle'), t('albums.reloadText'), t('albums.reloadSaved')))) return
+  if (!stillCurrent()) return
+  // A server conflict can arrive before its background event. Reload the
+  // authoritative definition and its choices rather than adopting stale lists.
+  busy.value = true
+  try {
+    await refreshAll(albums.load(), things.load(), people.load())
+  } catch (e) {
+    logError(e)
+    return
+  } finally {
+    busy.value = false
+  }
+  if (!active || !stillCurrent()) return
+  const fresh = albums.byId.get(current.id)
+  if (fresh && fresh.version.identity === version.value?.identity) await edit(fresh)
+}
 /** Opens the album's current rules; copies keep the unsaved draft local. */
 async function edit(album: Album) {
   if (busy.value) return
-  error.value = ''
-  attempted.value = false
+  reset()
+  version.value = { ...album.version }
+  // Initial reference reads can defer the form's first render. Keep its
+  // intended focus without moving focus away from a newer user action.
+  focusedField = { label: t('albums.name'), start: 0, end: album.name.length }
   editing.value = album.id
   name.value = album.name
   kind.value = album.kind
@@ -143,52 +285,79 @@ async function edit(album: Album) {
   nameField.value?.inputRef?.select()
 }
 
+// Consume an edit link once. A delayed route replacement must not reopen a
+// cancelled/removed session when a privacy reload finishes in the meantime.
+let consumedEdit: string | undefined
+watch(
+  () => route.query.edit,
+  () => {
+    consumedEdit = undefined
+  },
+)
 // Collection heroes can open the same editor without owning a second form.
 watch(
   [() => route.query.edit, () => albums.loaded],
   ([id, loaded]) => {
-    if (!loaded || typeof id !== 'string' || !/^\d+$/.test(id) || editorOpen.value) return
+    if (!loaded || typeof id !== 'string' || !/^\d+$/.test(id) || editorOpen.value || consumedEdit === id) return
+    consumedEdit = id
     const album = albums.byId.get(Number(id))
     if (album) void edit(album)
   },
   { immediate: true },
 )
 watch(editorOpen, (open, previous) => {
-  if (!open && previous && route.query.edit !== undefined)
-    void router.replace({ query: { ...route.query, edit: undefined } })
+  if (!open && previous) {
+    reset()
+    if (route.query.edit !== undefined) void router.replace({ query: { ...route.query, edit: undefined } })
+  }
 })
 
 async function save() {
   attempted.value = true
   if (invalid.value || busy.value) return
+  const currentSession = session
+  const id = editing.value
+  const savedKind = kind.value
+  const savedName = name.value
+  const savedRule = { ...rule.value }
+  const savedVersion = version.value ? { ...version.value } : null
+  if (id !== null && !savedVersion) return
   busy.value = true
   error.value = ''
   try {
-    const id = editing.value
-    if (id === null) {
-      const created = await engine.createAlbum(name.value, kind.value, rule.value)
-      // It exists now: a list that fails to refresh does not undo that.
-      await albums.load().catch(logError)
-      if (!active) return
-      notify({
-        id: 'albums.saved',
-        kind: 'success',
-        title: t(kind.value === AlbumKind.AlbumSmart ? 'albums.createdSmart' : 'albums.createdManual'),
-      })
-      reset()
-      editorOpen.value = false
-      void router.push({ name: 'album', params: { id: created } })
-    } else {
-      await engine.updateAlbum(id, name.value, rule.value)
-      await albums.load().catch(logError)
-      notify({ id: 'albums.saved', kind: 'success', title: t('albums.saved') })
-      reset()
-      editorOpen.value = false
+    let created: number | undefined
+    if (id === null) created = await engine.createAlbum(savedName, savedKind, savedRule)
+    else if (savedVersion) {
+      const committed = await engine.saveAlbum({ id, version: savedVersion, name: savedName, rule: savedRule })
+      if (active && session === currentSession) version.value = committed
     }
+    // A committed write must never be presented as a failed save or replayed
+    // merely because the independent list read failed.
+    await albums.load().catch(logError)
+    if (!active || session !== currentSession) return
+    notify({
+      id: 'albums.saved',
+      kind: 'success',
+      title: t(
+        id !== null
+          ? 'albums.saved'
+          : savedKind === AlbumKind.AlbumSmart
+            ? 'albums.createdSmart'
+            : 'albums.createdManual',
+      ),
+    })
+    closeEditor()
+    if (created !== undefined) void router.push({ name: 'album', params: { id: created } })
   } catch (e) {
-    error.value = errorText(e)
+    if (!active || session !== currentSession) return
+    if (errorCode(e) === ErrorCode.NotFound) retireDraft()
+    else {
+      if (errorCode(e) === ErrorCode.AlbumChanged) conflict.value = true
+      error.value = errorText(e)
+      if (errorCode(e) === ErrorCode.AlbumReference) void retryDraft()
+    }
   } finally {
-    busy.value = false
+    if (active) busy.value = false
   }
 }
 
@@ -207,7 +376,7 @@ async function remove(album: Album) {
   busy.value = true
   try {
     await albumChanges.remove(album.id)
-    if (editing.value === album.id) reset()
+    if (editing.value === album.id) closeEditor()
     await albums.load().catch(logError)
     notify({ id: 'albums.deleted', kind: 'success', title: t('albums.deleted') })
   } catch (e) {
@@ -218,7 +387,7 @@ async function remove(album: Album) {
 }
 
 async function blockAlbum(album: Album) {
-  if ((await block(BlockKind.BlockAlbum, album.id, album.name)) && editing.value === album.id) reset()
+  if ((await block(BlockKind.BlockAlbum, album.id, album.name)) && editing.value === album.id) closeEditor()
 }
 const editedAlbum = computed(() => (editing.value === null ? undefined : albums.byId.get(editing.value)))
 const albumKinds = computed(() => [
@@ -237,18 +406,35 @@ const mediaKinds = computed(() => [
   { label: t('albums.photos'), value: 1 },
   { label: t('albums.videos'), value: 2 },
 ])
+const selectedTag = computed({
+  get: () => (missingTag.value ? -1 : rule.value.tag),
+  set: (value: number) => {
+    if (value < 0) return
+    rule.value.tag = value
+    missingTag.value = false
+  },
+})
+const selectedPerson = computed({
+  get: () => (missingPerson.value ? -1 : rule.value.person),
+  set: (value: number) => {
+    if (value < 0) return
+    rule.value.person = value
+    missingPerson.value = false
+  },
+})
 const tagChoices = computed(() => [
+  ...(missingTag.value ? [{ label: t('albums.referenceUnavailable'), value: -1, disabled: true }] : []),
   { label: t('albums.anyTag'), value: 0 },
   ...things.list.map((tag) => ({ label: tag.name, value: tag.id })),
 ])
 const personChoices = computed(() => [
+  ...(missingPerson.value ? [{ label: t('albums.referenceUnavailable'), value: -1, disabled: true }] : []),
   { label: t('albums.anyPerson'), value: 0 },
   ...people.list.map((person) => ({ label: person.name || t('person.unnamed'), value: person.id })),
 ])
 function cancelEditor() {
   if (busy.value) return
-  editorOpen.value = false
-  reset()
+  closeEditor()
 }
 function newAlbum() {
   if (busy.value) return
@@ -266,9 +452,9 @@ function rememberTrigger(e: Event) {
   if (e.currentTarget instanceof HTMLElement) editorTrigger = e.currentTarget
 }
 function returnFocus(e: Event) {
-  if (!editorTrigger?.isConnected) return
   e.preventDefault()
-  editorTrigger.focus()
+  const target = editorTrigger?.isConnected ? editorTrigger : newAlbumButton.value?.$el
+  target?.focus()
 }
 function keepEditorFocus(e: Event) {
   if (editorOpen.value) e.preventDefault()
@@ -341,6 +527,7 @@ useCommands([
         "
       >
         <UButton
+          ref="newAlbumButton"
           data-action="new-album"
           :icon="icons.plus"
           color="primary"
@@ -465,7 +652,39 @@ useCommands([
         }"
       >
         <template #body>
-          <form id="album-editor" class="flex flex-col gap-4" @submit.prevent="save">
+          <div v-if="suspended" data-draft-state tabindex="-1" class="flex flex-col gap-4">
+            <p role="status">{{ t(draftReadError ? 'albums.draftReadFailed' : 'albums.verifyingDraft') }}</p>
+            <UButton
+              v-if="draftReadError"
+              data-action="retry-draft"
+              color="neutral"
+              variant="outline"
+              @click="retryDraft"
+              >{{ t('albums.retry') }}</UButton
+            >
+          </div>
+          <form
+            v-else
+            id="album-editor"
+            class="flex flex-col gap-4"
+            @focusin="rememberField"
+            @input="rememberField"
+            @select="rememberField"
+            @keyup="rememberField"
+            @submit.prevent="save"
+          >
+            <UAlert v-if="conflict" role="alert" color="warning" :title="t('error.albumChanged')">
+              <template #actions
+                ><UButton
+                  data-action="reload-album"
+                  color="neutral"
+                  variant="outline"
+                  :disabled="busy"
+                  @click="reloadSaved"
+                  >{{ t('albums.reloadSaved') }}</UButton
+                ></template
+              >
+            </UAlert>
             <UFormField :label="t('albums.name')" :hint="t('albums.nameHint')" required>
               <UInput
                 ref="nameField"
@@ -513,7 +732,7 @@ useCommands([
               </UFormField>
               <UFormField :label="t('albums.tag')">
                 <USelect
-                  v-model="rule.tag"
+                  v-model="selectedTag"
                   :disabled="busy"
                   class="w-full"
                   :items="tagChoices"
@@ -522,14 +741,20 @@ useCommands([
               </UFormField>
               <UFormField :label="t('albums.person')">
                 <USelect
-                  v-model="rule.person"
+                  v-model="selectedPerson"
                   :disabled="busy"
                   class="w-full"
                   :items="personChoices"
                   :aria-label="t('albums.person')"
                 />
               </UFormField>
-              <UCheckbox v-model="rule.favourites" :disabled="busy" :label="t('albums.favourites')" class="self-end" />
+              <UCheckbox
+                v-model="rule.favourites"
+                :disabled="busy"
+                :label="t('albums.favourites')"
+                :aria-label="t('albums.favourites')"
+                class="self-end"
+              />
             </div>
             <UAlert
               v-if="attempted && !trimName(name)"
@@ -541,12 +766,24 @@ useCommands([
             <UAlert v-if="dateError" role="alert" color="error" variant="subtle" :title="t('error.albumDateOrder')" />
             <UAlert
               v-if="referenceError"
+              data-album-reference-error
               role="alert"
               color="error"
               variant="subtle"
               :title="t('albums.referenceMissing')"
-            />
-            <section v-if="kind === AlbumKind.AlbumSmart" class="album-preview" data-album-preview>
+            >
+              <template #actions>
+                <UButton
+                  data-action="retry-album-references"
+                  color="neutral"
+                  variant="outline"
+                  :loading="things.loading || people.loading"
+                  @click="retryDraft"
+                  >{{ t('albums.retry') }}</UButton
+                >
+              </template>
+            </UAlert>
+            <section v-if="kind === AlbumKind.AlbumSmart && !conflict" class="album-preview" data-album-preview>
               <strong>{{ ruleSummary(rule) }}</strong>
               <div role="status" aria-live="polite" class="flex items-center gap-2">
                 <UBadge color="success" variant="soft">{{ t('albums.live') }}</UBadge>
@@ -584,7 +821,7 @@ useCommands([
           </form>
         </template>
         <template #footer>
-          <UDropdownMenu v-if="editedAlbum" :items="albumMoreItems(editedAlbum.id)">
+          <UDropdownMenu v-if="editedAlbum && !suspended" :items="albumMoreItems(editedAlbum.id)">
             <IconButton :icon="icons.more" :label="t('albums.actions', { name: editedAlbum.name })" :disabled="busy" />
           </UDropdownMenu>
           <div class="flex-1" />

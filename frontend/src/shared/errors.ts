@@ -44,6 +44,7 @@ const codeText: Record<ErrorCode, MessageKey> = {
   [ErrorCode.AlbumKind]: 'error.albumKind',
   [ErrorCode.AlbumReference]: 'error.albumReference',
   [ErrorCode.AlbumManualOnly]: 'error.albumManualOnly',
+  [ErrorCode.AlbumChanged]: 'error.albumChanged',
   [ErrorCode.PersonExists]: 'error.personExists',
   [ErrorCode.BlockedName]: 'error.blockedName',
   [ErrorCode.TagExists]: 'error.tagExists',

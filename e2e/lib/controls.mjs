@@ -24,6 +24,21 @@ export function button(page, text, root = '') {
   return clickText(page, `${root ? `${root} ` : ''}button::-p-text(${text})`, text)
 }
 
+/** Bounds failure diagnostics when a dead page cannot answer the protocol. */
+export async function diagnostic(read) {
+  let timer
+  try {
+    return await Promise.race([read, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('diagnostic timed out')), 5000)
+    })])
+  } catch (error) {
+    return { error: String(error) }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+
 /** Exact option labels distinguish Photos from Photos and videos. */
 export function option(page, text) {
   return clickText(page, `[role="option"]::-p-text(${text})`, text)

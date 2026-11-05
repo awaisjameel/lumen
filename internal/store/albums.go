@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,8 +32,13 @@ var (
 	ErrAlbumSmartItems = fmt.Errorf("%w: smart albums choose their own items", ErrInvalidAlbum)
 	// ErrAlbumKind rejects an unsupported collection kind.
 	ErrAlbumKind = fmt.Errorf("%w: unknown album kind", ErrInvalidAlbum)
-	// ErrAlbumReference rejects a deleted Thing or person.
-	ErrAlbumReference = fmt.Errorf("%w: the selected Thing or person no longer exists", ErrInvalidAlbum)
+	// ErrAlbumReference rejects an unavailable Thing or person.
+	ErrAlbumReference = fmt.Errorf("%w: the selected Thing or person is unavailable", ErrInvalidAlbum)
+	// ErrAlbumChanged rejects an unsaved definition based on an older version.
+	ErrAlbumChanged = errors.New("album definition changed")
+	// The preview conceals blocked reference identities; writes explain that
+	// the reference is unavailable without naming it.
+	errAlbumReferenceHidden = fmt.Errorf("%w: selected reference is blocked", ErrAlbumReference)
 	// ErrAlbumManualOnly rejects member edits in a smart album.
 	ErrAlbumManualOnly = fmt.Errorf("%w: only manual albums accept items", ErrInvalidAlbum)
 )
@@ -126,38 +133,91 @@ func (s *Store) CreateAlbum(ctx context.Context, name string, kind core.AlbumKin
 
 // UpdateAlbum changes its name and, for smart albums, its rule.
 func (s *Store) UpdateAlbum(ctx context.Context, id int64, name string, rule core.AlbumRule) error {
-	if err := validateAlbumRule(rule); err != nil {
-		return err
+	_, err := s.updateAlbum(ctx, id, name, &rule, nil)
+	return err
+}
+
+// SaveAlbum writes the intended entity and definition atomically. A retry of
+// an already committed identical result succeeds without replaying the write.
+func (s *Store) SaveAlbum(ctx context.Context, edit core.AlbumEdit) (core.AlbumVersion, error) {
+	if edit.ID <= 0 || edit.Version.Identity == "" || edit.Version.Revision == "" {
+		return core.AlbumVersion{}, ErrInvalidAlbum
 	}
+	return s.updateAlbum(ctx, edit.ID, edit.Name, edit.Rule, &edit.Version)
+}
+
+func (s *Store) updateAlbum(ctx context.Context, id int64, name string, rule *core.AlbumRule, expected *core.AlbumVersion) (core.AlbumVersion, error) {
+	if rule != nil {
+		if err := validateAlbumRule(*rule); err != nil {
+			return core.AlbumVersion{}, err
+		}
+	}
+	var saved core.AlbumVersion
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		a, err := album(ctx, tx, id)
 		if err != nil {
 			return err
 		}
-		if a.Kind == core.AlbumManual {
-			rule = core.AlbumRule{}
+		if expected != nil && a.Version.Identity != expected.Identity {
+			return ErrNotFound
 		}
-		body, err := json.Marshal(rule)
-		if err != nil {
-			return err
+		wanted := a.Rule
+		if a.Kind == core.AlbumManual {
+			wanted = core.AlbumRule{}
+		} else if rule != nil {
+			wanted = *rule
 		}
 		if name, err = albumName(ctx, tx, name, id); err != nil {
 			return err
 		}
-		if err := albumReferences(ctx, tx, rule); err != nil {
+		saved, err = albumVersion(a.Version.Identity, name, a.Kind, wanted)
+		if err != nil {
+			return err
+		}
+		if saved == a.Version {
+			return nil
+		}
+		if expected != nil && a.Version.Revision != expected.Revision {
+			return ErrAlbumChanged
+		}
+		if rule != nil {
+			if err := albumReferences(ctx, tx, wanted); err != nil {
+				return err
+			}
+		}
+		body, err := json.Marshal(wanted)
+		if err != nil {
 			return err
 		}
 		return affected(tx.ExecContext(ctx, `UPDATE albums SET name = ?, rule_json = ? WHERE id = ?`, name, string(body), id))
 	})
 	if isUnique(err) {
-		return fmt.Errorf("%w: %w", ErrInvalidAlbum, ErrAlbumExists)
+		return core.AlbumVersion{}, fmt.Errorf("%w: %w", ErrInvalidAlbum, ErrAlbumExists)
 	}
-	return err
+	if err != nil {
+		return core.AlbumVersion{}, err
+	}
+	return saved, nil
 }
 
 // albumReferences checks existence in the caller's snapshot. Saves use their
 // write transaction, so deletion cannot race the saved rule.
 func albumReferences(ctx context.Context, tx *sql.Tx, rule core.AlbumRule) error {
+	for _, target := range []struct {
+		kind core.BlockKind
+		id   int64
+	}{{core.BlockTag, rule.Tag}, {core.BlockPerson, rule.Person}} {
+		if target.id == 0 {
+			continue
+		}
+		blocked, err := isBlocked(ctx, tx, target.kind, target.id)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			return errAlbumReferenceHidden
+		}
+	}
 	var valid bool
 	err := tx.QueryRowContext(ctx, `SELECT
 		(?1 = 0 OR EXISTS (SELECT 1 FROM tags WHERE id = ?1)) AND
@@ -180,22 +240,10 @@ func (s *Store) PreviewAlbum(ctx context.Context, rule core.AlbumRule, minScore 
 	}
 	var out core.AlbumPreview
 	err := s.read(ctx, func(tx *sql.Tx) error {
-		for _, target := range []struct {
-			kind core.BlockKind
-			id   int64
-		}{{core.BlockTag, rule.Tag}, {core.BlockPerson, rule.Person}} {
-			if target.id == 0 {
-				continue
-			}
-			blocked, err := isBlocked(ctx, tx, target.kind, target.id)
-			if err != nil {
-				return err
-			}
-			if blocked {
+		if err := albumReferences(ctx, tx, rule); err != nil {
+			if errors.Is(err, errAlbumReferenceHidden) {
 				return ErrNotFound
 			}
-		}
-		if err := albumReferences(ctx, tx, rule); err != nil {
 			return err
 		}
 		where, args := albumFilter(core.Album{Kind: core.AlbumSmart, Rule: rule}).where(minScore)
@@ -222,7 +270,7 @@ func (s *Store) DeleteAlbum(ctx context.Context, id int64) error {
 }
 
 func album(ctx context.Context, q querier, id int64) (core.Album, error) {
-	albums, err := queryAll(ctx, q, scanAlbum, `SELECT id, name, kind, COALESCE(rule_json, '{}') FROM albums WHERE id = ?
+	albums, err := queryAll(ctx, q, scanAlbum, `SELECT id, name, kind, COALESCE(rule_json, '{}'), identity FROM albums WHERE id = ?
 		AND NOT `+labelBlocked(core.BlockAlbum, "albums.id"), id)
 	if err != nil {
 		return core.Album{}, err
@@ -239,7 +287,7 @@ func (s *Store) Albums(ctx context.Context, minScore float64) ([]core.Album, err
 	// Counts and covers must describe the same snapshot while indexing continues.
 	var albums []core.Album
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
-		albums, err = queryAll(ctx, tx, scanAlbum, `SELECT id, name, kind, COALESCE(rule_json, '{}') FROM albums
+		albums, err = queryAll(ctx, tx, scanAlbum, `SELECT id, name, kind, COALESCE(rule_json, '{}'), identity FROM albums
 			WHERE NOT `+labelBlocked(core.BlockAlbum, "albums.id")+`
 			ORDER BY `+byName("name"))
 		if err != nil {
@@ -265,14 +313,31 @@ func (s *Store) Albums(ctx context.Context, minScore float64) ([]core.Album, err
 
 func scanAlbum(r *sql.Rows) (core.Album, error) {
 	var a core.Album
-	var raw string
-	if err := r.Scan(&a.ID, &a.Name, &a.Kind, &raw); err != nil {
+	var raw, identity string
+	if err := r.Scan(&a.ID, &a.Name, &a.Kind, &raw, &identity); err != nil {
 		return a, err
 	}
 	if err := json.Unmarshal([]byte(raw), &a.Rule); err != nil {
 		return a, fmt.Errorf("album %d rule: %w", a.ID, err)
 	}
-	return a, nil
+	var err error
+	a.Version, err = albumVersion(identity, a.Name, a.Kind, a.Rule)
+	return a, err
+}
+
+func albumVersion(identity, name string, kind core.AlbumKind, rule core.AlbumRule) (core.AlbumVersion, error) {
+	definition := struct {
+		Identity string
+		Name     string
+		Kind     core.AlbumKind
+		Rule     core.AlbumRule
+	}{identity, name, kind, rule}
+	body, err := json.Marshal(definition)
+	if err != nil {
+		return core.AlbumVersion{}, err
+	}
+	digest := sha256.Sum256(body)
+	return core.AlbumVersion{Identity: identity, Revision: hex.EncodeToString(digest[:])}, nil
 }
 
 // albumFilter selects an album's members: a manual album's items, or what

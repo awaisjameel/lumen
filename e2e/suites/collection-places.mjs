@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { close, launch, lib, resize, search, unthrottle, waitIndexed } from '../lib/app.mjs'
-import { button, dismissNotices, selectPhoto, undoNotice, until } from '../lib/controls.mjs'
+import { button, diagnostic, dismissNotices, selectPhoto, undoNotice, until } from '../lib/controls.mjs'
 import { copyLibrary } from '../lib/fixtures.mjs'
 import { bindingID, mutationTrace } from '../lib/mutation-trace.mjs'
 import { E2E, suite } from '../lib/suite.mjs'
@@ -40,18 +40,6 @@ let collections
 function step(value) {
   action = value
   console.log(`collection-places: ${phase}: ${value}`)
-}
-async function diagnostic(read) {
-  let timer
-  try {
-    return await Promise.race([read, new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('diagnostic timed out')), 5000)
-    })])
-  } catch (error) {
-    return { error: String(error) }
-  } finally {
-    clearTimeout(timer)
-  }
 }
 
 function fault(action) {
@@ -107,9 +95,21 @@ async function openCollection(page, collection) {
 }
 async function header(page, city) {
   step(`wait for current metadata ${city.name}`)
-  await until(() => page.$$eval('[data-collection-place]', (links, city) => links.length === 1 &&
-    links[0].textContent.trim() === city.name && links[0].getAttribute('href') === `/places/${city.id}`, city),
-  `the current header did not link to ${city.name}`)
+  let snapshot
+  await until(async () => {
+    // Caption and destinations must describe the same DOM instant. A later
+    // admitted library revision may clear them again for a trailing read.
+    snapshot = await page.evaluate(() => ({
+      caption: document.querySelector('.collection-hero .meta')?.textContent ?? '',
+      places: [...document.querySelectorAll('[data-collection-place]')].map(link => ({
+        name: link.textContent.trim(), href: link.getAttribute('href'),
+      })),
+      observedAt: performance.now(),
+    }))
+    return snapshot.caption.includes(city.name) && snapshot.places.length === 1 &&
+      snapshot.places[0].name === city.name && snapshot.places[0].href === `/places/${city.id}`
+  }, `the current header did not link to ${city.name}`)
+  return snapshot
 }
 async function correctPlace(page, city) {
   await selectPhoto(page, first, step)
@@ -174,17 +174,26 @@ try {
     await correctPlace(page, corrected)
     await until(() => page.$eval('.inspector-body', (node, name) => node.textContent.includes(name), corrected.name),
       'the corrected inspector did not refresh')
-    // Give the parent's existing three-second event path its full window.
-    const started = await page.evaluate(() => performance.now())
-    await page.waitForFunction((started) => performance.now() - started > 3500, {}, started)
-    const caption = await page.$eval('.collection-hero .meta', (node) => node.textContent)
+    let parentHeader
+    if (liveHeader) {
+      // Await one atomic current caption/destination snapshot under the normal
+      // interaction deadline. Later reads must not mix another DOM revision.
+      await trace.idle()
+      parentHeader = await header(page, corrected)
+    } else {
+      // Give the legacy parent's event path its full window before observing
+      // the reproduced stale metadata, without granting it a repaired contract.
+      const started = await page.evaluate(() => performance.now())
+      await page.waitForFunction((started) => performance.now() - started > 3500, {}, started)
+    }
+    const caption = parentHeader?.caption ?? await page.$eval('.collection-hero .meta', (node) => node.textContent)
     const stored = await lib(page, 'TopPlaces', collections[0].view)
     const observation = { contract: liveHeader ? 'live-metadata' : 'identity-count-only', caption, stored,
-      sameMembership: await membership(page, collections[0]) }
+      header: parentHeader, sameMembership: await membership(page, collections[0]) }
     observations.push({ phase, ...observation })
     const correctHeader = liveHeader
       ? caption.includes(corrected.name) && !caption.includes(origin.name) &&
-        await page.$eval('[data-collection-place]', (node, id) => node.getAttribute('href') === `/places/${id}`, corrected.id)
+        parentHeader.places.length === 1 && parentHeader.places[0].href === `/places/${corrected.id}`
       : caption.includes(origin.name) && !caption.includes(corrected.name)
     s.check(liveHeader ? 'the built parent retains live same-count metadata and destinations'
       : 'the built parent retains the old city after a completed same-count correction',

@@ -110,7 +110,7 @@ jobs:
         run: |
           npm ci --prefix e2e
           python -m pip install -r e2e/requirements.txt
-          node e2e/run.mjs collection-places smart-album-preview tagging-recovery undo-recovery search-history favourite-undo
+          node e2e/run.mjs album-draft collection-places smart-album-preview tagging-recovery undo-recovery search-history favourite-undo
 
       - name: Preserve native regression reports
         if: always()
@@ -124,6 +124,7 @@ jobs:
             e2e/.work/results/tagging-recovery
             e2e/.work/results/smart-album-preview
             e2e/.work/results/collection-places
+            e2e/.work/results/album-draft
           retention-days: 14
           include-hidden-files: true
           if-no-files-found: ignore

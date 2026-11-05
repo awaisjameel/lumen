@@ -77,6 +77,33 @@ results, and clears samples before privacy refreshes or failed reads. It never
 counts or filters timeline days itself. Preview retry does not save an album
 or replace the editor's draft.
 
+**Album draft admission.** Shared privacy invalidation still clears cached
+lists immediately. The existing album editor retains local fields but removes
+its form and preview until authoritative album/reference reads admit them.
+Failed reads offer a read-only retry; confirmed disappearance or a different
+creation identity closes and clears the editor. Missing references lose their
+IDs and require an explicit choice rather than silently broadening the rule.
+A changed saved definition blocks saving until an explicit confirmed reload.
+If a current preview reports a hidden/deleted reference before its library
+refresh arrives, its existing read owner exposes that classified failure.
+The editor invalidates its selected reference lists immediately and uses the
+same visibility admission; an obsolete preview cannot retire newer choices.
+Reference retry reads current choices without restoring a retired selection.
+A pending reference read is unknown even if an earlier cache was loaded;
+missing-ID reconciliation waits until that read settles. Confirmed definition
+reload refreshes album and reference data together before adopting a rule.
+Deferred first rendering retains the intended field focus.
+
+Album definitions carry an immutable creation identity (migration 0040) and a
+derived revision over their name, kind and rule; counts/covers do not conflict
+with a draft. `Store.SaveAlbum` checks that version in the writer transaction,
+returns the committed version and acknowledges an identical retry without
+another write. Name-only saves retain the server rule; header name Undo uses
+the version returned by its forward save. Both interactive definition writers
+use this guarded contract. The legacy three-argument update remains only for
+compiled clients and native fixtures, sharing the same store implementation.
+No persisted draft owner or membership-turn registry is added.
+
 **Collection place metadata.** The library's existing admitted content revision
 invalidates header places even when counts and day buckets are unchanged.
 The header adds no library-event subscription: background revisions share a

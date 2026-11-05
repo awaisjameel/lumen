@@ -459,6 +459,14 @@ export function RunExport(batch: number): $CancellablePromise<core$0.ExportJob[]
 }
 
 /**
+ * SaveAlbum changes only the intended album and definition, returning its
+ * committed version without a fallible read after the transaction.
+ */
+export function SaveAlbum(edit: core$0.AlbumEdit): $CancellablePromise<core$0.AlbumVersion> {
+    return $Call.ByID(1006543071, edit);
+}
+
+/**
  * Selection resolves the view or ranked search IDs under current visibility.
  */
 export function Selection(view: core$0.View, ids: number[] | null, search: boolean): $CancellablePromise<core$0.Selection> {
@@ -795,6 +803,8 @@ export function UnlockBlocks(pin: string): $CancellablePromise<void> {
 
 /**
  * UpdateAlbum changes an album's name and smart rule.
+ * Existing compiled clients and native fixtures retain this signature; the
+ * current editor and name Undo use SaveAlbum's guarded definition contract.
  */
 export function UpdateAlbum(id: number, name: string, rule: core$0.AlbumRule): $CancellablePromise<void> {
     return $Call.ByID(2490788795, id, name, rule);

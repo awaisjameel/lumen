@@ -194,7 +194,16 @@ it('refreshes metadata and the place action on asset changes without clearing an
   vi.mocked(engine.asset).mockResolvedValueOnce({ ...detail(1), width: 0, height: 0 })
   vi.mocked(engine.applyBatch).mockRejectedValueOnce(new Error('album edit failed'))
   vi.mocked(engine.albums).mockResolvedValue([
-    { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
+    {
+      id: 7,
+      version: { identity: 'album-7', revision: 'original' },
+      name: 'Trip',
+      kind: AlbumKind.AlbumManual,
+      rule: emptyRule(),
+      count: 0,
+      cover: 0,
+      coverThumb: 0,
+    },
   ])
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
@@ -360,7 +369,16 @@ it('does not clear the next selection draft when album creation finishes', async
 
 it('puts an album checkbox back when the change fails', async () => {
   vi.mocked(engine.albums).mockResolvedValue([
-    { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
+    {
+      id: 7,
+      version: { identity: 'album-7', revision: 'original' },
+      name: 'Trip',
+      kind: AlbumKind.AlbumManual,
+      rule: emptyRule(),
+      count: 0,
+      cover: 0,
+      coverThumb: 0,
+    },
   ])
   vi.mocked(engine.applyBatch).mockRejectedValueOnce(new Error('album deleted'))
   wrapper = mountDetails({ day: 'results', id: 1 })
@@ -604,7 +622,16 @@ it('does not roll back an album checkbox on the next photo when an earlier edit 
     rejectEdit = reject
   })
   vi.mocked(engine.albums).mockResolvedValue([
-    { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
+    {
+      id: 7,
+      version: { identity: 'album-7', revision: 'original' },
+      name: 'Trip',
+      kind: AlbumKind.AlbumManual,
+      rule: emptyRule(),
+      count: 0,
+      cover: 0,
+      coverThumb: 0,
+    },
   ])
   vi.mocked(engine.applyBatch).mockReturnValueOnce(pending)
   vi.mocked(engine.assetAlbums).mockResolvedValueOnce([7]).mockResolvedValueOnce([])

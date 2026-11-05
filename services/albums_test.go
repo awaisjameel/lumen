@@ -36,3 +36,38 @@ func TestSmartAlbumPreviewUsesCurrentTagConfidenceAndRefusesBlockedReferences(t 
 		t.Fatalf("blocked reference preview = %+v, %v", got, err)
 	}
 }
+
+func TestAlbumSaveReturnsCommittedVersionAndRefusesAStaleEditor(t *testing.T) {
+	l, _ := screenshotLibrary(t)
+	ctx := t.Context()
+	svc := &LibraryService{store: l.st}
+	id, err := svc.CreateAlbum(ctx, "Versioned", core.AlbumSmart, core.AlbumRule{}, nil)
+	check(t, err)
+	list, err := svc.Albums(ctx)
+	check(t, err)
+	var original core.Album
+	for _, a := range list {
+		if a.ID == id {
+			original = a
+		}
+	}
+	edit := core.AlbumEdit{ID: id, Version: original.Version, Name: "Saved"}
+	committed, err := svc.SaveAlbum(ctx, edit)
+	check(t, err)
+	if committed.Identity != original.Version.Identity || committed.Revision == original.Version.Revision {
+		t.Fatalf("committed = %+v", committed)
+	}
+	retry, err := svc.SaveAlbum(ctx, edit)
+	check(t, err)
+	if retry != committed {
+		t.Fatalf("retry = %+v", retry)
+	}
+	edit.Name = "Stale"
+	if _, err := svc.SaveAlbum(ctx, edit); !errors.Is(err, store.ErrAlbumChanged) {
+		t.Fatalf("stale save = %v", err)
+	}
+	check(t, svc.DeleteAlbum(ctx, id))
+	if _, err := svc.SaveAlbum(ctx, edit); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted save = %v", err)
+	}
+}

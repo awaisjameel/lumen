@@ -587,6 +587,169 @@ diagnostics. Interaction deadlines and assertions are unchanged. Fresh native
 acceptance remains pending. The hosted report retains SaveEmbeddings64 folder
 63.089/60 ms and unblocked 185.352/70 ms; budgets remain unchanged.
 
+### #44 integration and #45 accepted scope
+
+PR #52 is merged into the parent at `e80a1d08`, verified head `d9f1c80`.
+[Run 42018179926](https://github.com/awaisjameel/lumen/actions/runs/42018179926)
+passes production/current bindings/modules, static/docs, all 1,031 frontend
+tests and every Windows Go race shard. Artifact `13410543832` retains metadata
+22/22, preview 27/27, tagging 18/18, Undo recovery 20/20, favourite Undo 22/22
+and history 7/7. Inspected screenshots show private header names removed during
+the read fault and the correct current destination after navigation. There are
+no uncaught page errors or unexpected console/instrumentation errors. Ten
+background corrections use one 32-byte place read (5.2971 ms on that fixture).
+Hosted overruns remain SaveFaces64 folder 7.327/7 ms and SaveEmbeddings64
+unblocked 121.135/70 ms; budgets and configured-machine acceptance are unchanged.
+
+[#45](https://github.com/awaisjameel/lumen/issues/45) starts from `e80a1d08`
+on `fix/45-album-draft-privacy`. Its mounted regression confirms that an unrelated
+delayed privacy reload erases a valid unsaved name and changes an edit into
+creation. A second regression covers a saved definition changing behind the
+open editor. Shared privacy invalidation must continue clearing cached lists.
+
+The accepted repair keeps the draft in its existing editor and admits it only
+against fresh visibility. Unknown visibility suspends private form content and
+previews; a failed read offers read-only recovery. A still-visible target
+resumes its local fields/focus without overwriting newer input. Confirmed
+removal or blocking closes and clears the edit. Missing/blocked rule references
+are redacted and require an explicit valid choice, never silently broadening
+the rule. Save ownership includes the editor session and immutable target;
+navigation, retry and late completions cannot create or change another album.
+
+Conflict and identity checks belong in the store's write transaction as well
+as the UI. A small album creation token distinguishes SQLite ID reuse (the
+existing membership Undo contract deliberately permits reuse). A derived
+metadata revision excludes changing counts/covers. Guarded saves compare those
+tokens, reject stale or recreated targets, and acknowledge an already committed
+identical result without replaying it. The same store validation/write helper
+serves compatibility calls, and current editor/name-Undo surfaces use the
+guarded contract. There is no persisted draft cache or second mutation journal.
+Rule-reference visibility validation remains shared with preview/save logic.
+Wire changes require regenerated bindings and error/contract coverage. Fresh
+store/service, mounted/native global-Undo/privacy and full-system verification
+are required before this child is integrated.
+
+### #45 implementation checkpoint
+
+The confirmed mounted regressions fail on parent `e80a1d08`: unrelated privacy
+invalidation discards a valid draft and changes edit mode into creation; a
+concurrent saved definition is silently overwritten. The repair leaves shared
+privacy invalidation intact and keeps draft ownership in the existing editor.
+Uncertain visibility removes form/preview, read-only retry retains local fields,
+and confirmed missing/recreated targets close and clear. Hidden/missing rule IDs
+are retired and require an explicit selection. Conflicts retain local input and
+block saving until an explicitly confirmed reload or cancellation.
+
+`SaveAlbum` checks immutable creation identity and derived definition revision
+inside the existing writer transaction, preventing ID reuse and lost updates.
+Counts/covers do not conflict; an identical retry performs no write. Name-only
+header saves/Undo preserve server rules and use returned committed versions.
+The legacy update signature remains compatible with compiled parent clients
+and shares its canonical implementation. Bindings and the typed error chain
+are regenerated/aligned. No persistent draft cache or membership lease is added.
+
+Local editor/header regressions, identity/CAS/idempotence/privacy/migration
+store tests and static checks are being run. A new `album-draft` native suite
+is wired before the six existing regression suites in Windows CI. Native,
+full Windows and final local results remain pending; this checkpoint claims no
+runtime acceptance or completion of #45. Existing latency budgets are unchanged.
+
+The first Windows run [42027465896](https://github.com/awaisjameel/lumen/actions/runs/42027465896)
+passes production/current bindings/modules, static checks, 1,043 frontend tests,
+service/core and store-oracle race checks. The remaining store shard finds that
+`downgradeToV18` retained migration 0040's column while rewinding `user_version`.
+Its shared fixture now removes both the column and trigger; the failure is
+reproduced locally before this correction, and album/place/upgrade race tests
+pass afterwards (4.821 s). A separate regression establishes that count/cover
+changes do not invalidate a definition version.
+
+Native album-draft setup incorrectly called the store-only `TagByName` name;
+it now uses the existing bound `TagAssets` API. The inherited collection-place
+parent comparison also sampled an empty header during its refresh. Repaired
+parents now await the actual current destination under the existing interaction
+deadline; legacy parents retain the original delayed stale-state reproduction.
+The draft fixture creates its edited album last so its later deletion actually
+exercises SQLite ID reuse. No production admission, assertion, deadline or
+performance budget is loosened. Fresh full native acceptance remains pending.
+The unchanged hosted overrun is SaveEmbeddings64 unblocked 103.061/70 ms.
+
+A further mounted regression confirms that a save-window conflict can precede
+its background event: the first reload implementation reapplied the stale list
+entry. **Reload saved version** now reads the authoritative list after explicit
+confirmation, keeps the editor busy during that read, and checks the same
+session/visibility before adopting its result. A refused read retains the local
+conflict draft behind read-only recovery. The regression fails before the fix;
+fresh focused/full frontend and Windows/native verification are pending.
+
+[Run 42052902380](https://github.com/awaisjameel/lumen/actions/runs/42052902380),
+head `b63b6568`, passes Windows production/current bindings/modules, static and
+1,045 frontend tests, and every Go race shard. Artifact `13429357191` records
+album-draft 25/25, preview 27/27, tagging 18/18, Undo recovery 20/20, history 7/7
+and favourite Undo 22/22. The inspected paused-editor screenshot contains no
+private draft fields and disables saving. Collection metadata is 21/22: its
+parent helper observes a correct link, then reads an emptied caption after a
+later revision, mixing two DOM instants. The helper now captures caption and
+destinations atomically within the existing deadline for parent and candidate.
+No production metadata assertion or interaction deadline is relaxed.
+
+A mounted follow-up confirms a reference privacy gap: a blocked/deleted preview
+response can arrive before the collection refresh and leave the old Thing name
+in the form. Both error-code regressions fail before the repair. The existing
+preview owner now exposes only its current classified reference refusal; the
+editor invalidates its selected reference caches and uses the same admission
+path. Confirmed missing IDs require an explicit replacement. Read-only reference
+retry refreshes choices without restoring retired IDs; an obsolete preview
+cannot invalidate a newer rule. The inherited native preview suite now checks
+redacted names as well as cleared samples and explicitly reselects a restored
+reference. Generic unavailable-target feedback also omits protected names.
+Fresh full frontend/Windows/native acceptance of these final changes is pending.
+The unchanged hosted overrun on this head is SaveEmbeddings64 unblocked
+116.973/70 ms; the configured-machine gate remains open.
+
+Two final mounted regressions confirm that cached loaded choices cannot admit
+a pending reference read, and that confirmed saved-version reload must refresh
+its reference choices along with the album. Both fail before the repair by
+retiring a still-valid new Thing ID. Reference admission now includes loading,
+missing-ID reconciliation waits for settlement, and confirmed reload reads all
+three existing list owners together. A delayed first render also lost its
+initial field focus; its assertion fails before seeding the intended generic
+name-field focus and selection. Current focused tests pass 61/61, with a full
+1,051-test frontend pass. The native conflict fixture now creates its selected
+Thing after the editor opens and asserts that reload adopts the valid new
+choice. Fresh final-head acceptance remains pending; no budget is changed.
+
+[Run 42058774883](https://github.com/awaisjameel/lumen/actions/runs/42058774883),
+verified head `38c208ce`, passes every Windows job: production/current bindings/
+modules, static/frontend and all Go race shards. Artifact `13432725928` records
+album drafts 25/25, metadata 22/22, previews 27/27, tagging 18/18, Undo recovery
+20/20, history 7/7 and favourite Undo 22/22. There are no uncaught page errors or
+unexpected instrumentation errors. The inspected paused-editor screenshot has
+no private fields, and the parent metadata report records one atomic Lahore
+caption/link snapshot (`/places/1172451`) matching the store and membership.
+The revised preview suite confirms immediate reference-name/sample redaction
+and explicit restoration after read-only retry. The unchanged hosted overrun
+is SaveEmbeddings64 unblocked 185.861/70 ms; hardware acceptance remains open.
+
+The seven final admission/focus/native-fixture/documentation changes above are
+now prepared for their own full Windows/native run, including the new 26th
+draft case. This record accepts the verified candidate's results without
+claiming runtime acceptance for those final refinements yet.
+
+The final admission candidate, head `885de9de` in
+[run 42062544358](https://github.com/awaisjameel/lumen/actions/runs/42062544358),
+passes production/current bindings/modules, static checks, 1,051 frontend tests
+and every Go race shard. Metadata 22/22, preview 27/27, tagging 18/18, Undo
+recovery 20/20, history 7/7 and favourite Undo 22/22 pass. The extended draft
+suite stops at 14/15 during its confirmed-reload wait: immediate `$eval` throws
+while the form is deliberately absent for reference admission. Artifact
+`13434896530` has no page errors; its inspected failure screenshot/DOM show the
+correct current name, newly created Thing and enabled Save after readmission.
+The predicate now observes temporary absence as pending via one DOM evaluation
+under the unchanged timeout. No application code or assertion is weakened.
+Full completion of the extended 26-check journey remains pending. Hosted
+reports retain folder SaveFaces64 7.048/7 ms and unblocked SaveEmbeddings64
+166.493/70 ms; budgets and the configured-machine gate remain unchanged.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

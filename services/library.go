@@ -378,8 +378,20 @@ func (s *LibraryService) CreateAlbum(ctx context.Context, name string, kind core
 }
 
 // UpdateAlbum changes an album's name and smart rule.
+// Existing compiled clients and native fixtures retain this signature; the
+// current editor and name Undo use SaveAlbum's guarded definition contract.
 func (s *LibraryService) UpdateAlbum(ctx context.Context, id int64, name string, rule core.AlbumRule) error {
 	return s.store.UpdateAlbum(ctx, id, name, rule)
+}
+
+// SaveAlbum changes only the intended album and definition, returning its
+// committed version without a fallible read after the transaction.
+func (s *LibraryService) SaveAlbum(ctx context.Context, edit core.AlbumEdit) (core.AlbumVersion, error) {
+	version, err := s.store.SaveAlbum(ctx, edit)
+	if err == nil {
+		s.viewsChanged()
+	}
+	return version, err
 }
 
 // DeleteAlbum removes an album without touching media files.

@@ -76,6 +76,18 @@ export interface Album {
     "count": number;
     "cover": number;
     "coverThumb": number;
+    "version": AlbumVersion;
+}
+
+/**
+ * AlbumEdit guards a write against deletion, numeric ID reuse and conflicting
+ * definitions. A nil rule changes only the name, retaining the current rule.
+ */
+export interface AlbumEdit {
+    "id": number;
+    "version": AlbumVersion;
+    "name": string;
+    "rule": AlbumRule | null;
 }
 
 /**
@@ -117,6 +129,15 @@ export interface AlbumRule {
     "to": string;
     "tag": number;
     "person": number;
+}
+
+/**
+ * AlbumVersion separates a persistent creation identity from its current
+ * definition. Counts and covers do not invalidate an unsaved definition.
+ */
+export interface AlbumVersion {
+    "identity": string;
+    "revision": string;
 }
 
 /**
