@@ -79,10 +79,7 @@ async function settings(section) {
   await incoming(`/settings?section=${section}`)
   await app.page.waitForSelector(`[data-category="${section}"]`, { visible: true })
 }
-async function menu(name, text) {
-  await app.page.locator(`button[aria-label^="Actions for"][aria-label*="${name}"]`).click()
-  await app.page.locator(`[role="menuitem"]::-p-text(${text})`).click()
-}
+
 async function unlock() {
   await app.page.locator('input[type="password"]').fill(PIN)
   await button(app.page, 'Unlock')
@@ -216,22 +213,30 @@ try {
   s.check('an unlocked protected thumbnail is served before navigation', await app.page.evaluate(async url => (await fetch(url)).status, protectedURL) === 200)
   await sidebar('/things')
   let locked = false
-  await until(async () => { try { await lib(app.page, 'Blocks'); return false } catch { locked = true; return true } }, 'navigation did not relock the protected service')
+  await until(async () => { try { await lib(app.page, 'Blocks'); return false } catch (error) { locked = String(error).includes('blocks_locked'); return locked } }, 'navigation did not relock the protected service')
   const status = await app.page.evaluate(async url => (await fetch(url)).status, protectedURL)
-  s.check('leaving Blocked relocks the service and denies its previously served media', locked && status >= 400, { locked, status })
+  s.check('leaving Blocked relocks the service and denies its previously served media', locked && [403, 404].includes(status), { locked, status })
+  await settings('privacy'); await app.page.locator('a[href="/settings/blocked"]').click(); await unlock()
+  s.check('unlocking deliberately restores protected media for this screen', await app.page.evaluate(async url => (await fetch(url)).status, protectedURL) === 200)
+  await incoming('/things')
+  await header('Things')
+  let reloadLocked = false
+  try { await lib(app.page, 'Blocks') } catch (error) { reloadLocked = String(error).includes('blocks_locked') }
+  const reloadStatus = await app.page.evaluate(async url => (await fetch(url)).status, protectedURL)
+  s.check('a full incoming-page reload also ends the old PIN/media session', reloadLocked && [403, 404].includes(reloadStatus), { reloadLocked, reloadStatus })
   await settings('privacy'); await app.page.locator('a[href="/settings/blocked"]').click(); await unlock()
   await app.page.locator('[data-blocked="unblock"]').click()
   await until(async () => (await lib(app.page, 'Selection', { filter: '' }, [], false)).ids.includes(first), 'unblocking did not restore the original asset')
   s.check('unblocking through the protected control restores the original asset', true)
 
   phase = 'malformed incoming locations'
-  trace = await mutationTrace(app.page, undefined, new Map([[bindingID('libraryservice', 'Days'), 'Days']]))
+  trace = await mutationTrace(app.page, undefined, new Map(['Timeline', 'Days', 'Selection'].map(name => [bindingID('libraryservice', name), name])))
   for (const url of ['/people/0', '/people/1.5', '/people/9007199254740992', '/things/nope', '/albums/0', '/places/-1', '/events/bad.id', '/search?place=0', '/search?q=one&q=two', '/settings?section=unknown']) {
     trace.reset()
     await incoming(url)
     await until(() => app.page.evaluate(() => document.body.innerText.includes('This location is unavailable')), 'malformed input mounted a feature')
     await trace.idle()
-    s.check(`${url}: malformed input shows no grid and starts no whole-library request`, !(await app.page.$('.scroller')) && !trace.calls.some(call => call.name === 'Days'))
+    s.check(`${url}: malformed input shows no grid and starts no whole-library request`, !(await app.page.$('.scroller')) && !trace.calls.some(call => ['Timeline', 'Days', 'Selection', 'Hits'].includes(call.name)))
   }
   await incoming('/not-a-destination', '/')
   s.check('only intentional unknown paths fall back to Library', !!(await app.page.waitForSelector('.scroller', { visible: true })))

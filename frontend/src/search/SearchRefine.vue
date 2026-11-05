@@ -54,8 +54,8 @@ function refine(changes: Refinement) {
     query.media =
       changes.media === Filter.FilterPhotos ? 'photos' : changes.media === Filter.FilterVideos ? 'videos' : undefined
   if ('favourites' in changes) query.favourites = changes.favourites ? true : undefined
-  if ('from' in changes) query.from = changes.from ? String(changes.from) : undefined
-  if ('to' in changes) query.to = changes.to ? String(changes.to) : undefined
+  if ('from' in changes) query.from = changes.from || undefined
+  if ('to' in changes) query.to = changes.to || undefined
   if ('place' in changes) query.place = changes.place && changes.place > 0 ? changes.place : undefined
   void router.replace(destination({ name: 'search', query }))
 }

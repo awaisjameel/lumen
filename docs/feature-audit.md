@@ -678,15 +678,18 @@ that route rename, missing root view/example and the original recovery-link
 mistake fail mandatory checks. Nineteen focused AST cases cover raw routing and
 allowed external/fixture data. No cast or suppression bypass was added.
 
-The current full local run passes 1,141 tests in 118 files, with additional
-recovery and date-edit coverage passing. The stricter date codec initially
+The latest full local run passes 1,143 tests in 118 files, including exact
+recovery controls, date edits and frontend-lifetime PIN-session ordering. The stricter date codec initially
 exposed an uncaught error when typing beyond an existing range; its regression
 fails before the repair and now retains the last admitted query using native
 control validity. Type/lint/format and mutation checks, production frontend build
 and docs checks pass locally. The focused Go SPA attempt is blocked by this
 Linux host's missing GTK/WebKit/libvips headers; it establishes no Go pass.
-Windows production/current bindings/modules, full race/static, installer and
-native acceptance remain required. CI now runs the native navigation suite and
+The first Windows run passes production/current bindings/modules and both
+store race shards. Final lint identified redundant conversions after narrowing
+the date-edit type; the follow-up also awaits the existing PIN-session close
+before initial page loading, covering hard reloads that bypass Vue unmount.
+Fresh full race/static, installer and native acceptance remain required. CI now runs the native navigation suite and
 preserved collection-recovery suite before the seven existing child suites,
 retaining reports and screenshots. No historical result certifies this child;
 latency budgets and configured-machine acceptance remain unchanged.

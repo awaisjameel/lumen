@@ -141,3 +141,14 @@ TypeScript/Vue fixtures. Production frontend build emits all 21 path shapes and
 no production Showcase chunk. A fresh final run, Windows named-package race and
 static checks, installer build and the native suite remain required before
 integration. No historical #45 pass establishes acceptance for this refactor.
+
+
+The final input-boundary review adds an awaited PIN-session close before app
+health/library initialisation. A browser reload does not run Vue's old Blocked
+unmount hook; a new frontend lifetime therefore closes that prior session using
+the existing bridge queue and service gate. A mounted regression fails without
+the close and verifies no initial page load starts until it settles. Native
+acceptance additionally unlocks media, hard-loads another destination and checks
+both service denial and revocation of the previously served thumbnail URL.
+Malformed-input tracing observes Timeline, Days, Selection and search reads,
+so an empty DOM alone cannot mask an unrelated whole-library request.

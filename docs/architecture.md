@@ -85,7 +85,9 @@ frontend validator while leaving real files and development modules alone.
 Production component tests share these registration records through isolated
 memory histories. AST lint, positive/negative Vue/TypeScript compilation and
 mutation checks prevent bypasses and drift. Navigation diagnostics contain a
-fixed message, never a private URL or query. Existing preferences, commands,
+fixed message, never a private URL or query. Each new frontend lifetime first
+closes the previous PIN session, including a hard reload that bypasses Vue
+unmount hooks. Existing preferences, commands,
 notifications, overlays, selection, scroll and PIN owners remain responsible
 for their state. See [the navigation guide](navigation-contract.md).
 

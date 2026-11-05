@@ -51,6 +51,9 @@ async function initialise() {
   retrying.value = true
   failed.value = ''
   try {
+    // A hard reload creates a new UI lifetime without Vue unmounting the
+    // previous Blocked view. End that PIN session before showing any page.
+    await engine.lockBlocks()
     await engine.updateHealth()
   } catch (e) {
     failed.value = errorText(e)
