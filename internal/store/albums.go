@@ -32,8 +32,8 @@ var (
 	ErrAlbumSmartItems = fmt.Errorf("%w: smart albums choose their own items", ErrInvalidAlbum)
 	// ErrAlbumKind rejects an unsupported collection kind.
 	ErrAlbumKind = fmt.Errorf("%w: unknown album kind", ErrInvalidAlbum)
-	// ErrAlbumReference rejects a deleted Thing or person.
-	ErrAlbumReference = fmt.Errorf("%w: the selected Thing or person no longer exists", ErrInvalidAlbum)
+	// ErrAlbumReference rejects an unavailable Thing or person.
+	ErrAlbumReference = fmt.Errorf("%w: the selected Thing or person is unavailable", ErrInvalidAlbum)
 	// ErrAlbumChanged rejects an unsaved definition based on an older version.
 	ErrAlbumChanged = errors.New("album definition changed")
 	// The preview conceals blocked reference identities; writes explain that

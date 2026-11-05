@@ -29,7 +29,6 @@ let phase = 'seed'
 let action = 'seed'
 let failure
 let a
-let b
 let tag
 let initialName = 'Native draft A'
 const otherName = 'Native draft B'
@@ -120,7 +119,7 @@ async function saveDraft() {
   step('save the current draft')
   await app.page.locator('button[form="album-editor"]').click()
 }
-async function closed() { await app.page.waitForSelector('#album-editor', { hidden: true }) }
+async function closed() { await app.page.waitForSelector('[data-action="cancel-album"]', { hidden: true }) }
 
 try {
   execFileSync(process.env.PYTHON ?? 'python', [join(E2E, 'fixtures', 'build.py'), 'library', photos, '2'], { stdio: 'inherit' })
@@ -134,7 +133,7 @@ try {
   s.must('two generated originals are indexed', ids.length === 2, ids)
   await search(app.page, 'TagAssets', ids, 'Native draft reference')
   tag = (await search(app.page, 'Things')).find(thing => thing.name === 'Native draft reference').id
-  b = await lib(app.page, 'CreateAlbum', otherName, 'manual', rule, ids)
+  await lib(app.page, 'CreateAlbum', otherName, 'manual', rule, ids)
   // Delete the highest ID later, so SQLite's normal ID reuse is exercised.
   a = await lib(app.page, 'CreateAlbum', initialName, 'smart', { ...rule, tag }, [])
   await lib(app.page, 'CreateBlockPIN', '612435')

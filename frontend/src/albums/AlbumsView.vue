@@ -106,6 +106,15 @@ const preview = useAlbumPreview(() =>
     ? rule.value
     : null,
 )
+watch(preview.referenceUnavailable, (unavailable) => {
+  if (!unavailable) return
+  // A preview can learn of privacy/deletion before its library event arrives.
+  // Clear the existing reference caches immediately, then admit only fresh data.
+  const reads: Promise<void>[] = []
+  if (rule.value.tag) reads.push(things.invalidate())
+  if (rule.value.person) reads.push(people.invalidate())
+  void refreshAll(...reads).catch(logError)
+})
 function ruleSummary(value: AlbumRule) {
   return [
     t(
@@ -156,14 +165,18 @@ function closeEditor() {
   editorOpen.value = false
   reset()
 }
+function retireDraft() {
+  editorTrigger = null
+  closeEditor()
+  notify({ id: 'albums.unavailable', kind: 'info', title: t('albums.draftUnavailable') })
+}
 // list=[] during invalidation says nothing about the target's existence. Only
 // a completed successful read can remove a draft or declare a conflict.
 watch([() => albums.list, () => albums.loaded, () => albums.loading], () => {
   if (editing.value === null || !version.value || !albums.loaded || albums.loading || albums.error) return
   const current = albums.byId.get(editing.value)
   if (current?.version.identity !== version.value.identity) {
-    editorTrigger = null
-    closeEditor()
+    retireDraft()
     return
   }
   if (!busy.value && current.version.revision !== version.value.revision) conflict.value = true
@@ -319,7 +332,7 @@ async function save() {
     if (created !== undefined) void router.push({ name: 'album', params: { id: created } })
   } catch (e) {
     if (!active || session !== currentSession) return
-    if (errorCode(e) === ErrorCode.NotFound) closeEditor()
+    if (errorCode(e) === ErrorCode.NotFound) retireDraft()
     else {
       if (errorCode(e) === ErrorCode.AlbumChanged) conflict.value = true
       error.value = errorText(e)
@@ -735,11 +748,23 @@ useCommands([
             <UAlert v-if="dateError" role="alert" color="error" variant="subtle" :title="t('error.albumDateOrder')" />
             <UAlert
               v-if="referenceError"
+              data-album-reference-error
               role="alert"
               color="error"
               variant="subtle"
               :title="t('albums.referenceMissing')"
-            />
+            >
+              <template #actions>
+                <UButton
+                  data-action="retry-album-references"
+                  color="neutral"
+                  variant="outline"
+                  :loading="things.loading || people.loading"
+                  @click="retryDraft"
+                  >{{ t('albums.retry') }}</UButton
+                >
+              </template>
+            </UAlert>
             <section v-if="kind === AlbumKind.AlbumSmart && !conflict" class="album-preview" data-album-preview>
               <strong>{{ ruleSummary(rule) }}</strong>
               <div role="status" aria-live="polite" class="flex items-center gap-2">

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { effectScope, nextTick, ref } from 'vue'
-import { engine, Kind } from '../bridge'
+import { engine, ErrorCode, Kind } from '../bridge'
 import type * as Bridge from '../bridge'
+import { deferred } from '../shared/testing'
 import { showBlocksChanged } from '../shared/block'
 import { emptyRule } from './store'
 import { useAlbumPreview } from './preview'
@@ -137,4 +138,20 @@ it('debounces rapid edits and cancels the final request when its owner closes', 
   const signal = vi.mocked(engine.previewAlbum).mock.calls[0]?.[1]
   active?.stop()
   expect(signal?.aborted).toBe(true)
+})
+
+it('does not retire current references after a superseded preview refuses an older reference', async () => {
+  const pending = deferred<Bridge.AlbumPreview>()
+  vi.mocked(engine.previewAlbum).mockReturnValueOnce(pending.promise)
+  const rule = ref<Bridge.AlbumRule | null>({ ...emptyRule(), tag: 7 })
+  const result = preview(rule)
+  const older = result.refresh()
+  rule.value = { ...emptyRule(), tag: 8 }
+  await nextTick()
+  await result.refresh()
+  pending.reject(new Error('old reference unavailable', { cause: { code: ErrorCode.NotFound } }))
+  await older
+  expect(result.referenceUnavailable.value).toBe(false)
+  expect(result.error.value).toBe('')
+  expect(result.count.value).toBe(0)
 })

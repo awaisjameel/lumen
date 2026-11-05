@@ -84,6 +84,11 @@ Failed reads offer a read-only retry; confirmed disappearance or a different
 creation identity closes and clears the editor. Missing references lose their
 IDs and require an explicit choice rather than silently broadening the rule.
 A changed saved definition blocks saving until an explicit confirmed reload.
+If a current preview reports a hidden/deleted reference before its library
+refresh arrives, its existing read owner exposes that classified failure.
+The editor invalidates its selected reference lists immediately and uses the
+same visibility admission; an obsolete preview cannot retire newer choices.
+Reference retry reads current choices without restoring a retired selection.
 
 Album definitions carry an immutable creation identity (migration 0040) and a
 derived revision over their name, kind and rule; counts/covers do not conflict

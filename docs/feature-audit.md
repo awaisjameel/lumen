@@ -681,6 +681,31 @@ session/visibility before adopting its result. A refused read retains the local
 conflict draft behind read-only recovery. The regression fails before the fix;
 fresh focused/full frontend and Windows/native verification are pending.
 
+[Run 42052902380](https://github.com/awaisjameel/lumen/actions/runs/42052902380),
+head `b63b6568`, passes Windows production/current bindings/modules, static and
+1,045 frontend tests, and every Go race shard. Artifact `13429357191` records
+album-draft 25/25, preview 27/27, tagging 18/18, Undo recovery 20/20, history 7/7
+and favourite Undo 22/22. The inspected paused-editor screenshot contains no
+private draft fields and disables saving. Collection metadata is 21/22: its
+parent helper observes a correct link, then reads an emptied caption after a
+later revision, mixing two DOM instants. The helper now captures caption and
+destinations atomically within the existing deadline for parent and candidate.
+No production metadata assertion or interaction deadline is relaxed.
+
+A mounted follow-up confirms a reference privacy gap: a blocked/deleted preview
+response can arrive before the collection refresh and leave the old Thing name
+in the form. Both error-code regressions fail before the repair. The existing
+preview owner now exposes only its current classified reference refusal; the
+editor invalidates its selected reference caches and uses the same admission
+path. Confirmed missing IDs require an explicit replacement. Read-only reference
+retry refreshes choices without restoring retired IDs; an obsolete preview
+cannot invalidate a newer rule. The inherited native preview suite now checks
+redacted names as well as cleared samples and explicitly reselects a restored
+reference. Generic unavailable-target feedback also omits protected names.
+Fresh full frontend/Windows/native acceptance of these final changes is pending.
+The unchanged hosted overrun on this head is SaveEmbeddings64 unblocked
+116.973/70 ms; the configured-machine gate remains open.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

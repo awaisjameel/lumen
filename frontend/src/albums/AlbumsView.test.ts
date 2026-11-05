@@ -1,7 +1,8 @@
 import USelect from '@nuxt/ui/components/Select.vue'
+import { dismiss } from '../shared/notify'
 import { question } from '../shared/confirm'
 import { t } from '../shared/i18n'
-import { deferred, mountInApp } from '../shared/testing'
+import { deferred, mountInApp, recordNotifications } from '../shared/testing'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
@@ -229,7 +230,7 @@ it.each([
   [ErrorCode.AlbumDateOrder, 'The start date must not follow the end date.'],
   [ErrorCode.AlbumSmartItems, 'Smart albums choose their own items.'],
   [ErrorCode.AlbumKind, 'Choose a manual or smart album.'],
-  [ErrorCode.AlbumReference, 'The selected Thing or person no longer exists.'],
+  [ErrorCode.AlbumReference, 'The selected Thing or person is unavailable.'],
   [ErrorCode.AlbumManualOnly, 'Only manual albums accept items.'],
 ])('explains %s in the album editor and keeps the unsaved draft', async (code, message) => {
   vi.mocked(engine.createAlbum).mockRejectedValue(new Error('engine details', { cause: { code } }))
@@ -566,3 +567,58 @@ it('keeps the local conflict draft when its confirmed saved-version reload fails
   expect(editor().find('[data-action="reload-album"]').exists()).toBe(true)
   expect(engine.saveAlbum).not.toHaveBeenCalled()
 })
+
+it('explains a refused missing target without exposing its old name or creating another album', async () => {
+  dismiss('albums.unavailable')
+  const notices = recordNotifications()
+  expect(notices.find('albums.unavailable')).toBeUndefined()
+  try {
+    const w = await mounted()
+    await menuAction(w, t('albums.editNamed', { name: album.name }))
+    vi.mocked(engine.saveAlbum).mockRejectedValueOnce(new Error('missing', { cause: { code: ErrorCode.NotFound } }))
+    await editor().get('form').trigger('submit')
+    await flushPromises()
+    expect(document.querySelector('#album-editor')).toBeNull()
+    expect(notices.find('albums.unavailable')?.title).toBe(t('albums.draftUnavailable'))
+    expect(notices.find('albums.unavailable')?.title).not.toContain(album.name)
+    expect(engine.createAlbum).not.toHaveBeenCalled()
+  } finally {
+    notices.stop()
+  }
+})
+
+it.each([ErrorCode.NotFound, ErrorCode.AlbumReference])(
+  'retires an unsafe selected reference when preview reports %s before a global refresh',
+  async (code) => {
+    vi.useFakeTimers()
+    const tag = {
+      id: 7,
+      name: 'Retired reference',
+      kind: TagKind.TagManual,
+      original: '',
+      count: 0,
+      cover: 0,
+      coverThumb: 0,
+      pinned: false,
+    }
+    vi.mocked(engine.things).mockResolvedValue([tag])
+    vi.mocked(engine.albums).mockResolvedValue([
+      { ...album, kind: AlbumKind.AlbumSmart, rule: { ...emptyRule(), tag: tag.id } },
+    ])
+    const pending = deferred<Bridge.AlbumPreview>()
+    vi.mocked(engine.previewAlbum).mockReturnValueOnce(pending.promise)
+    const w = await mounted()
+    await menuAction(w, t('albums.editNamed', { name: album.name }))
+    await vi.advanceTimersByTimeAsync(200)
+    expect(editor().text()).toContain(tag.name)
+    vi.mocked(engine.things).mockResolvedValue([])
+    pending.reject(new Error('reference refused', { cause: { code } }))
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(200)
+    expect(editor().text()).not.toContain(tag.name)
+    expect(editor().text()).toContain(t('albums.referenceMissing'))
+    await editor().get('form').trigger('submit')
+    expect(engine.saveAlbum).not.toHaveBeenCalled()
+    expect(engine.previewAlbum).toHaveBeenCalledOnce()
+  },
+)

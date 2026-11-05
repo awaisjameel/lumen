@@ -126,7 +126,9 @@ An unrelated privacy change pauses an open album draft while Lumen checks
 visibility. The form returns with your unsaved fields if the album is still
 available. **Try again** after a failed check only reads the current state.
 A hidden or deleted album closes its editor; a hidden Thing or person requires
-an explicit replacement. If the saved definition changed elsewhere, your draft
+an explicit replacement. A preview that detects an unavailable reference also
+clears its old name while checking the current choices. **Try again** reloads
+those choices; choose a replacement explicitly before saving. If the saved definition changed elsewhere, your draft
 stays visible but cannot overwrite it: **Reload saved version** asks before
 discarding your unsaved changes, or **Cancel** closes the draft.
 

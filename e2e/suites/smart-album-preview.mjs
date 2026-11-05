@@ -268,20 +268,28 @@ try {
   await until(() => trace.held, 'the reference read did not reach its visibility check')
   const block = await lib(page, 'SetBlock', 'tag', tag, '', 'label')
   await trace.release()
-  await page.waitForSelector('[data-album-preview] [role="alert"]', { visible: true })
-  s.check('a newly blocked reference fails closed without old images', (await sampleIDs(page)).length === 0)
+  await page.waitForSelector('[data-album-reference-error]', { visible: true })
+  s.check('a newly blocked reference retires its cached name and sample before a global refresh',
+    (await sampleIDs(page)).length === 0 &&
+    !(await page.$eval('#album-editor', node => node.textContent.includes('Native détail'))) &&
+    await page.$eval('button[form="album-editor"]', node => node.disabled))
   await lib(page, 'UnlockBlocks', PIN)
   await lib(page, 'RemoveBlock', block.id)
   await lib(page, 'LockBlocks')
-  await button(page, 'Try again', '[data-album-preview]')
+  await button(page, 'Try again', '[data-album-reference-error]')
+  await until(() => page.$eval('[data-action="retry-album-references"]', node => !node.disabled),
+    'the current reference choices did not reload')
+  await choose(page, 'Thing', 'Native détail')
   await count(page, expected(rule({ tag, favourites: true })).length)
-  s.check('retry reloads the current rule and preserves the unsaved name',
+  s.check('read-only retry and an explicit restored choice preserve the unsaved name',
     (await page.$eval('#album-editor input[aria-label="Album name"]', (node) => node.value)) === 'Reference recovery draft')
   await lib(page, 'UpdateAlbum', oracle, 'Independent saved oracle', rule())
   await search(page, 'DeleteTag', tag)
   await favourites(page, false)
-  await page.waitForSelector('[data-album-preview] [role="alert"]', { visible: true })
-  s.check('a deleted reference returns no stale count or sample', (await sampleIDs(page)).length === 0)
+  await page.waitForSelector('[data-album-reference-error]', { visible: true })
+  s.check('a deleted reference retires its cached name, count and sample',
+    (await sampleIDs(page)).length === 0 &&
+    !(await page.$eval('#album-editor', node => node.textContent.includes('Native détail'))))
   await choose(page, 'Thing', 'Any Thing')
   await count(page, expected(rule()).length)
   s.check('choosing a valid reference recovers the same draft',
