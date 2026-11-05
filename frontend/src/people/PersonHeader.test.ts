@@ -1,7 +1,6 @@
-import type * as Router from 'vue-router'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { mountInApp } from '../shared/testing'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
@@ -11,10 +10,6 @@ import type { Changes, Person } from '../bridge'
 import PersonHeader from './PersonHeader.vue'
 import { showBlocksChanged } from '../shared/block'
 
-vi.mock('vue-router', async (importOriginal) => ({
-  ...(await importOriginal<typeof Router>()),
-  useRouter: () => ({ replace: vi.fn() }),
-}))
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
@@ -190,12 +185,12 @@ it('names who is most often in photos with them and where most were taken, and c
   await flushPromises()
   expect(engine.topPlaces).toHaveBeenCalledWith(expect.objectContaining({ person: 1 }))
   expect(wrapper.findAll('[data-person-companion]').map((c) => [c.text(), c.attributes('href')])).toEqual([
-    ['Omar', '/person/2'],
-    ['Sara', '/person/3'],
+    ['Omar', '/people/2'],
+    ['Sara', '/people/3'],
   ])
   expect(wrapper.findAll('[data-person-place]').map((p) => [p.text(), p.attributes('href')])).toEqual([
-    ['Karachi', '/place/7'],
-    ['Lahore', '/place/8'],
+    ['Karachi', '/places/7'],
+    ['Lahore', '/places/8'],
   ])
   expect(wrapper.get('.person-tabs').text()).toContain('Faces36')
   // Blocking someone takes what was said about them away at once.
@@ -213,15 +208,5 @@ function mountHeader() {
 }
 
 function testRouter() {
-  return createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
-        name,
-        path: `/${name}/:id?`,
-        component: { template: '<div />' },
-      })),
-    ],
-  })
+  return createTestNavigation()
 }

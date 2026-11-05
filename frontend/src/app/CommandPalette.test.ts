@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import { registerCommands, setShortcutOverrides } from '../shared/commands'
 import type { Command } from '../shared/commands'
@@ -11,10 +11,7 @@ import CommandPalette from './CommandPalette.vue'
 let wrapper: VueWrapper | undefined
 let remove: (() => void) | undefined
 const opened = ref(true)
-const router = createRouter({
-  history: createMemoryHistory(),
-  routes: [{ path: '/', component: { template: '<div />' } }],
-})
+const router = createTestNavigation()
 afterEach(() => {
   wrapper?.unmount()
   remove?.()

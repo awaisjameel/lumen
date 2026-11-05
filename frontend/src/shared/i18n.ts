@@ -387,6 +387,8 @@ const en = {
   'shortcuts.hint': 'What the keys do. Shortcuts for a photo work while it is selected or open.',
 
   'nav.library': 'Library',
+  'navigation.unavailable': 'This location is unavailable',
+  'navigation.unavailableText': 'Open Library to continue, or go back to the previous page.',
   'nav.people': 'People',
   'nav.favourites': 'Favourites',
   'nav.videos': 'Videos',

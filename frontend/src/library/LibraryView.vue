@@ -1,15 +1,17 @@
 <script setup lang="ts">
+import { isGridDestination, mediaOf, scopeOf, withMedia } from './navigation'
+import { destination } from '../shared/navigation/contract'
 import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
 import USlider from '@nuxt/ui/components/Slider.vue'
-import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
+import UContextMenu from '../shared/navigation/NavContextMenu.vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useLocation, useNavigation, useDestination } from '../shared/navigation/router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import {
   AlbumKind,
@@ -60,7 +62,7 @@ import type { Row } from './layout'
 import TrashBar from '../trash/TrashBar.vue'
 import TrashCaption from '../trash/TrashCaption.vue'
 import { BEST, isResults, scopeKey, useLibrary } from './store'
-import type { Scope, Sel } from './store'
+import type { Sel } from './store'
 import TimelineScrubber from './TimelineScrubber.vue'
 import DetailsPanel from './DetailsPanel.vue'
 import VideoThumb from './VideoThumb.vue'
@@ -126,23 +128,13 @@ const mode = useLayoutMode()
 const things = useThings()
 const people = usePeople()
 const albums = useAlbums()
-const route = useRoute()
-const router = useRouter()
-const media = computed<Filter>(() =>
-  route.query.media === 'photos'
-    ? Filter.FilterPhotos
-    : route.query.media === 'videos' || route.name === 'videos'
-      ? Filter.FilterVideos
-      : route.meta.filter === Filter.FilterPhotos
-        ? Filter.FilterPhotos
-        : Filter.FilterAll,
-)
+const location = useLocation()
+const route = computed(() => (isGridDestination(location.value) ? location.value : undefined))
+const searchRoute = useDestination('search')
+const router = useNavigation()
+const media = computed(() => mediaOf(route.value))
 function showMedia(value: Filter) {
-  void router.replace({
-    name: route.name === 'videos' ? 'library' : (route.name ?? 'library'),
-    params: route.params,
-    query: { ...route.query, media: value === Filter.FilterAll ? undefined : value },
-  })
+  if (route.value) void router.replace(withMedia(route.value, value))
 }
 const mediaItems = computed(() => [
   { value: Filter.FilterAll, label: t('library.all') },
@@ -165,45 +157,14 @@ function openBatch(operation: BatchAction | 'tag' | 'block' | 'delete') {
   batchOpen.value = true
 }
 
-// The route decides what the grid shows: a filter (/, /favourites, /videos),
-// one Thing (/things/:id), one person (/people/:id), one album (/albums/:id)
-// or search results (/search?q=…).
-const scope = computed<Scope>(() => {
-  if (route.name === 'search')
-    return {
-      kind: 'search',
-      query: String(route.query.q ?? '').trim(),
-      media: media.value,
-      favourites: route.query.favourites === 'true',
-      from: String(route.query.from ?? ''),
-      to: String(route.query.to ?? ''),
-      place: Number(route.query.place) || 0,
-    }
-  const id = Number(route.params.id) || 0
-  return {
-    kind: 'timeline',
-    media: media.value === Filter.FilterAll ? undefined : media.value,
-    view: {
-      filter:
-        route.name === 'favourites'
-          ? Filter.FilterFavourites
-          : route.name === 'trash'
-            ? Filter.FilterTrash
-            : media.value,
-      tag: route.name === 'thing' ? id : 0,
-      person: route.name === 'person' ? id : 0,
-      album: route.name === 'album' ? id : 0,
-      place: route.name === 'place' ? id : 0,
-      event: route.name === 'event' ? id : 0,
-    },
-  }
-})
-// The grid shows the library's scope while mounted (before the scope is set,
-// so that loads).
+// Only validated grid locations may change the library's scope.
+const scope = computed(() => scopeOf(route.value))
 lib.attach()
 watch(
-  () => scopeKey(scope.value),
-  () => void lib.setScope(scope.value).catch(logError),
+  () => (scope.value ? scopeKey(scope.value) : undefined),
+  () => {
+    if (scope.value) void lib.setScope(scope.value).catch(logError)
+  },
   { immediate: true },
 )
 
@@ -215,11 +176,11 @@ const titles: Record<Filter, MessageKey> = {
   [Filter.FilterTrash]: 'nav.trash',
 }
 
-const tagId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.tag ?? 0) : 0))
-const personId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.person ?? 0) : 0))
-const albumId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.album ?? 0) : 0))
-const placeId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.place ?? 0) : 0))
-const eventId = computed(() => (scope.value.kind === 'timeline' ? (scope.value.view.event ?? 0) : 0))
+const tagId = computed(() => (scope.value?.kind === 'timeline' ? (scope.value.view.tag ?? 0) : 0))
+const personId = computed(() => (scope.value?.kind === 'timeline' ? (scope.value.view.person ?? 0) : 0))
+const albumId = computed(() => (scope.value?.kind === 'timeline' ? (scope.value.view.album ?? 0) : 0))
+const placeId = computed(() => (scope.value?.kind === 'timeline' ? (scope.value.view.place ?? 0) : 0))
+const eventId = computed(() => (scope.value?.kind === 'timeline' ? (scope.value.view.event ?? 0) : 0))
 const groupTitle = ref('')
 const group = shallowRef<Event | Place | null>(null)
 let active = true
@@ -281,6 +242,7 @@ watch(
 
 const title = computed(() => {
   const s = scope.value
+  if (!s) return t('nav.library')
   if (s.kind === 'search') return s.query ? t('search.title', { q: s.query }) : t('search.command')
   if (tagId.value) return things.byId.get(tagId.value)?.name ?? t('nav.things')
   if (personId.value) return people.byId.get(personId.value)?.name || t('person.unnamed')
@@ -301,7 +263,7 @@ const collectionKind = computed(() =>
           ? albums.byId.get(albumId.value)?.kind === AlbumKind.AlbumSmart
             ? 'smart'
             : 'album'
-          : route.name === 'favourites'
+          : route.value?.name === 'favourites'
             ? 'favourites'
             : null,
 )
@@ -317,10 +279,10 @@ const back = computed(() => {
           ? 'events'
           : albumId.value
             ? 'albums'
-            : route.name === 'favourites'
+            : route.value?.name === 'favourites'
               ? 'library'
               : null
-  return name ? { to: { name }, label: t(`nav.${name}`) } : undefined
+  return name ? { to: destination({ name }), label: t(`nav.${name}`) } : undefined
 })
 function reloadCollection() {
   void loadGroupTitle()
@@ -330,15 +292,21 @@ function reloadCollection() {
 const filtered = computed(
   () =>
     media.value !== Filter.FilterAll ||
-    (lib.isSearch && !!(route.query.favourites || route.query.from || route.query.to || route.query.place)),
+    (lib.isSearch &&
+      !!(
+        searchRoute.value?.query.favourites ??
+        searchRoute.value?.query.from ??
+        searchRoute.value?.query.to ??
+        searchRoute.value?.query.place
+      )),
 )
 function clearFilters() {
-  if (lib.isSearch) void router.replace({ name: 'search', query: { q: route.query.q } })
+  if (lib.isSearch) void router.replace(destination({ name: 'search', query: { q: searchRoute.value?.query.q } }))
   else showMedia(Filter.FilterAll)
 }
 /** Starts over with an empty search box, its suggestions open. */
 async function searchAgain() {
-  await router.push({ name: 'search' })
+  await router.push(destination({ name: 'search' }))
   await runCommand('search.focus')
 }
 const examples = computed(() => [t('search.example.sunset'), t('search.example.cake'), t('search.example.text')])
@@ -858,6 +826,7 @@ const empty = computed(() => lib.timelineLoaded && lib.buckets.length === 0)
 const searching = computed(() => lib.isSearch && lib.searchLoading)
 const emptyText = computed((): [string, string] => {
   const s = scope.value
+  if (!s) return ['', '']
   if (s.kind === 'search') {
     if (!s.query) return [t('search.resultsFirstUse'), t('search.resultsFirstUseHint')]
     if (lib.searchInfo?.blocked) return [t('search.blockedTitle'), t('search.blockedHint')]
@@ -865,7 +834,7 @@ const emptyText = computed((): [string, string] => {
       ? [t('search.unavailable'), t('search.unavailableHint')]
       : [t('search.none'), t('search.noneHint')]
   }
-  if (media.value !== Filter.FilterAll && route.name !== 'videos')
+  if (media.value !== Filter.FilterAll && route.value?.name !== 'videos')
     return [t('library.noResults'), t('library.noResultsHint')]
   if (tagId.value) return [t('things.viewEmpty'), t('things.viewEmptyHint')]
   if (personId.value) return [t('person.empty'), t('person.emptyHint')]
@@ -898,7 +867,7 @@ const trashFiles = ref<number | null>(null)
 const countText = computed(() => {
   if (lib.isSearch) {
     if (searching.value) return t('search.searching')
-    if (scope.value.kind === 'search' && !scope.value.query) return t('search.onThisPC')
+    if (scope.value?.kind === 'search' && !scope.value.query) return t('search.onThisPC')
     return lib.total ? t('search.results', { n: lib.total }) : t('search.none')
   }
   if (lib.inTrash && trashFiles.value !== null && lib.total)
@@ -1007,7 +976,7 @@ function resultsHead(day: string): [string, string] {
           :description="lib.loadError"
           color="error"
           ><template #actions
-            ><UButton color="neutral" variant="outline" @click="lib.setScope(scope).catch(logError)">{{
+            ><UButton color="neutral" variant="outline" @click="scope && lib.setScope(scope).catch(logError)">{{
               t('common.retry')
             }}</UButton></template
           ></UAlert
@@ -1081,7 +1050,7 @@ function resultsHead(day: string): [string, string] {
           </template>
         </ViewBar>
         <SearchSummary
-          v-if="lib.isSearch && scope.kind === 'search' && scope.query"
+          v-if="lib.isSearch && scope?.kind === 'search' && scope.query"
           :info="lib.searchInfo"
           :total="lib.total"
           :searching="searching"
@@ -1126,7 +1095,7 @@ function resultsHead(day: string): [string, string] {
             :title="t('library.loadFailed')"
             :text="lib.loadError"
           >
-            <UButton @click="lib.setScope(scope).catch(logError)">{{ t('common.retry') }}</UButton>
+            <UButton @click="scope && lib.setScope(scope).catch(logError)">{{ t('common.retry') }}</UButton>
           </FeatureState>
           <div
             v-else-if="!lib.timelineLoaded"
@@ -1152,7 +1121,7 @@ function resultsHead(day: string): [string, string] {
             <UButton v-if="filtered" @click="clearFilters">{{ t('library.clearFilters') }}</UButton>
             <template v-else-if="lib.isSearch">
               <!-- First use offers searches to try; no match offers starting over, then them. -->
-              <template v-if="scope.kind === 'search' && !scope.query">
+              <template v-if="scope?.kind === 'search' && !scope.query">
                 <UButton
                   v-for="example in examples"
                   :key="example"
@@ -1160,20 +1129,20 @@ function resultsHead(day: string): [string, string] {
                   variant="outline"
                   :trailing-icon="icons['arrow-right']"
                   data-search-example
-                  @click="router.push({ name: 'search', query: { q: example } })"
+                  @click="router.push(destination({ name: 'search', query: { q: example } }))"
                   >{{ example }}</UButton
                 >
               </template>
               <UButton v-else color="neutral" variant="outline" data-search-again @click="searchAgain">{{
                 t(lib.searchInfo?.noAI && !lib.searchInfo.blocked ? 'search.forPerson' : 'search.tryAnother')
               }}</UButton>
-              <div v-if="scope.kind === 'search' && scope.query && !lib.searchInfo?.blocked" class="examples">
+              <div v-if="scope?.kind === 'search' && scope.query && !lib.searchInfo?.blocked" class="examples">
                 <span>{{ t('search.tryFor') }}</span>
                 <Chip
                   v-for="example in examples"
                   :key="example"
                   data-search-example
-                  @click="router.push({ name: 'search', query: { q: example } })"
+                  @click="router.push(destination({ name: 'search', query: { q: example } }))"
                   >{{ example }}<Icon name="arrow-right" :size="14"
                 /></Chip>
               </div>
@@ -1184,8 +1153,10 @@ function resultsHead(day: string): [string, string] {
             <UButton v-else-if="collectionKind === 'smart'" @click="collectionHead?.editRule()">{{
               t('collection.editRule')
             }}</UButton>
-            <UButton v-else-if="route.name === 'favourites'" to="/">{{ t('nav.library') }}</UButton>
-            <UButton v-else-if="!lib.inTrash && !collectionKind && !personId" to="/settings">{{
+            <UButton v-else-if="route?.name === 'favourites'" :to="destination({ name: 'library' })">{{
+              t('nav.library')
+            }}</UButton>
+            <UButton v-else-if="!lib.inTrash && !collectionKind && !personId" :to="destination({ name: 'settings' })">{{
               t('settings.addFolder')
             }}</UButton>
           </FeatureState>
@@ -1349,7 +1320,7 @@ function resultsHead(day: string): [string, string] {
           :aria-label="t('collection.chooseAlbum')"
         />
         <p v-else>{{ t('collection.noAlbums') }}</p>
-        <UButton v-if="!manualAlbums.length" to="/albums">{{ t('nav.albums') }}</UButton>
+        <UButton v-if="!manualAlbums.length" :to="destination({ name: 'albums' })">{{ t('nav.albums') }}</UButton>
       </template>
       <template #footer>
         <UButton color="neutral" variant="ghost" @click="albumOpen = false">{{ t('common.cancel') }}</UButton>

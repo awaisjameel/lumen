@@ -180,6 +180,17 @@ file covers how code is written.
   - Every list has loading, empty and failure states (`FeatureState`); a
     state is never shown by colour, shadow or motion alone, so reduced
     motion and forced colours lose nothing.
+- **Navigation.** `shared/navigation/contract.ts` owns destination names, paths,
+  params, supported queries and incoming decoding. Use `destination(...)`,
+  `useNavigation()` and validated `useLocation()` / `useDestination(name)`;
+  use the navigation link/button/menu adapters for route-bearing controls.
+  Never import raw Vue Router outside its named infrastructure boundary or
+  pass a string/untyped named object to a reusable component. Root view
+  bindings are exhaustive and lazy; the shell owns labels, order and context.
+  Tests use `createTestNavigation()` with production records and optional stub
+  views. `.visit()` is an explicit incoming-URL boundary for negative tests,
+  not an internal navigation escape hatch. Add independent expected URLs and
+  compiler fixtures when changing the contract; see [the navigation guide](docs/navigation-contract.md).
 - **One owner each**
   - Interface preferences (appearance, layout, viewing, playback, shortcuts,
     export presets): `shared/preferences.ts`, saved in the library's settings

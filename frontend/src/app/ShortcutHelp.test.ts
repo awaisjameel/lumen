@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { mountInApp } from '../shared/testing'
 import { registerCommands, setShortcutOverrides } from '../shared/commands'
 import { shortcutCatalogue } from '../shared/shortcuts'
@@ -14,10 +14,7 @@ afterEach(() => {
   remove?.()
   setShortcutOverrides({})
 })
-const router = createRouter({
-  history: createMemoryHistory(),
-  routes: [{ path: '/settings', component: { template: '<div />' } }],
-})
+const router = createTestNavigation()
 async function start() {
   wrapper = mountInApp(ShortcutHelp, { props: { open: true }, plugins: [router] })
   await flushPromises()
@@ -67,7 +64,7 @@ it('hands shortcut changes to the real Settings accessibility category', async (
   await start()
   button('Customise shortcuts').click()
   await flushPromises()
-  expect(router.currentRoute.value.fullPath).toBe('/settings?section=accessibility')
+  expect(router.fullPath.value).toBe('/settings?section=accessibility')
   expect(wrapper?.findComponent(ShortcutHelp).emitted('update:open')).toEqual([[false]])
 })
 

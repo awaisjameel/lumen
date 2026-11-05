@@ -1,17 +1,19 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import UFormField from '@nuxt/ui/components/FormField.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import USlideover from '@nuxt/ui/components/Slideover.vue'
 import { useLayoutMode } from '../shared/layout'
 import USelect from '@nuxt/ui/components/Select.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import RouterLink from '../shared/navigation/NavLink.vue'
+import { useDestination, useNavigation } from '../shared/navigation/router'
 import { AlbumKind, BlockKind, engine, errorCode, ErrorCode, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
 import type { Album, AlbumRule, AlbumVersion } from '../bridge'
 import { usePeople } from '../people/store'
@@ -39,8 +41,8 @@ import { emptyRule, useAlbums } from './store'
 import { useAlbumChanges } from './changes'
 
 const mode = useLayoutMode()
-const router = useRouter()
-const route = useRoute()
+const router = useNavigation()
+const route = useDestination('albums')
 const albums = useAlbums()
 const albumChanges = useAlbumChanges()
 const smartCount = computed(() => albums.list.filter((album) => album.kind === AlbumKind.AlbumSmart).length)
@@ -287,20 +289,20 @@ async function edit(album: Album) {
 
 // Consume an edit link once. A delayed route replacement must not reopen a
 // cancelled/removed session when a privacy reload finishes in the meantime.
-let consumedEdit: string | undefined
+let consumedEdit: number | undefined
 watch(
-  () => route.query.edit,
+  () => route.value?.query.edit,
   () => {
     consumedEdit = undefined
   },
 )
 // Collection heroes can open the same editor without owning a second form.
 watch(
-  [() => route.query.edit, () => albums.loaded],
+  [() => route.value?.query.edit, () => albums.loaded],
   ([id, loaded]) => {
-    if (!loaded || typeof id !== 'string' || !/^\d+$/.test(id) || editorOpen.value || consumedEdit === id) return
+    if (!loaded || id === undefined || editorOpen.value || consumedEdit === id) return
     consumedEdit = id
-    const album = albums.byId.get(Number(id))
+    const album = albums.byId.get(id)
     if (album) void edit(album)
   },
   { immediate: true },
@@ -308,7 +310,7 @@ watch(
 watch(editorOpen, (open, previous) => {
   if (!open && previous) {
     reset()
-    if (route.query.edit !== undefined) void router.replace({ query: { ...route.query, edit: undefined } })
+    if (route.value?.query.edit !== undefined) void router.replace(destination({ name: 'albums' }))
   }
 })
 
@@ -347,7 +349,7 @@ async function save() {
       ),
     })
     closeEditor()
-    if (created !== undefined) void router.push({ name: 'album', params: { id: created } })
+    if (created !== undefined) void router.push(destination({ name: 'album', params: { id: created } }))
   } catch (e) {
     if (!active || session !== currentSession) return
     if (errorCode(e) === ErrorCode.NotFound) retireDraft()
@@ -563,7 +565,7 @@ useCommands([
           <CollectionCard
             v-for="album in visibleAlbums"
             :key="album.id"
-            :to="{ name: 'album', params: { id: album.id } }"
+            :to="destination({ name: 'album', params: { id: album.id } })"
             :title="album.name"
             :subtitle="album.kind === AlbumKind.AlbumSmart ? ruleSummary(album.rule) : undefined"
             :count="
@@ -577,9 +579,11 @@ useCommands([
           >
             <template #title>
               <div class="album-title">
-                <RouterLink :to="{ name: 'album', params: { id: album.id } }" class="album-name" :title="album.name">{{
-                  album.name
-                }}</RouterLink
+                <RouterLink
+                  :to="destination({ name: 'album', params: { id: album.id } })"
+                  class="album-name"
+                  :title="album.name"
+                  >{{ album.name }}</RouterLink
                 ><UBadge
                   v-if="album.kind === AlbumKind.AlbumSmart"
                   :icon="icons.smart"
@@ -621,7 +625,7 @@ useCommands([
             <strong>{{ t('albums.guidanceTitle') }}</strong>
             <p>{{ t('albums.guidance') }}</p>
             <UButton
-              to="/"
+              :to="destination({ name: 'library' })"
               variant="link"
               color="neutral"
               size="sm"

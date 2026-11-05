@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { createPinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
@@ -11,10 +11,7 @@ import { commandById, runCommand } from '../shared/commands'
 import { mountInApp } from '../shared/testing'
 
 let mounted: VueWrapper | undefined
-const router = createRouter({
-  history: createMemoryHistory(),
-  routes: [{ path: '/settings', component: { render: () => null } }],
-})
+const router = createTestNavigation()
 
 const idle: Progress = {
   scanning: false,
@@ -158,7 +155,7 @@ it('shows scheduling recovery without inventing queued files or hiding other wor
   await open(status)
   expect(rows()).toEqual([])
   expect(details().get('[data-ocr-retry]').text()).toContain('Your tags are saved.')
-  expect(details().get('[data-ocr-retry] a').attributes('href')).toBe('/settings?section=about')
+  expect(details().get('[data-ocr-retry] a').attributes('href')).toBe('/settings?section=updates')
 
   useLibrary().progress = { ...idle, ocrQueueRetry: true, thumbnail: 3, working: { ...idle.working, thumbnail: true } }
   await flushPromises()

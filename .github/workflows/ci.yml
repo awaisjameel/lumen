@@ -110,7 +110,13 @@ jobs:
         run: |
           npm ci --prefix e2e
           python -m pip install -r e2e/requirements.txt
-          node e2e/run.mjs album-draft collection-places smart-album-preview tagging-recovery undo-recovery search-history favourite-undo
+          node e2e/run.mjs navigation collection-recovery album-draft collection-places smart-album-preview tagging-recovery undo-recovery search-history favourite-undo
+
+      - name: Build the installer with embedded application assets
+        shell: bash
+        run: |
+          wails3 task package
+          test -z "$(git status --porcelain)"
 
       - name: Preserve native regression reports
         if: always()
@@ -125,6 +131,8 @@ jobs:
             e2e/.work/results/smart-album-preview
             e2e/.work/results/collection-places
             e2e/.work/results/album-draft
+            e2e/.work/results/navigation
+            e2e/.work/results/collection-recovery
           retention-days: 14
           include-hidden-files: true
           if-no-files-found: ignore

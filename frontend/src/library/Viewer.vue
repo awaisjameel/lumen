@@ -6,7 +6,7 @@
 import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { engine, isCancelled, videosAvailable, ViewerWheel } from '../bridge'
 import type { AssetDetail, GridItem } from '../bridge'

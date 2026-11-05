@@ -1,7 +1,7 @@
 import { t } from '../shared/i18n'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { flushPromises, DOMWrapper } from '@vue/test-utils'
 import { DuplicateKind, engine } from '../bridge'
 import type * as Bridge from '../bridge'
@@ -80,7 +80,7 @@ class TestResizeObserver implements ResizeObserver {
 let notifications: RecordedNotifications
 
 function mountView() {
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: DuplicatesView }] })
+  const router = createTestNavigation()
   return mountInApp(DuplicatesView, { plugins: [router] })
 }
 

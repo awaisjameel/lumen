@@ -2,13 +2,13 @@
 // command palette, so a destination has one name, icon and place. Videos
 // have no destination of their own: Library's filter shows them, and
 // /videos (router.ts) opens Library on it.
+import { destination } from '../shared/navigation/contract'
+import type { Destination } from '../shared/navigation/contract'
 import type { IconName } from '../design/icons'
 import type { MessageKey } from '../shared/i18n'
 
 export interface NavEntry {
-  /** The route's name (router.ts). */
-  name: string
-  path: string
+  to: Destination
   label: MessageKey
   icon: IconName
   /**
@@ -28,20 +28,20 @@ export const navSections: readonly { section: NavSection; label?: MessageKey }[]
 ]
 
 export const navEntries: readonly NavEntry[] = [
-  { name: 'library', path: '/', label: 'nav.library', icon: 'photos', section: 'library' },
-  { name: 'favourites', path: '/favourites', label: 'nav.favourites', icon: 'heart', section: 'library' },
-  { name: 'people', path: '/people', label: 'nav.people', icon: 'people', section: 'collections' },
-  { name: 'things', path: '/things', label: 'nav.things', icon: 'things', section: 'collections' },
-  { name: 'places', path: '/places', label: 'nav.places', icon: 'places', section: 'collections' },
-  { name: 'events', path: '/events', label: 'nav.events', icon: 'events', section: 'collections' },
-  { name: 'albums', path: '/albums', label: 'nav.albums', icon: 'albums', section: 'collections' },
-  { name: 'duplicates', path: '/duplicates', label: 'nav.duplicates', icon: 'duplicates', section: 'tools' },
-  { name: 'compression', path: '/compression', label: 'compression.title', icon: 'compress', section: 'tools' },
-  { name: 'trash', path: '/trash', label: 'nav.trash', icon: 'trash', section: 'tools' },
-  { name: 'settings', path: '/settings', label: 'nav.settings', icon: 'settings', section: 'app' },
+  { to: destination({ name: 'library' }), label: 'nav.library', icon: 'photos', section: 'library' },
+  { to: destination({ name: 'favourites' }), label: 'nav.favourites', icon: 'heart', section: 'library' },
+  { to: destination({ name: 'people' }), label: 'nav.people', icon: 'people', section: 'collections' },
+  { to: destination({ name: 'things' }), label: 'nav.things', icon: 'things', section: 'collections' },
+  { to: destination({ name: 'places' }), label: 'nav.places', icon: 'places', section: 'collections' },
+  { to: destination({ name: 'events' }), label: 'nav.events', icon: 'events', section: 'collections' },
+  { to: destination({ name: 'albums' }), label: 'nav.albums', icon: 'albums', section: 'collections' },
+  { to: destination({ name: 'duplicates' }), label: 'nav.duplicates', icon: 'duplicates', section: 'tools' },
+  { to: destination({ name: 'compression' }), label: 'compression.title', icon: 'compress', section: 'tools' },
+  { to: destination({ name: 'trash' }), label: 'nav.trash', icon: 'trash', section: 'tools' },
+  { to: destination({ name: 'settings' }), label: 'nav.settings', icon: 'settings', section: 'app' },
 ]
 
-/** Whether path is entry's page or one under it ("/people/3" is under People). */
-export function isActive(entry: NavEntry, path: string): boolean {
-  return entry.path === '/' ? path === '/' : path === entry.path || path.startsWith(`${entry.path}/`)
+/** A detail inherits its declared parent section, independently of its path. */
+export function isActive(entry: NavEntry, target: Destination | undefined): boolean {
+  return !!target && 'group' in target.meta && target.meta.group === entry.to.name
 }

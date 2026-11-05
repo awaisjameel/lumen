@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { reactive } from 'vue'
 import { AlbumKind, engine, Filter } from '../bridge'
 import type * as Bridge from '../bridge'
@@ -31,15 +31,8 @@ beforeEach(() => {
 })
 afterEach(() => vi.useRealTimers())
 async function mountHead(nameOverride = '', kind: 'event' | 'album' = 'event') {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/albums', name: 'albums', component: { template: '<div />' } },
-      { path: '/places', name: 'places', component: { template: '<div />' } },
-      { path: '/places/:id', name: 'place', component: { template: '<div />' } },
-    ],
-  })
-  await router.push('/albums')
+  const router = createTestNavigation()
+  await router.visit('/albums')
   const props = reactive({
     kind,
     id: 1,

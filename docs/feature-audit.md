@@ -629,6 +629,68 @@ Wire changes require regenerated bindings and error/contract coverage. Fresh
 store/service, mounted/native global-Undo/privacy and full-system verification
 are required before this child is integrated.
 
+### #45 final integration
+
+PR [#53](https://github.com/awaisjameel/lumen/pull/53) merged into the parent
+at `557a1693`. Final head `33c27e11`, Windows
+[run 42066890496](https://github.com/awaisjameel/lumen/actions/runs/42066890496),
+passes every required job, including production build, clean generated bindings,
+static checks, 1,051 frontend tests and all named-package Go race shards.
+Artifact `13436870473` records draft 26/26, collection metadata 22/22, preview
+27/27, tagging 18/18, Undo recovery 20/20, history 7/7 and favourite Undo 22/22.
+The paused-editor capture contains no private fields and disables Save. The
+conflict check adopts a Thing created after the editor opened. There are no
+unexpected page errors; the deliberate SQLite read fault is classified.
+Hosted latency still exceeds unchanged budgets: folder SaveFaces64 9.310/7 ms,
+combined SaveFaces64 8.412/8 ms, unblocked SaveEmbeddings64 208.262/70 ms.
+The configured-machine milestone performance gate remains open. #45 is closed;
+the earlier checkpoints below remain historical evidence.
+
+### #38 accepted navigation scope
+
+Work starts at parent `557a1693` on `refactor/38-navigation-contract`. The
+[navigation inventory](navigation-contract.md) records the existing paths,
+queries, compatibility rules, producers, consumers and chosen architecture
+before production code changes. #38 owns navigation identities before #46
+addresses command identities. It preserves the existing owners for commands,
+preferences, notifications, overlays, collection drafts and the PIN gate.
+Implementation and fresh acceptance are pending; no historical pass certifies
+this child. Its PR targets the parent for owner review, with no final main PR.
+
+### #38 implementation checkpoint
+
+The central contract now derives registration, destination types, parameter and
+query decoding, timeline identities and parent highlighting. Root view bindings
+are exhaustive and lazy; Showcase is not emitted as a production view. Typed
+link/button/menu adapters cover templates and reusable props; all producers and
+consumers in the inventory are migrated. Settings metadata and generated start
+preferences are checked against the same vocabulary. Existing overlay, command,
+notification, selection, scroll, draft and PIN owners remain in place.
+
+A regression fails on the original `/people/0` flow because it requests the
+whole library. The repaired input boundary rejects malformed IDs before feature
+mounting. The embedded Go SPA handler consumes a contract-derived path manifest,
+so dotted malformed IDs also reach the safe unavailable-location state after a
+hard reload. Independent recovery-control tests now follow all three links to
+the real matched Blocked record at literal `/settings/blocked`. Compiler checks
+reject 18 invalid TypeScript/Vue examples, and isolated mutations demonstrate
+that route rename, missing root view/example and the original recovery-link
+mistake fail mandatory checks. Nineteen focused AST cases cover raw routing and
+allowed external/fixture data. No cast or suppression bypass was added.
+
+The current full local run passes 1,141 tests in 118 files, with additional
+recovery and date-edit coverage passing. The stricter date codec initially
+exposed an uncaught error when typing beyond an existing range; its regression
+fails before the repair and now retains the last admitted query using native
+control validity. Type/lint/format and mutation checks, production frontend build
+and docs checks pass locally. The focused Go SPA attempt is blocked by this
+Linux host's missing GTK/WebKit/libvips headers; it establishes no Go pass.
+Windows production/current bindings/modules, full race/static, installer and
+native acceptance remain required. CI now runs the native navigation suite and
+preserved collection-recovery suite before the seven existing child suites,
+retaining reports and screenshots. No historical result certifies this child;
+latency budgets and configured-machine acceptance remain unchanged.
+
 ### #45 implementation checkpoint
 
 The confirmed mounted regressions fail on parent `e80a1d08`: unrelated privacy

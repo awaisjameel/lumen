@@ -68,6 +68,27 @@ eligibility and settings, never replays annotations, and hands actual work to
 the existing durable OCR jobs. Optional progress feedback distinguishes pending
 scheduling recovery from a counted stage job; pause still controls processing.
 
+**Application navigation.** `shared/navigation/contract.ts` owns registration
+identities, path shapes, query/parameter codecs, timeline metadata and parent
+groups. Root `router.ts` binds every production view exhaustively, keeps the
+Library eager, loads other views lazily, and excludes Showcase in production.
+The shared navigation provider wraps Vue Router; links, buttons and menus expose
+only typed destinations. Validated reads are discriminated by identity before
+forming engine scopes. Malformed identifiers render a generic unavailable
+state instead of a whole-library request; valid missing/blocked entities retain
+their engine checks. Incoming settings aliases normalise with replace, and an
+unknown path retains the deliberate Library fallback.
+
+Vite derives the embedded `navigation.json` path-shape manifest from that same
+contract. The Go SPA handler uses it to serve malformed dotted IDs to the
+frontend validator while leaving real files and development modules alone.
+Production component tests share these registration records through isolated
+memory histories. AST lint, positive/negative Vue/TypeScript compilation and
+mutation checks prevent bypasses and drift. Navigation diagnostics contain a
+fixed message, never a private URL or query. Existing preferences, commands,
+notifications, overlays, selection, scroll and PIN owners remain responsible
+for their state. See [the navigation guide](navigation-contract.md).
+
 **Smart-album previews.** `Store.PreviewAlbum` evaluates the same validated
 `albumFilter` as saved smart albums. Reference visibility, exact count and the
 newest three grid items share one read-only snapshot. The thin service applies

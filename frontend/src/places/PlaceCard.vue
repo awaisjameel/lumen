@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import { computed } from 'vue'
 import type { Place } from '../bridge'
 import { Filter, thumbUrl } from '../bridge'
@@ -45,7 +46,7 @@ const items = computed(() =>
     <CollectionCard
       :data-collection="place.id"
       :data-active="active || undefined"
-      :to="{ name: 'place', params: { id: place.id } }"
+      :to="destination({ name: 'place', params: { id: place.id } })"
       :title="place.name"
       :subtitle="
         t('places.nearCity', { location: [place.region, place.country].filter(Boolean).join(', ') || place.name })

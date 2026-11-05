@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { engine } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { SearchInfo } from '../library/store'
@@ -15,10 +15,7 @@ vi.mock('../bridge', async (original) => ({
   engine: { people: vi.fn() },
 }))
 
-const router = createRouter({
-  history: createMemoryHistory(),
-  routes: [{ path: '/search', name: 'search', component: { template: '<div />' } }],
-})
+const router = createTestNavigation()
 let wrapper: VueWrapper | undefined
 
 const found = (info: Partial<SearchInfo>): SearchInfo => ({
@@ -32,7 +29,7 @@ const found = (info: Partial<SearchInfo>): SearchInfo => ({
 })
 
 async function show(info: SearchInfo, total = 6, path = '/search?q=Amina%20at%20the%20beach&media=photos') {
-  await router.push(path)
+  await router.visit(path)
   wrapper = mountInApp(SearchSummary, { plugins: [router], props: { info, total, searching: false } })
   await flushPromises()
   return wrapper
@@ -56,10 +53,16 @@ it('takes a person or the description out of the search, keeping its refinements
   ])
   await parts[0]?.trigger('click')
   await flushPromises()
-  expect(router.currentRoute.value.query).toEqual({ q: 'at the beach', media: 'photos' })
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1]))).toEqual({
+    q: 'at the beach',
+    media: 'photos',
+  })
   await parts[1]?.trigger('click')
   await flushPromises()
-  expect(router.currentRoute.value.query).toEqual({ q: 'Amina', media: 'photos' })
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1]))).toEqual({
+    q: 'Amina',
+    media: 'photos',
+  })
 })
 
 it('says how many matched, and that more did when the results are cut short', async () => {

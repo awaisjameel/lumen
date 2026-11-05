@@ -11,6 +11,8 @@ import type { VueWrapper } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import type { Component, Plugin } from 'vue'
 import { setPresenter } from './notify'
+import { isNavigationPlugin } from './navigation/router'
+import { createTestNavigation } from './navigation/testing'
 import type { Notification } from './notify'
 
 export interface MountInAppOptions {
@@ -52,13 +54,15 @@ export function deferred<T>() {
  * document.body. Unmount it when the test ends.
  */
 export function mountInApp(component: Component, options: MountInAppOptions = {}): VueWrapper {
+  const plugins = options.plugins ?? []
+  const navigation = plugins.some(isNavigationPlugin) ? [] : [createTestNavigation()]
   const Host = defineComponent({
     name: 'TestHost',
     render: () => h(UApp, { toaster: null }, { default: () => h(component, options.props, options.slots) }),
   })
   return mount(Host, {
     attachTo: document.body,
-    global: { plugins: [ui, ...(options.plugins ?? [])], stubs: options.stubs },
+    global: { plugins: [ui, ...navigation, ...plugins], stubs: options.stubs },
   })
 }
 

@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { createRouter, createMemoryHistory } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
 import App from '../App.vue'
 import { useLibrary } from '../library/store'
@@ -33,11 +33,8 @@ it('keeps first-run progress visible after sources arrive until the user starts 
     return Promise.resolve()
   })
   vi.spyOn(usePreferences(), 'load').mockResolvedValue()
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/', name: 'library', component: { render: () => null } }],
-  })
-  await router.push('/')
+  const router = createTestNavigation()
+  await router.visit('/')
   const w = mountInApp(App, { plugins: [router] })
   await flushPromises()
   await w.get('[data-begin]').trigger('click')

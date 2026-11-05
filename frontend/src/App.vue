@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import UApp from '@nuxt/ui/components/App.vue'
 import { defineAsyncComponent, onMounted, ref } from 'vue'
-import { RouterView, useRouter } from 'vue-router'
+import NavigationView from './shared/navigation/NavigationView.vue'
+import { useNavigation } from './shared/navigation/router'
+import { destination, startDestination } from './shared/navigation/contract'
 import CrashNotice from './about/CrashNotice.vue'
 import AppNotifications from './app/AppNotifications.vue'
 import AppOverlays from './app/AppOverlays.vue'
@@ -23,20 +25,24 @@ const prefs = usePreferences()
 const portal = useFullscreenPortal()
 const failed = ref('')
 const onboarding = ref(false)
-const router = useRouter()
+const router = useNavigation()
 // Whether the user has gone anywhere yet: the start view only ever replaces
 // the screen Lumen opened on.
 let navigated = false
-const stopCounting = router.afterEach((_to, from) => {
-  if (from.matched.length) navigated = true
+const stopCounting = router.afterEach((hadPrevious) => {
+  if (hadPrevious) navigated = true
 })
 
 /** Opens on the screen the user chose, if Lumen is still where it started. */
 async function openStartView() {
+  await router.ready()
   stopCounting()
   const view = prefs.prefs.startView
-  if (navigated || view === StartView.StartLibrary || router.currentRoute.value.name !== 'library') return
-  if (router.hasRoute(view)) await router.replace({ name: view })
+  const location = router.location.value
+  if (navigated || view === StartView.StartLibrary || location.kind !== 'valid' || location.target.name !== 'library')
+    return
+  const target = startDestination(view)
+  if (target) await router.replace(target)
 }
 
 const retrying = ref(false)
@@ -65,7 +71,7 @@ async function initialise() {
 onMounted(() => void initialise())
 
 async function finishOnboarding() {
-  await router.replace({ name: 'library' })
+  await router.replace(destination({ name: 'library' }))
   onboarding.value = false
 }
 </script>
@@ -76,7 +82,7 @@ async function finishOnboarding() {
       <template v-if="lib.ready">
         <Welcome v-if="!lib.sources.length || onboarding" @starting="onboarding = true" @complete="finishOnboarding" />
         <AppShell v-else>
-          <RouterView />
+          <NavigationView />
         </AppShell>
       </template>
       <StartupError v-else-if="failed || retrying" :error="failed" :busy="retrying" @retry="initialise" />

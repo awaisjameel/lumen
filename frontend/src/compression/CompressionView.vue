@@ -1,12 +1,13 @@
 <script setup lang="ts">
+import { destination as navigateTo } from '../shared/navigation/contract'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import URadioGroup from '@nuxt/ui/components/RadioGroup.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
-import { RouterLink } from 'vue-router'
+import RouterLink from '../shared/navigation/NavLink.vue'
 import { icons } from '../design/icons'
 import Icon from '../shared/Icon.vue'
 import Segmented from '../shared/Segmented.vue'
@@ -439,7 +440,9 @@ onBeforeUnmount(() => {
   <Page>
     <template #header
       ><PageHeader :title="t('compression.title')" :subtitle="caption"
-        ><UButton to="/" variant="ghost" :icon="icons.photos">{{ t('compression.back') }}</UButton></PageHeader
+        ><UButton :to="navigateTo({ name: 'library' })" variant="ghost" :icon="icons.photos">{{
+          t('compression.back')
+        }}</UButton></PageHeader
       ></template
     >
     <FeatureState v-if="error || readError" kind="error" :title="error || readError"
@@ -450,7 +453,7 @@ onBeforeUnmount(() => {
       kind="error"
       :title="t('compression.unavailableTitle')"
       :text="t('compression.unavailable')"
-      ><UButton to="/settings">{{ t('compression.settings') }}</UButton></FeatureState
+      ><UButton :to="navigateTo({ name: 'settings' })">{{ t('compression.settings') }}</UButton></FeatureState
     >
     <FeatureState v-if="loading" kind="loading" :title="t('compression.state.planned')" />
     <div v-else ref="workspace" data-compression-workspace class="compression-workspace">
@@ -484,7 +487,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="selection-scope">
               <Icon name="photos" :size="24" /><strong>{{ t('compression.scope', { n: inputs.length }) }}</strong
-              ><UButton to="/" variant="ghost">{{ t('compression.change') }}</UButton>
+              ><UButton :to="navigateTo({ name: 'library' })" variant="ghost">{{ t('compression.change') }}</UButton>
             </div>
             <details class="source-disclosure">
               <summary>{{ t('compression.sources', { n: inputs.length }) }}</summary>
@@ -595,7 +598,9 @@ onBeforeUnmount(() => {
               <UButton variant="ghost" :disabled="submitting" @click="resetOptions">{{
                 t('compression.reset')
               }}</UButton
-              ><RouterLink to="/settings?section=compression">{{ t('compression.defaults') }}</RouterLink>
+              ><RouterLink :to="navigateTo({ name: 'settings', query: { section: 'files' } })">{{
+                t('compression.defaults')
+              }}</RouterLink>
             </div>
             <UButton
               data-compression-plan
@@ -613,7 +618,9 @@ onBeforeUnmount(() => {
             icon="compress"
             :title="t('compression.emptyTitle')"
             :text="t('compression.empty')"
-            ><UButton to="/" color="primary" variant="solid">{{ t('compression.openLibrary') }}</UButton></FeatureState
+            ><UButton :to="navigateTo({ name: 'library' })" color="primary" variant="solid">{{
+              t('compression.openLibrary')
+            }}</UButton></FeatureState
           >
 
           <section

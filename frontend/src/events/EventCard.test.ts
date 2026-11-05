@@ -1,4 +1,4 @@
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import type { Event } from '../bridge'
@@ -20,13 +20,7 @@ const event: Event = {
 let wrapper: ReturnType<typeof mountInApp> | undefined
 afterEach(() => wrapper?.unmount())
 function mounted(rename = vi.fn().mockResolvedValue(true), item = event) {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      { name: 'event', path: '/events/:id', component: { template: '<div />' } },
-    ],
-  })
+  const router = createTestNavigation()
   wrapper = mountInApp(EventCard, { props: { event: item, busy: false, rename }, plugins: [router] })
   return wrapper
 }

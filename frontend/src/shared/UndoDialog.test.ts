@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from './navigation/testing'
 import { t } from './i18n'
 import { mountInApp, recordNotifications } from './testing'
 import type { RecordedNotifications } from './testing'
@@ -20,11 +20,8 @@ afterEach(() => {
 const body = () => new DOMWrapper(document.body)
 const done = (ids: number[]): UndoResult[] => ids.map((id) => ({ id, state: 'done', error: '' }))
 async function mountDialog() {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/', component: { template: '<div />' } }],
-  })
-  await router.push('/')
+  const router = createTestNavigation()
+  await router.visit('/')
   return mountInApp(UndoDialog, { plugins: [router] })
 }
 

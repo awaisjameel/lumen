@@ -1,4 +1,4 @@
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../../shared/navigation/testing'
 import { vi } from 'vitest'
 import { createPinia } from 'pinia'
 import type { Pinia } from 'pinia'
@@ -50,10 +50,7 @@ export function mountCorrection(
     const value = options.props.assets.find((asset) => asset.id === id)
     return value ? Promise.resolve(value) : Promise.reject(new Error('Unknown fixture asset'))
   })
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/', component: { render: () => null } }],
-  })
+  const router = createTestNavigation()
   return mountInApp(component, { props: options.props, plugins: [options.pinia ?? createPinia(), router] })
 }
 
