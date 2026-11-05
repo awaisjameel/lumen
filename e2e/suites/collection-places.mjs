@@ -218,12 +218,15 @@ try {
   await button(page, 'Try again', '[data-collection-places-error]')
   await page.waitForSelector('[data-collection-places-error]', { hidden: true })
   await trace.idle()
+  const covered = await lib(page, 'Asset', first)
   s.check('retry reads the current blocked state without replaying a correction',
-    !(await page.$('[data-collection-place]')) && (await lib(page, 'Asset', first)).placeId === corrected.id &&
+    !(await page.$('[data-collection-place]')) && covered.placeId === 0 && covered.lat === corrected.lat &&
+    covered.lon === corrected.lon &&
     !trace.calls.some((row) => row.write))
   await button(page, 'Undo', '[data-notification="block.undo"]')
   await header(page, corrected)
-  s.check('normal block Undo restores the current city in place', await membership(page, collections[0]))
+  s.check('normal block Undo restores the current city in place',
+    await membership(page, collections[0]) && (await lib(page, 'Asset', first)).placeId === corrected.id)
   await dismissNotices(page)
 
   phase = 'old read after navigation'
