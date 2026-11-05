@@ -1,13 +1,15 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { reactive } from 'vue'
 import { engine, Filter } from '../bridge'
 import type * as Bridge from '../bridge'
-import type { Event } from '../bridge'
-import { mountInApp, recordNotifications } from '../shared/testing'
+import type { Event, NamedPlace } from '../bridge'
+import { showBlocksChanged } from '../shared/block'
+import { deferred, mountInApp, recordNotifications } from '../shared/testing'
 import CollectionHead from './CollectionHead.vue'
+import { useLibrary } from './store'
 
 vi.mock('../bridge', async (original) => ({
   ...(await original<typeof Bridge>()),
@@ -17,18 +19,22 @@ vi.mock('../bridge', async (original) => ({
     things: vi.fn(),
     albums: vi.fn(),
     topPlaces: vi.fn().mockResolvedValue([]),
+    counts: vi.fn().mockResolvedValue({ photos: 0, videos: 0, favourites: 0, people: 0, trash: 0 }),
   },
 }))
 beforeEach(() => {
   vi.mocked(engine.setEventName).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setEventPinned).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.topPlaces).mockReset().mockResolvedValue([])
 })
+afterEach(() => vi.useRealTimers())
 async function mountHead(nameOverride = '') {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: '/albums', name: 'albums', component: { template: '<div />' } },
       { path: '/places', name: 'places', component: { template: '<div />' } },
+      { path: '/places/:id', name: 'place', component: { template: '<div />' } },
     ],
   })
   await router.push('/albums')
@@ -37,6 +43,7 @@ async function mountHead(nameOverride = '') {
     id: 1,
     name: nameOverride || 'Weekend',
     count: 248,
+    revision: 0,
     days: ['2026-10-04', '2026-10-03'],
     group: {
       id: 1,
@@ -142,15 +149,21 @@ it('retains a failed rename draft for retry', async () => {
   wrapper.unmount()
 })
 it('says where most of the collection was taken after what it holds, and asks again as that changes', async () => {
+  vi.useFakeTimers()
   vi.mocked(engine.topPlaces).mockResolvedValue([
     { id: 7, name: 'Karachi' },
     { id: 8, name: 'Skardu' },
   ])
   const { wrapper, props } = await mountHead()
   await flushPromises()
-  expect(engine.topPlaces).toHaveBeenLastCalledWith({ filter: Filter.FilterAll, event: 1 })
-  expect(wrapper.text()).toMatch(/248 items · Karachi · Skardu/)
+  expect(engine.topPlaces).toHaveBeenLastCalledWith({ filter: Filter.FilterAll, event: 1 }, expect.any(AbortSignal))
+  expect(wrapper.text().replace(/\s+/g, ' ')).toMatch(/248 items · Karachi · Skardu/)
+  expect(wrapper.findAll('[data-collection-place]').map((link) => link.attributes('href'))).toEqual([
+    '/places/7',
+    '/places/8',
+  ])
   props.count = 249
+  await vi.advanceTimersByTimeAsync(3000)
   await flushPromises()
   expect(engine.topPlaces).toHaveBeenCalledTimes(2)
   wrapper.unmount()
@@ -163,4 +176,104 @@ it('offers a kind’s own action as the primary button and Block as one that ask
   expect(map?.classes()).toContain('bg-primary')
   expect(wrapper.findAll('button').some((b) => b.text() === 'Block…')).toBe(true)
   wrapper.unmount()
+})
+
+it('coalesces same-count changes and indexing growth into one trailing metadata read', async () => {
+  vi.useFakeTimers()
+  vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 7, name: 'Karachi' }])
+  const { wrapper, props } = await mountHead()
+  await flushPromises()
+  for (let i = 0; i < 100; i++) {
+    props.revision++
+    if (i >= 50) props.count++
+    await flushPromises()
+  }
+  expect(wrapper.find('[data-collection-place]').exists()).toBe(false)
+  expect(engine.topPlaces).toHaveBeenCalledOnce()
+  vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 8, name: 'Lahore' }])
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(engine.topPlaces).toHaveBeenCalledTimes(2)
+  expect(wrapper.get('[data-collection-place]').text()).toBe('Lahore')
+  props.revision++
+  await flushPromises()
+  wrapper.unmount()
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(engine.topPlaces).toHaveBeenCalledTimes(2)
+})
+
+it('reconciles correction and Undo metadata immediately without a new event subscription', async () => {
+  vi.useFakeTimers()
+  vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 7, name: 'Karachi' }])
+  const { wrapper } = await mountHead()
+  await flushPromises()
+  vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 8, name: 'Lahore' }])
+  await useLibrary().reconcileChanges()
+  await flushPromises()
+  expect(wrapper.get('[data-collection-place]').attributes('href')).toBe('/places/8')
+  vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 7, name: 'Karachi' }])
+  await useLibrary().reconcileChanges()
+  await flushPromises()
+  expect(wrapper.get('[data-collection-place]').attributes('href')).toBe('/places/7')
+  expect(engine.topPlaces).toHaveBeenCalledTimes(3)
+  wrapper.unmount()
+})
+
+it('clears private metadata before a failed privacy read and offers an accessible retry', async () => {
+  vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 7, name: 'Karachi' }])
+  const { wrapper } = await mountHead()
+  await flushPromises()
+  const pending = deferred<NamedPlace[]>()
+  vi.mocked(engine.topPlaces).mockReturnValueOnce(pending.promise)
+  const refreshing = showBlocksChanged()
+  const rejected = expect(refreshing).rejects.toThrow('read failed')
+  await flushPromises()
+  expect(wrapper.find('[data-collection-place]').exists()).toBe(false)
+  pending.reject(new Error('read failed'))
+  await rejected
+  await flushPromises()
+  expect(wrapper.get('[role="alert"]').text()).toContain('read failed')
+  expect(wrapper.text()).not.toContain('Karachi')
+  vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 8, name: 'Lahore' }])
+  await wrapper.get('[role="alert"] button').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('[data-collection-place]').attributes('href')).toBe('/places/8')
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  wrapper.unmount()
+})
+
+it('cancels an older collection read and never applies it to the next identity', async () => {
+  const older = deferred<NamedPlace[]>()
+  vi.mocked(engine.topPlaces)
+    .mockReturnValueOnce(older.promise)
+    .mockResolvedValue([{ id: 8, name: 'Lahore' }])
+  const { wrapper, props } = await mountHead()
+  const signal = vi.mocked(engine.topPlaces).mock.calls[0]?.[1]
+  props.id = 2
+  await flushPromises()
+  expect(signal?.aborted).toBe(true)
+  expect(engine.topPlaces).toHaveBeenCalledOnce()
+  older.resolve([{ id: 7, name: 'Karachi' }])
+  await flushPromises()
+  expect(engine.topPlaces).toHaveBeenCalledTimes(2)
+  expect(engine.topPlaces).toHaveBeenLastCalledWith({ filter: Filter.FilterAll, event: 2 }, expect.any(AbortSignal))
+  expect(wrapper.get('[data-collection-place]').text()).toBe('Lahore')
+  expect(wrapper.text()).not.toContain('Karachi')
+  wrapper.unmount()
+})
+
+it('retires pending metadata and queued reads when its header unmounts', async () => {
+  const older = deferred<NamedPlace[]>()
+  vi.mocked(engine.topPlaces).mockReturnValueOnce(older.promise)
+  const { wrapper, props } = await mountHead()
+  const signal = vi.mocked(engine.topPlaces).mock.calls[0]?.[1]
+  props.id = 2
+  await flushPromises()
+  wrapper.unmount()
+  older.resolve([{ id: 7, name: 'Karachi' }])
+  await flushPromises()
+  expect(signal?.aborted).toBe(true)
+  expect(engine.topPlaces).toHaveBeenCalledOnce()
+  await showBlocksChanged()
+  expect(engine.topPlaces).toHaveBeenCalledOnce()
 })

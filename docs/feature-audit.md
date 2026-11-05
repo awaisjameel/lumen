@@ -495,6 +495,53 @@ work. Final Windows/native results and artifact references are recorded in
 [#42](https://github.com/awaisjameel/lumen/issues/42) and its child PR; the parent
 performance gate is separate and remains open until its own acceptance.
 
+### #42 integration and #44 accepted scope
+
+PR #51 is merged into the parent at `5123a7f8`, verified head `52d1c329`.
+[Run 41918558533](https://github.com/awaisjameel/lumen/actions/runs/41918558533)
+passes production/bindings/modules, static/docs checks, all 1,022 frontend
+tests and all Windows Go race shards. Artifact `13368105341` retains native
+preview 26/26, tagging 18/18, Undo recovery 20/20, favourite Undo 22/22 and
+history 7/7, with inspected screenshots.
+
+Five readings per amplified rule on equivalent 100,000-row/100-day scratch
+metadata fixtures show 101 calls becoming one. Photo response bytes fall from
+4,175,493 to 139; favourite-video bytes from 1,596,105 to 213. Median summed
+bridge read times are 952.14 to 21.15 ms and 612.35 to 20.87 ms respectively;
+control-to-preview medians are 1,231.13 to 373.22 ms and 877.44 to 292.65 ms.
+Every parent reading makes 100 day calls; every candidate reading makes one
+bounded preview and no timeline/day calls. This is synthetic hosted evidence.
+The unchanged budgets still report SaveFaces64 folder 8.375/7 ms,
+SaveEmbeddings64 unblocked 188.659/70 ms, SaveFaces64 unblocked 11.956/8 ms
+and Things unblocked 11.331/10 ms. Configured-machine acceptance remains open.
+
+[#44](https://github.com/awaisjameel/lumen/issues/44) starts at `5123a7f8` on
+`fix/44-collection-place-refresh`. A mounted real `LibraryView` regression
+confirms that a completed same-count/day correction refresh leaves Karachi in
+the header after the metadata source changes to Lahore. The original header
+watches identity/count and has no admission for content-only changes. Its top
+place names are plain text, so stale link behaviour is not claimed for that
+original surface.
+
+The accepted repair reuses the library's existing refresh revision and mutation
+reconciliation owner, without another library-event subscription. Background
+changes share a trailing three-second read; correction and Undo reconciliation
+read immediately through the same coalesced owner. Cancel superseded I/O and
+guard current view/unmount, clear private names before reads, and provide
+accessible read-only retry. Current names become links using the existing
+place route; route contracts remain in #38. Store query/visibility semantics,
+generated contracts, originals and automatic event-name Undo are unchanged.
+
+Targeted header/library/store coverage passes 83 tests, including the repaired
+mounted regression, a 100-revision coalescing test, failed privacy refresh/retry,
+late identity reads, thumbnail-only admission and unmount cleanup. A scratch fault preflight confirms the
+backend query refuses `p.name` while its fixture column is renamed and reads
+normally after restoration. The native suite compares the built parent and
+candidate in copied generated libraries, then checks manual/smart albums,
+Things/events, Undo, current destinations, burst work, privacy/error/retry and
+back/forward navigation. Fresh full Windows/native acceptance is pending;
+final results are recorded in #44 and its child PR before integration.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

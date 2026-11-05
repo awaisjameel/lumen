@@ -24,6 +24,27 @@ export interface MountInAppOptions {
   stubs?: Record<string, Component | boolean>
 }
 
+/** Controls when an engine read settles, including obsolete failures. */
+export function deferred<T>() {
+  let complete: ((value: T) => void) | undefined
+  let refuse: ((error: unknown) => void) | undefined
+  const promise = new Promise<T>((done, reject) => {
+    complete = done
+    refuse = reject
+  })
+  return {
+    promise,
+    resolve(value: T) {
+      if (!complete) throw new Error('Deferred promise was not initialised')
+      complete(value)
+    },
+    reject(error: unknown) {
+      if (!refuse) throw new Error('Deferred promise was not initialised')
+      refuse(error)
+    },
+  }
+}
+
 /**
  * Mounts component inside UApp, attached to the document (Nuxt UI's
  * overlays are portalled to the body, and focus needs a real document).

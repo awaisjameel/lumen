@@ -77,6 +77,15 @@ results, and clears samples before privacy refreshes or failed reads. It never
 counts or filters timeline days itself. Preview retry does not save an album
 or replace the editor's draft.
 
+**Collection place metadata.** The library's existing admitted content revision
+invalidates header places even when counts and day buckets are unchanged.
+The header adds no library-event subscription: background revisions share a
+three-second trailing read, while the existing mutation reconciliation owner
+refreshes corrections and Undo immediately. Both use one `coalescedLoad` owner,
+cancellable bridge reads and current-view/lifetime guards. Privacy invalidation
+clears names and destinations before I/O; failed reads expose retry and never
+restore old metadata. Place links use the existing place route.
+
 **People.** The following figures are historical tuning evidence, not a promise of recognition accuracy on another library. Clustering joins groups of faces while their average cosine similarity is at least 0.42 (Phase 0 found every group at that threshold held one person). A new person needs clear faces in three photos: sharpness (variance of the Laplacian of the aligned face) at least 15, head turn at most 0.45 eye distances. On 204 office photos with 1,000 faces, 92% were placed into 28 people, each checked by eye to hold one person; the rest wait, unplaced, for more photos of them. The faces stage and clustering never undo the user: see `internal/people/cluster.go`.
 
 **Places.** City names come from [GeoNames](https://www.geonames.org/), licensed under CC BY 4.0. Lumen bundles a reduced 30 September 2026 `cities5000` snapshot (69,760 populated places), with region and country names, so lookups make no network request. A city within 75 km is an approximate label, not an exact administrative boundary. See [data provenance](geonames.md).

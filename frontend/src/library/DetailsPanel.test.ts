@@ -4,7 +4,7 @@ import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, shallowRef } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { mountInApp, recordNotifications } from '../shared/testing'
+import { deferred, mountInApp, recordNotifications } from '../shared/testing'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import type { Sel } from './store'
@@ -74,26 +74,6 @@ vi.mock('../bridge', async (importOriginal) => ({
     setTakenAt: vi.fn().mockResolvedValue(undefined),
   },
 }))
-
-function deferred<T>() {
-  let complete: ((value: T) => void) | undefined
-  let refuse: ((error: unknown) => void) | undefined
-  const promise = new Promise<T>((done, reject) => {
-    complete = done
-    refuse = reject
-  })
-  return {
-    promise,
-    resolve(value: T) {
-      if (!complete) throw new Error('Deferred promise was not initialised')
-      complete(value)
-    },
-    reject(error: unknown) {
-      if (!refuse) throw new Error('Deferred promise was not initialised')
-      refuse(error)
-    },
-  }
-}
 
 const detail = (id: number, camera = ''): AssetDetail => ({
   id,

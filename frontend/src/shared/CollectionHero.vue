@@ -30,9 +30,9 @@ defineProps<{
           <bdi>{{ name }}</bdi>
         </h2>
       </slot>
-      <slot name="meta">
-        <span v-if="meta" class="meta">{{ meta }}</span>
-      </slot>
+      <span v-if="meta || $slots.meta" class="meta"
+        ><slot name="meta">{{ meta }}</slot></span
+      >
       <slot name="facts" />
     </div>
     <div v-if="$slots.actions" class="actions">
