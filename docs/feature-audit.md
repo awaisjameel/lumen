@@ -573,6 +573,20 @@ The metadata baseline also reads its parent's public header revision-prop
 contract before measuring outcomes: original parents must demonstrate the stale
 header, while later parents must retain live metadata and current destinations.
 
+The next [run 42013873221](https://github.com/awaisjameel/lumen/actions/runs/42013873221)
+at `965ca66` passes Windows production/current bindings, static/docs checks,
+all 1,031 frontend tests and every Go race shard. Preview now passes 27/27;
+tagging 18/18, Undo recovery 20/20, favourite Undo 22/22 and history 7/7 remain
+passing. Metadata reproduces the original parent defect but stops at an
+unspecified candidate control timeout (4/5 before completion); its trace was
+reset before that step and screenshot capture did not finish. Artifact
+`13408554758` retains those actual results. The native harness now waits for
+the first rendered grid before enabling interception, reloads both frontends
+under the installed observer, and records control stages plus bounded failure
+diagnostics. Interaction deadlines and assertions are unchanged. Fresh native
+acceptance remains pending. The hosted report retains SaveEmbeddings64 folder
+63.089/60 ms and unblocked 185.352/70 ms; budgets remain unchanged.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

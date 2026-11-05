@@ -25,6 +25,7 @@ let trace
 let dataDir = seed
 let faultActive = false
 let phase = 'fixture'
+let action = 'fixture'
 let failure
 let first
 let second
@@ -35,6 +36,23 @@ let smart
 let other
 let tag
 let collections
+
+function step(value) {
+  action = value
+  console.log(`collection-places: ${phase}: ${value}`)
+}
+async function diagnostic(read) {
+  let timer
+  try {
+    return await Promise.race([read, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('diagnostic timed out')), 5000)
+    })])
+  } catch (error) {
+    return { error: String(error) }
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 function fault(action) {
   execFileSync(process.env.PYTHON ?? 'python', [fixture, action, join(dataDir, 'library.db')], { stdio: 'inherit' })
@@ -62,8 +80,15 @@ async function start(label, baseline) {
   await unthrottle(app.page)
   await waitIndexed(app.page, { ai: true, atLeast: 2, timeout: 120_000, log: console.log })
   await lib(app.page, 'SetPaused', true)
+  // Backend readiness alone precedes Vue's first render. Finish that render
+  // before intercepting requests, then reload both frontends under the trace.
+  step(`wait for ${label}'s first rendered grid`)
+  await app.page.waitForSelector('.scroller .cell', { visible: true })
   trace = await mutationTrace(app.page, baseline, readMethods)
-  if (baseline) await app.page.reload()
+  step(`reload ${label} under the installed observer`)
+  await app.page.reload()
+  await app.page.waitForSelector('.scroller .cell', { visible: true })
+  await app.page.bringToFront()
   await resize(app.page, 1440, 1000)
 }
 async function stop() {
@@ -72,22 +97,31 @@ async function stop() {
   app = undefined
 }
 async function openCollection(page, collection) {
+  step(`open collection list ${collection.list}`)
   await page.locator(`aside a[href="${collection.list}"]`).click()
+  step(`open collection ${collection.path}`)
   await page.locator(`a[href="${collection.path}"]`).click()
+  step(`wait for collection ${collection.path}`)
   await page.waitForSelector('.collection-hero .meta')
   await until(() => page.evaluate((path) => location.pathname === path, collection.path), 'the collection did not open')
 }
 async function header(page, city) {
+  step(`wait for current metadata ${city.name}`)
   await until(() => page.$$eval('[data-collection-place]', (links, city) => links.length === 1 &&
     links[0].textContent.trim() === city.name && links[0].getAttribute('href') === `/places/${city.id}`, city),
   `the current header did not link to ${city.name}`)
 }
 async function correctPlace(page, city) {
-  await selectPhoto(page, first)
+  await selectPhoto(page, first, step)
+  step('open the location correction')
   await page.locator('[data-edit-place]').click()
+  step('fill Latitude')
   await page.locator('input[aria-label="Latitude"]').fill(String(city.lat))
+  step('fill Longitude')
   await page.locator('input[aria-label="Longitude"]').fill(String(city.lon))
+  step('save the location correction')
   await button(page, 'Save place', '[role="dialog"]')
+  step('wait for the correction to close')
   await page.waitForSelector('#correct-place', { hidden: true })
   return undoNotice(page)
 }
@@ -267,11 +301,16 @@ try {
     !(row.phase === 'privacy clearing and failed-read recovery' && /^no such column: (?:p\.)?name$/.test(row.error)))
   s.check('only the deliberately refused place-name reads are logged', pageErrors.length === 0 && unexpected.length === 0, { pageErrors, unexpected })
 } catch (error) {
-  failure = { phase, stack: error.stack ?? String(error) }
+  failure = { phase, action, stack: error.stack ?? String(error) }
   s.check(`collection metadata completed (${phase})`, false, String(error))
   if (app) {
-    failure.header = await app.page.evaluate(() => document.querySelector('.collection-hero')?.textContent).catch(() => undefined)
-    await app.page.screenshot({ path: join(s.out, 'failure.png') }).catch(() => {})
+    failure.page = { url: app.page.url(), closed: app.page.isClosed(), exit: app.proc.exitCode }
+    failure.dom = await diagnostic(app.page.evaluate(() => ({
+      ready: document.readyState, visibility: document.visibilityState, focus: document.hasFocus(),
+      width: innerWidth, height: innerHeight, body: document.body?.innerText.slice(0, 12000),
+      active: document.activeElement?.getAttribute('aria-label'),
+    })))
+    failure.screenshot = await diagnostic(app.page.screenshot({ path: join(s.out, 'failure.png') }).then(() => 'captured'))
   }
 } finally {
   await trace?.release().catch(() => {})

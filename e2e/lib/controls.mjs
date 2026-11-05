@@ -40,16 +40,22 @@ export async function selectAllResults(page) {
 }
 
 /** Selects a real grid item and waits for its current inspector identity. */
-export async function selectPhoto(page, id) {
+export async function selectPhoto(page, id, step = () => undefined) {
+  step('clear selection')
   const clear = await page.$('button[aria-label="Clear selection"]')
   if (clear) await clear.click()
   if (!(await page.$(`#cell-${id}`))) await page.$eval('.scroller', (el) => { el.scrollTop = el.scrollHeight })
+  step('wait for the target cell')
   await page.waitForSelector(`#cell-${id}`)
+  step('select the target cell')
   await page.locator(`#cell-${id}`).click()
   const details = 'button[aria-label="Details"]'
+  step('open Details')
   if ((await page.$eval(details, (el) => el.getAttribute('aria-pressed'))) !== 'true') await page.locator(details).click()
+  step('wait for the inspector')
   await page.waitForSelector('[data-edit-date]', { visible: true })
   const name = (await lib(page, 'Asset', id)).paths[0].split(/[\\/]/).at(-1)
+  step('wait for the current inspector identity')
   await until(() => page.$eval('.preview-caption h3', (el, name) => el.textContent.trim() === name, name),
     'the inspector did not settle on the current target')
 }
