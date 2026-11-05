@@ -77,6 +77,24 @@ results, and clears samples before privacy refreshes or failed reads. It never
 counts or filters timeline days itself. Preview retry does not save an album
 or replace the editor's draft.
 
+**Album draft admission.** Shared privacy invalidation still clears cached
+lists immediately. The existing album editor retains local fields but removes
+its form and preview until authoritative album/reference reads admit them.
+Failed reads offer a read-only retry; confirmed disappearance or a different
+creation identity closes and clears the editor. Missing references lose their
+IDs and require an explicit choice rather than silently broadening the rule.
+A changed saved definition blocks saving until an explicit confirmed reload.
+
+Album definitions carry an immutable creation identity (migration 0040) and a
+derived revision over their name, kind and rule; counts/covers do not conflict
+with a draft. `Store.SaveAlbum` checks that version in the writer transaction,
+returns the committed version and acknowledges an identical retry without
+another write. Name-only saves retain the server rule; header name Undo uses
+the version returned by its forward save. Both interactive definition writers
+use this guarded contract. The legacy three-argument update remains only for
+compiled clients and native fixtures, sharing the same store implementation.
+No persisted draft owner or membership-turn registry is added.
+
 **Collection place metadata.** The library's existing admitted content revision
 invalidates header places even when counts and day buckets are unchanged.
 The header adds no library-event subscription: background revisions share a

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { close, launch, lib, resize, search, unthrottle, waitIndexed } from '../lib/app.mjs'
-import { button, dismissNotices, selectPhoto, undoNotice, until } from '../lib/controls.mjs'
+import { button, diagnostic, dismissNotices, selectPhoto, undoNotice, until } from '../lib/controls.mjs'
 import { copyLibrary } from '../lib/fixtures.mjs'
 import { bindingID, mutationTrace } from '../lib/mutation-trace.mjs'
 import { E2E, suite } from '../lib/suite.mjs'
@@ -40,18 +40,6 @@ let collections
 function step(value) {
   action = value
   console.log(`collection-places: ${phase}: ${value}`)
-}
-async function diagnostic(read) {
-  let timer
-  try {
-    return await Promise.race([read, new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('diagnostic timed out')), 5000)
-    })])
-  } catch (error) {
-    return { error: String(error) }
-  } finally {
-    clearTimeout(timer)
-  }
 }
 
 function fault(action) {

@@ -38,6 +38,7 @@ Install the pinned fixture tooling with `python -m pip install -r e2e/requiremen
 | `undo-recovery` | Retries partial selection and multi-album inverses, preserves correction provenance and newer edits, reverses a self-covering place correction, retires deleted-album inverses and restarts | three generated photos in its own library |
 | `tagging-recovery` | Injects annotation and OCR queue faults, checks draft retention versus committed tags, and verifies owned scheduling and text recovery in-session and across restart | two generated documents in their own library |
 | `smart-album-preview` | Compares parent/candidate request counts, payloads and latency on 100,000 synthetic rows over 100 days; real editor rules, privacy/retry and cancellation | generated photos/videos and an isolated metadata fixture |
+| `album-draft` | Parent draft-loss reproduction; global privacy Undo with held/refused reads, local retry, reference redaction, guarded save conflicts/ID reuse, cancellation, navigation and restart | two generated photos in copied scratch libraries |
 | `collection-places` | Reproduces stale parent metadata, then checks same-count correction/Undo, current place links, coalescing, privacy/read retry and back/forward/lifetime ownership | two generated photos in copied scratch libraries |
 | `organise` | Organise on disk: preview, move, Undo, checked on the files themselves | base library + two files of its own |
 | `viewer` | Zoom, pan, rotate, full screen, filmstrip, compare, slideshow; selection and batch; export and rename with Undo; audio tracks, subtitles, frame export; playback history; blocks | `media` |
@@ -126,6 +127,15 @@ The baseline's sibling generated bindings identify its contract: a checkout
 before `PreviewAlbum` must reproduce day amplification; a later parent must
 retain the one-call/three-sample bounded contract. Supply the baseline from a
 frontend checkout with those bindings, as PR CI does.
+
+`album-draft` uses the same compiled-parent mechanism. Its source contract
+(`data-draft-state`) selects legacy draft-loss or repaired admission expectations
+before outcomes are observed. It blocks unrelated B, edits A, and uses the real
+global Undo while holding the album read. Scratch-only schema/trigger faults
+refuse actual reads/writes; retry does not replay committed state. Held saves
+exercise a conflicting definition, navigation and a deleted/recreated numeric ID.
+The suite restores its scratch schema, restarts the app and leaves originals
+unchanged. Keep the baseline's sibling `src/` directory, as PR CI does.
 
 `collection-places` also uses the compiled parent frontend for a native
 before/after comparison. Manual/smart albums, Things and single-photo events

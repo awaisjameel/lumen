@@ -122,6 +122,14 @@ rule, its preview shows the current matching count and up to three sample
 items. If the preview cannot be read, **Try again** retries the same draft;
 the previous images are cleared until a current read succeeds.
 
+An unrelated privacy change pauses an open album draft while Lumen checks
+visibility. The form returns with your unsaved fields if the album is still
+available. **Try again** after a failed check only reads the current state.
+A hidden or deleted album closes its editor; a hidden Thing or person requires
+an explicit replacement. If the saved definition changed elsewhere, your draft
+stays visible but cannot overwrite it: **Reload saved version** asks before
+discarding your unsaved changes, or **Cancel** closes the draft.
+
 Undo of favourite selections, album memberships and date/place corrections
 shows progress and **Cancel remaining**.
 Completed changes stay in place. **View outcomes** lists results a page at a

@@ -18,6 +18,7 @@ let wrapper: VueWrapper | undefined
 let notices: ReturnType<typeof recordNotifications>
 const album = (id: number, name: string, kind = AlbumKind.AlbumManual) => ({
   id,
+  version: { identity: `album-${id}`, revision: 'original' },
   name,
   kind,
   rule: emptyRule(),

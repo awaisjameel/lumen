@@ -587,6 +587,73 @@ diagnostics. Interaction deadlines and assertions are unchanged. Fresh native
 acceptance remains pending. The hosted report retains SaveEmbeddings64 folder
 63.089/60 ms and unblocked 185.352/70 ms; budgets remain unchanged.
 
+### #44 integration and #45 accepted scope
+
+PR #52 is merged into the parent at `e80a1d08`, verified head `d9f1c80`.
+[Run 42018179926](https://github.com/awaisjameel/lumen/actions/runs/42018179926)
+passes production/current bindings/modules, static/docs, all 1,031 frontend
+tests and every Windows Go race shard. Artifact `13410543832` retains metadata
+22/22, preview 27/27, tagging 18/18, Undo recovery 20/20, favourite Undo 22/22
+and history 7/7. Inspected screenshots show private header names removed during
+the read fault and the correct current destination after navigation. There are
+no uncaught page errors or unexpected console/instrumentation errors. Ten
+background corrections use one 32-byte place read (5.2971 ms on that fixture).
+Hosted overruns remain SaveFaces64 folder 7.327/7 ms and SaveEmbeddings64
+unblocked 121.135/70 ms; budgets and configured-machine acceptance are unchanged.
+
+[#45](https://github.com/awaisjameel/lumen/issues/45) starts from `e80a1d08`
+on `fix/45-album-draft-privacy`. Its mounted regression confirms that an unrelated
+delayed privacy reload erases a valid unsaved name and changes an edit into
+creation. A second regression covers a saved definition changing behind the
+open editor. Shared privacy invalidation must continue clearing cached lists.
+
+The accepted repair keeps the draft in its existing editor and admits it only
+against fresh visibility. Unknown visibility suspends private form content and
+previews; a failed read offers read-only recovery. A still-visible target
+resumes its local fields/focus without overwriting newer input. Confirmed
+removal or blocking closes and clears the edit. Missing/blocked rule references
+are redacted and require an explicit valid choice, never silently broadening
+the rule. Save ownership includes the editor session and immutable target;
+navigation, retry and late completions cannot create or change another album.
+
+Conflict and identity checks belong in the store's write transaction as well
+as the UI. A small album creation token distinguishes SQLite ID reuse (the
+existing membership Undo contract deliberately permits reuse). A derived
+metadata revision excludes changing counts/covers. Guarded saves compare those
+tokens, reject stale or recreated targets, and acknowledge an already committed
+identical result without replaying it. The same store validation/write helper
+serves compatibility calls, and current editor/name-Undo surfaces use the
+guarded contract. There is no persisted draft cache or second mutation journal.
+Rule-reference visibility validation remains shared with preview/save logic.
+Wire changes require regenerated bindings and error/contract coverage. Fresh
+store/service, mounted/native global-Undo/privacy and full-system verification
+are required before this child is integrated.
+
+### #45 implementation checkpoint
+
+The confirmed mounted regressions fail on parent `e80a1d08`: unrelated privacy
+invalidation discards a valid draft and changes edit mode into creation; a
+concurrent saved definition is silently overwritten. The repair leaves shared
+privacy invalidation intact and keeps draft ownership in the existing editor.
+Uncertain visibility removes form/preview, read-only retry retains local fields,
+and confirmed missing/recreated targets close and clear. Hidden/missing rule IDs
+are retired and require an explicit selection. Conflicts retain local input and
+block saving until an explicitly confirmed reload or cancellation.
+
+`SaveAlbum` checks immutable creation identity and derived definition revision
+inside the existing writer transaction, preventing ID reuse and lost updates.
+Counts/covers do not conflict; an identical retry performs no write. Name-only
+header saves/Undo preserve server rules and use returned committed versions.
+The legacy update signature remains compatible with compiled parent clients
+and shares its canonical implementation. Bindings and the typed error chain
+are regenerated/aligned. No persistent draft cache or membership lease is added.
+
+Local editor/header regressions, identity/CAS/idempotence/privacy/migration
+store tests and static checks are being run. A new `album-draft` native suite
+is wired before the six existing regression suites in Windows CI. Native,
+full Windows and final local results remain pending; this checkpoint claims no
+runtime acceptance or completion of #45. Existing latency budgets are unchanged.
+
 ## First milestone: collection recovery and event name Undo
 
 Accepted scope, recorded before implementation:

@@ -1,22 +1,19 @@
-import type * as Router from 'vue-router'
 import USelect from '@nuxt/ui/components/Select.vue'
+import { question } from '../shared/confirm'
 import { t } from '../shared/i18n'
-import { mountInApp } from '../shared/testing'
+import { deferred, mountInApp } from '../shared/testing'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
-import { AlbumKind, engine, ErrorCode, Kind, MAX_NAME_LEN, thumbUrl } from '../bridge'
+import { AlbumKind, engine, ErrorCode, Kind, MAX_NAME_LEN, TagKind, thumbUrl } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Album } from '../bridge'
-import { blockRequest } from '../shared/block'
+import { blockRequest, showBlocksChanged } from '../shared/block'
+import { personFixture } from '../people/testing'
 import { emptyRule, useAlbums } from './store'
 import AlbumsView from './AlbumsView.vue'
 
-vi.mock('vue-router', async (importOriginal) => ({
-  ...(await importOriginal<typeof Router>()),
-  useRouter: () => ({ push: vi.fn() }),
-}))
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
@@ -25,13 +22,15 @@ vi.mock('../bridge', async (importOriginal) => ({
     things: vi.fn(),
     people: vi.fn(),
     createAlbum: vi.fn(),
-    updateAlbum: vi.fn(),
+    saveAlbum: vi.fn(),
     previewAlbum: vi.fn(),
+    counts: vi.fn().mockResolvedValue({ photos: 0, videos: 0, favourites: 0, people: 0, trash: 0 }),
   },
 }))
 
 const album: Album = {
   id: 1,
+  version: { identity: 'original-album', revision: 'initial-definition' },
   name: 'Private trip',
   kind: AlbumKind.AlbumManual,
   count: 1,
@@ -47,11 +46,12 @@ beforeEach(() => {
   vi.mocked(engine.things).mockResolvedValue([])
   vi.mocked(engine.people).mockResolvedValue([])
   vi.mocked(engine.createAlbum).mockReset().mockResolvedValue(2)
-  vi.mocked(engine.updateAlbum).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.saveAlbum).mockReset().mockResolvedValue(album.version)
   vi.mocked(engine.previewAlbum).mockReset().mockResolvedValue({ count: 0, items: [] })
 })
 
 afterEach(() => {
+  question.value?.answer(false)
   blockRequest.value?.answer(false)
   blockRequest.value = null
   wrapper?.unmount()
@@ -64,7 +64,7 @@ async function mounted() {
   return wrapper
 }
 
-it('resets the edited album only after its block is saved successfully', async () => {
+it('closes the edited album only after its block is saved successfully', async () => {
   const w = await mounted()
   await menuAction(w, t('albums.editNamed', { name: album.name }))
   await flushPromises()
@@ -83,19 +83,59 @@ it('resets the edited album only after its block is saved successfully', async (
   )
   blockRequest.value?.answer(true)
   await flushPromises()
-  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('')
-  expect(editor().text()).toContain('New album')
+  expect(document.querySelector('#album-editor')).toBeNull()
 })
 
-it('resets the editor when its album disappears from a reload', async () => {
+it('closes the editor when its album disappears from a successful reload', async () => {
   const w = await mounted()
   await menuAction(w, t('albums.editNamed', { name: album.name }))
   await flushPromises()
   vi.mocked(engine.albums).mockResolvedValue([])
   await useAlbums().load()
   await flushPromises()
-  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('')
+  expect(document.querySelector('#album-editor')).toBeNull()
   expect(w.text()).not.toContain(album.name)
+})
+
+it('preserves an existing album draft and target after an unrelated delayed privacy refresh', async () => {
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  await editor().get('form input').setValue('Unsaved local name')
+  const pending = deferred<Album[]>()
+  vi.mocked(engine.albums).mockReturnValueOnce(pending.promise)
+  const refreshing = showBlocksChanged()
+  await flushPromises()
+  expect(useAlbums().list).toEqual([])
+  expect(useAlbums().loaded).toBe(false)
+  pending.resolve([album])
+  await refreshing
+  await flushPromises()
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('Unsaved local name')
+  await editor().get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.saveAlbum).toHaveBeenCalledExactlyOnceWith({
+    id: album.id,
+    version: album.version,
+    name: 'Unsaved local name',
+    rule: emptyRule(),
+  })
+  expect(engine.createAlbum).not.toHaveBeenCalled()
+})
+
+it('does not apply a draft after the saved album definition changes behind the editor', async () => {
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  await editor().get('form input').setValue('Older local draft')
+  vi.mocked(engine.albums).mockResolvedValue([
+    { ...album, name: 'Changed saved definition', version: { ...album.version, revision: 'changed' } },
+  ])
+  await useAlbums().load()
+  await flushPromises()
+  const form = document.querySelector('#album-editor')
+  if (form) await new DOMWrapper(form).trigger('submit')
+  await flushPromises()
+  expect(engine.saveAlbum).not.toHaveBeenCalled()
+  expect(engine.createAlbum).not.toHaveBeenCalled()
 })
 
 it('validates names by code point before creating an album', async () => {
@@ -139,7 +179,7 @@ it('retries a failed smart preview without saving or replacing its draft', async
   expect(preview.text()).not.toContain('Preview refused')
   expect(preview.findAll('.preview-grid > div')).toHaveLength(1)
   expect(editor().get<HTMLInputElement>('form input').element.value).toBe(album.name)
-  expect(engine.updateAlbum).not.toHaveBeenCalled()
+  expect(engine.saveAlbum).not.toHaveBeenCalled()
 })
 
 it('keeps every smart rule field and maps all media back to the engine zero value', async () => {
@@ -161,7 +201,12 @@ it('keeps every smart rule field and maps all media back to the engine zero valu
   await flushPromises()
   await editor().get('form').trigger('submit')
   await flushPromises()
-  expect(engine.updateAlbum).toHaveBeenCalledWith(album.id, album.name, { ...rule, kind: Kind.$zero })
+  expect(engine.saveAlbum).toHaveBeenCalledWith({
+    id: album.id,
+    version: album.version,
+    name: album.name,
+    rule: { ...rule, kind: Kind.$zero },
+  })
 })
 
 it('focuses the name in the modal and returns focus to New album when cancelled', async () => {
@@ -260,7 +305,7 @@ it('blocks saving an inverted date range while retaining the draft', async () =>
   await menuAction(w, t('albums.editNamed', { name: album.name }))
   await editor().get('form').trigger('submit')
   await flushPromises()
-  expect(engine.updateAlbum).not.toHaveBeenCalled()
+  expect(engine.saveAlbum).not.toHaveBeenCalled()
   expect(editor().get('[role="alert"]').text()).toContain('The start date must not follow the end date.')
   expect(editor().get<HTMLInputElement>('form input').element.value).toBe(album.name)
 })
@@ -298,4 +343,190 @@ it('keeps the saving draft when the empty-state creation action is used again', 
   finish(2)
   await flushPromises()
   expect(engine.createAlbum).toHaveBeenCalledOnce()
+})
+
+it('suspends private fields during a failed privacy read and resumes them through a read-only retry', async () => {
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  await editor().get('form input').setValue('Last valid local input')
+  const pending = deferred<Album[]>()
+  vi.mocked(engine.albums).mockReturnValueOnce(pending.promise)
+  const refreshing = showBlocksChanged().catch(() => undefined)
+  await flushPromises()
+  expect(document.querySelector('#album-editor')).toBeNull()
+  expect(document.body.textContent).not.toContain('Last valid local input')
+  pending.reject(new Error('Read unavailable'))
+  await refreshing
+  await flushPromises()
+  expect(document.querySelector('#album-editor')).toBeNull()
+  await editor().get('[data-action="retry-draft"]').trigger('click')
+  await flushPromises()
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('Last valid local input')
+  expect(engine.saveAlbum).not.toHaveBeenCalled()
+  expect(engine.createAlbum).not.toHaveBeenCalled()
+})
+
+it('restores the focused field and caret after a valid draft is readmitted', async () => {
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  const field = editor().get<HTMLInputElement>('form input')
+  field.element.focus()
+  await field.setValue('Local name')
+  field.element.setSelectionRange(3, 5)
+  await field.trigger('select')
+  const pending = deferred<Album[]>()
+  vi.mocked(engine.albums).mockReturnValueOnce(pending.promise)
+  const refreshing = showBlocksChanged()
+  await flushPromises()
+  pending.resolve([album])
+  await refreshing
+  await flushPromises()
+  const restored = editor().get<HTMLInputElement>('form input').element
+  expect(document.activeElement).toBe(restored)
+  expect([restored.selectionStart, restored.selectionEnd]).toEqual([3, 5])
+})
+
+it('closes a draft instead of saving into a replacement album with the same numeric ID', async () => {
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  await editor().get('form input').setValue('Old entity draft')
+  vi.mocked(engine.albums).mockResolvedValue([{ ...album, version: { ...album.version, identity: 'replacement' } }])
+  await useAlbums().load()
+  await flushPromises()
+  expect(document.querySelector('#album-editor')).toBeNull()
+  expect(engine.saveAlbum).not.toHaveBeenCalled()
+  expect(engine.createAlbum).not.toHaveBeenCalled()
+  expect(document.activeElement).toBe(w.get('[data-action="new-album"]').element)
+})
+
+it('keeps conflict input until an explicit confirmed reload replaces it with the current saved definition', async () => {
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  await editor().get('form input').setValue('Unsaved conflict')
+  const changed = { ...album, name: 'Current saved', version: { ...album.version, revision: 'newer' } }
+  vi.mocked(engine.albums).mockResolvedValue([changed])
+  await useAlbums().load()
+  await flushPromises()
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('Unsaved conflict')
+  await editor().get('[data-action="reload-album"]').trigger('click')
+  question.value?.answer(false)
+  await flushPromises()
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('Unsaved conflict')
+  await editor().get('[data-action="reload-album"]').trigger('click')
+  question.value?.answer(true)
+  await flushPromises()
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe(changed.name)
+  await editor().get('form input').setValue('Fresh edit')
+  await editor().get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.saveAlbum).toHaveBeenCalledExactlyOnceWith({
+    id: album.id,
+    version: changed.version,
+    name: 'Fresh edit',
+    rule: emptyRule(),
+  })
+})
+
+it('retires hidden rule identities and requires an explicit replacement rather than broadening the rule', async () => {
+  vi.useFakeTimers()
+  const smart = { ...album, kind: AlbumKind.AlbumSmart, rule: { ...emptyRule(), tag: 7, person: 9 } }
+  vi.mocked(engine.albums).mockResolvedValue([smart])
+  vi.mocked(engine.things).mockResolvedValue([
+    {
+      id: 7,
+      name: 'Hidden Thing',
+      kind: TagKind.TagManual,
+      original: '',
+      count: 0,
+      cover: 0,
+      coverThumb: 0,
+      pinned: false,
+    },
+  ])
+  vi.mocked(engine.people).mockResolvedValue([personFixture(9, 'Hidden person', 0)])
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  await vi.advanceTimersByTimeAsync(200)
+  vi.mocked(engine.things).mockResolvedValue([])
+  vi.mocked(engine.people).mockResolvedValue([])
+  await showBlocksChanged()
+  await flushPromises()
+  await vi.advanceTimersByTimeAsync(200)
+  expect(editor().text()).not.toContain('Hidden Thing')
+  expect(editor().text()).not.toContain('Hidden person')
+  expect(editor().text()).toContain(t('albums.referenceMissing'))
+  const choices = w.findAllComponents(USelect)
+  const tag = choices[2]
+  const person = choices[3]
+  if (!tag || !person) throw new Error('Rule choices are missing')
+  expect(tag.props()).toMatchObject({ modelValue: -1 })
+  expect(person.props()).toMatchObject({ modelValue: -1 })
+  await editor().get('form').trigger('submit')
+  expect(engine.saveAlbum).not.toHaveBeenCalled()
+  tag.vm.$emit('update:modelValue', 0)
+  person.vm.$emit('update:modelValue', 0)
+  await flushPromises()
+  await editor().get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.saveAlbum).toHaveBeenCalledExactlyOnceWith({
+    id: album.id,
+    version: album.version,
+    name: album.name,
+    rule: emptyRule(),
+  })
+})
+
+it('does not close a replacement editor after a saved write finishes its delayed reload', async () => {
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  const pending = deferred<Bridge.AlbumVersion>()
+  vi.mocked(engine.saveAlbum).mockReturnValueOnce(pending.promise)
+  await editor().get('form input').setValue('Saving original')
+  await editor().get('form').trigger('submit')
+  vi.mocked(engine.albums).mockResolvedValue([])
+  await useAlbums().load()
+  await flushPromises()
+  expect(document.querySelector('#album-editor')).toBeNull()
+  pending.resolve({ ...album.version, revision: 'committed' })
+  await flushPromises()
+  await w.get('[data-action="new-album"]').trigger('click')
+  await flushPromises()
+  expect(editor().get<HTMLInputElement>('form input').element.value).toBe('')
+  expect(engine.createAlbum).not.toHaveBeenCalled()
+})
+
+it('never replays a committed save after its list refresh fails', async () => {
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  await editor().get('form input').setValue('Committed')
+  vi.mocked(engine.albums).mockRejectedValueOnce(new Error('Post-commit read failed'))
+  await editor().get('form').trigger('submit')
+  await flushPromises()
+  expect(document.querySelector('#album-editor')).toBeNull()
+  expect(engine.saveAlbum).toHaveBeenCalledOnce()
+  await useAlbums().load()
+  await flushPromises()
+  expect(engine.saveAlbum).toHaveBeenCalledOnce()
+})
+
+it('does not reopen a cancelled edit link when its route cleanup is delayed beyond privacy readmission', async () => {
+  const router = testRouter()
+  await router.push({ path: '/', query: { edit: String(album.id) } })
+  wrapper = mountInApp(AlbumsView, { plugins: [router] })
+  await flushPromises()
+  const cleanup = deferred<Awaited<ReturnType<typeof router.replace>>>()
+  vi.spyOn(router, 'replace').mockReturnValueOnce(cleanup.promise)
+  const pending = deferred<Album[]>()
+  vi.mocked(engine.albums).mockReturnValueOnce(pending.promise)
+  const refreshing = showBlocksChanged()
+  await flushPromises()
+  await editor().get('[data-action="cancel-album"]').trigger('click')
+  await flushPromises()
+  pending.resolve([album])
+  await refreshing
+  await flushPromises()
+  expect(document.querySelector('#album-editor')).toBeNull()
+  cleanup.resolve(undefined)
+  expect(engine.saveAlbum).not.toHaveBeenCalled()
+  expect(engine.createAlbum).not.toHaveBeenCalled()
 })

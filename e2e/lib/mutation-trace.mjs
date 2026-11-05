@@ -36,10 +36,11 @@ const types = {
 }
 
 // Extra read methods opt into response-byte and latency measurements. Their
-// arguments contain only the explicitly observed read contracts, never PINs.
-export async function mutationTrace(page, baselineDir, readMethods = new Map()) {
+// arguments contain only the explicitly observed contracts, never PINs.
+// Optional write methods record their parameters and retain write accounting.
+export async function mutationTrace(page, baselineDir, readMethods = new Map(), writeMethods = new Map()) {
   let calls = []
-  const observed = new Map([...methods, ...readMethods])
+  const observed = new Map([...methods, ...readMethods, ...writeMethods])
   const extraReads = new Set(readMethods.values())
   const responseReads = new Set()
   const pending = new Map()
@@ -70,11 +71,11 @@ export async function mutationTrace(page, baselineDir, readMethods = new Map()) 
     const name = body?.object === 0 && body.method === 0 ? observed.get(body.args?.methodID) : undefined
     if (name) {
       const args = body.args.args
-      const ids = extraReads.has(name) ? [] : ['SetFavourite', 'Asset', 'Inspect'].includes(name) ? [args[0]] : name === 'ValidateSelection' ? (args[0].ids ?? []) : args[0]
+      const ids = extraReads.has(name) ? [] : writeMethods.has(body.args.methodID) ? (name === 'SaveAlbum' ? [args[0].id] : []) : ['SetFavourite', 'Asset', 'Inspect'].includes(name) ? [args[0]] : name === 'ValidateSelection' ? (args[0].ids ?? []) : args[0]
       const record = {
         name,
         write: !extraReads.has(name) && !['Asset', 'Inspect', 'Hits', 'ValidateSelection'].includes(name),
-        parameters: extraReads.has(name) ? args : undefined,
+        parameters: extraReads.has(name) || writeMethods.has(body.args.methodID) ? args : undefined,
         ids,
         action: args[1],
         album: name === 'ApplyBatch' ? args[2] : undefined,

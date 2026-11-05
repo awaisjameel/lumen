@@ -3,18 +3,20 @@ import { createPinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { reactive } from 'vue'
-import { engine, Filter } from '../bridge'
+import { AlbumKind, engine, Filter } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Event, NamedPlace } from '../bridge'
 import { showBlocksChanged } from '../shared/block'
 import { deferred, mountInApp, recordNotifications } from '../shared/testing'
 import CollectionHead from './CollectionHead.vue'
+import { emptyRule, useAlbums } from '../albums/store'
 import { useLibrary } from './store'
 
 vi.mock('../bridge', async (original) => ({
   ...(await original<typeof Bridge>()),
   engine: {
     setEventName: vi.fn(),
+    saveAlbum: vi.fn(),
     setEventPinned: vi.fn(),
     things: vi.fn(),
     albums: vi.fn(),
@@ -28,7 +30,7 @@ beforeEach(() => {
   vi.mocked(engine.topPlaces).mockReset().mockResolvedValue([])
 })
 afterEach(() => vi.useRealTimers())
-async function mountHead(nameOverride = '') {
+async function mountHead(nameOverride = '', kind: 'event' | 'album' = 'event') {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -39,7 +41,7 @@ async function mountHead(nameOverride = '') {
   })
   await router.push('/albums')
   const props = reactive({
-    kind: 'event' as const,
+    kind,
     id: 1,
     name: nameOverride || 'Weekend',
     count: 248,
@@ -317,4 +319,70 @@ it('retires pending metadata and queued reads when its header unmounts', async (
   expect(engine.topPlaces).toHaveBeenCalledOnce()
   await showBlocksChanged()
   expect(engine.topPlaces).toHaveBeenCalledOnce()
+})
+
+it('uses the original album version for rename and the committed version for its name-only Undo', async () => {
+  const version = { identity: 'album-1', revision: 'original' }
+  const committed = { ...version, revision: 'renamed' }
+  const original = {
+    id: 1,
+    name: 'Weekend',
+    kind: AlbumKind.AlbumSmart,
+    rule: { ...emptyRule(), favourites: true },
+    version,
+    count: 1,
+    cover: 0,
+    coverThumb: 0,
+  }
+  vi.mocked(engine.albums).mockResolvedValue([original])
+  vi.mocked(engine.saveAlbum).mockReset().mockResolvedValue(committed)
+  const notices = recordNotifications()
+  const { wrapper, props } = await mountHead('', 'album')
+  await useAlbums().load()
+  await flushPromises()
+  await wrapper
+    .findAll('button')
+    .find((b) => b.text() === 'Rename…')
+    ?.trigger('click')
+  await wrapper.get('input').setValue('Renamed')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.saveAlbum).toHaveBeenCalledExactlyOnceWith({ id: 1, version, name: 'Renamed', rule: null })
+  props.id = 2
+  notices.find('collection.name')?.actions?.[0]?.run()
+  await flushPromises()
+  expect(engine.saveAlbum).toHaveBeenLastCalledWith({ id: 1, version: committed, name: 'Weekend', rule: null })
+  wrapper.unmount()
+  notices.stop()
+})
+
+it('does not adopt a replacement album version while an inline rename is open', async () => {
+  const version = { identity: 'album-1', revision: 'original' }
+  const original = {
+    id: 1,
+    name: 'Weekend',
+    kind: AlbumKind.AlbumManual,
+    rule: emptyRule(),
+    version,
+    count: 1,
+    cover: 0,
+    coverThumb: 0,
+  }
+  vi.mocked(engine.albums).mockResolvedValue([original])
+  vi.mocked(engine.saveAlbum).mockReset().mockRejectedValue(new Error('Target is no longer available'))
+  const { wrapper } = await mountHead('', 'album')
+  await useAlbums().load()
+  await flushPromises()
+  await wrapper
+    .findAll('button')
+    .find((b) => b.text() === 'Rename…')
+    ?.trigger('click')
+  vi.mocked(engine.albums).mockResolvedValue([{ ...original, version: { ...version, identity: 'replacement' } }])
+  await useAlbums().load()
+  await wrapper.get('input').setValue('Old draft')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.saveAlbum).toHaveBeenCalledExactlyOnceWith({ id: 1, version, name: 'Old draft', rule: null })
+  expect(wrapper.text()).toContain('Target is no longer available')
+  wrapper.unmount()
 })
