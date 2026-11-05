@@ -14,12 +14,20 @@ mkdirSync(photos, { recursive: true })
 let app
 const requests = []
 const diagnostics = []
+const consoleReads = []
 const failedRequests = []
 const pendingRequests = new Map()
 let phase = 'initial fixture'
 function watch(page) {
   s.watch(page)
-  page.on('pageerror', error => diagnostics.push({ phase, stack: error.stack ?? String(error), pending: [...pendingRequests.values()] }))
+  page.on('pageerror', error => diagnostics.push({ type: 'pageerror', phase, stack: error.stack ?? String(error), pending: [...pendingRequests.values()] }))
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    const current = { type: 'console', phase, location: message.location(), trace: message.stackTrace(), pending: [...pendingRequests.values()] }
+    consoleReads.push(Promise.all(message.args().map(value => value.evaluate(value =>
+      value && typeof value.stack === 'string' ? value.stack : String(value)).catch(() => message.text()))).then(parts =>
+      diagnostics.push({ ...current, stack: parts.join(' ') || message.text() })))
+  })
   page.on('requestfailed', request => {
     failedRequests.push({ phase, method: pendingRequests.get(request), error: request.failure()?.errorText })
     pendingRequests.delete(request)
@@ -243,6 +251,7 @@ try {
 } finally {
   phase = 'final shutdown'
   if (app) await close(app)
+  await Promise.all(consoleReads)
   s.check('no request left the PC', requests.length === 0, requests)
   s.check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors())
   s.finish({ diagnostics, failedRequests })
