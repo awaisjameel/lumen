@@ -226,6 +226,7 @@ try {
   }))
   evidence.push({ phase, retired })
   s.check('leaving the collection retires its item commands', retired.path === '/' && retired.query === 'Command after' && retired.options.length === 0, retired)
+  s.check('an empty palette cannot run an earlier highlight', await page.$$eval('[role="dialog"][data-state="open"] button', buttons => buttons.find(button => button.textContent.includes('Run'))?.disabled === true))
   await capture('retired-item-commands')
   await page.keyboard.press('Escape')
 

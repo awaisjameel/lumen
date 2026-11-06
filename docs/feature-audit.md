@@ -997,6 +997,12 @@ before integration. The unchanged hosted latency report exceeds folder
 `SetEventName` (9.515/5 ms) and unblocked `SaveEmbeddings64` (217.914/70 ms);
 the calibrated-machine milestone gate remains open.
 
+A real local palette check confirms item-owner disposal and exposes a footer
+highlight that survives an empty search. A failing-before mounted regression
+guards the repair: Run requires a command matching the current query. The native
+command fixture also asserts this with its open-palette disposal check. Current
+Windows/native/package acceptance remains the linked PR evidence.
+
 ### Current disposition of accepted work
 
 The baseline matrix below remains the initial review. This table applies the

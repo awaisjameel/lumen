@@ -95,6 +95,23 @@ it('recovers from an empty match without closing the palette', async () => {
   expect(row('Go to People')).toBeDefined()
 })
 
+it('cannot run a previously highlighted command after the search excludes it', async () => {
+  const run = vi.fn()
+  await start([{ id: 'go.people', title: () => 'Go to People', run }])
+  const input = await search('People')
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+  await flushPromises()
+  const button = [...document.querySelectorAll('button')].find((element) => element.textContent.includes('Run'))
+  if (!button) throw new Error('Missing palette Run button')
+  expect(button.disabled).toBe(false)
+  await search('zzzz')
+  expect(document.querySelectorAll('[role="option"]')).toHaveLength(0)
+  expect(button.disabled).toBe(true)
+  button.click()
+  await flushPromises()
+  expect(run).not.toHaveBeenCalled()
+})
+
 it('runs a command after dismissal and offers it as a current-session recent on reopening', async () => {
   const run = vi.fn()
   await start([{ id: 'go.people', title: () => 'Go to People', run }])

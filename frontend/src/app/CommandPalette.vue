@@ -28,7 +28,9 @@ const query = ref('')
 const inputId = useId()
 const activeId = ref<CommandId>()
 const activeCommand = computed(() =>
-  availableCommands.value.find((command) => activeId.value && command.key === commandKey(activeId.value)),
+  availableCommands.value.find(
+    (command) => activeId.value && command.key === commandKey(activeId.value) && parts(command.title()) !== undefined,
+  ),
 )
 const helpCommand = computed(() => availableCommands.value.find((command) => command.id === 'app.shortcuts'))
 const helpCaps = computed(() => {

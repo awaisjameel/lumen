@@ -186,3 +186,12 @@ arities were checked against generated bindings. The planned aborted request
 must produce exactly one existing reporter diagnostic. Only that exact message,
 phase and source, its one transport resource failure, and the optional Wails
 custom script's 404 are expected; all other console/page errors still fail.
+
+The follow-up local browser check confirms that a disposed item owner disappears
+from the real palette. It also exposes a retained footer highlight: an empty
+search can leave Run enabled for a command excluded by the query. A mounted
+regression fails before the repair; the footer now requires the current command
+to match the current query. Native acceptance asserts this alongside the exact
+open palette's query, empty state and item disposal, with a screenshot and result
+diagnostics. Closing portals are excluded from these observations. Current
+Windows acceptance remains the linked PR record.
