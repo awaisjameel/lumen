@@ -57,6 +57,7 @@ if [ "$bench" -eq 1 ]; then
 fi
 step "frontend: vue-tsc, eslint, prettier" npm --prefix frontend run -s check
 step "frontend: regression tests" npm --prefix frontend run -s test
+step "native harness: error attribution regressions" node --test e2e/lib/errors.test.mjs
 step "python: ruff" bash -c "'$T/ruff' check --quiet && '$T/ruff' format --check --quiet"
 step "installer: payload cleanup regressions" python scripts/installer_payload_test.py
 step "dependencies: warm extraction regressions" python scripts/dependency_cache_test.py

@@ -378,6 +378,7 @@ await guard('duplicates', async () => {
   )
 })
 
+await s.settleErrors()
 check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors().join(' || '))
 check('no external requests', external.length === 0, external.join(' '))
 await close(app)

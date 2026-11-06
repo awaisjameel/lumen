@@ -161,6 +161,7 @@ try {
     completedJobs,
   )
   writeFileSync(join(s.out, 'completed-jobs.json'), JSON.stringify(completedJobs, null, 2))
+  await s.settleErrors()
   s.check('no uncaught frontend errors in either build', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
   s.check('the upgrade workflow completed', false, String(error))

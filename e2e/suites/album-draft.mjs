@@ -46,7 +46,12 @@ function fault(value) {
   else saveFault = value === 'refuse-save'
 }
 function watch(page) {
-  s.watch(page)
+  s.watch(page, { context: () => phase, expected: row => (['failed privacy read and read-only retry', 'committed header rename with failed refresh'].includes(row.context) &&
+      row.message === 'no such column: identity' && (row.kind === 'console' || (row.kind === 'response' && row.method === 'Albums'))) ||
+    (row.kind === 'response' && row.method === 'SaveAlbum' && (
+      (row.context === 'failed save and retry' && row.message === 'album draft write refused') ||
+      (row.context === 'save-window conflict' && row.code === 'album_changed') ||
+      (row.context === 'deleted target and reused ID' && row.code === 'not_found'))) })
   page.on('pageerror', error => pageErrors.push({ phase, error: String(error) }))
   page.on('console', message => {
     if (message.type() !== 'error') return
@@ -216,6 +221,35 @@ try {
   s.check('Escape cancels without writing and returns focus to an available trigger', !trace.calls.some(row => row.write) &&
     await app.page.evaluate(() => document.activeElement?.getAttribute('data-action') === 'new-album'))
 
+  phase = 'committed header rename with failed refresh'
+  await dismissNotices(app.page)
+  await app.page.locator(`a[href="/albums/${a}"]`).click()
+  await app.page.waitForSelector('.collection-hero', { visible: true })
+  await button(app.page, 'Rename…', '.collection-hero')
+  await app.page.locator('input[aria-label="Collection name"]').fill('Committed header name')
+  await trace.idle()
+  trace.holdNext(row => row.name === 'Albums')
+  await app.page.focus('input[aria-label="Collection name"]')
+  await app.page.keyboard.press('Enter')
+  await until(() => trace.held, 'the saved header did not refresh Albums')
+  await app.page.waitForSelector('[data-notification="collection.name"]', { visible: true })
+  fault('refuse-read')
+  await trace.release()
+  await trace.idle()
+  await app.page.waitForSelector('[data-notification="error"]', { visible: true })
+  s.check('a committed header rename retains its Undo through refresh failure',
+    !(await app.page.$('input[aria-label="Collection name"]')) &&
+    !!(await app.page.$('[data-notification="collection.name"] button')))
+  await app.page.screenshot({ path: join(s.out, 'committed-header-refresh-failure.png') })
+  fault('restore-read')
+  s.check('the failed refresh did not roll back the committed name', (await saved()).name === 'Committed header name')
+  await button(app.page, 'Undo', '[data-notification="collection.name"]')
+  await until(async () => (await saved()).name === initialName, 'header Undo did not restore its original version')
+  await trace.idle()
+  await dismissNotices(app.page)
+  await app.page.locator('aside a[href="/albums"]').click()
+  await app.page.waitForSelector('[data-action="new-album"]', { visible: true })
+
   phase = 'failed save and retry'
   await edit()
   await fill('Retried native save')
@@ -335,9 +369,8 @@ try {
   s.check('candidate instrumentation has no errors', trace.errors.length === 0, trace.errors)
   s.check('no external requests', external.length === 0, external)
   await Promise.all(consoleReads)
-  const unexpected = diagnostics.filter(row => !/custom\.js|Failed to load resource/.test(row.error) &&
-    !(row.phase === 'failed privacy read and read-only retry' && /^no such column: identity$/.test(row.error)))
-  s.check('only the deliberately refused album read is logged, with no uncaught errors', pageErrors.length === 0 && unexpected.length === 0, { pageErrors, unexpected })
+  await s.settleErrors()
+  s.check('only the identified injected failures are logged, with no uncaught errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
   failure = { phase, action, stack: error.stack ?? String(error) }
   s.check(`album draft completed (${phase})`, false, String(error))

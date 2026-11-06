@@ -27,7 +27,7 @@ const reads = new Map([
   [bindingID('mediaservice', 'Inspect'), 'Inspect'],
 ])
 function watch(page) {
-  s.watch(page)
+  s.watch(page, { context: () => phase, expected: row => row.kind === 'response' && row.context === 'deleted album identity and failed-item recovery' && row.method === 'Inspect' && row.code === 'not_found' })
   page.on('pageerror', (error) => console.log(`PAGE ERROR ${error.stack ?? error}`))
   page.on('console', (message) => {
     if (message.type() === 'error') {
@@ -301,6 +301,7 @@ try {
     (await lib(app.page, 'Counts')).photos === 3, persisted)
   s.check('no external requests', external.length === 0, external)
   s.check('bridge instrumentation completed without errors', trace.errors.length === 0, trace.errors)
+  await s.settleErrors()
   s.check('no unexpected frontend errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
   failure = { phase, stack: error.stack ?? String(error) }

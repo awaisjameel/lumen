@@ -194,6 +194,7 @@ try {
   // Resizing the window under an open menu makes WebView2 report "ResizeObserver
   // loop completed with undelivered notifications": a layout notice, counted
   // in the report, not an exception of the app.
+  await s.settleErrors()
   const notices = s.appErrors().filter((e) => e.includes('ResizeObserver loop'))
   const failures = s.appErrors().filter((e) => !e.includes('ResizeObserver loop'))
   if (notices.length) console.log(`NOTE  ${notices.length} ResizeObserver loop notices while resizing`)

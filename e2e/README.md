@@ -184,6 +184,18 @@ node perf/compare.mjs <exeA> <dataA> <exeB> <dataB>      # two builds, launches 
 
 This folder's `docs/` holds a separate, opt-in capture of the README's face-review screenshot, on a library of pinned public photos; it is not a suite of `run.mjs`. Its steps, the photos' provenance and the review it needs are in [the screenshots guide](../docs/screenshots/README.md#reproducing-the-face-review).
 
+## Error attribution
+
+The shared recorder uses current generated binding identities and retains
+structured runtime refusals. Call `await s.settleErrors()` before inspecting
+`s.appErrors()` so console arguments and response bodies have settled. An
+injection suite supplies its exact method, scenario and error code/message to
+`s.watch`; an allowed response accounts for only one matching browser resource
+message. Uncaught page errors and unrelated resource failures remain failures.
+Only the optional local `/wails/custom.js` 404 is ignored globally, alongside
+coded cancellation of the named cancellable reads. `scripts/lint.sh` exercises
+the recorder's negative cases with `node --test e2e/lib/errors.test.mjs`.
+
 ## Writing a suite
 
 A suite is one file in `suites/`, registered with its own port in `lib/suite.mjs`:

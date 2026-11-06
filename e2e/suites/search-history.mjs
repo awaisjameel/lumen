@@ -75,6 +75,7 @@ try {
   s.must('reopened controls show the persisted query', (await history(app.page)).includes('new search'))
   await app.page.screenshot({ path: join(s.out, 'restarted-history.png') })
   s.check('no external network requests', requests.length === 0, requests)
+  await s.settleErrors()
   s.check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
   s.check('the history workflow ran to the end', false, String(error))

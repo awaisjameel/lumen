@@ -30,7 +30,7 @@ function fixture(action, argument = '') {
   return out.trim() ? JSON.parse(out) : undefined
 }
 function watch(page) {
-  s.watch(page)
+  s.watch(page, { context: () => phase, expected: row => row.kind === 'response' && row.context === 'blocked and missing references with retry' && row.method === 'PreviewAlbum' && ['album_reference', 'not_found'].includes(row.code) })
   page.on('request', (request) => {
     const url = new URL(request.url())
     if (/^https?:$/.test(url.protocol) && !['wails.localhost', 'localhost', '127.0.0.1'].includes(url.hostname)) external.push(url.href)
@@ -297,6 +297,7 @@ try {
   await page.screenshot({ path: join(s.out, 'native-rule-preview.png') })
   s.check('bridge observation completed without errors', trace.errors.length === 0, trace.errors)
   s.check('no external requests', external.length === 0, external)
+  await s.settleErrors()
   s.check('no unexpected frontend errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
   failure = { phase, stack: error.stack ?? String(error) }

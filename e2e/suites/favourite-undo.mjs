@@ -272,6 +272,7 @@ try {
     (await lib(app.page, 'Counts')).favourites === 1 && !!(await search(app.page, 'Hits', [edited]))[0]?.f,
   )
   s.check('no external requests', external.length === 0, external)
+  await s.settleErrors()
   s.check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
   failure = { phase, stack: error.stack ?? String(error) }

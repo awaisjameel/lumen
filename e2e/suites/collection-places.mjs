@@ -47,7 +47,8 @@ function fault(action) {
   faultActive = action === 'refuse'
 }
 function watch(page) {
-  s.watch(page)
+  s.watch(page, { context: () => phase, expected: row => row.context === 'privacy clearing and failed-read recovery' && /^no such column: (?:p\.)?name$/.test(row.message ?? '') &&
+    (row.kind === 'console' || (row.kind === 'response' && ['TopPlaces', 'Days', 'Timeline', 'Asset', 'Places'].includes(row.method))) })
   page.on('pageerror', (error) => pageErrors.push({ phase, error: String(error) }))
   page.on('console', (message) => {
     if (message.type() !== 'error') return
@@ -309,9 +310,8 @@ try {
   // The scratch column fault also refuses the grid's unqualified place-name
   // read. Only these exact injected failures are expected; uncaught promise
   // failures and every other error still fail acceptance.
-  const unexpected = diagnostics.filter((row) => !/custom\.js|Failed to load resource/.test(row.error) &&
-    !(row.phase === 'privacy clearing and failed-read recovery' && /^no such column: (?:p\.)?name$/.test(row.error)))
-  s.check('only the deliberately refused place-name reads are logged', pageErrors.length === 0 && unexpected.length === 0, { pageErrors, unexpected })
+  await s.settleErrors()
+  s.check('only the identified injected failures are logged, with no uncaught errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
   failure = { phase, action, stack: error.stack ?? String(error) }
   s.check(`collection metadata completed (${phase})`, false, String(error))

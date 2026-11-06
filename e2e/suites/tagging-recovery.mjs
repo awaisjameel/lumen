@@ -25,7 +25,7 @@ function fixture(action, id = asset) {
   return action === 'state' ? JSON.parse(output) : undefined
 }
 function watch(page) {
-  s.watch(page)
+  s.watch(page, { context: () => phase, expected: row => row.kind === 'response' && row.context === 'pre-commit failure' && row.method === 'TagAsset' && row.message === 'tag write unavailable' })
   page.on('request', (request) => {
     const url = new URL(request.url())
     if (/^https?:$/.test(url.protocol) && !['wails.localhost', 'localhost', '127.0.0.1'].includes(url.hostname)) external.push(request.url())
@@ -160,6 +160,7 @@ try {
     return state.tags.some(([name, source]) => name === 'Screenshots' && source === 'user') && state.text.toLowerCase().includes('invoice')
   }))
   s.check('no external requests', external.length === 0, external)
+  await s.settleErrors()
   s.check('no unexpected frontend errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
   failure = { phase, stack: error.stack ?? String(error) }

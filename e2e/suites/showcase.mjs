@@ -73,6 +73,7 @@ try {
     !before.dark && (await page.evaluate(() => document.documentElement.classList.contains('dark'))),
   )
   await page.screenshot({ path: join(s.out, 'showcase-dark.png') })
+  await s.settleErrors()
   check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors().join(' || '))
 } catch (e) {
   check('the showcase ran to the end', false, String(e))

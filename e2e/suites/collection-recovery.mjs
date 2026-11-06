@@ -19,7 +19,7 @@ const failedRequests = []
 const pendingRequests = new Map()
 let phase = 'initial fixture'
 function watch(page) {
-  s.watch(page)
+  s.watch(page, { context: () => phase, expected: row => row.kind === 'response' && row.context === 'last collection blocked recovery' && row.method === 'Blocks' && row.code === 'blocks_locked' })
   page.on('pageerror', error => diagnostics.push({ type: 'pageerror', phase, stack: error.stack ?? String(error), pending: [...pendingRequests.values()] }))
   page.on('console', message => {
     if (message.type() !== 'error') return
@@ -259,6 +259,7 @@ try {
   if (app) await close(app)
   await Promise.all(consoleReads)
   s.check('no request left the PC', requests.length === 0, requests)
+  await s.settleErrors()
   s.check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors())
   s.finish({ diagnostics, failedRequests })
 }

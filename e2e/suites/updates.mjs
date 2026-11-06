@@ -74,6 +74,7 @@ try {
   await sleep(1300)
   s.check('opening Updates never enables discovery', !(await updates(page, 'Status')).policy.automatic)
   s.check('no off-device UI request', external.length === 0, external)
+  await s.settleErrors()
   s.check('no uncaught UI errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
   s.check('suite completed', false, String(error))
