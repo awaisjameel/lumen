@@ -12,7 +12,7 @@ import { icons } from '../design/icons'
 import { block, onBlocksChanged } from '../shared/block'
 import Chip from '../shared/Chip.vue'
 import CollectionHero from '../shared/CollectionHero.vue'
-import { useCommands } from '../shared/commands'
+import { menuItems, useCommands } from '../shared/commands'
 import { errorText, logError } from '../shared/errors'
 import Icon from '../shared/Icon.vue'
 import IconButton from '../shared/IconButton.vue'
@@ -136,18 +136,21 @@ async function blockPerson(hide = false) {
     await router.push(destination({ name: 'people' }))
   }
 }
-const actions = computed(() => [
-  { label: t('person.rename'), icon: icons.pencil, onSelect: edit },
-  {
-    label: t('person.changePicture'),
-    icon: icons.face,
-    to: destination({ name: 'personFaces', params: { id: props.id }, query: { picture: '1' } }),
-  },
-  { label: t('person.review'), icon: icons.face, to: destination({ name: 'personFaces', params: { id: props.id } }) },
-  { label: t('person.mergeWith'), icon: icons.merge, onSelect: edit },
-  { label: t('people.hide'), icon: icons['eye-off'], onSelect: () => blockPerson(true) },
-  { label: t('people.block'), icon: icons.blocked, color: 'error' as const, onSelect: () => blockPerson() },
-])
+const actions = computed(() => {
+  const rename = menuItems([{ id: 'person.rename' }])
+  return [
+    ...rename,
+    {
+      label: t('person.changePicture'),
+      icon: icons.face,
+      to: destination({ name: 'personFaces', params: { id: props.id }, query: { picture: '1' } }),
+    },
+    { label: t('person.review'), icon: icons.face, to: destination({ name: 'personFaces', params: { id: props.id } }) },
+    ...rename.map((item) => ({ ...item, label: t('person.mergeWith'), icon: icons.merge })),
+    { label: t('people.hide'), icon: icons['eye-off'], onSelect: () => blockPerson(true) },
+    ...menuItems([{ id: 'person.block' }]).map((item) => ({ ...item, color: 'error' as const })),
+  ]
+})
 useCommands([
   {
     id: 'person.rename',
