@@ -11,9 +11,10 @@ import { E2E, suite } from '../lib/suite.mjs'
 
 const s = suite('commands')
 const dataDir = join(s.run, 'data'), photos = join(s.run, 'photos')
-const errors = [], external = [], evidence = []
+const errors = [], external = [], evidence = [], consoleDiagnostics = []
 let app, page, trace, photo, album, failure
 let phase = 'fixture'
+let injectedTransportFailure = false
 function step(name) { phase = name; console.log(`commands: ${phase}`) }
 async function control(key) {
   await page.keyboard.down('Control')
@@ -21,6 +22,12 @@ async function control(key) {
 }
 function watch() {
   s.watch(page)
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    let path = ''
+    try { path = new URL(message.location().url || page.url()).pathname } catch { /* Keep unknown locations unexpected. */ }
+    consoleDiagnostics.push({ phase, path, text: message.text() })
+  })
   page.on('pageerror', error => errors.push({ phase, error: String(error) }))
   page.on('request', request => {
     const url = new URL(request.url())
@@ -178,6 +185,7 @@ try {
   trace.holdNext(row => row.name === 'SetAdjustment')
   await page.locator('.viewer [data-command="viewer.rotate"]').click()
   await until(() => trace.held, 'the retry fixture request was not held')
+  injectedTransportFailure = true
   await trace.abortHeld()
   await until(() => page.$$eval('[data-notification][data-state="open"]', rows => rows.length === 1), 'the refused action did not report one failure')
   await until(() => page.$eval('.viewer [data-command="viewer.rotate"]', node => !node.disabled), 'failure did not restore the button')
@@ -199,7 +207,7 @@ try {
   await until(() => page.evaluate(() => document.activeElement?.closest('#album-editor') !== null), 'the item editor did not receive focus')
   await name.asLocator().fill('Command after')
   await button(page, 'Save changes')
-  await until(async () => (await lib(page, 'Album', album)).name === 'Command after', 'item edit did not commit')
+  await until(async () => (await lib(page, 'Albums') ?? []).find(item => item.id === album)?.name === 'Command after', 'item edit did not commit')
   await palette('Edit Command after', false)
   s.check('the refreshed item command has the current context label', await page.$$eval('[role="option"]', rows => rows.some(row => row.textContent.includes('Command after')) && rows.every(row => !row.textContent.includes('Command before'))))
   await page.keyboard.press('Escape')
@@ -241,6 +249,17 @@ try {
   if (app) await close(app)
 }
 s.check('no uncaught page errors escape the command owners', errors.length === 0, errors)
-s.check('no unexpected console errors escape the feature owners', s.appErrors().length === 0, s.appErrors())
+const plannedFetchLog = row => injectedTransportFailure && row.phase === 'real transport failure and retry' &&
+  row.path.startsWith('/assets/') && row.text === 'TypeError: Failed to fetch'
+const plannedAbortResource = row => injectedTransportFailure && row.phase === 'real transport failure and retry' &&
+  row.path === '/wails/runtime' && row.text === 'Failed to load resource: net::ERR_FAILED'
+const optionalCustomScript = row => row.path === '/wails/custom.js' &&
+  row.text === 'Failed to load resource: the server responded with a status of 404 (Not Found)'
+if (injectedTransportFailure) {
+  s.check('the deliberately aborted action is logged exactly once', consoleDiagnostics.filter(plannedFetchLog).length === 1)
+  s.check('only the deliberately aborted request reports a transport resource failure', consoleDiagnostics.filter(plannedAbortResource).length <= 1)
+}
+const unexpectedConsole = consoleDiagnostics.filter(row => !plannedFetchLog(row) && !plannedAbortResource(row) && !optionalCustomScript(row))
+s.check('no unexpected console errors escape the feature owners', unexpectedConsole.length === 0, unexpectedConsole)
 s.check('no request leaves the PC', external.length === 0, external)
-s.finish({ failure, evidence, pageErrors: errors, external })
+s.finish({ failure, evidence, pageErrors: errors, consoleDiagnostics, external })

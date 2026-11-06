@@ -175,3 +175,14 @@ one reason. This preserves keyboard ownership for a reassigned Ctrl+R while
 pending and disables peer adjustments without adding a global queue. The test
 fails before the repair; all 67 viewer/policy checks, type checking and focused
 lint pass afterwards. Current native/package acceptance is the linked PR record.
+
+The early command report from [run 75](https://github.com/awaisjameel/lumen/actions/runs/42231644706)
+confirms thirteen native checks, including palette pointer activation, shortcut
+reassignment/conflicts/help, held zoom, independent pending admission, failure/
+retry, Escape hierarchy and focus restoration. It stops at the fixture's call
+to a nonexistent singular Album method, after the real edit has saved. The
+fixture now reads the existing Albums contract; its literal method names and
+arities were checked against generated bindings. The planned aborted request
+must produce exactly one existing reporter diagnostic. Only that exact message,
+phase and source, its one transport resource failure, and the optional Wails
+custom script's 404 are expected; all other console/page errors still fail.
