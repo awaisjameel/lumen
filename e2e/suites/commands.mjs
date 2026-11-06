@@ -31,6 +31,7 @@ async function start() {
   app = await launch({ exe: s.exe, dataDir, port: s.port })
   page = app.page
   watch()
+  await page.bringToFront()
   await unthrottle(page)
   await resize(page, 1440, 1000)
 }
@@ -46,7 +47,22 @@ async function palette(query, choose = true) {
       (!choose && document.querySelector('.palette .empty'))
   }, {}, query, choose)
   if (choose) {
+    // Let startup reads and the portalled opening transition finish before
+    // taking pointer coordinates, as the existing native fixtures do.
+    await page.waitForNetworkIdle()
+    await page.evaluate(() => {
+      window.__lumenCommandClick = null
+      document.addEventListener('click', event => {
+        const target = event.target instanceof Element ? event.target : null
+        window.__lumenCommandClick = {
+          tag: target?.tagName, role: target?.getAttribute('role'),
+          option: !!target?.closest('[role="option"]'),
+          trusted: event.isTrusted, x: event.clientX, y: event.clientY,
+        }
+      }, { once: true, capture: true })
+    })
     await page.locator('[role="option"]').click()
+    evidence.push({ phase, paletteClick: await page.evaluate(() => window.__lumenCommandClick) })
     await until(() => page.$$eval('[role="dialog"][data-state="open"]', rows => rows.length === 0), 'palette did not close')
   }
 }

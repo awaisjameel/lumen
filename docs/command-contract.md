@@ -159,3 +159,19 @@ their meaning. Both controls, Person-header aliases and runner policies pass
 29 focused checks after the fix; the current Windows run verifies the final
 control implementation with the full suite. Shortcut help acceptance checks the
 reassigned action's own key caps, rather than unrelated text elsewhere in help.
+
+Run [73](https://github.com/awaisjameel/lumen/actions/runs/42226724358) at `532f6e2`
+passes all 1,170 frontend tests, static/build/contracts and all Go race shards.
+Collection recovery now passes 51/51. Native verification remains failed: the
+new pointer fixture leaves the palette open, and an Undo fixture selects the
+wrong photo while privacy recovery moves virtual rows. Pointer fixtures now
+activate the WebView and settle reads before taking coordinates; the new suite
+retains click-target diagnostics. No assertion or product error is suppressed.
+
+A separate mounted regression confirms that viewer adjustment bindings used
+busy state as availability. The shared feature guard now keeps rotate, flip and
+reset available in the photo context while disabling them during the save, with
+one reason. This preserves keyboard ownership for a reassigned Ctrl+R while
+pending and disables peer adjustments without adding a global queue. The test
+fails before the repair; all 67 viewer/policy checks, type checking and focused
+lint pass afterwards. Current native/package acceptance is the linked PR record.

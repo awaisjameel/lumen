@@ -410,6 +410,13 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
+// Saving disables the adjustment family without surrendering its keyboard
+// events to browser accelerators such as a reassigned Ctrl+R.
+const adjustmentAvailability = {
+  available: () => !!image.value && ordinary.value,
+  enabled: () => !adjusting.value,
+  reason: () => (adjusting.value ? t('commands.running') : undefined),
+}
 useCommands([
   {
     id: 'viewer.openFile',
@@ -467,18 +474,18 @@ useCommands([
   },
   {
     id: 'viewer.rotate',
-    available: () => !!image.value && ordinary.value && !adjusting.value,
+    ...adjustmentAvailability,
     run: () => adjust((detail.value?.adjustment?.rotation ?? 0) + 1, detail.value?.adjustment?.flip ?? false),
   },
   {
     id: 'viewer.flip',
-    available: () => !!image.value && ordinary.value && !adjusting.value,
+    ...adjustmentAvailability,
     run: () => adjust(detail.value?.adjustment?.rotation ?? 0, !detail.value?.adjustment?.flip),
   },
   {
     id: 'viewer.resetAdjustment',
-    enabled: () => adjusted.value,
-    available: () => !!image.value && ordinary.value && !adjusting.value,
+    ...adjustmentAvailability,
+    enabled: () => adjusted.value && adjustmentAvailability.enabled(),
     run: () => adjust(0, false),
   },
   {
