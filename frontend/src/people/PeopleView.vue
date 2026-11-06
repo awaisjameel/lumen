@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { itemCommand, useCommands, useItemCommands } from '../shared/commands'
 import { destination } from '../shared/navigation/contract'
 import UButton from '../shared/navigation/NavButton.vue'
 import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
@@ -11,7 +13,6 @@ import { icons } from '../design/icons'
 import { block } from '../shared/block'
 import CardGrid from '../shared/CardGrid.vue'
 import CollectionCard from '../shared/CollectionCard.vue'
-import { useCommands, useItemCommands } from '../shared/commands'
 import { logError } from '../shared/errors'
 import FeatureState from '../shared/FeatureState.vue'
 import Icon from '../shared/Icon.vue'
@@ -66,34 +67,25 @@ const personItems = useItemCommands(
   (p) => p.id,
   (p) => [
     {
-      id: `person.${p.id}.rename`,
-      group: 'view',
+      id: itemCommand('person.rename', p.id),
       title: () => (p.name ? t('person.rename') : t('person.addName')),
-      icon: 'pencil',
       enabled: () => !saving.value,
       run: () => rename.open(p.id, p.name),
     },
     {
-      id: `person.${p.id}.review`,
-      group: 'view',
+      id: itemCommand('person.review', p.id),
       title: () => t('person.review'),
-      icon: 'face',
       run: () => router.push(destination({ name: 'personFaces', params: { id: p.id } })),
     },
     {
-      id: `person.${p.id}.hide`,
-      group: 'view',
+      id: itemCommand('person.hide', p.id),
       title: () => t('people.hide'),
-      icon: 'eye-off',
       enabled: () => !saving.value,
       run: () => blockPerson(p, true),
     },
     {
-      id: `person.${p.id}.block`,
-      group: 'view',
+      id: itemCommand('person.block', p.id),
       title: () => t('people.block'),
-      icon: 'blocked',
-      danger: true,
       enabled: () => !saving.value,
       run: () => blockPerson(p),
     },
@@ -102,9 +94,6 @@ const personItems = useItemCommands(
 useCommands([
   {
     id: 'people.refresh',
-    group: 'view',
-    title: () => t('people.refresh'),
-    icon: 'refresh',
     enabled: () => !people.loading,
     reason: () => t('people.loading'),
     run: refresh,
@@ -132,7 +121,7 @@ useCommands([
           color="neutral"
           variant="ghost"
           :disabled="people.loading"
-          @click="refresh"
+          command="people.refresh"
         />
       </PageHeader>
     </template>
@@ -163,9 +152,9 @@ useCommands([
         variant="outline"
         >{{ t('nav.settings') }}</UButton
       >
-      <UButton color="primary" variant="solid" :disabled="people.loading" @click="refresh">{{
+      <CommandButton color="primary" variant="solid" :disabled="people.loading" command="people.refresh">{{
         t('common.retry')
-      }}</UButton>
+      }}</CommandButton>
     </FeatureState>
     <section v-if="!people.loaded && !people.error && !facesError" :aria-label="t('people.loading')" aria-busy="true">
       <h2 class="section-heading">{{ t('people.loading') }}</h2>
@@ -306,9 +295,9 @@ useCommands([
       <UButton :to="destination({ name: 'settings', query: { section: 'library' } })" color="primary" variant="solid">{{
         t('people.addFolder')
       }}</UButton
-      ><UButton color="neutral" variant="ghost" :disabled="people.loading" @click="refresh">{{
+      ><CommandButton color="neutral" variant="ghost" :disabled="people.loading" command="people.refresh">{{
         t('people.refresh')
-      }}</UButton>
+      }}</CommandButton>
     </FeatureState>
     <UButton
       class="mb-4"

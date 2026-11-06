@@ -1,146 +1,281 @@
-// The command registry: one description of each thing the user can do, which
-// toolbars, context menus, the command palette and keyboard shortcuts all
-// read, so an action has one label, one icon, one shortcut and one rule for
-// when it is available. A feature registers its commands while its view is
-// mounted; the shell registers navigation. The engine remains the authority:
-// a command only asks, and every service checks again.
+// One command owner serves controls, menus, palette and keyboard. Features
+// retain contextual predicates and accepted work; the registry owns admission.
 import type { NavigationMenuItem as DropdownMenuItem } from './navigation/menu'
-import { computed, onScopeDispose, shallowRef, toValue, watch } from 'vue'
+import { computed, shallowRef, toValue, watch } from 'vue'
 import type { MaybeRefOrGetter } from 'vue'
 import { icons } from '../design/icons'
 import type { IconName } from '../design/icons'
+import { errorCode, isCancelled } from '../bridge'
+import { reportError, reportUnexpected } from './errors'
+import { t } from './i18n'
 import { isTyping } from './keys'
 import { shortcutsSuspended } from './overlay'
+import { commandKey, isStaticCommandId, resolveCommand, staticCommand } from './commandContract'
+import type {
+  CommandGroup,
+  CommandId,
+  CommandMetadata,
+  CommandReference,
+  CommandZone,
+  DuplicateCommandId,
+  ItemCommandId,
+  StaticCommandId,
+} from './commandContract'
+export {
+  commandGroups,
+  commandZones,
+  commandKey,
+  itemCommand,
+  duplicateCommand,
+  commandIdFromKey,
+} from './commandContract'
+export type { CommandGroup, CommandId, CommandReference, CommandZone } from './commandContract'
 
-/** Where a command is grouped, in the order the palette and the shortcut reference show them. */
-export const commandGroups = ['media', 'view', 'library', 'navigate', 'app'] as const
-export type CommandGroup = (typeof commandGroups)[number]
-
-export interface Command {
-  /** Stable and unique, e.g. "media.favourite". */
-  id: string
-  group: CommandGroup
-  /** The label, read when shown so it follows what is selected. */
-  title: () => string
-  icon?: IconName
-  /**
-   * The shortcut, as it is shown: "F", "Ctrl+K", "Delete". Keys join with
-   * "+"; modifiers are Ctrl, Shift and Alt.
-   */
-  keys?: string
-  /** Other keys that do the same ("/" beside Ctrl+F); only keys is shown. */
-  altKeys?: readonly string[]
-  /**
-   * Which key events reach the shortcut: "global" from anywhere on the
-   * page, or the name of the zone whose owner passes its own key events to
-   * dispatchKey (the grid, the viewer).
-   */
-  zone?: string
-  /** Whether it applies at all right now (else it is not offered). */
-  available?: () => boolean
-  /** Whether it can run now; false shows it disabled (a save in flight). */
-  enabled?: () => boolean
-  /** Why it cannot run now, shown beside it while it is disabled. */
-  reason?: () => string | undefined
-  /** It removes or hides something: drawn in the danger colour. */
-  danger?: boolean
-  run: () => unknown
+interface Binding {
+  readonly title?: () => string
+  readonly icon?: IconName
+  readonly available?: () => boolean
+  readonly enabled?: () => boolean
+  readonly reason?: () => string | undefined
+  readonly danger?: boolean
+  /** Resolving may mean work was accepted; features own form-level outcomes and long jobs. */
+  readonly run: () => unknown
 }
+export type Command = Binding &
+  ({ readonly id: StaticCommandId } | { readonly id: ItemCommandId | DuplicateCommandId; readonly title: () => string })
+/** Read-only presentation deliberately exposes no raw execution callback. */
+export interface ExecutableCommand extends CommandReference {
+  readonly key: string
+  readonly group: CommandGroup
+  readonly icon?: IconName
+  readonly danger?: boolean
+  readonly keys?: string
+  readonly altKeys?: readonly string[]
+  readonly zone?: CommandZone
+  readonly title: () => string
+  readonly available: () => boolean
+  readonly enabled: () => boolean
+  readonly reason: () => string | undefined
+}
+interface Entry {
+  readonly token: symbol
+  readonly id: CommandId
+  readonly key: string
+  readonly name: string
+  readonly metadata: CommandMetadata
+  readonly binding: Command
+  readonly view: ExecutableCommand
+}
+const registered = shallowRef<ReadonlyMap<string, Entry>>(new Map())
+const pending = shallowRef<ReadonlyMap<symbol, number>>(new Map())
+const executing = new Set<symbol>()
+const overrides = shallowRef<ReadonlyMap<string, string>>(new Map())
 
-const registered = shallowRef<readonly Command[]>([])
-
-// The shortcuts the user reassigned, by command id ("" leaves a command
-// without one). The preferences store owns them and hands them over
-// whenever they change; a command not listed keeps its own keys.
-const overrides = shallowRef<Readonly<Record<string, string>>>({})
-
-/** Replaces the reassigned shortcuts (the preferences store calls this). */
+/** Stored unknown keys remain in preferences but cannot become active commands. */
 export function setShortcutOverrides(shortcuts: Readonly<Record<string, string>>): void {
-  overrides.value = { ...shortcuts }
+  overrides.value = new Map(
+    Object.entries(shortcuts).filter(
+      ([id, keys]) => isStaticCommandId(id) && !staticCommand(id).shortcut?.locked && validShortcut(keys),
+    ),
+  )
 }
-
-/** The shortcut a command answers to now: the user's, or else its own. undefined if it has none. */
-export function keysOf(c: Pick<Command, 'id' | 'keys'>): string | undefined {
-  const own = overrides.value[c.id]
-  return own === undefined ? c.keys : own || undefined
+export function keysOf(command: CommandReference): string | undefined {
+  const resolved = resolveCommand(command.id)
+  const own = overrides.value.get(resolved.key)
+  return own === undefined ? resolved.metadata.shortcut?.keys : own || undefined
 }
-
-/** A command's other keys, which go with its own shortcut: reassigning it drops them. */
-export function altKeysOf(c: Pick<Command, 'id' | 'altKeys'>): readonly string[] {
-  return overrides.value[c.id] === undefined ? (c.altKeys ?? []) : []
+export function altKeysOf(command: CommandReference): readonly string[] {
+  const resolved = resolveCommand(command.id)
+  return overrides.value.has(resolved.key) ? [] : (resolved.metadata.shortcut?.altKeys ?? [])
 }
-
-/** Every registered command, in registration order. */
-export const commands = computed(() => registered.value)
-
-/** The commands that apply now. */
-export const availableCommands = computed(() => registered.value.filter(isAvailable))
-
-function isAvailable(c: Command): boolean {
-  return c.available?.() ?? true
+export const commands = computed(() => [...registered.value.values()].map((entry) => entry.view))
+export const availableCommands = computed(() =>
+  [...registered.value.values()].filter(available).map((entry) => entry.view),
+)
+function available(entry: Entry): boolean {
+  return entry.binding.available?.() ?? true
 }
-
-export function isEnabled(c: Command): boolean {
-  return isAvailable(c) && (c.enabled?.() ?? true)
+function enabled(entry: Entry): boolean {
+  return (
+    available(entry) &&
+    (entry.binding.enabled?.() ?? true) &&
+    (entry.metadata.repeatable === true || !pending.value.has(entry.token))
+  )
 }
-
-/** Adds commands; the returned function removes them again. */
-export function registerCommands(cmds: readonly Command[]): () => void {
-  const ids = new Set(cmds.map((c) => c.id))
-  const owned = new Set(cmds)
-  // A view remounting registers the same ids again: the newest wins.
-  registered.value = [...registered.value.filter((c) => !ids.has(c.id)), ...cmds]
+export function isEnabled(command: CommandReference): boolean {
+  const entry = registered.value.get(commandKey(command.id))
+  return entry !== undefined && enabled(entry)
+}
+function reason(entry: Entry): string | undefined {
+  return pending.value.has(entry.token) && !entry.metadata.repeatable ? t('commands.running') : entry.binding.reason?.()
+}
+function fallback(metadata: CommandMetadata): string {
+  return t(metadata.label ?? 'commands.unavailable')
+}
+function entryFor(binding: Command): Entry {
+  const resolved = resolveCommand(binding.id)
+  const { key, metadata, id } = resolved
+  const current = () => registered.value.get(key)
+  const view: ExecutableCommand = {
+    id,
+    key,
+    group: metadata.group,
+    zone: metadata.zone,
+    icon: binding.icon ?? metadata.icon,
+    danger: binding.danger ?? metadata.danger,
+    keys: metadata.shortcut?.keys,
+    altKeys: metadata.shortcut?.altKeys,
+    title: () => current()?.binding.title?.() ?? fallback(metadata),
+    available: () => {
+      const entry = current()
+      return entry !== undefined && available(entry)
+    },
+    enabled: () => {
+      const entry = current()
+      return entry !== undefined && enabled(entry)
+    },
+    reason: () => {
+      const entry = current()
+      return entry ? reason(entry) : undefined
+    },
+  }
+  return { ...resolved, binding, token: Symbol('command registration'), view }
+}
+/** Newest registration wins; an older disposer can remove only its own token. */
+export function registerCommands(bindings: readonly Command[]): () => void {
+  const entries = bindings.map(entryFor)
+  const unique = new Set(entries.map((entry) => entry.key))
+  if (unique.size !== entries.length) throw new Error('Duplicate command registration')
+  const next = new Map(registered.value)
+  const waiting = new Map(pending.value)
+  for (const entry of entries) {
+    const previous = next.get(entry.key)
+    if (previous) waiting.delete(previous.token)
+    next.delete(entry.key)
+    next.set(entry.key, entry)
+  }
+  registered.value = next
+  pending.value = waiting
   return () => {
-    registered.value = registered.value.filter((c) => !owned.has(c))
+    const remaining = new Map(registered.value)
+    const waiting = new Map(pending.value)
+    let changed = false
+    for (const entry of entries) {
+      if (remaining.get(entry.key)?.token === entry.token) {
+        remaining.delete(entry.key)
+        changed = true
+      }
+      waiting.delete(entry.token)
+    }
+    if (changed) registered.value = remaining
+    if (waiting.size !== pending.value.size) pending.value = waiting
   }
 }
-
-/** Registers commands for as long as the calling component or store lives. */
-export function useCommands(cmds: readonly Command[]): void {
-  onScopeDispose(registerCommands(cmds))
+/** Reactive item sources retire stale bindings before another activation can run. */
+export function useCommands(bindings: MaybeRefOrGetter<readonly Command[]>): void {
+  watch(
+    () => toValue(bindings),
+    (current, _old, cleanup) => cleanup(registerCommands(current)),
+    { immediate: true, flush: 'sync' },
+  )
 }
-
-/**
- * Registers a collection's actions and indexes its menus by item. Building
- * every card's menu therefore visits only that card's commands, rather
- * than searching all the collection's commands for every rendered card.
- * A menu chosen after the list changed resolves the current registration.
- */
 export function useItemCommands<T, K extends string | number>(
   items: MaybeRefOrGetter<readonly T[]>,
   key: (item: T) => K,
   create: (item: T) => readonly Command[],
 ): (id: K) => DropdownMenuItem[] {
   const groups = computed(() => new Map(toValue(items).map((item) => [key(item), create(item)])))
-  watch(groups, (current, _previous, cleanup) => cleanup(registerCommands([...current.values()].flat())), {
-    immediate: true,
-  })
+  useCommands(() => [...groups.value.values()].flat())
   return (id) => menuItems(groups.value.get(id) ?? [])
 }
-
-/** A menu of these commands: those that apply now, run through the registry when chosen. */
-export function menuItems(cmds: readonly Command[]): DropdownMenuItem[] {
-  return cmds.filter(isAvailable).map((c) => ({
-    label: c.title(),
-    icon: c.icon ? icons[c.icon] : undefined,
-    disabled: !isEnabled(c),
-    color: c.danger ? 'error' : undefined,
-    description: isEnabled(c) ? undefined : c.reason?.(),
-    onSelect: () => runCommand(c.id),
-  }))
+export function menuItems(references: readonly CommandReference[]): DropdownMenuItem[] {
+  return references.flatMap((reference) => {
+    const entry = registered.value.get(commandKey(reference.id))
+    if (!entry || !available(entry)) return []
+    const command = entry.view
+    return [
+      {
+        label: command.title(),
+        icon: command.icon ? icons[command.icon] : undefined,
+        disabled: !enabled(entry),
+        color: command.danger ? ('error' as const) : undefined,
+        description: enabled(entry) ? undefined : reason(entry),
+        onSelect: () => runCommand(command.id),
+      },
+    ]
+  })
 }
-
-export function commandById(id: string): Command | undefined {
-  return registered.value.find((c) => c.id === id)
+export function commandById(id: CommandId): ExecutableCommand | undefined {
+  return registered.value.get(commandKey(id))?.view
 }
-
-/** Runs a command if it can run now; resolves whether it did. */
-export async function runCommand(id: string): Promise<boolean> {
-  const c = commandById(id)
-  if (!c || !isEnabled(c)) return false
-  await c.run()
-  return true
+export function commandState(id: CommandId) {
+  const resolved = resolveCommand(id)
+  const entry = registered.value.get(resolved.key)
+  const icon = entry?.view.icon ?? resolved.metadata.icon
+  return {
+    title: entry?.view.title() ?? fallback(resolved.metadata),
+    icon: icon ? icons[icon] : undefined,
+    enabled: entry !== undefined && enabled(entry),
+    busy: entry !== undefined && pending.value.has(entry.token) && !entry.metadata.repeatable,
+    reason: entry ? reason(entry) : t('commands.unavailable'),
+    caps: capsOf(id),
+  }
 }
+function waiting(entry: Entry, change: 1 | -1) {
+  const next = new Map(pending.value)
+  const count = (next.get(entry.token) ?? 0) + change
+  if (count > 0 && registered.value.get(entry.key) === entry) next.set(entry.token, count)
+  else next.delete(entry.token)
+  pending.value = next
+}
+function promiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    ((typeof value === 'object' && value !== null) || typeof value === 'function') &&
+    'then' in value &&
+    typeof value.then === 'function'
+  )
+}
+/** Invalid identities reject; legitimate absence/disabled work and reported failures resolve false. */
+export async function runCommand(id: CommandId): Promise<boolean> {
+  const key = commandKey(id)
+  const entry = registered.value.get(key)
+  if (!entry) return false
+  let asynchronous = false
+  let entered = false
+  try {
+    if (
+      !enabled(entry) ||
+      (!entry.metadata.repeatable && executing.has(entry.token)) ||
+      registered.value.get(key) !== entry
+    )
+      return false
+    executing.add(entry.token)
+    entered = true
+    const result = entry.binding.run()
+    if (promiseLike(result)) {
+      asynchronous = true
+      waiting(entry, 1)
+      await result
+    }
+    return true
+  } catch (error) {
+    if (!isCancelled(error)) {
+      if (errorCode(error)) reportError(error)
+      else reportUnexpected(error, `command:${entry.name}`)
+    }
+    return false
+  } finally {
+    if (entered) executing.delete(entry.token)
+    if (asynchronous) waiting(entry, -1)
+  }
+}
+// Item commands have no persistent shortcuts; avoid scanning a large collection on every key press.
+const shortcutCommands = computed(() =>
+  [...registered.value.values()].filter(
+    (entry) =>
+      typeof entry.id === 'string' && (entry.metadata.shortcut !== undefined || overrides.value.has(entry.key)),
+  ),
+)
 
 interface Chord {
   key: string
@@ -152,12 +287,19 @@ interface Chord {
 // The space bar types " ", which a shortcut cannot show: it is written "Space".
 const keyName = (key: string): string => (key === ' ' ? 'Space' : key)
 
-function parseKeys(keys: string): Chord {
+function shiftMatters(key: string): boolean {
+  return key.length > 1 || /[a-z0-9]/i.test(key)
+}
+
+// core.ValidShortcut's persisted grammar; shared fixtures check both implementations.
+const keyGrammar = /^(Ctrl\+)?(Shift\+)?(Alt\+)?([A-Za-z0-9]{1,12}|[^\sA-Za-z0-9+])$/u
+function parseKeys(keys: string): Chord | undefined {
+  if (!keyGrammar.test(keys)) return undefined
   const parts = keys.split('+')
   return {
     key: (parts.at(-1) ?? '').toLowerCase(),
     ctrl: parts.includes('Ctrl'),
-    shift: parts.includes('Shift'),
+    shift: shiftMatters(parts.at(-1) ?? '') && parts.includes('Shift'),
     alt: parts.includes('Alt'),
   }
 }
@@ -168,7 +310,7 @@ export function keyCaps(keys: string): string[] {
 }
 
 /** The caps of a registered command's shortcut in force, for a tooltip; undefined if it has none. */
-export function capsOf(id: string): string[] | undefined {
+export function capsOf(id: CommandId): string[] | undefined {
   const c = commandById(id)
   const keys = c ? keysOf(c) : undefined
   return keys ? keyCaps(keys) : undefined
@@ -178,12 +320,12 @@ function matches(e: KeyboardEvent, keys: string): boolean {
   const chord = parseKeys(keys)
   // A character's Shift is part of the character ("?"), so only named keys
   // and letters compare it.
-  const shiftMatters = chord.key.length > 1 || /[a-z0-9]/.test(chord.key)
+  if (!chord) return false
   return (
     keyName(e.key).toLowerCase() === chord.key &&
     (e.ctrlKey || e.metaKey) === chord.ctrl &&
     e.altKey === chord.alt &&
-    (!shiftMatters || e.shiftKey === chord.shift)
+    (!shiftMatters(chord.key) || e.shiftKey === chord.shift)
   )
 }
 
@@ -197,6 +339,14 @@ const MODIFIERS: readonly string[] = ['Control', 'Shift', 'Alt', 'Meta', 'AltGra
 // or a field whatever else is set; "+" joins a shortcut's parts.
 const RESERVED: readonly string[] = ['escape', 'tab', '+']
 
+/** Whether stored key text is assignable (core.ValidShortcut); defaults may still own Escape. */
+export function validShortcut(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  if (value === '') return true
+  const chord = parseKeys(value)
+  return chord !== undefined && !RESERVED.includes(chord.key) && value.toLowerCase() !== 'alt+f4'
+}
+
 /**
  * The shortcut a key press spells, as it is stored and shown ("Ctrl+Shift+K"):
  * "" while only modifiers are down, null for a key that cannot be assigned.
@@ -207,22 +357,22 @@ export function chordOf(e: KeyboardEvent): string | null {
   if (RESERVED.includes(name.toLowerCase()) || /\s/.test(name) || name.length > 12) return null
   // A character already says whether Shift was down ("?"); a letter, a digit
   // and a named key do not.
-  const shiftMatters = name.length > 1 || /[a-z0-9]/i.test(name)
   const keys = [
     e.ctrlKey || e.metaKey ? 'Ctrl' : '',
-    e.shiftKey && shiftMatters ? 'Shift' : '',
+    e.shiftKey && shiftMatters(name) ? 'Shift' : '',
     e.altKey ? 'Alt' : '',
     name.length === 1 ? name.toUpperCase() : name,
   ]
     .filter(Boolean)
     .join('+')
-  return keys === 'Alt+F4' ? null : keys
+  return validShortcut(keys) ? keys : null
 }
 
 /** Whether two shortcuts are the same keys, however their letters are cased. */
 export function sameKeys(a: string, b: string): boolean {
   const x = parseKeys(a)
   const y = parseKeys(b)
+  if (!x || !y) return false
   return x.key === y.key && x.ctrl === y.ctrl && x.shift === y.shift && x.alt === y.alt
 }
 
@@ -230,7 +380,7 @@ export function sameKeys(a: string, b: string): boolean {
  * Whether two zones hear the same key presses: the same zone, or either is
  * the whole page. The grid and the viewer never do (one is behind the other).
  */
-export function zonesOverlap(a: string | undefined, b: string | undefined): boolean {
+export function zonesOverlap(a: CommandZone | undefined, b: CommandZone | undefined): boolean {
   const x = a ?? 'global'
   const y = b ?? 'global'
   return x === y || x === 'global' || y === 'global'
@@ -241,15 +391,17 @@ export function zonesOverlap(a: string | undefined, b: string | undefined): bool
  * whether one ran (the event is then spent). A zone's owner calls this from
  * its own keydown handler; the shell calls it for "global".
  */
-export function dispatchKey(e: KeyboardEvent, zone: string): boolean {
+export function dispatchKey(e: KeyboardEvent, zone: CommandZone): boolean {
   if (e.defaultPrevented || e.isComposing) return false
-  const c = registered.value.find(
-    (cmd) =>
-      (cmd.zone ?? 'global') === zone && (matchesKeys(e, keysOf(cmd)) || altKeysOf(cmd).some((k) => matches(e, k))),
+  const entry = shortcutCommands.value.find(
+    (entry) =>
+      (entry.metadata.zone ?? 'global') === zone &&
+      available(entry) &&
+      (matchesKeys(e, keysOf(entry.view)) || altKeysOf(entry.view).some((keys) => matches(e, keys))),
   )
-  if (!c || !isEnabled(c)) return false
+  if (!entry) return false
   e.preventDefault()
-  void c.run()
+  if (enabled(entry) && (!e.repeat || entry.metadata.repeatable)) void runCommand(entry.id)
   return true
 }
 

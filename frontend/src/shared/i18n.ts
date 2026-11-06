@@ -334,6 +334,9 @@ const en = {
   'shell.search': 'Search or jump to…',
   'shell.backTo': 'Back to {place}',
 
+  'commands.running': 'Running…',
+  'commands.unavailable': 'This action is unavailable.',
+  'commands.rejectFaces': 'Reject selected faces',
   'commands.title': 'Commands',
   'commands.hint': 'Search for something to do or somewhere to go.',
   'commands.placeholder': 'Type a command…',
@@ -2084,6 +2087,11 @@ type VarNames<K extends MessageKey> = (typeof en)[K] extends infer M
     ? Placeholders<M>
     : Placeholders<M[keyof M]> | 'n'
   : never
+
+/** A stable label that needs no contextual placeholder values. */
+export type SimpleMessageKey = {
+  [K in MessageKey]: [VarNames<K>] extends [never] ? K : never
+}[MessageKey]
 
 type Vars = Record<string, string | number>
 

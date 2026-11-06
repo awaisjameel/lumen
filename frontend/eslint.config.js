@@ -31,7 +31,7 @@ const features = [
 export default defineConfigWithVueTs(
   // Compiler fixtures deliberately contain invalid application code. Their own
   // project checks positive examples and requires every marked rejection.
-  { name: 'lumen/ignores', ignores: ['dist/', 'bindings/', 'tools/navigation-fixtures/'] },
+  { name: 'lumen/ignores', ignores: ['dist/', 'bindings/', 'tools/navigation-fixtures/', 'tools/command-fixtures/'] },
 
   js.configs.recommended,
   pluginVue.configs['flat/recommended'],

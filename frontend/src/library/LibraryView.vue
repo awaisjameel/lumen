@@ -514,15 +514,10 @@ const gridCommands: Command[] = [
     'library.compress',
     () => !!fileIDs.value.length && !lib.inTrash && !lib.viewer,
     () => fileIDs.value.map((assetId) => ({ assetId, path: '' })),
-    'grid',
     () => lib.selectionSnapshot,
   ),
   {
     id: 'library.files',
-    group: 'media',
-    title: () => t('files.title'),
-    icon: 'files',
-    zone: 'grid',
     available: () => !!fileIDs.value.length && !lib.inTrash && !lib.viewer,
     run: () => {
       openFiles(ExportFormat.ExportOriginal)
@@ -530,10 +525,6 @@ const gridCommands: Command[] = [
   },
   {
     id: 'library.batch',
-    group: 'media',
-    title: () => t('files.batch'),
-    icon: 'check',
-    zone: 'grid',
     available: () => !!fileIDs.value.length && !lib.viewer,
     run: () => {
       openBatch(BatchAction.BatchFavourite)
@@ -541,10 +532,6 @@ const gridCommands: Command[] = [
   },
   {
     id: 'library.open',
-    group: 'media',
-    title: () => t('files.open'),
-    icon: 'external',
-    zone: 'grid',
     available: () => fileIDs.value.length === 1 && !lib.inTrash && !lib.viewer,
     run: async () => {
       const id = fileIDs.value[0]
@@ -553,21 +540,12 @@ const gridCommands: Command[] = [
   },
   {
     id: 'media.favourite',
-    group: 'media',
     title: () => t(lib.selectedItem?.f ? 'details.unfavourite' : 'details.favourite'),
-    icon: 'heart',
-    keys: 'F',
-    zone: 'grid',
     available: () => !!lib.selected && !lib.inTrash && !lib.viewer,
     run: () => lib.toggleFavourite(lib.selected),
   },
   {
     id: 'media.open',
-    group: 'media',
-    title: () => t('library.open'),
-    icon: 'image',
-    keys: 'Enter',
-    zone: 'grid',
     available: () => !!lib.selected && !lib.viewer,
     run: () => {
       if (lib.selected) lib.viewer = { ...lib.selected }
@@ -575,28 +553,17 @@ const gridCommands: Command[] = [
   },
   {
     id: 'view.details',
-    group: 'view',
-    title: () => t('library.info'),
-    icon: 'inspector',
-    keys: 'I',
-    zone: 'grid',
     available: () => !lib.viewer,
     run: () => (lib.showDetails = !lib.showDetails),
   },
   {
     id: 'view.largerTiles',
-    group: 'view',
-    title: () => t('library.zoomIn'),
-    icon: 'zoom-in',
     enabled: () => prefs.prefs.tileSize < TILE_SIZE_MAX,
     reason: () => t('library.largest'),
     run: () => setTileSize(prefs.prefs.tileSize + ZOOM_STEP * 3),
   },
   {
     id: 'view.smallerTiles',
-    group: 'view',
-    title: () => t('library.zoomOut'),
-    icon: 'zoom-out',
     enabled: () => prefs.prefs.tileSize > TILE_SIZE_MIN,
     reason: () => t('library.smallest'),
     run: () => setTileSize(prefs.prefs.tileSize - ZOOM_STEP * 3),
@@ -607,16 +574,10 @@ useCommands(gridCommands)
 const selectionDefinitions: Command[] = [
   {
     id: 'library.favouriteSelection',
-    group: 'media',
-    title: () => t('details.favourite'),
-    icon: 'heart',
     run: () => work.apply(BatchAction.BatchFavourite),
   },
   {
     id: 'library.albumSelection',
-    group: 'media',
-    title: () => t('library.album'),
-    icon: 'albums',
     run: () => {
       targetAlbum.value = 0
       albumOpen.value = true
@@ -625,62 +586,37 @@ const selectionDefinitions: Command[] = [
   },
   {
     id: 'library.exportSelection',
-    group: 'media',
-    title: () => t('library.export'),
-    icon: 'download',
     run: () => openFiles(ExportFormat.ExportOriginal),
   },
   {
     id: 'library.trashSelection',
-    group: 'media',
-    title: () => t('trash.move'),
-    icon: 'trash',
-    danger: true,
     run: () => work.apply(BatchAction.BatchTrash),
   },
   {
     id: 'library.unfavouriteSelection',
-    group: 'media',
-    title: () => t('details.unfavourite'),
-    icon: 'heart',
     run: () => work.apply(BatchAction.BatchUnfavourite),
   },
   {
     id: 'library.tagSelection',
-    group: 'media',
-    title: () => t('details.addTag'),
-    icon: 'tag',
     run: () => openBatch('tag'),
   },
   {
     id: 'library.removeAlbumSelection',
-    group: 'media',
-    title: () => t('files.removeAlbum'),
-    icon: 'albums',
     available: () => !!albumId.value && albums.byId.get(albumId.value)?.kind === AlbumKind.AlbumManual,
     run: () => work.apply(BatchAction.BatchRemoveAlbum, albumId.value),
   },
   {
     id: 'library.moveSelection',
-    group: 'media',
-    title: () => t('files.move'),
-    icon: 'move',
     run: () => openFiles('move'),
   },
   {
     id: 'library.renameSelection',
-    group: 'media',
-    title: () => t('files.rename'),
-    icon: 'pencil',
     enabled: () => fileIDs.value.length === 1,
     reason: () => t('library.singleFile'),
     run: () => openFiles('rename'),
   },
   {
     id: 'library.revealSelection',
-    group: 'media',
-    title: () => t('library.showExplorer'),
-    icon: 'folder',
     enabled: () => fileIDs.value.length === 1,
     reason: () => t('library.singleFile'),
     run: () => {
@@ -690,9 +626,6 @@ const selectionDefinitions: Command[] = [
   },
   {
     id: 'library.copyPath',
-    group: 'media',
-    title: () => t('files.copyPath'),
-    icon: 'copy',
     enabled: () => fileIDs.value.length === 1,
     reason: () => t('library.singleFile'),
     run: async () => {
@@ -707,9 +640,6 @@ const selectionDefinitions: Command[] = [
   },
   {
     id: 'library.rotateSelection',
-    group: 'media',
-    title: () => t('viewer.rotate'),
-    icon: 'rotate',
     enabled: () => fileIDs.value.length === 1 && !lib.selectedItem?.v,
     reason: () => t('library.singleFile'),
     run: async () => {
@@ -722,9 +652,6 @@ const selectionDefinitions: Command[] = [
   },
   {
     id: 'library.blockSelection',
-    group: 'media',
-    title: () => t('blocked.block'),
-    icon: 'blocked',
     run: () => openBatch('block'),
   },
 ]
@@ -746,7 +673,9 @@ const dockActions = computed(() =>
 )
 const dockMore = computed(() => [
   ...selectionCommands.slice(4),
-  ...gridCommands.filter((c) => ['library.files', 'library.batch', 'library.open'].includes(c.id)),
+  ...gridCommands.filter(
+    (c) => typeof c.id === 'string' && ['library.files', 'library.batch', 'library.open'].includes(c.id),
+  ),
 ])
 const selectionOptions = computed(() => [
   { label: t('selection.visible'), onSelect: selectVisible },
@@ -1021,7 +950,7 @@ function resultsHead(day: string): [string, string] {
                 variant="ghost"
                 size="xs"
                 :disabled="prefs.prefs.tileSize <= TILE_SIZE_MIN"
-                @click="setTileSize(prefs.prefs.tileSize - ZOOM_STEP * 3)"
+                command="view.smallerTiles"
               />
               <USlider
                 class="zoom-slider"
@@ -1041,7 +970,7 @@ function resultsHead(day: string): [string, string] {
                 variant="ghost"
                 size="xs"
                 :disabled="prefs.prefs.tileSize >= TILE_SIZE_MAX"
-                @click="setTileSize(prefs.prefs.tileSize + ZOOM_STEP * 3)"
+                command="view.largerTiles"
               />
             </div>
             <UDropdownMenu :items="selectionOptions" :content="{ align: 'end' }">

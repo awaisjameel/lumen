@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
 import { destination } from '../shared/navigation/contract'
 import UButton from '../shared/navigation/NavButton.vue'
 import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
@@ -150,26 +151,17 @@ const actions = computed(() => [
 useCommands([
   {
     id: 'person.rename',
-    group: 'view',
-    title: () => t('person.rename'),
-    icon: 'pencil',
     available: () => person.value !== null,
     enabled: () => !editing.value,
     run: edit,
   },
   {
     id: 'person.review',
-    group: 'view',
-    title: () => t('person.review'),
-    icon: 'face',
     available: () => person.value !== null,
     run: review,
   },
   {
     id: 'person.block',
-    group: 'view',
-    title: () => t('people.block'),
-    icon: 'blocked',
     available: () => person.value !== null,
     run: () => blockPerson(),
   },
@@ -183,17 +175,17 @@ useCommands([
       <template #name>
         <PersonNameEditor v-if="editing" :key="person.id" :person="person" @cancel="rename.close()" @saved="saved" />
         <h2 v-else class="heading">
-          <UButton
+          <CommandButton
             :ref="rename.triggerRef(true)"
             class="name"
             data-action="rename"
             color="neutral"
             variant="ghost"
             :title="t('person.rename')"
-            @click="edit"
+            command="person.rename"
             ><bdi class="name-text" :title="name">{{ name }}</bdi
             ><Icon name="pencil" :size="16"
-          /></UButton>
+          /></CommandButton>
         </h2>
       </template>
       <template #facts>

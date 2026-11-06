@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "typecheck": "vue-tsc --noEmit && node tools/check-navigation.mjs",
+    "typecheck": "vue-tsc --noEmit && node tools/check-navigation.mjs && node tools/check-commands.mjs",
     "test": "vitest run",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",

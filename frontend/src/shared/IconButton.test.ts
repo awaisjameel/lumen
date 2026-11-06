@@ -13,7 +13,7 @@ afterEach(() => {
   wrapper = undefined
 })
 
-async function tooltipOf(props: Record<string, unknown>): Promise<string> {
+async function tooltipOf(props: { label: string; tip?: string; 'aria-pressed'?: boolean }): Promise<string> {
   wrapper = mountInApp(IconButton, { props: { icon: icons.close, ...props } })
   const button = wrapper.get('button')
   expect(button.text()).toBe('')

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { itemCommand, menuItems, useCommands } from '../shared/commands'
 import RouterLink from '../shared/navigation/NavLink.vue'
 import { destination } from '../shared/navigation/contract'
 import UBadge from '@nuxt/ui/components/Badge.vue'
@@ -13,7 +15,6 @@ import { icons } from '../design/icons'
 import CollectionCard from '../shared/CollectionCard.vue'
 import Icon from '../shared/Icon.vue'
 import IconButton from '../shared/IconButton.vue'
-import { menuItems, useCommands } from '../shared/commands'
 import type { Command } from '../shared/commands'
 import { useCollectionPreview } from '../shared/collectionPreview'
 import { onBlocksChanged } from '../shared/block'
@@ -131,10 +132,8 @@ async function save(value: string) {
 }
 const actions: Command[] = [
   {
-    id: `event.${props.event.id}.rename`,
-    group: 'view',
+    id: itemCommand('event.rename', props.event.id),
     title: () => t('events.rename', { name: props.event.name }),
-    icon: 'pencil',
     enabled: () => !props.busy,
     run: () => {
       renameFrom.value = 'menu'
@@ -142,26 +141,20 @@ const actions: Command[] = [
     },
   },
   {
-    id: `event.${props.event.id}.pin`,
-    group: 'view',
+    id: itemCommand('event.pin', props.event.id),
     title: () => t(props.event.pinned ? 'events.unpinNamed' : 'events.pinNamed', { name: props.event.name }),
-    icon: 'pin',
     enabled: () => !props.busy,
     run: () => emit('pin'),
   },
   {
-    id: `event.${props.event.id}.reset`,
-    group: 'view',
+    id: itemCommand('event.reset', props.event.id),
     title: () => t('events.reset'),
-    icon: 'reset',
     enabled: () => !props.busy,
     run: () => save(''),
   },
   {
-    id: `event.${props.event.id}.block`,
-    group: 'view',
+    id: itemCommand('event.block', props.event.id),
     title: () => t('blocked.confirmTitle', { name: props.event.name }),
-    icon: 'eye-off',
     enabled: () => !props.busy,
     run: () => emit('block'),
   },
@@ -266,14 +259,14 @@ function renameTitle() {
               ><UButton type="button" size="sm" variant="ghost" :disabled="busy" @click="editor.close()">{{
                 t('common.cancel')
               }}</UButton
-              ><UButton
+              ><CommandButton
                 type="button"
                 size="sm"
                 data-action="reset"
                 variant="ghost"
                 :disabled="busy"
-                @click="save('')"
-                >{{ t('events.reset') }}</UButton
+                :command="itemCommand('event.reset', props.event.id)"
+                >{{ t('events.reset') }}</CommandButton
               >
             </form>
             <span class="meta"
@@ -293,7 +286,7 @@ function renameTitle() {
             :disabled="busy"
             :variant="event.pinned ? 'soft' : 'ghost'"
             :color="event.pinned ? 'primary' : 'neutral'"
-            @click="emit('pin')"
+            :command="itemCommand('event.pin', props.event.id)"
           />
           <UDropdownMenu v-if="editing === null" :items="items" :content="{ onCloseAutoFocus: keepEditorFocus }"
             ><IconButton

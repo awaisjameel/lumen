@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { runCommand } from '../shared/commands'
 import { destination } from '../shared/navigation/contract'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '../shared/navigation/NavButton.vue'
@@ -16,7 +17,7 @@ import ViewBar from '../shared/ViewBar.vue'
 import FeatureState from '../shared/FeatureState.vue'
 import FilterField from '../shared/FilterField.vue'
 import IconButton from '../shared/IconButton.vue'
-import { capsOf, runCommand, useCommands } from '../shared/commands'
+import { capsOf, useCommands } from '../shared/commands'
 import { confirm } from '../shared/confirm'
 import { block } from '../shared/block'
 import { errorText, logError } from '../shared/errors'
@@ -210,9 +211,6 @@ async function remove(tag: Tag) {
 useCommands([
   {
     id: 'things.create',
-    group: 'library',
-    title: () => t('things.find'),
-    icon: 'plus',
     enabled: () => !findReason.value,
     reason: () => findReason.value,
     run: create,
@@ -241,7 +239,7 @@ useCommands([
           :kbds="capsOf('app.commandPalette')"
           variant="ghost"
           color="neutral"
-          @click="runCommand('app.commandPalette')"
+          command="app.commandPalette"
         />
       </PageHeader>
     </template>
@@ -280,7 +278,7 @@ useCommands([
           <h2>{{ t('things.teach') }}</h2>
           <p>{{ t('things.intro') }}</p>
         </div>
-        <form class="new" data-create-thing @submit.prevent="create">
+        <form class="new" data-create-thing @submit.prevent="runCommand('things.create')">
           <label for="new-thing">{{ t('things.promptLabel') }}</label>
           <div class="flex min-w-0 gap-2">
             <UInput

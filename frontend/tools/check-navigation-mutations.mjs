@@ -1,12 +1,16 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const frontend = fileURLToPath(new URL('../', import.meta.url))
-const scratch = mkdtempSync(join(tmpdir(), 'lumen-navigation-'))
+const scratchRoot = mkdtempSync(join(tmpdir(), 'lumen-navigation-'))
+const scratch = join(scratchRoot, 'frontend')
 try {
+  mkdirSync(scratch)
+  // Match the repository layout for the shared Go/frontend chord fixtures.
+  cpSync(join(frontend, '../internal/core/testdata'), join(scratchRoot, 'internal/core/testdata'), { recursive: true })
   for (const name of ['src', 'bindings', 'tsconfig.json'])
     cpSync(join(frontend, name), join(scratch, name), { recursive: true })
   symlinkSync(join(frontend, 'node_modules'), join(scratch, 'node_modules'), 'junction')
@@ -56,5 +60,5 @@ try {
     'contract.test.ts',
   ])
 } finally {
-  rmSync(scratch, { recursive: true, force: true })
+  rmSync(scratchRoot, { recursive: true, force: true })
 }

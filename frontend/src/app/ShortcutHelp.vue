@@ -11,7 +11,6 @@ import { shortcutCatalogue, shortcutZones, zoneOf } from '../shared/shortcuts'
 import { t } from '../shared/i18n'
 import { icons } from '../design/icons'
 import { whenPortalsClosed } from '../shared/overlay'
-import { reportError } from '../shared/errors'
 
 const open = defineModel<boolean>('open', { required: true })
 const router = useNavigation()
@@ -92,7 +91,7 @@ const groups = computed(() => {
 async function back() {
   open.value = false
   await whenPortalsClosed()
-  void runCommand('app.commandPalette').catch(reportError)
+  void runCommand('app.commandPalette')
 }
 function customise() {
   open.value = false

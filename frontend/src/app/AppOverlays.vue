@@ -35,7 +35,6 @@ const inApp = () => lib.ready && lib.sources.length > 0
 useCommands([
   ...navEntries.map((e): Command => ({
     id: `go.${e.to.name}`,
-    group: 'navigate',
     title: () => t('commands.goTo', { place: t(e.label) }),
     icon: e.icon,
     available: inApp,
@@ -45,7 +44,6 @@ useCommands([
   // filter, while videos are indexed.
   {
     id: 'go.videos',
-    group: 'navigate',
     title: () => t('commands.showVideos'),
     icon: 'video',
     available: () => inApp() && lib.settings.videos,
@@ -53,19 +51,11 @@ useCommands([
   },
   {
     id: 'app.commandPalette',
-    group: 'app',
-    title: () => t('commands.title'),
-    icon: 'command',
-    keys: 'Ctrl+K',
     available: inApp,
     run: () => (paletteUsed.value = palette.value = true),
   },
   {
     id: 'app.shortcuts',
-    group: 'app',
-    title: () => t('shortcuts.title'),
-    icon: 'keyboard',
-    keys: '?',
     run: () => (shortcutsUsed.value = shortcuts.value = true),
   },
 ])

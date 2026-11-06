@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+
 // The Blocked screen's browser: the photos one block covers, in a virtualised
 // grid. A photo opens in the Viewer, which can move it to the Trash. Photos
 // that other blocks hide too say which, so unblocking this one is no surprise.
@@ -10,7 +12,7 @@ import { BlockMode } from '../bridge'
 import type { CoveredItem } from '../bridge'
 import { listFormat, t } from '../shared/i18n'
 import { icons } from '../design/icons'
-import { runCommand, useCommands } from '../shared/commands'
+import { useCommands } from '../shared/commands'
 import { shortcutsSuspended } from '../shared/overlay'
 import { observeResize } from '../shared/observeResize'
 import FeatureState from '../shared/FeatureState.vue'
@@ -89,24 +91,16 @@ const names = (item: CoveredItem) => listFormat.format(item.hiddenBy.map((b) => 
 useCommands([
   {
     id: 'blocked.covered.back',
-    group: 'view',
-    title: () => t('covered.back'),
-    icon: 'arrow-left',
     run: () => props.covered.close(),
   },
   {
     id: 'blocked.covered.trash',
-    group: 'media',
-    title: () => t('trash.move'),
-    icon: 'trash',
     available: () => props.covered.selected.size > 0,
     enabled: () => !props.covered.trashing,
     run: () => props.covered.trashSelection(),
   },
   {
     id: 'blocked.covered.clear',
-    group: 'view',
-    title: () => t('blocked.clearSelection'),
     available: () => props.covered.selected.size > 0,
     run: () => props.covered.clearSelection(),
   },
@@ -116,9 +110,9 @@ useCommands([
 <template>
   <section class="covered" :aria-label="covered.block ? t('covered.title', { name: covered.block.name }) : undefined">
     <header class="head">
-      <UButton :icon="icons['arrow-left']" data-covered="back" @click="runCommand('blocked.covered.back')">{{
+      <CommandButton :icon="icons['arrow-left']" data-covered="back" command="blocked.covered.back">{{
         t('covered.back')
-      }}</UButton>
+      }}</CommandButton>
       <h2 v-if="covered.block">{{ t('covered.title', { name: covered.block.name }) }}</h2>
       <small v-if="!covered.loading" class="text-muted">{{ t('covered.count', { n: covered.items.length }) }}</small>
     </header>

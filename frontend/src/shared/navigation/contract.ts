@@ -182,7 +182,9 @@ type ExactInput<T extends DestinationInput> = T &
     : unknown)
 
 /** Internal targets have no raw-string or partially named escape hatch. */
-export function destination<const T extends DestinationInput>(input: ExactInput<T>): Destination
+export function destination<const T extends DestinationInput>(
+  input: ExactInput<T>,
+): Extract<Destination, { name: T['name'] }>
 export function destination(input: DestinationInput): Destination {
   const definition = routes.find((entry) => entry.name === input.name)
   if (!definition) throw new InvalidNavigation()

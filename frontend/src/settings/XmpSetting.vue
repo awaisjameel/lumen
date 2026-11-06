@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+
 // The XMP sidecar toggle and its "Export now" button. Off by default; while
 // it is on, Lumen keeps the sidecars up to date in the background, and the
 // button runs a full pass at once and says what it did. Its saves are queued
@@ -6,12 +8,11 @@
 // Lumen's sidecar files" is always offered, on or off, so the user can take
 // back everything Lumen wrote: it turns the setting off first, then moves
 // Lumen's own sidecars to the Recycle Bin.
-import UButton from '@nuxt/ui/components/Button.vue'
 import USwitch from '@nuxt/ui/components/Switch.vue'
 import { ref } from 'vue'
 import PrefRow from '../shared/PrefRow.vue'
 import { icons } from '../design/icons'
-import { useCommands, runCommand } from '../shared/commands'
+import { useCommands } from '../shared/commands'
 import { engine } from '../bridge'
 import type { XMPDelete, XMPExport } from '../bridge'
 import { useLibrary } from '../library/store'
@@ -72,9 +73,6 @@ async function deleteAll() {
 useCommands([
   {
     id: 'settings.xmpExport',
-    group: 'library',
-    title: () => t('settings.xmpExport'),
-    icon: 'sidecar',
     available: () => lib.settings.xmp,
     // The engine refuses an export until turning sidecars on is saved.
     enabled: () => !exporting.value && !deleting.value && !saving('xmp'),
@@ -82,9 +80,6 @@ useCommands([
   },
   {
     id: 'settings.xmpDelete',
-    group: 'library',
-    title: () => t('settings.xmpDelete'),
-    icon: 'recycle',
     enabled: () => !exporting.value && !deleting.value,
     run: deleteAll,
   },
@@ -116,13 +111,13 @@ useCommands([
       :label="t('settings.xmpExport')"
       :description="t('settings.xmpExportHint')"
     >
-      <UButton
+      <CommandButton
         data-xmp="export"
         :icon="icons.sidecar"
         :loading="exporting"
         :disabled="exporting || deleting || saving('xmp')"
-        @click="runCommand('settings.xmpExport')"
-        >{{ exporting ? t('settings.xmpExporting') : t('settings.xmpExport') }}</UButton
+        command="settings.xmpExport"
+        >{{ exporting ? t('settings.xmpExporting') : t('settings.xmpExport') }}</CommandButton
       >
     </PrefRow>
     <p v-if="result && lib.settings.xmp" class="text-muted" role="status">
@@ -134,14 +129,14 @@ useCommands([
       :label="t('settings.xmpDelete')"
       :description="t('settings.xmpDeleteHint')"
     >
-      <UButton
+      <CommandButton
         data-xmp="delete"
         :icon="icons.recycle"
         :loading="deleting"
         :disabled="exporting || deleting"
-        @click="runCommand('settings.xmpDelete')"
+        command="settings.xmpDelete"
         >{{ deleting ? t('settings.xmpDeleting') : t('settings.xmpDelete') }}
-      </UButton>
+      </CommandButton>
     </PrefRow>
     <p v-if="deleted" class="text-muted" role="status">
       {{ deleted.deleted > 0 ? t('settings.xmpDeleted', { n: deleted.deleted }) : t('settings.xmpDeletedNone')

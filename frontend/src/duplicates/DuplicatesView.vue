@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
 import { destination } from '../shared/navigation/contract'
 // Duplicates: exact file copies and similar-looking photos. Each group
 // pre-selects the copy to keep (the engine's suggestion, or the user's own
@@ -19,7 +20,7 @@ import { DuplicateKind, engine, THUMB_LARGE, thumbUrl } from '../bridge'
 import type { DuplicateGroup, DuplicateItem } from '../bridge'
 import { icons } from '../design/icons'
 import { useLibrary } from '../library/store'
-import { runCommand, useCommands } from '../shared/commands'
+import { useCommands } from '../shared/commands'
 import FeatureState from '../shared/FeatureState.vue'
 import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
@@ -328,9 +329,6 @@ function openPreview(item: DuplicateItem, path = item.paths[0] ?? '') {
 useCommands([
   {
     id: 'duplicates.refresh',
-    group: 'view',
-    title: () => t('duplicates.refresh'),
-    icon: 'refresh',
     enabled: () => !busy.value && !acting.value,
     run: checkAgain,
   },
@@ -341,15 +339,15 @@ useCommands([
   <Page :scroll="false">
     <template #header>
       <PageHeader :title="t('nav.duplicates')" :subtitle="groups.length ? summary : undefined">
-        <UButton
+        <CommandButton
           v-if="!settled"
           :icon="icons.refresh"
           :loading="busy"
           :disabled="acting"
           color="neutral"
           variant="ghost"
-          @click="runCommand('duplicates.refresh')"
-          >{{ t('duplicates.refresh') }}</UButton
+          command="duplicates.refresh"
+          >{{ t('duplicates.refresh') }}</CommandButton
         >
         <UButton
           v-if="groups.length && !queue"
@@ -485,13 +483,13 @@ useCommands([
         ><UButton v-if="completed" :to="destination({ name: 'library' })" color="primary">{{
           t('duplicates.library')
         }}</UButton
-        ><UButton variant="outline" color="neutral" @click="checkAgain">{{
+        ><CommandButton variant="outline" color="neutral" command="duplicates.refresh">{{
           t('duplicates.refresh')
-        }}</UButton></FeatureState
+        }}</CommandButton></FeatureState
       >
-      <UButton v-if="duplicates.error || error" variant="outline" color="neutral" @click="checkAgain">{{
+      <CommandButton v-if="duplicates.error || error" variant="outline" color="neutral" command="duplicates.refresh">{{
         t('duplicates.refresh')
-      }}</UButton>
+      }}</CommandButton>
     </div>
     <UModal
       v-model:open="previewOpen"

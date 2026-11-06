@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { runCommand } from '../shared/commands'
 import { destination } from '../shared/navigation/contract'
 import UButton from '../shared/navigation/NavButton.vue'
 import UPopover from '@nuxt/ui/components/Popover.vue'
@@ -199,9 +201,7 @@ async function blockFace(face: Face | undefined) {
 }
 const rejectCommand: Command = {
   id: 'faces.reject',
-  group: 'media',
   title: () => t('faces.notThem', { name: name.value }),
-  icon: 'user-remove',
   available: () => count.value > 0,
   enabled: () => !busy.value,
   reason: () => t('faces.saving'),
@@ -209,9 +209,6 @@ const rejectCommand: Command = {
 }
 const coverCommand: Command = {
   id: 'faces.cover',
-  group: 'media',
-  title: () => t('faces.cover'),
-  icon: 'face',
   available: () => faces.value.length > 0,
   enabled: () => count.value === 1 && !busy.value,
   reason: () => (busy.value ? t('faces.saving') : t('faces.coverReason')),
@@ -219,9 +216,6 @@ const coverCommand: Command = {
 }
 const blockCommand: Command = {
   id: 'faces.block',
-  group: 'media',
-  title: () => t('faces.block'),
-  icon: 'blocked',
   available: () => count.value > 0,
   enabled: () => count.value === 1 && !busy.value,
   reason: () => (busy.value ? t('faces.saving') : t('faces.blockReason')),
@@ -233,18 +227,12 @@ useCommands([
   blockCommand,
   {
     id: 'faces.clear',
-    group: 'view',
-    title: () => t('faces.clear'),
-    icon: 'close',
     available: () => count.value > 0,
     enabled: () => !busy.value,
     run: clear,
   },
   {
     id: 'faces.selectAll',
-    group: 'view',
-    title: () => t('faces.selectAll'),
-    icon: 'check',
     available: () => faces.value.length > 0,
     enabled: () => !busy.value,
     run: selectAll,
@@ -274,14 +262,14 @@ useCommands([
     <ViewBar class="faces-viewbar" :label="t('faces.title', { name })"
       ><p class="text-sm text-muted">{{ t('faces.hint', { name }) }}</p>
       <template #end
-        ><UButton
+        ><CommandButton
           v-if="faces.length"
           color="neutral"
           variant="ghost"
           :disabled="busy"
           :aria-pressed="count === faces.length"
-          @click="selectAll"
-          >{{ count === faces.length ? t('faces.clear') : t('faces.selectAll') }}</UButton
+          command="faces.selectAll"
+          >{{ count === faces.length ? t('faces.clear') : t('faces.selectAll') }}</CommandButton
         ></template
       ></ViewBar
     >
@@ -357,16 +345,21 @@ useCommands([
     >
     <p v-if="person" class="kept"><Icon name="info" :size="16" />{{ t('faces.kept') }}</p>
     <template #dock>
-      <SelectionDock class="faces-dock" :count="count" :summary="t('faces.selected', { n: count })" @clear="clear">
-        <UButton
+      <SelectionDock
+        class="faces-dock"
+        :count="count"
+        :summary="t('faces.selected', { n: count })"
+        @clear="runCommand('faces.clear')"
+      >
+        <CommandButton
           color="primary"
           variant="solid"
           data-action="reject"
           :icon="icons['user-remove']"
           :disabled="busy"
           :loading="busy"
-          @click="reject"
-          >{{ t('faces.notThem', { name }) }}</UButton
+          command="faces.reject"
+          >{{ t('faces.notThem', { name }) }}</CommandButton
         >
         <UPopover
           v-model:open="picker"
@@ -387,15 +380,15 @@ useCommands([
               @cancel="picker = false"
           /></template>
         </UPopover>
-        <UButton
+        <CommandButton
           color="neutral"
           variant="ghost"
           :icon="icons.face"
           :disabled="count !== 1 || busy"
           :aria-label="t('faces.cover')"
           :title="count === 1 ? t('faces.cover') : t('faces.coverReason')"
-          @click="useAsCover"
-          ><span class="dock-label">{{ t('faces.cover') }}</span></UButton
+          command="faces.cover"
+          ><span class="dock-label">{{ t('faces.cover') }}</span></CommandButton
         >
         <IconButton
           :icon="icons.blocked"

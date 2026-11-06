@@ -1,3 +1,4 @@
+import { staticCommands } from './commandContract'
 import { expect, it } from 'vitest'
 import { t } from './i18n'
 
@@ -38,7 +39,11 @@ it('shows every message somewhere, by its name or as part of a name built from a
   // Names built from a value: t(`compression.mode.${value}`) shows every compression.mode.* message.
   const built = [...code.matchAll(/`([\w.]+)\.\$\{/g)].map((m) => `${m[1] ?? ''}.`)
   const unshown = keys.filter(
-    (key) => !code.includes(`'${key}'`) && !code.includes(`"${key}"`) && !built.some((p) => key.startsWith(p)),
+    (key) =>
+      !staticCommands.some((command) => command.label === key) &&
+      !code.includes(`'${key}'`) &&
+      !code.includes(`"${key}"`) &&
+      !built.some((p) => key.startsWith(p)),
   )
   expect(keys.length).toBeGreaterThan(1000)
   expect(unshown).toEqual([])

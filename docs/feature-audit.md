@@ -957,6 +957,31 @@ an original-file mutation or a new product policy.
 
 ## Inventory
 
+### #46 command contract implementation checkpoint
+
+The preventive scope and before-evidence are recorded in
+[the command contract](command-contract.md). No existing typo or wholly missing
+global error handler is alleged. Against the integrated #38 parent `70f186e1`,
+an isolated invalid-identity fixture compiles and all eight policy regressions
+fail. They now pass with one typed catalogue and one registry runner.
+
+Static identities, 23 numeric item families and duplicate review derive from
+executable definitions; navigation identities reuse #38's route vocabulary.
+Public command snapshots expose presentation without callbacks. Ownership tokens,
+synchronous item disposal, independent pending admission and explicit repeatable
+controls cover remounts, duplicate activation and stale completion. Shared button
+controls, menus, palette and keyboard use the runner. Shortcut settings/help
+metadata is derived directly; its source-format parser is removed. Known imported
+overrides remain active, unknown legacy data round-trips, and Reset all remains
+explicit. No service, wire, schema, original-media or budget change is needed.
+
+Twenty-one negative TypeScript/Vue fixtures plus valid controls run alongside the
+18 navigation compiler fixtures. Native `commands` acceptance uses generated
+scratch files, real controls and held/refused transport for retry; it is added to
+the existing nine suites, followed by installer packaging. Fresh Windows evidence
+is pending and must pass before the child is merged. The parent remains for owner
+review, with no final PR to `main`.
+
 ### Current disposition of accepted work
 
 The baseline matrix below remains the initial review. This table applies the
@@ -975,7 +1000,7 @@ specific runs and suites recorded above.
 | Live collection place metadata | Integrated: #44 | #52; current metadata suite 22/22 |
 | Album draft lifetime and guarded saving | Integrated: #45 | #53; current draft suite 26/26 |
 | Typed navigation and runtime input | Verified implementation; integration record in #54 | Code `91f54d3b`, navigation 74/74; [contract guide](navigation-contract.md) |
-| Command contract hardening | #46 remains the next preventive child | Existing command execution is implemented; no missing global error handling is claimed |
+| Command contract hardening | #46 implementation and verification in progress | [Command contract](command-contract.md); native/production/package acceptance pending |
 | Performance and release prerequisites | External acceptance remains open | Unchanged configured-machine gate in #31; signing/trust and installed-machine acceptance stay separate |
 
 ### Baseline inventory

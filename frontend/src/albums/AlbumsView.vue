@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { itemCommand, useItemCommands, useCommands, runCommand } from '../shared/commands'
 import { destination } from '../shared/navigation/contract'
 import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
@@ -32,7 +34,6 @@ import { nameTooLong, trimName } from '../shared/names'
 import { icons } from '../design/icons'
 import CardGrid from '../shared/CardGrid.vue'
 import CollectionCard from '../shared/CollectionCard.vue'
-import { useItemCommands, useCommands } from '../shared/commands'
 import FeatureState from '../shared/FeatureState.vue'
 import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
@@ -314,6 +315,11 @@ watch(editorOpen, (open, previous) => {
   }
 })
 
+function submitAlbum() {
+  attempted.value = true
+  void runCommand('albums.save')
+}
+
 async function save() {
   attempted.value = true
   if (invalid.value || busy.value) return
@@ -466,27 +472,20 @@ const albumItems = useItemCommands(
   (album) => album.id,
   (album) => [
     {
-      id: `album.${album.id}.edit`,
-      group: 'library',
+      id: itemCommand('album.edit', album.id),
       title: () => t('albums.editNamed', { name: album.name }),
-      icon: 'pencil',
       enabled: () => !busy.value,
       run: () => edit(album),
     },
     {
-      id: `album.${album.id}.block`,
-      group: 'library',
+      id: itemCommand('album.block', album.id),
       title: () => t('blocked.confirmTitle', { name: album.name }),
-      icon: 'eye-off',
       enabled: () => !busy.value,
       run: () => blockAlbum(album),
     },
     {
-      id: `album.${album.id}.delete`,
-      group: 'library',
+      id: itemCommand('album.delete', album.id),
       title: () => t('albums.deleteNamed', { name: album.name }),
-      icon: 'trash',
-      danger: true,
       enabled: () => !busy.value,
       run: () => remove(album),
     },
@@ -498,17 +497,12 @@ function albumMoreItems(id: number) {
 useCommands([
   {
     id: 'albums.new',
-    group: 'library',
-    title: () => t('albums.new'),
-    icon: 'plus',
     enabled: () => !busy.value,
     run: newAlbum,
   },
   {
     id: 'albums.save',
-    group: 'library',
     title: () => t(editing.value === null ? 'albums.create' : 'albums.save'),
-    icon: 'save',
     available: () => editorOpen.value,
     enabled: () => !busy.value && !invalid.value,
     run: save,
@@ -528,16 +522,16 @@ useCommands([
           })
         "
       >
-        <UButton
+        <CommandButton
           ref="newAlbumButton"
           data-action="new-album"
           :icon="icons.plus"
           color="primary"
           variant="solid"
           :disabled="busy"
+          command="albums.new"
           @click.capture="rememberTrigger"
-          @click="newAlbum"
-          >{{ t('albums.new') }}</UButton
+          >{{ t('albums.new') }}</CommandButton
         >
       </PageHeader>
     </template>
@@ -610,13 +604,13 @@ useCommands([
           icon="albums"
           :title="t(filter === 'all' ? 'albums.empty' : 'albums.filterEmpty')"
           :text="t('albums.emptyHint')"
-          ><UButton
+          ><CommandButton
             :icon="icons.plus"
             color="primary"
             variant="solid"
+            command="albums.new"
             @click.capture="rememberTrigger"
-            @click="newAlbum"
-            >{{ t('albums.new') }}</UButton
+            >{{ t('albums.new') }}</CommandButton
           ></FeatureState
         >
         <div v-if="albums.loaded && albums.list.length" class="album-guidance">
@@ -675,7 +669,7 @@ useCommands([
             @input="rememberField"
             @select="rememberField"
             @keyup="rememberField"
-            @submit.prevent="save"
+            @submit.prevent="submitAlbum"
           >
             <UAlert v-if="conflict" role="alert" color="warning" :title="t('error.albumChanged')">
               <template #actions
