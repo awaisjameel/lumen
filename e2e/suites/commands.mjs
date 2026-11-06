@@ -63,6 +63,11 @@ async function viewer() {
   await page.locator('.viewer').click({ offset: { x: 20, y: 100 } })
 }
 async function closeViewer() {
+  if (await page.$('.viewer .inspector')) {
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('.viewer .inspector', { hidden: true })
+    s.check('Escape retires the details layer before the viewer', !!(await page.$('.viewer')))
+  }
   await page.keyboard.press('Escape')
   await page.waitForSelector('.viewer', { hidden: true })
 }
@@ -160,6 +165,7 @@ try {
   await until(async () => await rotation() === (before + 2) % 4, 'retry did not complete')
   s.check('one failed request reports once and the same button succeeds on retry', trace.calls.filter(row => row.name === 'SetAdjustment').length === 2)
   await trace.idle()
+  s.check('request instrumentation completes without errors', trace.errors.length === 0, trace.errors)
   evidence.push({ phase, writes: trace.calls.filter(row => row.name === 'SetAdjustment').length, instrumentationErrors: trace.errors })
   await closeViewer()
   s.check('closing the viewer returns focus to its grid', await page.evaluate(() => document.activeElement?.closest('.scroller') !== null))
