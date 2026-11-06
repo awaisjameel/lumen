@@ -38,6 +38,7 @@ Install the pinned fixture tooling with `python -m pip install -r e2e/requiremen
 | `undo-recovery` | Retries partial selection and multi-album inverses, preserves correction provenance and newer edits, reverses a self-covering place correction, retires deleted-album inverses and restarts | three generated photos in its own library |
 | `tagging-recovery` | Injects annotation and OCR queue faults, checks draft retention versus committed tags, and verifies owned scheduling and text recovery in-session and across restart | two generated documents in their own library |
 | `smart-album-preview` | Compares parent/candidate request counts, payloads and latency on 100,000 synthetic rows over 100 days; real editor rules, privacy/retry and cancellation | generated photos/videos and an isolated metadata fixture |
+| `navigation` | Real onboarding, every production destination, typed shell/collection/command/settings handoffs, aliases/history, malformed IDs, PIN/media relocking, themes/drawer and persisted startup | generated photos/faces in its scratch profile and library |
 | `album-draft` | Parent draft-loss reproduction; global privacy Undo with held/refused reads, local retry, reference redaction, guarded save conflicts/ID reuse, cancellation, navigation and restart | two generated photos in copied scratch libraries |
 | `collection-places` | Reproduces stale parent metadata, then checks same-count correction/Undo, current place links, coalescing, privacy/read retry and back/forward/lifetime ownership | two generated photos in copied scratch libraries |
 | `organise` | Organise on disk: preview, move, Undo, checked on the files themselves | base library + two files of its own |
@@ -150,6 +151,12 @@ The checkout's header revision-prop contract identifies legacy versus live
 metadata before the correction outcome is measured. Later parents must retain
 the live names/destinations; the historical stale-parent comparison is retained
 for checkouts before the repair.
+
+`navigation` records method identity and structured refusal metadata for failed
+runtime responses, never arguments or PINs. Expected cancellations, the explicit
+stale-person fixture and PIN-gate probes are checked by method/kind/code rather
+than allowing all resource errors. Fixture reloads await a rendered, settled
+page; interaction deadlines and the no-unexpected-error assertion remain active.
 
 `undo-recovery` shares the bridge instrumentation in `lib/mutation-trace.mjs`
 and control helpers in `lib/controls.mjs`. Its held requests make partial

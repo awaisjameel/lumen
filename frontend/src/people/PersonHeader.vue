@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import { destination } from '../shared/navigation/contract'
+import UButton from '../shared/navigation/NavButton.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import RouterLink from '../shared/navigation/NavLink.vue'
+import { useNavigation } from '../shared/navigation/router'
 import { BlockKind, engine, ErrorCode, errorCode, Filter } from '../bridge'
 import type { NamedPlace, Person, PersonFacts } from '../bridge'
 import { icons } from '../design/icons'
@@ -24,7 +26,7 @@ import { usePeople } from './store'
 
 const props = defineProps<{ id: number; reviewing?: boolean; faceCount?: number }>()
 const emit = defineEmits<{ loaded: [person: Person] }>()
-const router = useRouter()
+const router = useNavigation()
 const people = usePeople()
 const person = ref<Person | null>(null)
 const dates = ref('')
@@ -105,7 +107,7 @@ const companions = computed(() => facts.value?.companions ?? [])
 const meta = computed(
   () => `${t('person.photos', { n: person.value?.count ?? 0 })}${dates.value ? ` · ${dates.value}` : ''}`,
 )
-const review = () => router.push({ name: 'personFaces', params: { id: props.id } })
+const review = () => router.push(destination({ name: 'personFaces', params: { id: props.id } }))
 function edit() {
   if (person.value) void rename.open(true, person.value.name)
 }
@@ -120,7 +122,7 @@ async function saved(shown: number, name: string) {
   else notify({ id: 'people.merged', kind: 'success', title: t('person.merged', { name }) })
   void people.load().catch(logError)
   if (!alive || props.id !== previous.id) return
-  if (shown !== props.id) await router.replace({ name: 'person', params: { id: shown } })
+  if (shown !== props.id) await router.replace(destination({ name: 'person', params: { id: shown } }))
   else await load()
 }
 async function blockPerson(hide = false) {
@@ -130,7 +132,7 @@ async function blockPerson(hide = false) {
     // Remove cached identity before navigating, including its portrait.
     if (!alive || id !== props.id) return
     clear()
-    await router.push({ name: 'people' })
+    await router.push(destination({ name: 'people' }))
   }
 }
 const actions = computed(() => [
@@ -138,9 +140,9 @@ const actions = computed(() => [
   {
     label: t('person.changePicture'),
     icon: icons.face,
-    to: { name: 'personFaces', params: { id: props.id }, query: { picture: '1' } },
+    to: destination({ name: 'personFaces', params: { id: props.id }, query: { picture: '1' } }),
   },
-  { label: t('person.review'), icon: icons.face, to: { name: 'personFaces', params: { id: props.id } } },
+  { label: t('person.review'), icon: icons.face, to: destination({ name: 'personFaces', params: { id: props.id } }) },
   { label: t('person.mergeWith'), icon: icons.merge, onSelect: edit },
   { label: t('people.hide'), icon: icons['eye-off'], onSelect: () => blockPerson(true) },
   { label: t('people.block'), icon: icons.blocked, color: 'error' as const, onSelect: () => blockPerson() },
@@ -202,7 +204,7 @@ useCommands([
               v-for="p in companions"
               :key="p.id"
               class="companion"
-              :to="{ name: 'person', params: { id: p.id } }"
+              :to="destination({ name: 'person', params: { id: p.id } })"
               data-person-companion
             >
               <FaceThumb v-if="p.cover.id" :face="p.cover" :size="20" round />
@@ -214,7 +216,7 @@ useCommands([
             <span class="caption"><Icon name="places" :size="14" />{{ t('person.topPlaces') }}</span>
             <template v-for="(p, i) in places" :key="p.id">
               <span v-if="i" class="caption" aria-hidden="true">·</span>
-              <RouterLink class="place" :to="{ name: 'place', params: { id: p.id } }" data-person-place
+              <RouterLink class="place" :to="destination({ name: 'place', params: { id: p.id } })" data-person-place
                 ><bdi>{{ p.name }}</bdi></RouterLink
               >
             </template>
@@ -226,7 +228,7 @@ useCommands([
           v-if="!reviewing"
           color="primary"
           variant="solid"
-          :to="{ name: 'personFaces', params: { id } }"
+          :to="destination({ name: 'personFaces', params: { id } })"
           :icon="icons.face"
           >{{ t('person.review') }}</UButton
         >
@@ -242,14 +244,14 @@ useCommands([
     </CollectionHero>
     <nav v-if="person" class="person-tabs" :aria-label="t('person.view')">
       <RouterLink
-        :to="{ name: 'person', params: { id } }"
+        :to="destination({ name: 'person', params: { id } })"
         class="tab"
         :class="{ active: !reviewing }"
         :aria-current="!reviewing ? 'page' : undefined"
         >{{ t('person.photosTab') }}<span>{{ formatNumber(person.count) }}</span></RouterLink
       >
       <RouterLink
-        :to="{ name: 'personFaces', params: { id } }"
+        :to="destination({ name: 'personFaces', params: { id } })"
         class="tab"
         :class="{ active: reviewing }"
         :aria-current="reviewing ? 'page' : undefined"

@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { destination, settingsSection, settingsSections } from '../shared/navigation/contract'
+import type { SettingsSection } from '../shared/navigation/contract'
+import type { IconName } from '../design/icons'
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, toRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useDestination, useNavigation } from '../shared/navigation/router'
 import AboutSection from '../about/AboutSection.vue'
 import UpdatesSection from '../updates/UpdatesSection.vue'
 import OcrSetting from './OcrSetting.vue'
@@ -54,7 +57,7 @@ import PrefRow from '../shared/PrefRow.vue'
 import FeatureState from '../shared/FeatureState.vue'
 import { useCommands, runCommand } from '../shared/commands'
 import type { MessageKey } from '../shared/i18n'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import IconButton from '../shared/IconButton.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import USwitch from '@nuxt/ui/components/Switch.vue'
@@ -359,29 +362,32 @@ async function resetSection(category: PrefCategory, section: string) {
 }
 const query = ref('')
 provide('settings-query', query)
-const category = ref('appearance')
+const category = ref<SettingsSection>('appearance')
 const searching = computed(() => !!query.value.trim())
 
 function clearSearch() {
   query.value = ''
 }
 function selectCategory(value: string) {
-  category.value = value
+  const section = settingsSection(value)
+  if (!section) return
+  category.value = section
   query.value = ''
-  void router.replace({ query: { ...route.query, section: value } })
+  void router.replace(destination({ name: 'settings', query: { section } }))
 }
-const categories = [
-  { id: 'appearance', label: 'settings.appearance', icon: 'appearance' },
-  { id: 'library', label: 'settings.category.library', icon: 'folder' },
-  { id: 'viewing', label: 'settings.category.viewing', icon: 'play' },
-  { id: 'search', label: 'settings.category.search', icon: 'smart' },
-  { id: 'indexing', label: 'settings.category.indexing', icon: 'cpu' },
-  { id: 'files', label: 'settings.category.files', icon: 'organise' },
-  { id: 'accessibility', label: 'settings.category.accessibility', icon: 'keyboard' },
-  { id: 'privacy', label: 'settings.privacy', icon: 'blocked' },
-  { id: 'presets', label: 'settings.category.presets', icon: 'sliders' },
-  { id: 'updates', label: 'settings.category.updates', icon: 'update' },
-] as const
+const categoryDetails: Record<SettingsSection, { label: MessageKey; icon: IconName }> = {
+  appearance: { label: 'settings.appearance', icon: 'appearance' },
+  library: { label: 'settings.category.library', icon: 'folder' },
+  viewing: { label: 'settings.category.viewing', icon: 'play' },
+  search: { label: 'settings.category.search', icon: 'smart' },
+  indexing: { label: 'settings.category.indexing', icon: 'cpu' },
+  files: { label: 'settings.category.files', icon: 'organise' },
+  accessibility: { label: 'settings.category.accessibility', icon: 'keyboard' },
+  privacy: { label: 'settings.privacy', icon: 'blocked' },
+  presets: { label: 'settings.category.presets', icon: 'sliders' },
+  updates: { label: 'settings.category.updates', icon: 'update' },
+}
+const categories = settingsSections.map((id) => ({ id, ...categoryDetails[id] }))
 const categoryItems = computed(() => categories.map((item) => ({ value: item.id, label: t(item.label) })))
 const preferenceGroups = {
   appearance: ['theme', 'accent', 'density', 'textScale'],
@@ -422,25 +428,17 @@ const modifiedCategories = computed(() => {
 })
 // Old deep links still reach the category that now contains their controls.
 function categoryOf(id: string) {
-  return id === 'video'
-    ? 'viewing'
-    : id === 'compression'
-      ? 'files'
-      : id === 'about'
-        ? 'updates'
-        : id === 'ai'
-          ? 'search'
-          : id
+  return settingsSection(id)
 }
 // A notice elsewhere can open Settings at one category (?section=updates).
-const route = useRoute()
-const router = useRouter()
+const route = useDestination('settings')
+const router = useNavigation()
 watch(
-  () => route.query.section,
+  () => route.value?.query.section,
   (section) => {
-    if (typeof section === 'string' && categories.some((item) => item.id === categoryOf(section))) {
-      if (category.value !== categoryOf(section)) query.value = ''
-      category.value = categoryOf(section)
+    if (section) {
+      if (category.value !== section) query.value = ''
+      category.value = section
     }
   },
   { immediate: true },
@@ -680,7 +678,7 @@ const shownCategories = computed(() =>
     .filter(([id, keys]) => (searching.value || categoryOf(id) === category.value) && keys.some((key) => matches(key)))
     .map(([id]) => ({ id })),
 )
-const currentCategory = computed(() => categories.find((item) => item.id === category.value) ?? categories[0])
+const currentCategory = computed(() => ({ id: category.value, ...categoryDetails[category.value] }))
 const pageSaving = computed(() => prefs.saving || savingAny.value || resetting.value)
 async function resetAll() {
   if (
@@ -1309,7 +1307,9 @@ async function resetAll() {
                 :description="t('settings.organiseHint')"
               >
                 <template #default>
-                  <UButton to="/settings/organise" :icon="icons.organise">{{ t('organise.link') }}</UButton>
+                  <UButton :to="destination({ name: 'organise' })" :icon="icons.organise">{{
+                    t('organise.link')
+                  }}</UButton>
                 </template>
               </PrefRow>
               <ExportPresets v-if="row('files', 'settings.exportPresets', 'settings.exportPresetsHint')" />
@@ -1407,7 +1407,9 @@ async function resetAll() {
                 :description="t('settings.privacyText')"
               >
                 <template #default>
-                  <UButton to="/settings/blocked" :icon="icons.blocked">{{ t('blocked.title') }}</UButton>
+                  <UButton :to="destination({ name: 'blocked' })" :icon="icons.blocked">{{
+                    t('blocked.title')
+                  }}</UButton>
                 </template>
               </PrefRow>
             </div>

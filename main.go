@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -487,13 +488,46 @@ func (b *background) ServiceShutdown() error {
 // modules (/@vite/client, /@id/virtual:…), which have no extension either
 // and must reach it as they are, or the UI cannot start in development.
 func spa(files http.Handler) http.Handler {
+	data, err := assets.ReadFile("frontend/dist/navigation.json")
+	if err != nil {
+		panic("embedded navigation contract is missing")
+	}
+	var routes []string
+	if json.Unmarshal(data, &routes) != nil || len(routes) == 0 {
+		panic("embedded navigation contract is invalid")
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if path.Ext(r.URL.Path) == "" && r.URL.Path != "/" && !strings.HasPrefix(r.URL.Path, "/@") {
+		if r.URL.Path != "/" && !strings.HasPrefix(r.URL.Path, "/@") &&
+			(path.Ext(r.URL.Path) == "" || clientRoute(routes, r.URL.EscapedPath())) {
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
+			r.URL.RawPath = ""
 		}
 		files.ServeHTTP(w, r)
 	})
+}
+
+// Match only the contract's path shape. Invalid parameter values still reach
+// the frontend's unavailable-location state instead of an asset-server 404.
+func clientRoute(routes []string, requestPath string) bool {
+	parts := strings.Split(strings.Trim(requestPath, "/"), "/")
+	for _, route := range routes {
+		pattern := strings.Split(strings.Trim(route, "/"), "/")
+		if len(pattern) != len(parts) {
+			continue
+		}
+		matches := true
+		for i, part := range pattern {
+			if !strings.HasPrefix(part, ":") && !strings.EqualFold(part, parts[i]) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }
 
 // devtoolsArgs opens the WebView's DevTools protocol on localhost when

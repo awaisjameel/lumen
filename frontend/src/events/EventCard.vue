@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import RouterLink from '../shared/navigation/NavLink.vue'
+import { destination } from '../shared/navigation/contract'
 import UBadge from '@nuxt/ui/components/Badge.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UButton from '../shared/navigation/NavButton.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { Filter, MAX_NAME_LEN, thumbUrl } from '../bridge'
@@ -192,7 +194,7 @@ function renameTitle() {
       class="event-card"
       :class="{ pinned: event.pinned }"
       :data-collection="event.id"
-      :to="{ name: 'event', params: { id: event.id } }"
+      :to="destination({ name: 'event', params: { id: event.id } })"
       :title="event.name"
       icon="events"
     >
@@ -307,11 +309,11 @@ function renameTitle() {
           <RouterLink
             v-for="face in faces"
             :key="face.person"
-            :to="{ name: 'person', params: { id: face.person } }"
+            :to="destination({ name: 'person', params: { id: face.person } })"
             class="person"
             ><FaceThumb :face="face" :size="24" round />{{ face.name }}</RouterLink
           ><UButton
-            :to="{ name: 'event', params: { id: event.id } }"
+            :to="destination({ name: 'event', params: { id: event.id } })"
             variant="ghost"
             color="neutral"
             size="sm"

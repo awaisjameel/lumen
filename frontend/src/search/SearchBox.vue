@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 // The one search box: type a description and press Enter to search by what's
 // in the photos (names of people narrow it to them), or pick a matching
 // person, Thing or recent search. Ctrl+F or / focuses it.
@@ -6,7 +7,7 @@ import IconButton from '../shared/IconButton.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useLocation, useNavigation } from '../shared/navigation/router'
 import { engine } from '../bridge'
 import type { Person, Tag } from '../bridge'
 import { logError } from '../shared/errors'
@@ -25,8 +26,8 @@ defineProps<{
   button?: boolean
 }>()
 
-const route = useRoute()
-const router = useRouter()
+const route = useLocation()
+const router = useNavigation()
 const lib = useLibrary()
 const recent = useRecentSearches()
 
@@ -68,7 +69,7 @@ const options = computed<Option[]>(() => {
 
 // Show the current query while on the results page, and forget it on leaving.
 watch(
-  () => (route.name === 'search' ? String(route.query.q ?? '') : null),
+  () => (route.value?.name === 'search' ? (route.value.query.q ?? '') : null),
   (q, before) => {
     if (q !== null) text.value = q
     else if (before != null) text.value = ''
@@ -133,10 +134,14 @@ function search() {
   close()
   void recent.remember(q)
   // A new search starts unrefined; the same one, unrefined, runs again.
-  if (route.name === 'search' && route.query.q === q && Object.keys(route.query).length === 1) {
+  if (
+    route.value?.name === 'search' &&
+    route.value.query.q === q &&
+    Object.values(route.value.query).filter((value) => value !== undefined).length === 1
+  ) {
     void lib.setScope({ kind: 'search', query: q }).catch(logError)
   } else {
-    void router.push({ name: 'search', query: { q } })
+    void router.push(destination({ name: 'search', query: { q } }))
   }
 }
 
@@ -150,7 +155,7 @@ function choose(o: Option | undefined) {
 
 function clear() {
   text.value = ''
-  if (route.name === 'search') void router.push('/')
+  if (route.value?.name === 'search') void router.push(destination({ name: 'library' }))
   field.value?.inputRef?.focus()
 }
 

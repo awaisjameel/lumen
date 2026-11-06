@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import UButton from '@nuxt/ui/components/Button.vue'
+import { destination } from '../shared/navigation/contract'
+import UButton from '../shared/navigation/NavButton.vue'
 import UPopover from '@nuxt/ui/components/Popover.vue'
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useDestination, useNavigation } from '../shared/navigation/router'
 import { BlockKind, engine, ErrorCode, errorCode } from '../bridge'
 import type { Face, Person } from '../bridge'
 import { icons } from '../design/icons'
@@ -27,10 +28,10 @@ import PersonHeader from './PersonHeader.vue'
 import PersonPicker from './PersonPicker.vue'
 import { usePeople } from './store'
 
-const route = useRoute()
-const router = useRouter()
+const route = useDestination('personFaces')
+const router = useNavigation()
 const people = usePeople()
-const id = computed(() => Number(route.params.id))
+const id = computed(() => route.value?.params.id ?? 0)
 const person = ref<Person | null>(null)
 const faces = shallowRef<Face[]>([])
 const selected = shallowRef(new Set<number>())
@@ -39,7 +40,7 @@ const loading = ref(false)
 const error = ref('')
 const picker = ref(false)
 const limit = ref(24)
-const pictureHint = ref(route.query.picture === '1')
+const pictureHint = ref(route.value?.query.picture === '1')
 let revision = 0
 let loadRequest = 0
 onBeforeUnmount(() => {
@@ -50,6 +51,7 @@ const name = computed(() => person.value?.name || t('person.unnamed'))
 const count = computed(() => selected.value.size)
 
 async function load() {
+  if (!id.value) return
   const request = ++loadRequest
   loading.value = true
   try {
@@ -141,7 +143,7 @@ async function act(fn: (ids: number[], before: Person) => Promise<void>) {
     await load().catch(async (e: unknown) => {
       if (requested !== revision) return
       if (errorCode(e) !== ErrorCode.NotFound) throw e
-      await router.replace({ name: 'people' })
+      await router.replace(destination({ name: 'people' }))
     })
   } catch (e) {
     if (requested === revision) error.value = errorText(e)
@@ -256,7 +258,7 @@ useCommands([
       <PageHeader
         :title="t('faces.title', { name })"
         :subtitle="person ? t('faces.count', { n: faces.length }) : t('faces.loading')"
-        :back="{ to: { name: 'person', params: { id } }, label: name }"
+        :back="id ? { to: destination({ name: 'person', params: { id } }), label: name } : undefined"
       >
         <IconButton
           :icon="icons.refresh"
@@ -349,7 +351,9 @@ useCommands([
       icon="face"
       :title="t('faces.none')"
       :text="t('faces.noneHint')"
-      ><UButton color="primary" variant="solid" to="/people">{{ t('person.back') }}</UButton></FeatureState
+      ><UButton color="primary" variant="solid" :to="destination({ name: 'people' })">{{
+        t('person.back')
+      }}</UButton></FeatureState
     >
     <p v-if="person" class="kept"><Icon name="info" :size="16" />{{ t('faces.kept') }}</p>
     <template #dock>

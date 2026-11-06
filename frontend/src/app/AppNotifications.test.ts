@@ -8,7 +8,7 @@ import UToast from '@nuxt/ui/components/Toast.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import ui from '@nuxt/ui/vue-plugin'
 import { useToast } from '@nuxt/ui/composables'
-import { createRouter, createMemoryHistory } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { dismiss, notify, notificationToaster } from '../shared/notify'
 import AppNotifications from './AppNotifications.vue'
 
@@ -31,10 +31,7 @@ function mountToaster(overlay?: Component) {
       return () => h('div', [h(AppNotifications), overlay ? h(overlay) : null])
     },
   })
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/', component: { render: () => null } }],
-  })
+  const router = createTestNavigation()
   wrapper = mount(() => h(UApp, { toaster: notificationToaster }, { default: () => h(Host) }), {
     attachTo: document.body,
     global: { plugins: [ui, router] },

@@ -149,6 +149,25 @@ are in [e2e/README.md](../e2e/README.md). Do not run `--clean` during another
 capture or test. [Documentation screenshots](screenshots/README.md) have their
 own reproducible capture command and media attribution.
 
+## Changing application navigation
+
+Start with [the contract and migration inventory](navigation-contract.md).
+Declare a destination in `shared/navigation/contract.ts`, bind its view in root
+`router.ts`, add its independent expected URL, and construct internal targets
+with `destination(...)`. A settings section also requires exhaustive UI
+metadata. Keep shell presentation in `app/nav.ts`; raw incoming URLs belong at
+the provider boundary. Reuse the memory-navigation factory in component tests.
+
+`npm run check` includes actual negative TypeScript/Vue compilation and isolated
+mutations proving a renamed route, missing view binding and `/blocked` link
+fail required checks. The fixtures use a separate compiler project; rejection
+markers identify expected failing lines without casts or suppression comments.
+Vite emits the route-shape manifest consumed by Go's SPA handler, so rebuild the
+frontend before Go checks after changing navigation. The native `navigation`
+suite covers production controls and input boundaries; CI retains its reports,
+the collection-recovery suite and all existing child regressions, then builds
+the installer. This packaging check creates no release or distribution.
+
 ## Troubleshooting the build
 
 | Symptom | Check |

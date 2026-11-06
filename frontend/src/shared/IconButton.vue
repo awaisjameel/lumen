@@ -2,12 +2,14 @@
 // A button that shows only an icon. Its label is said twice: as the button's
 // accessible name, and as a tooltip on hover and keyboard focus, so no icon
 // is left to be guessed. Everything else given to it reaches the button.
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from './navigation/NavButton.vue'
 import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { computed, getCurrentInstance, useAttrs, useTemplateRef } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
+import type { Destination } from './navigation/contract'
 
 defineProps<{
+  to?: Destination
   /** What the button does: its accessible name and, unless tip is given, its tooltip. */
   label: string
   /** The icon; the default slot replaces it for one that is drawn here. */
@@ -38,7 +40,7 @@ defineExpose({
 
 <template>
   <UTooltip :text="tip ?? label" :kbds="kbds" :content="side ? { side } : undefined">
-    <UButton ref="button" v-bind="buttonAttrs" :icon="icon" :aria-label="label" square>
+    <UButton ref="button" v-bind="buttonAttrs" :to="to" :icon="icon" :aria-label="label" square>
       <template v-if="$slots.default" #default><slot /></template>
     </UButton>
   </UTooltip>

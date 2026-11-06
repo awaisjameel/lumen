@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
 import { UpdateChannel, UpdateFailure, UpdatePhase } from '../bridge'
 import { mountInApp, recordNotifications } from '../shared/testing'
@@ -27,11 +27,8 @@ it('announces an already-known offer and replaces it with the ready notice under
     dismissed: '',
   }
   const notices = recordNotifications()
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/settings', name: 'settings', component: { render: () => null } }],
-  })
-  await router.push('/settings')
+  const router = createTestNavigation()
+  await router.visit('/settings')
   try {
     mountInApp(UpdateNotice, { plugins: [router] })
     await flushPromises()
@@ -42,7 +39,7 @@ it('announces an already-known offer and replaces it with the ready notice under
     expect(notices.find('update')?.title).toContain('ready')
     notices.find('update')?.actions?.[0]?.run()
     await flushPromises()
-    expect(router.currentRoute.value.query.section).toBe('updates')
+    expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1])).section).toBe('updates')
   } finally {
     notices.stop()
   }

@@ -120,6 +120,19 @@ it('recognises a late cancelled runtime read without hiding another late failure
   expect(isCancelled(new CancelledRejectionError(promise, new Error('context canceled')))).toBe(false)
 })
 
+it('recognises only a coded visibility refusal that arrives after a read was cancelled', () => {
+  const promise = CancellablePromise.resolve()
+  const refused = new Call.RuntimeError('not found', { cause: { code: ErrorCode.NotFound } })
+  expect(isCancelled(new CancelledRejectionError(promise, refused))).toBe(true)
+  expect(isCancelled(refused)).toBe(false)
+  expect(isCancelled(new CancelledRejectionError(promise, new Call.RuntimeError('not found')))).toBe(false)
+  expect(
+    isCancelled(new CancelledRejectionError(promise, new Error('not found', { cause: { code: ErrorCode.NotFound } }))),
+  ).toBe(false)
+  expect(isCancelled(new CancelledRejectionError(promise, new TypeError('Failed to fetch')))).toBe(false)
+  expect(isCancelled(new TypeError('Failed to fetch'))).toBe(false)
+})
+
 it('localizes every invalid-album reason without showing engine prose', () => {
   for (const code of [
     ErrorCode.InvalidAlbum,

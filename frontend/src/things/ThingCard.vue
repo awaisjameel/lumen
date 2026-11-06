@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 // Card actions share their definitions with the command palette.
 import IconButton from '../shared/IconButton.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UButton from '../shared/navigation/NavButton.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, ref, watch } from 'vue'
 import { Filter, MAX_NAME_LEN, TagKind, thumbUrl } from '../bridge'
@@ -126,7 +127,7 @@ function renameTitle() {
     <CollectionCard
       class="thing-card"
       :data-collection="tag.id"
-      :to="{ name: 'thing', params: { id: tag.id } }"
+      :to="destination({ name: 'thing', params: { id: tag.id } })"
       :title="tag.name"
       :cover="tag.cover && tag.coverThumb ? thumbUrl(tag.cover, tag.coverThumb) : undefined"
       :icon="icon"
@@ -222,7 +223,8 @@ function renameTitle() {
         </div>
         <p v-if="!tag.count" class="text-xs text-dimmed">{{ t('things.viewEmptyHint') }}</p>
         <div v-if="inAlbum" class="text-xs text-dimmed">
-          {{ t('things.inAlbum') }} <UButton to="/albums" size="xs" variant="link">{{ t('things.editAlbum') }}</UButton>
+          {{ t('things.inAlbum') }}
+          <UButton :to="destination({ name: 'albums' })" size="xs" variant="link">{{ t('things.editAlbum') }}</UButton>
         </div>
       </template>
     </CollectionCard>

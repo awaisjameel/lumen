@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 // Duplicates: exact file copies and similar-looking photos. Each group
 // pre-selects the copy to keep (the engine's suggestion, or the user's own
 // pick); its Review button lists what would happen and does nothing until the
@@ -8,7 +9,7 @@ import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import ViewBar from '../shared/ViewBar.vue'
 import Segmented from '../shared/Segmented.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
@@ -481,7 +482,9 @@ useCommands([
         icon="duplicates"
         :title="t(completed ? 'duplicates.done' : 'duplicates.empty')"
         :text="completed ? t('duplicates.queueStats', { reviewed, skipped }) : t('duplicates.emptyHint')"
-        ><UButton v-if="completed" to="/" color="primary">{{ t('duplicates.library') }}</UButton
+        ><UButton v-if="completed" :to="destination({ name: 'library' })" color="primary">{{
+          t('duplicates.library')
+        }}</UButton
         ><UButton variant="outline" color="neutral" @click="checkAgain">{{
           t('duplicates.refresh')
         }}</UButton></FeatureState

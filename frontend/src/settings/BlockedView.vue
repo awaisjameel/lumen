@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 import UAlert from '@nuxt/ui/components/Alert.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -553,7 +554,7 @@ watch(
       <PageHeader
         :title="t('blocked.title')"
         :subtitle="unlocked ? t('blocked.count', { n: blocks.length }) : t('blocked.subtitleLocked')"
-        :back="{ to: '/settings', label: t('blocked.back') }"
+        :back="{ to: destination({ name: 'settings' }), label: t('blocked.back') }"
       >
         <template v-if="unlocked && !covered.block" #search>
           <UInput
@@ -775,7 +776,9 @@ watch(
         <UButton v-if="blocks.length" color="neutral" variant="outline" @click="clearFilters()">{{
           t('blocked.showAll')
         }}</UButton>
-        <UButton v-else to="/settings" color="neutral" variant="outline">{{ t('blocked.back') }}</UButton>
+        <UButton v-else :to="destination({ name: 'settings' })" color="neutral" variant="outline">{{
+          t('blocked.back')
+        }}</UButton>
       </FeatureState>
       <UAlert color="neutral" variant="subtle" :icon="icons.info" :title="t('blocked.privacy')" />
       <footer>

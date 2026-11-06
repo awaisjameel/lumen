@@ -3,7 +3,7 @@ import { createPinia, getActivePinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, shallowRef } from 'vue'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { deferred, mountInApp, recordNotifications } from '../shared/testing'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
@@ -107,15 +107,7 @@ function mountDetails(sel: Sel | null) {
   })
   const pinia = getActivePinia()
   if (!pinia) throw new Error('No active test Pinia')
-  const Page = { render: () => h('div') }
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: Page },
-      { path: '/people/:id', name: 'person', component: Page },
-      { path: '/things/:id', name: 'thing', component: Page },
-    ],
-  })
+  const router = createTestNavigation()
   return mountInApp(Host, { plugins: [pinia, router] })
 }
 

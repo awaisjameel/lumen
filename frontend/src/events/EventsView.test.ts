@@ -1,7 +1,8 @@
 import { t } from '../shared/i18n'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import type { RecordedNotifications } from '../shared/testing'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { destination } from '../shared/navigation/contract'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
@@ -49,8 +50,8 @@ afterEach(() => {
   notices.stop()
 })
 
-async function mounted() {
-  wrapper = mountInApp(EventsView, { plugins: [testRouter(), createPinia()] })
+async function mounted(navigation = testRouter()) {
+  wrapper = mountInApp(EventsView, { plugins: [navigation, createPinia()] })
   await flushPromises()
   return wrapper
 }
@@ -169,7 +170,8 @@ it('offers to block an event through the shared block flow', async () => {
 })
 
 it('drops a blocked event from the list and shows it again when the block is undone', async () => {
-  const w = await mounted()
+  const navigation = testRouter()
+  const w = await mounted(navigation)
   expect(w.findAll('[data-collection]')).toHaveLength(1)
   vi.mocked(engine.events).mockResolvedValue([])
   await showBlocksChanged() // what the block dialog does once the block is saved
@@ -177,6 +179,10 @@ it('drops a blocked event from the list and shows it again when the block is und
   expect(w.findAll('[data-collection]')).toHaveLength(0)
   expect(w.text()).toContain(t('events.cleared'))
   expect(w.get('a[href="/settings/blocked"]').text()).toBe(t('events.manageBlocked'))
+  await w.get('a[href="/settings/blocked"]').trigger('click')
+  await flushPromises()
+  expect(navigation.location.value).toMatchObject({ kind: 'valid', target: { name: 'blocked' } })
+  expect(navigation.resolve(destination({ name: 'blocked' })).matched).toEqual(['blocked'])
   vi.mocked(engine.events).mockResolvedValue([trip])
   await showBlocksChanged() // and what Undo, or unblocking, does
   await flushPromises()
@@ -206,19 +212,7 @@ it('shares event actions with the command palette and removes commands for hidde
 })
 
 function testRouter() {
-  return createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      { path: '/settings', component: { template: '<div />' } },
-      { path: '/settings/blocked', name: 'blocked', component: { template: '<div />' } },
-      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
-        name,
-        path: `/${name}/:id?`,
-        component: { template: '<div />' },
-      })),
-    ],
-  })
+  return createTestNavigation()
 }
 
 it('groups pinned events first then unpinned events by camera-clock month', async () => {

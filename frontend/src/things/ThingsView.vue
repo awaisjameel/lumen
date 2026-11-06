@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 import UAlert from '@nuxt/ui/components/Alert.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
@@ -226,9 +227,13 @@ useCommands([
         :title="t('nav.things')"
         :subtitle="t(all.length === 1 ? 'things.captionOne' : 'things.caption', { n: formatNumber(all.length) })"
       >
-        <UButton to="/settings?section=search" variant="ghost" color="neutral" :icon="icons.sliders">{{
-          t('settings.confidence')
-        }}</UButton>
+        <UButton
+          :to="destination({ name: 'settings', query: { section: 'search' } })"
+          variant="ghost"
+          color="neutral"
+          :icon="icons.sliders"
+          >{{ t('settings.confidence') }}</UButton
+        >
         <!-- The page filters its own Things; searching photos goes through the palette. -->
         <IconButton
           :icon="icons.search"
@@ -262,8 +267,13 @@ useCommands([
         variant="subtle"
         :title="t('things.aiUnavailable')"
         :description="t('things.aiHint')"
-        :actions="[{ label: t('things.aiSettings'), to: '/settings?section=search' }]"
-      />
+      >
+        <template #actions
+          ><UButton :to="destination({ name: 'settings', query: { section: 'search' } })">{{
+            t('things.aiSettings')
+          }}</UButton></template
+        >
+      </UAlert>
       <section class="teach" :aria-label="t('things.teach')">
         <span class="ai-mark"><Icon name="smart" :size="28" /></span>
         <div class="teach-copy">
@@ -313,7 +323,7 @@ useCommands([
             }}
             {{ found && !found.count ? t('things.viewEmptyHint') : '' }}</span
           >
-          <UButton :to="{ name: 'thing', params: { id: created.id } }" variant="ghost">{{
+          <UButton :to="destination({ name: 'thing', params: { id: created.id } })" variant="ghost">{{
             t('things.openPhotos')
           }}</UButton>
         </div>
@@ -389,13 +399,19 @@ useCommands([
       >
         <UButton v-if="query" variant="outline" @click="query = ''">{{ t('things.clearFilter') }}</UButton>
         <template v-else
-          ><UButton to="/settings?section=library">{{ t('things.addFolder') }}</UButton
-          ><UButton :to="{ name: 'blocked' }" variant="ghost">{{ t('things.manageBlocked') }}</UButton></template
+          ><UButton :to="destination({ name: 'settings', query: { section: 'library' } })">{{
+            t('things.addFolder')
+          }}</UButton
+          ><UButton :to="destination({ name: 'blocked' })" variant="ghost">{{
+            t('things.manageBlocked')
+          }}</UButton></template
         >
       </FeatureState>
       <p class="confidence">
         {{ t('things.confidenceHint') }}
-        <UButton to="/settings?section=search" variant="ghost" size="sm">{{ t('settings.confidence') }}</UButton>
+        <UButton :to="destination({ name: 'settings', query: { section: 'search' } })" variant="ghost" size="sm">{{
+          t('settings.confidence')
+        }}</UButton>
       </p>
     </div>
   </Page>

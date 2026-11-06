@@ -1,5 +1,6 @@
+import { destination } from './navigation/contract'
 import { shallowRef } from 'vue'
-import { useRouter } from 'vue-router'
+import { useNavigation } from './navigation/router'
 import { CompressionMode, CompressionEffort } from '../bridge'
 import type { CompressionInput, Selection } from '../bridge'
 import type { Command } from './commands'
@@ -32,7 +33,7 @@ export function compressionCommand(
   zone?: string,
   selection?: () => Selection | null,
 ): Command {
-  const router = useRouter()
+  const router = useNavigation()
   return {
     id,
     group: 'media',
@@ -42,7 +43,7 @@ export function compressionCommand(
     available,
     run: async () => {
       compressionRequest.value = { inputs: inputs().map((input) => ({ ...input })), selection: selection?.() ?? null }
-      await router.push('/compression')
+      await router.push(destination({ name: 'compression' }))
     },
   }
 }

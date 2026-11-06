@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import { destination } from '../shared/navigation/contract'
+import UButton from '../shared/navigation/NavButton.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import RouterLink from '../shared/navigation/NavLink.vue'
+import { useNavigation } from '../shared/navigation/router'
 import { BlockKind, engine } from '../bridge'
 import type { Person } from '../bridge'
 import { icons } from '../design/icons'
@@ -29,7 +31,7 @@ import PersonNameEditor from './PersonNameEditor.vue'
 import { usePeople } from './store'
 
 const lib = useLibrary()
-const router = useRouter()
+const router = useNavigation()
 const people = usePeople()
 const query = ref('')
 const saving = ref(false)
@@ -76,7 +78,7 @@ const personItems = useItemCommands(
       group: 'view',
       title: () => t('person.review'),
       icon: 'face',
-      run: () => router.push({ name: 'personFaces', params: { id: p.id } }),
+      run: () => router.push(destination({ name: 'personFaces', params: { id: p.id } })),
     },
     {
       id: `person.${p.id}.hide`,
@@ -154,9 +156,13 @@ useCommands([
       :title="people.error || t('people.unavailable', { error: facesError })"
       :text="facesError ? t('people.modelHint') : undefined"
     >
-      <UButton v-if="facesError" to="/settings?section=search" color="neutral" variant="outline">{{
-        t('nav.settings')
-      }}</UButton>
+      <UButton
+        v-if="facesError"
+        :to="destination({ name: 'settings', query: { section: 'search' } })"
+        color="neutral"
+        variant="outline"
+        >{{ t('nav.settings') }}</UButton
+      >
       <UButton color="primary" variant="solid" :disabled="people.loading" @click="refresh">{{
         t('common.retry')
       }}</UButton>
@@ -183,7 +189,7 @@ useCommands([
             v-for="p in named.slice(0, namedLimit)"
             :key="p.id"
             :data-person="p.id"
-            :to="{ name: 'person', params: { id: p.id } }"
+            :to="destination({ name: 'person', params: { id: p.id } })"
             :title="p.name"
             :count="t('person.photos', { n: p.count })"
             icon="people"
@@ -194,7 +200,11 @@ useCommands([
               ><UButton v-if="editing === p.id" color="neutral" variant="ghost" @click="rename.close()">{{
                 t('common.cancel')
               }}</UButton
-              ><RouterLink v-else :to="{ name: 'person', params: { id: p.id } }" :title="p.name" class="person-name"
+              ><RouterLink
+                v-else
+                :to="destination({ name: 'person', params: { id: p.id } })"
+                :title="p.name"
+                class="person-name"
                 ><bdi>{{ p.name }}</bdi></RouterLink
               ></template
             >
@@ -233,7 +243,7 @@ useCommands([
             :key="p.id"
             :data-person="p.id"
             :class="{ editing: editing === p.id }"
-            :to="{ name: 'person', params: { id: p.id } }"
+            :to="destination({ name: 'person', params: { id: p.id } })"
             :title="t('people.openPerson', { name: t('person.unnamed'), count: t('person.photos', { n: p.count }) })"
             :count="t('person.photos', { n: p.count })"
             icon="people"
@@ -293,14 +303,16 @@ useCommands([
       :text="t('people.emptyHint')"
     >
       <p class="w-full text-sm text-muted">{{ t('people.privacy') }}</p>
-      <UButton to="/settings?section=library" color="primary" variant="solid">{{ t('people.addFolder') }}</UButton
+      <UButton :to="destination({ name: 'settings', query: { section: 'library' } })" color="primary" variant="solid">{{
+        t('people.addFolder')
+      }}</UButton
       ><UButton color="neutral" variant="ghost" :disabled="people.loading" @click="refresh">{{
         t('people.refresh')
       }}</UButton>
     </FeatureState>
     <UButton
       class="mb-4"
-      to="/settings/blocked"
+      :to="destination({ name: 'blocked' })"
       color="neutral"
       variant="ghost"
       :icon="icons['eye-off']"

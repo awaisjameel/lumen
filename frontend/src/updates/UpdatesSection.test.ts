@@ -4,7 +4,7 @@ import type { Pinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import type { Component } from 'vue'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { engine, onUpdateStatus, UpdateChannel, UpdateFailure, UpdatePhase } from '../bridge'
 import type * as Bridge from '../bridge'
 import { t } from '../shared/i18n'
@@ -61,10 +61,7 @@ afterEach(() => {
 
 async function show(component: Component, status: Bridge.UpdateStatus, query = '') {
   vi.mocked(engine.updateStatus).mockResolvedValue(status)
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/settings', name: 'settings', component: { render: () => null } }],
-  })
+  const router = createTestNavigation()
   wrapper = mountInApp(component, { plugins: [pinia, router], props: { query } })
   await flushPromises()
   return wrapper

@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
@@ -877,7 +878,7 @@ useCommands([
             <FaceThumb :face="f" :size="36" round />
             <template v-if="f.person">
               <UButton
-                :to="{ name: 'person', params: { id: f.person } }"
+                :to="destination({ name: 'person', params: { id: f.person } })"
                 class="who"
                 variant="link"
                 :title="f.name || t('person.unnamed')"
@@ -913,7 +914,7 @@ useCommands([
         <ul v-if="tags.length" class="tags">
           <li v-for="tag in tags" :key="tag.id" :data-source="tag.source">
             <UButton
-              :to="{ name: 'thing', params: { id: tag.id } }"
+              :to="destination({ name: 'thing', params: { id: tag.id } })"
               variant="link"
               size="sm"
               class="tag-name"
@@ -1026,7 +1027,7 @@ useCommands([
         </MetaRow>
         <UButton
           v-if="detail.paths.length > 1"
-          to="/duplicates"
+          :to="destination({ name: 'duplicates' })"
           color="neutral"
           variant="soft"
           :icon="icons.duplicates"

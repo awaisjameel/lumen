@@ -73,6 +73,9 @@ async function start(label, baseline) {
   step(`wait for ${label}'s first rendered grid`)
   await app.page.waitForSelector('.scroller .cell', { visible: true })
   trace = await mutationTrace(app.page, baseline, readMethods)
+  // Grid rendering need not await preferences or sidebar counts. Retire no
+  // startup request when replacing either frontend under the observer.
+  await app.page.waitForNetworkIdle()
   step(`reload ${label} under the installed observer`)
   await app.page.reload()
   await app.page.waitForSelector('.scroller .cell', { visible: true })

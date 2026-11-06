@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import UButton from '@nuxt/ui/components/Button.vue'
+import { destination } from '../shared/navigation/contract'
+import UButton from '../shared/navigation/NavButton.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import RouterLink from '../shared/navigation/NavLink.vue'
+import { useNavigation } from '../shared/navigation/router'
 import { AlbumKind, BlockKind, engine, Filter, isCancelled, TagKind, thumbUrl } from '../bridge'
 import type { Event, NamedPlace, Place, View } from '../bridge'
 import { useAlbums } from '../albums/store'
@@ -31,7 +33,7 @@ const props = defineProps<{
   group?: Event | Place | null
 }>()
 const emit = defineEmits<{ changed: [] }>()
-const router = useRouter()
+const router = useNavigation()
 const things = useThings()
 const albums = useAlbums()
 const library = useLibrary()
@@ -258,7 +260,7 @@ async function togglePin() {
   }
 }
 function editRule() {
-  void router.push({ name: 'albums', query: { edit: props.id } })
+  void router.push(destination({ name: 'albums', query: { edit: props.id } }))
 }
 function addPhotos() {
   picker.value = true
@@ -284,7 +286,7 @@ defineExpose({ addPhotos, editRule })
       <template v-for="p in places" :key="p.id">
         <span aria-hidden="true"> · </span>
         <RouterLink
-          :to="{ name: 'place', params: { id: p.id } }"
+          :to="destination({ name: 'place', params: { id: p.id } })"
           class="underline decoration-dotted underline-offset-2 hover:text-highlighted"
           data-collection-place
           ><bdi>{{ p.name }}</bdi></RouterLink
@@ -351,7 +353,7 @@ defineExpose({ addPhotos, editRule })
         :icon="icons.map"
         color="primary"
         variant="solid"
-        :to="{ name: 'places', query: { place: id } }"
+        :to="destination({ name: 'places', query: { place: id } })"
         >{{ t('collection.openMap') }}</UButton
       >
       <UButton v-if="kind !== 'favourites'" color="neutral" variant="ghost" :disabled="busy" @click="blockCollection">{{

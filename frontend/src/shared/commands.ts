@@ -4,7 +4,7 @@
 // when it is available. A feature registers its commands while its view is
 // mounted; the shell registers navigation. The engine remains the authority:
 // a command only asks, and every service checks again.
-import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
+import type { NavigationMenuItem as DropdownMenuItem } from './navigation/menu'
 import { computed, onScopeDispose, shallowRef, toValue, watch } from 'vue'
 import type { MaybeRefOrGetter } from 'vue'
 import { icons } from '../design/icons'

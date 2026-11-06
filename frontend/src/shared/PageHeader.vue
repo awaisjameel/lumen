@@ -5,8 +5,8 @@
 // it, never here, so the bar never wraps into a jumble. A page inside
 // another (a person, an album, the Blocked list) leads with a breadcrumb:
 // the parent's name, which goes back to it, then the page's own name.
-import UButton from '@nuxt/ui/components/Button.vue'
-import type { RouteLocationRaw } from 'vue-router'
+import UButton from './navigation/NavButton.vue'
+import type { Destination } from './navigation/contract'
 import { icons } from '../design/icons'
 import { t } from './i18n'
 
@@ -15,7 +15,7 @@ defineProps<{
   /** A live count or short context under the title. */
   subtitle?: string
   /** The page this one sits in: its name is shown and goes back to it. */
-  back?: { to: RouteLocationRaw; label: string }
+  back?: { to: Destination; label: string }
 }>()
 </script>
 

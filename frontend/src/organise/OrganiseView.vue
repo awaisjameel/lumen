@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 // Organise files on disk: move photos into folders by a scheme the user
 // writes, after a dry-run preview, with live progress and a full undo. The
 // engine does all the moving (internal/fileops); this page only asks.
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
 import { storeToRefs } from 'pinia'
@@ -472,7 +473,7 @@ onScopeDispose(() => removeRunCommands())
       ><PageHeader
         :title="t(tool === 'files' ? 'organise.filesTitle' : 'organise.title')"
         :subtitle="caption"
-        :back="{ to: '/settings', label: t('organise.back') }"
+        :back="{ to: destination({ name: 'settings' }), label: t('organise.back') }"
     /></template>
     <template #toolbar
       ><ViewBar :label="t('organise.tools')"
@@ -501,7 +502,9 @@ onScopeDispose(() => removeRunCommands())
         icon="files"
         :title="t('organise.filesEmptyTitle')"
         :text="t('organise.filesEmptyText')"
-        ><UButton to="/" color="primary" variant="solid">{{ t('organise.selectFiles') }}</UButton></FeatureState
+        ><UButton :to="destination({ name: 'library' })" color="primary" variant="solid">{{
+          t('organise.selectFiles')
+        }}</UButton></FeatureState
       >
       <section v-else class="card">
         <h2>{{ t('organise.filesHeading') }}</h2>
@@ -511,7 +514,7 @@ onScopeDispose(() => removeRunCommands())
           <UButton color="primary" variant="solid" :disabled="busy" @click="filesOpen = true">{{
             t('organise.openFiles')
           }}</UButton
-          ><UButton to="/" variant="ghost">{{ t('organise.changeSelection') }}</UButton>
+          ><UButton :to="destination({ name: 'library' })" variant="ghost">{{ t('organise.changeSelection') }}</UButton>
         </div>
       </section>
     </section>
@@ -566,7 +569,9 @@ onScopeDispose(() => removeRunCommands())
         icon="organise"
         :title="t('organise.emptyTitle')"
         :text="t('organise.emptyText')"
-        ><UButton to="/settings" color="primary" variant="solid">{{ t('organise.addFolder') }}</UButton></FeatureState
+        ><UButton :to="destination({ name: 'settings' })" color="primary" variant="solid">{{
+          t('organise.addFolder')
+        }}</UButton></FeatureState
       >
 
       <section v-if="editing" data-organise-editor class="scheme">
@@ -814,7 +819,9 @@ onScopeDispose(() => removeRunCommands())
           }}</span></WorkProgress
         >
         <div class="actions">
-          <UButton to="/" color="neutral" variant="outline">{{ t('organise.backToLibrary') }}</UButton>
+          <UButton :to="destination({ name: 'library' })" color="neutral" variant="outline">{{
+            t('organise.backToLibrary')
+          }}</UButton>
         </div>
       </section>
 
@@ -846,7 +853,7 @@ onScopeDispose(() => removeRunCommands())
             @click="organiseMore"
             >{{ t('organise.more') }}</UButton
           >
-          <UButton to="/" variant="ghost">{{ t('organise.backToLibrary') }}</UButton>
+          <UButton :to="destination({ name: 'library' })" variant="ghost">{{ t('organise.backToLibrary') }}</UButton>
         </div>
       </section>
       <UAlert

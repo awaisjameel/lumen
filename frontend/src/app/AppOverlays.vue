@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 // Everything that can cover a page, mounted once: the confirmation, the
 // block dialog, the command palette and the shortcut reference. It also
 // owns the page-wide shortcut listener and the commands that belong to the
 // app as a whole (going somewhere, the palette, the reference).
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useNavigation } from '../shared/navigation/router'
 import { useLibrary } from '../library/store'
 import BlockDialog from '../shared/BlockDialog.vue'
 import { onGlobalKey, useCommands } from '../shared/commands'
@@ -15,7 +16,7 @@ import { startPortalLayers } from '../shared/overlay'
 import { undoOutcomes } from '../shared/undo'
 import { navEntries } from './nav'
 
-const router = useRouter()
+const router = useNavigation()
 const lib = useLibrary()
 
 // The palette and the shortcut reference are loaded when first asked for:
@@ -33,12 +34,12 @@ const inApp = () => lib.ready && lib.sources.length > 0
 
 useCommands([
   ...navEntries.map((e): Command => ({
-    id: `go.${e.name}`,
+    id: `go.${e.to.name}`,
     group: 'navigate',
     title: () => t('commands.goTo', { place: t(e.label) }),
     icon: e.icon,
     available: inApp,
-    run: () => router.push(e.path),
+    run: () => router.push(e.to),
   })),
   // Videos have no page of their own: this opens Library on its Videos
   // filter, while videos are indexed.
@@ -48,7 +49,7 @@ useCommands([
     title: () => t('commands.showVideos'),
     icon: 'video',
     available: () => inApp() && lib.settings.videos,
-    run: () => router.push('/videos'),
+    run: () => router.push(destination({ name: 'videos' })),
   },
   {
     id: 'app.commandPalette',

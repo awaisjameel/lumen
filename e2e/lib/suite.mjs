@@ -60,6 +60,10 @@ export const SUITES = {
     port: 9421,
     about: 'bounded smart-rule previews: real mixed media, privacy/retry, cancellation and 100,000-row parent comparison',
   },
+  navigation: {
+    port: 9424,
+    about: 'all production destinations, typed controls, malformed input, startup, history, drawer and PIN/media boundaries',
+  },
   'album-draft': {
     port: 9423,
     about: 'album draft admission across privacy Undo, failed reads, reference removal, guarded saves and navigation',

@@ -13,10 +13,34 @@ const PIN = '724691'
 mkdirSync(photos, { recursive: true })
 let app
 const requests = []
+const diagnostics = []
+const consoleReads = []
+const failedRequests = []
+const pendingRequests = new Map()
+let phase = 'initial fixture'
 function watch(page) {
   s.watch(page)
+  page.on('pageerror', error => diagnostics.push({ type: 'pageerror', phase, stack: error.stack ?? String(error), pending: [...pendingRequests.values()] }))
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    const current = { type: 'console', phase, location: message.location(), trace: message.stackTrace(), pending: [...pendingRequests.values()] }
+    consoleReads.push(Promise.all(message.args().map(value => value.evaluate(value =>
+      value && typeof value.stack === 'string' ? value.stack : String(value)).catch(() => message.text()))).then(parts =>
+      diagnostics.push({ ...current, stack: parts.join(' ') || message.text() })))
+  })
+  page.on('requestfailed', request => {
+    failedRequests.push({ phase, method: pendingRequests.get(request), error: request.failure()?.errorText })
+    pendingRequests.delete(request)
+  })
+  page.on('requestfinished', request => pendingRequests.delete(request))
   page.on('request', (request) => {
     const url = new URL(request.url())
+    if (url.pathname === '/wails/runtime') {
+      try {
+        const body = JSON.parse(request.postData() ?? 'null')
+        pendingRequests.set(request, { method: body?.args?.methodID ?? body?.args?.methodName, transport: body?.method })
+      } catch { /* Non-binding requests carry no parameters in diagnostics. */ }
+    }
     if (/^https?:$/.test(url.protocol) && !['wails.localhost', 'localhost', '127.0.0.1'].includes(url.hostname))
       requests.push(request.url())
   })
@@ -78,10 +102,14 @@ try {
   await unthrottle(app.page)
   await lib(app.page, 'AddSources', [photos])
   await lib(app.page, 'CreateBlockPIN', PIN)
+  // Fixture writes can finish before the initial UI's migration/read calls.
+  // Settle that page before replacing it with the configured library.
+  await app.page.waitForNetworkIdle()
   await app.page.reload()
   await app.page.waitForSelector('aside.sidebar')
 
   await s.guard('empty', async () => {
+    phase = 'empty recovery and themes'
     for (const width of [1440, 800]) {
       for (const theme of ['light', 'dark']) {
         const prefs = await lib(app.page, 'Preferences')
@@ -111,6 +139,7 @@ try {
   await search(app.page, 'TagAsset', ids[0], 'Recovery fixture')
 
   await s.guard('blocked', async () => {
+    phase = 'last collection blocked recovery'
     const things = (await search(app.page, 'Things')).filter((thing) => thing.kind !== 'builtin' || thing.count > 0)
     const place = (await lib(app.page, 'Places'))[0]
     const event = (await lib(app.page, 'Events'))[0]
@@ -165,6 +194,7 @@ try {
   await lib(app.page, 'LockBlocks')
   const event = (await lib(app.page, 'Events'))[0]
   await s.guard('names', async () => {
+    phase = 'event names'
     await go(app.page, `/events/${event.id}`)
     await app.page.waitForSelector('.scroller .cell')
     await rename(app.page, 'A temporary title')
@@ -180,7 +210,9 @@ try {
       corrected,
     )
 
+    phase = 'reload after automatic name Undo and correction'
     await app.page.reload()
+    phase = 'custom event name Undo'
     await rename(app.page, 'Our trip')
     await rename(app.page, 'Another title')
     await undo(app.page)
@@ -203,7 +235,9 @@ try {
 
   for (const place of await lib(app.page, 'Places')) await lib(app.page, 'SetBlock', 'place', place.id, '', 'label')
   await go(app.page, '/settings?section=privacy')
+  phase = 'close before restart'
   await close(app)
+  phase = 'restart'
   app = await launch({ exe: s.exe, dataDir, port: s.port })
   watch(app.page)
   await s.guard('restart', async () => {
@@ -218,8 +252,10 @@ try {
   s.check('the workflows ran to the end', false, String(e))
   await app?.page.screenshot({ path: join(s.out, 'failure.png') }).catch(() => {})
 } finally {
+  phase = 'final shutdown'
   if (app) await close(app)
+  await Promise.all(consoleReads)
   s.check('no request left the PC', requests.length === 0, requests)
   s.check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors())
-  s.finish()
+  s.finish({ diagnostics, failedRequests })
 }

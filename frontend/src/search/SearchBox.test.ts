@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { VueWrapper } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { engine, TagKind } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Errors from '../shared/errors'
@@ -29,15 +29,9 @@ vi.mock('../bridge', async (original) => ({
   },
 }))
 let wrapper: VueWrapper | undefined
-const router = createRouter({
-  history: createMemoryHistory(),
-  routes: [
-    { path: '/', name: 'library', component: { template: '<div />' } },
-    { path: '/search', name: 'search', component: { template: '<div />' } },
-  ],
-})
+const router = createTestNavigation()
 async function start(path = '/') {
-  await router.push(path)
+  await router.visit(path)
   wrapper = mountInApp(SearchBox, { plugins: [router] })
   const input = wrapper.get<HTMLInputElement>('input[role="combobox"]')
   await input.trigger('focus')
@@ -68,13 +62,13 @@ it('shows the actual focus shortcut while empty and rejects blank or composing E
   expect(wrapper?.findAll('kbd').map((cap) => cap.text())).toEqual(['Ctrl G'])
   await input.setValue('  ')
   await input.trigger('keydown', { key: 'Enter' })
-  expect(router.currentRoute.value.name).toBe('library')
+  expect(router.location.value.kind === 'valid' ? router.location.value.target.name : undefined).toBe('library')
   await input.setValue('海辺 کی شام')
   await input.trigger('keydown', { key: 'Enter', isComposing: true })
-  expect(router.currentRoute.value.name).toBe('library')
+  expect(router.location.value.kind === 'valid' ? router.location.value.target.name : undefined).toBe('library')
   await input.trigger('keydown', { key: 'Enter' })
   await flushPromises()
-  expect(router.currentRoute.value.query.q).toBe('海辺 کی شام')
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1])).q).toBe('海辺 کی شام')
 })
 
 it('offers a description first and searches the chosen Thing instead of opening its collection', async () => {
@@ -90,7 +84,10 @@ it('offers a description first and searches the chosen Thing instead of opening 
   expect(document.getElementById(active ?? '')?.textContent).toContain('Beach')
   await input.trigger('keydown', { key: 'Enter' })
   await flushPromises()
-  expect(router.currentRoute.value).toMatchObject({ name: 'search', query: { q: 'Beach' } })
+  expect(router.location.value.kind === 'valid' ? router.location.value.target : undefined).toMatchObject({
+    name: 'search',
+    query: { q: 'Beach' },
+  })
   expect(input.attributes('aria-expanded')).toBe('false')
 })
 
@@ -111,7 +108,7 @@ it('keeps the first search available when suggestions fail and retries the saved
   expect(wrapper?.text()).toContain('No matching people or Things')
   await input.trigger('keydown', { key: 'Enter' })
   await flushPromises()
-  expect(router.currentRoute.value.query.q).toBe('cake')
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1])).q).toBe('cake')
 })
 
 it('shows preparation feedback and retries preparation after failure', async () => {
@@ -155,7 +152,7 @@ it('repeats the same search and clears results while restoring input focus', asy
   await flushPromises()
   expect(input.element.value).toBe('')
   expect(document.activeElement).toBe(input.element)
-  expect(router.currentRoute.value.name).toBe('library')
+  expect(router.location.value.kind === 'valid' ? router.location.value.target.name : undefined).toBe('library')
 })
 
 it('searches a picked person and ignores a hidden active suggestion after Escape', async () => {
@@ -189,7 +186,7 @@ it('searches a picked person and ignores a hidden active suggestion after Escape
   expect(person?.text()).toContain('32')
   await person?.trigger('click')
   await flushPromises()
-  expect(router.currentRoute.value.query.q).toBe('Amina Khan')
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1])).q).toBe('Amina Khan')
   await input.trigger('focus')
   await input.setValue('amina at the beach')
   await settle()
@@ -197,7 +194,7 @@ it('searches a picked person and ignores a hidden active suggestion after Escape
   await input.trigger('keydown', { key: 'Escape' })
   await input.trigger('keydown', { key: 'Enter' })
   await flushPromises()
-  expect(router.currentRoute.value.query.q).toBe('amina at the beach')
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1])).q).toBe('amina at the beach')
 })
 
 it('offers the recent searches in an empty box and runs one when it is chosen', async () => {
@@ -211,7 +208,7 @@ it('offers the recent searches in an empty box and runs one when it is chosen', 
   await input.trigger('keydown', { key: 'ArrowDown' })
   await input.trigger('keydown', { key: 'Enter' })
   await flushPromises()
-  expect(router.currentRoute.value.query.q).toBe('birthday cake')
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1])).q).toBe('birthday cake')
   expect(engine.rememberSearch).toHaveBeenCalledWith('birthday cake')
 })
 
@@ -249,7 +246,7 @@ it('keeps a newer query in the reopened box when an older clear fails', async ()
   await input.setValue('new search')
   await input.trigger('keydown', { key: 'Enter' })
   await flushPromises()
-  await router.push('/')
+  await router.visit('/')
   await input.trigger('focus')
   await flushPromises()
   failClear(new Error('busy'))
@@ -260,7 +257,7 @@ it('keeps a newer query in the reopened box when an older clear fails', async ()
 
 it('offers a Search button on the search page that waits for words and starts the search unrefined', async () => {
   scope.mockClear()
-  await router.push('/search?q=sea&media=photos')
+  await router.visit('/search?q=sea&media=photos')
   wrapper = mountInApp(SearchBox, { plugins: [router], props: { button: true } })
   const run = wrapper.get('[data-search-run]')
   const input = wrapper.get('input[role="combobox"]')
@@ -270,7 +267,7 @@ it('offers a Search button on the search page that waits for words and starts th
   expect(run.attributes('disabled')).toBeUndefined()
   await run.trigger('click')
   await flushPromises()
-  expect(router.currentRoute.value.query).toEqual({ q: 'sea' })
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1]))).toEqual({ q: 'sea' })
   expect(scope).not.toHaveBeenCalled()
   await run.trigger('click')
   expect(scope).toHaveBeenCalledWith({ kind: 'search', query: 'sea' })

@@ -7,7 +7,7 @@
 // shortcuts share one name, icon and rule. On a narrow page the labels
 // give way to icons, whose names stay as tooltips.
 import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UDropdownMenu from './navigation/NavDropdownMenu.vue'
 import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { computed } from 'vue'
 import { icons } from '../design/icons'

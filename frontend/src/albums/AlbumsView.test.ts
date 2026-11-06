@@ -1,9 +1,10 @@
+import { destination } from '../shared/navigation/contract'
 import USelect from '@nuxt/ui/components/Select.vue'
 import { dismiss } from '../shared/notify'
 import { question } from '../shared/confirm'
 import { t } from '../shared/i18n'
 import { deferred, mountInApp, recordNotifications } from '../shared/testing'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
@@ -246,17 +247,7 @@ it.each([
 })
 
 function testRouter() {
-  return createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
-        name,
-        path: `/${name}/:id?`,
-        component: { template: '<div />' },
-      })),
-    ],
-  })
+  return createTestNavigation()
 }
 
 async function menuAction(
@@ -314,7 +305,7 @@ it('blocks saving an inverted date range while retaining the draft', async () =>
 
 it('opens the existing album editor from a collection hero’s edit link', async () => {
   const router = testRouter()
-  await router.push({ path: '/', query: { edit: '1' } })
+  await router.push(destination({ name: 'albums', query: { edit: 1 } }))
   wrapper = mountInApp(AlbumsView, { plugins: [router] })
   await flushPromises()
   expect(editor().get<HTMLInputElement>('form input').element.value).toBe(album.name)
@@ -513,7 +504,7 @@ it('never replays a committed save after its list refresh fails', async () => {
 
 it('does not reopen a cancelled edit link when its route cleanup is delayed beyond privacy readmission', async () => {
   const router = testRouter()
-  await router.push({ path: '/', query: { edit: String(album.id) } })
+  await router.push(destination({ name: 'albums', query: { edit: album.id } }))
   wrapper = mountInApp(AlbumsView, { plugins: [router] })
   await flushPromises()
   const cleanup = deferred<Awaited<ReturnType<typeof router.replace>>>()
@@ -528,7 +519,7 @@ it('does not reopen a cancelled edit link when its route cleanup is delayed beyo
   await refreshing
   await flushPromises()
   expect(document.querySelector('#album-editor')).toBeNull()
-  cleanup.resolve(undefined)
+  cleanup.resolve(true)
   expect(engine.saveAlbum).not.toHaveBeenCalled()
   expect(engine.createAlbum).not.toHaveBeenCalled()
 })
