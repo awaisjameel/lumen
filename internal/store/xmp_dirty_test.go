@@ -139,7 +139,7 @@ func TestXMPDirtyWorkNamesOnlyTheAssetsAnInputTouches(t *testing.T) {
 				// Exercise the trigger directly, as for event membership below.
 				// The public mutation now refuses a blocked album; batch_test
 				// independently verifies that admission and its unchanged rows.
-				query, args = "INSERT INTO album_items(album_id, asset_id) VALUES (?, ?)", []any{album, f.b}
+				query, args = "INSERT INTO album_items(album_id, asset_id, added_at) VALUES (?, ?, 0)", []any{album, f.b}
 				want = []int64{f.b}
 			case "event membership":
 				query = "INSERT INTO event_tags(id, kind, created_at) VALUES (1, 'block', 0)"
