@@ -182,6 +182,28 @@ try {
     trace.calls.some((row) => row.name === 'ApplyBatch' && row.album === albumB && row.ids[0] === first), trace.summary())
   await dismissNotices(page)
 
+  phase = 'blocked album membership recovery'
+  await selectPhoto(page, first)
+  await membershipBox(page, 'Native album A', false)
+  const hiddenAlbumUndo = await notice(page)
+  await until(async () => (await lib(page, 'AssetAlbums', first)).includes(albumA), 'album membership did not persist')
+  const albumBlock = await lib(page, 'SetBlock', 'album', albumA, '', 'label')
+  await button(page, 'Undo', root(hiddenAlbumUndo))
+  await caption(page, hiddenAlbumUndo, '0 restored', '1 failed')
+  s.check('a hidden album refuses Undo while its photo remains visible',
+    (await lib(page, 'Counts')).photos === 3 && !(await lib(page, 'Albums')).some((album) => album.id === albumA))
+  await page.screenshot({ path: join(s.out, 'blocked-album-undo.png') })
+  await unblock(page, albumBlock)
+  s.check('refused Undo preserves the hidden album membership', (await lib(page, 'AssetAlbums', first)).includes(albumA))
+  trace.reset()
+  await button(page, 'Retry failed items', root(hiddenAlbumUndo))
+  await caption(page, hiddenAlbumUndo, '1 restored', '0 failed')
+  await trace.idle()
+  s.check('unblocking retries only the original album membership',
+    !(await lib(page, 'AssetAlbums', first)).includes(albumA) && trace.calls.filter((row) => row.write).length === 1 &&
+    trace.calls.some((row) => row.name === 'ApplyBatch' && row.album === albumA && row.ids[0] === first), trace.summary())
+  await dismissNotices(page)
+
   phase = 'date correction provenance and newer edits'
   const dateUndo = await date(page, first, '2002-01-01T00:00:00')
   await button(page, 'Undo', root(dateUndo))

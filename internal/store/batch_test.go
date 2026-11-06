@@ -103,6 +103,46 @@ func TestBatchAlbumOutcomesCaptureActualChangesIncludingRepeatedIDs(t *testing.T
 	}
 }
 
+func TestMembershipWritesRefuseBlockedAlbumsAndRecoverAfterUnblocking(t *testing.T) {
+	for _, action := range []core.BatchAction{core.BatchAlbum, core.BatchRemoveAlbum} {
+		t.Run(string(action), func(t *testing.T) {
+			st, ids := viewingFixture(t)
+			ctx := t.Context()
+			var members []int64
+			if action == core.BatchRemoveAlbum {
+				members = ids
+			}
+			album, err := st.CreateAlbum(ctx, "Private collection", core.AlbumManual, core.AlbumRule{}, members)
+			check(t, err)
+			block, err := st.SetBlock(ctx, core.BlockAlbum, album, "", core.BlockLabel)
+			check(t, err)
+			rows, err := st.ApplyBatch(ctx, ids, action, album)
+			check(t, err)
+			for _, row := range rows {
+				if !errors.Is(row.Err, ErrNotFound) || row.Changed {
+					t.Errorf("blocked membership outcome = %+v", row)
+				}
+			}
+			if err := st.SetAlbumItem(ctx, ids[0], album, action == core.BatchAlbum); !errors.Is(err, ErrNotFound) {
+				t.Errorf("single blocked membership = %v", err)
+			}
+			var count int
+			check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM album_items WHERE album_id = ?", album).Scan(&count))
+			if count != len(members) {
+				t.Fatalf("blocked album changed: got %d members, want %d", count, len(members))
+			}
+			check(t, st.RemoveBlock(ctx, block))
+			rows, err = st.ApplyBatch(ctx, ids, action, album)
+			check(t, err)
+			for _, row := range rows {
+				if row.Err != nil || !row.Changed {
+					t.Fatalf("unblocked retry = %+v", row)
+				}
+			}
+		})
+	}
+}
+
 func TestCancelledMembershipBatchPublishesNoChangedFlags(t *testing.T) {
 	st, ids := viewingFixture(t)
 	album, err := st.CreateAlbum(t.Context(), "Cancelled", core.AlbumManual, core.AlbumRule{}, nil)

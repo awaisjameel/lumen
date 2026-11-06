@@ -370,6 +370,7 @@ func (s *Store) SetAlbumItem(ctx context.Context, assetID, albumID int64, includ
 func setAlbumItem(ctx context.Context, tx *sql.Tx, assetID, albumID int64, include bool) (bool, error) {
 	var kind core.AlbumKind
 	err := tx.QueryRowContext(ctx, `SELECT kind FROM albums WHERE id = ?
+		AND NOT `+labelBlocked(core.BlockAlbum, "albums.id")+`
 		AND EXISTS (SELECT 1 FROM assets WHERE id = ? AND `+present+`)`, albumID, assetID).Scan(&kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrNotFound
