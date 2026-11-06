@@ -178,7 +178,7 @@ it('keeps a committed album rename and its Undo when the following list refresh 
 })
 
 it('does not show an older rename failure on a different collection', async () => {
-  const pending = deferred<void>()
+  const pending = deferred<undefined>()
   vi.mocked(engine.setEventName).mockReturnValueOnce(pending.promise)
   const { wrapper, props } = await mountHead()
   await wrapper
@@ -197,8 +197,8 @@ it('does not show an older rename failure on a different collection', async () =
   wrapper.unmount()
 })
 it('keeps a newer collection draft and pending save when an older save completes', async () => {
-  const older = deferred<void>()
-  const newer = deferred<void>()
+  const older = deferred<undefined>()
+  const newer = deferred<undefined>()
   vi.mocked(engine.setEventName).mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
   const { wrapper, props } = await mountHead()
   const rename = async (name: string) => {
@@ -215,7 +215,7 @@ it('keeps a newer collection draft and pending save when an older save completes
   await flushPromises()
   await rename('Newer')
   expect(engine.setEventName).toHaveBeenLastCalledWith(2, 'Newer')
-  older.resolve()
+  older.resolve(undefined)
   await flushPromises()
   expect(wrapper.get('input').element.value).toBe('Newer')
   expect(wrapper.get('input').element.disabled).toBe(true)
