@@ -2,9 +2,10 @@
 
 This records the pre-implementation inventory, accepted scope and command contract for
 [#46](https://github.com/awaisjameel/lumen/issues/46), against integration parent
-`70f186e1`. Implementation and the current Windows acceptance record are in [PR #55](https://github.com/awaisjameel/lumen/pull/55). The branch is
-`refactor/46-command-contract`; its PR targets `feat/31-feature-completion` for
-the owner's parent-branch review, with no final main PR.
+`70f186e1`. Implementation and its child Windows acceptance record are in [PR #55](https://github.com/awaisjameel/lumen/pull/55),
+merged into the parent at [`e09f966`](https://github.com/awaisjameel/lumen/commit/e09f96639a67011b4743be958dd943d6440fea3c).
+The integrated change is under owner review in [PR #56](https://github.com/awaisjameel/lumen/pull/56);
+its [audit ledger](pr56-audit.md) distinguishes current validation from historical child results.
 
 ## Current inventory and confirmation
 
