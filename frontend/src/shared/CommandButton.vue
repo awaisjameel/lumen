@@ -16,7 +16,7 @@ const props = defineProps<
     rel?: never
   }
 >()
-defineSlots<ButtonSlots>()
+const slots = defineSlots<ButtonSlots>()
 const forwarded = useForwardProps(props)
 const button = computed(() => {
   const { command, ...rest } = forwarded.value
@@ -24,7 +24,7 @@ const button = computed(() => {
   return {
     ...rest,
     label: props.label ?? state.title,
-    icon: props.icon ?? state.icon,
+    icon: props.icon ?? (slots.default ? undefined : state.icon),
     disabled: props.disabled || !state.enabled,
     loading: props.loading || state.busy,
     title: state.reason,

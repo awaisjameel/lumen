@@ -52,3 +52,16 @@ it('does not run an absent command or override an explicitly disabled control', 
   await wrapper.get('button').trigger('click')
   expect(run).not.toHaveBeenCalled()
 })
+
+it.each([CommandButton, IconButton])(
+  'lets custom button content own its icon without adding a duplicate',
+  (control) => {
+    dispose.push(registerCommands([{ id: 'about.report', run: () => undefined }]))
+    wrapper = mountInApp(control, {
+      props: { command: 'about.report' },
+      slots: { default: () => h('span', { 'data-custom-content': '' }, 'Custom content') },
+    })
+    expect(wrapper.get('button').find('[data-custom-content]').exists()).toBe(true)
+    expect(wrapper.get('button').find('[data-slot="leadingIcon"]').exists()).toBe(false)
+  },
+)

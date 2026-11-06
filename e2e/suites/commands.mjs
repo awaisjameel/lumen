@@ -15,6 +15,10 @@ const errors = [], external = [], evidence = []
 let app, page, trace, photo, album, failure
 let phase = 'fixture'
 function step(name) { phase = name; console.log(`commands: ${phase}`) }
+async function control(key) {
+  await page.keyboard.down('Control')
+  try { await page.keyboard.press(key) } finally { await page.keyboard.up('Control') }
+}
 function watch() {
   s.watch(page)
   page.on('pageerror', error => errors.push({ phase, error: String(error) }))
@@ -33,7 +37,7 @@ async function start() {
 async function capture(name) { await page.screenshot({ path: join(s.out, `${name}.png`) }) }
 async function path(expected) { await until(() => page.evaluate(expected => location.pathname === expected, expected), `missing path ${expected}`) }
 async function palette(query, choose = true) {
-  await page.keyboard.press('Control+k')
+  await control('k')
   const input = await page.waitForSelector('[role="dialog"][data-state="open"] input')
   await input.asLocator().fill(query)
   await page.waitForFunction((query, choose) => {
@@ -52,7 +56,7 @@ async function settings() {
 }
 async function record(id, keys) {
   await page.locator(`[data-shortcut="${id}"] [data-shortcut-change]`).click()
-  await page.keyboard.press(keys)
+  await control(keys)
 }
 async function viewer() {
   await go(page, '/', 0)
@@ -102,29 +106,29 @@ try {
   s.check('palette dismisses before the search command takes focus', true)
   await page.keyboard.press('Escape')
   await page.locator('main').click({ offset: { x: 20, y: 20 } })
-  await page.keyboard.press('Control+g')
+  await control('g')
   await path('/people')
   s.check('an imported known command outside the shortcut editor remains active', true)
   await capture('palette-focus')
 
   step('shortcut recording, conflicts and help')
   await settings()
-  await record('viewer.rotate', 'Control+r')
+  await record('viewer.rotate', 'r')
   await until(async () => (await prefs()).shortcuts?.['viewer.rotate'] === 'Ctrl+R', 'shortcut did not persist')
-  await record('viewer.flip', 'Control+r')
+  await record('viewer.flip', 'r')
   await page.waitForSelector('[data-shortcut="viewer.flip"] [role="alert"]')
   s.check('conflicting reassignment is refused without losing the first binding', (await prefs()).shortcuts?.['viewer.flip'] === undefined)
   s.check('fixed Escape offers no reassignment control', !(await page.$('[data-shortcut="viewer.close"] [data-shortcut-change]')))
   await page.locator('main').click({ offset: { x: 20, y: 20 } })
   await page.keyboard.press('?')
   await page.waitForSelector('[role="dialog"][data-state="open"]')
-  s.check('help derives the active reassignment', await page.$$eval('[role="dialog"]', rows => rows.some(row => /Rotate/.test(row.textContent) && /Ctrl/.test(row.textContent))))
+  s.check('help derives the active reassignment', await page.$$eval('[role="dialog"] [data-shortcut="viewer.rotate"] kbd', caps => caps.map(cap => cap.textContent).join('+') === 'Ctrl+R'))
   await page.keyboard.press('Escape')
   await capture('shortcut-editor')
 
   step('pending admission and independent commands')
   await viewer()
-  await page.keyboard.press('Control+k')
+  await control('k')
   s.check('the viewer retains the keyboard instead of opening the page palette', !(await page.$('[role="dialog"][data-state="open"] input')))
   const zoom = () => page.$eval('[data-zoom]', node => Number.parseFloat(node.textContent))
   const fit = await zoom()
@@ -137,11 +141,11 @@ try {
   const before = await rotation()
   trace.reset()
   trace.holdNext(row => row.name === 'SetAdjustment')
-  await page.keyboard.press('Control+r')
+  await control('r')
   await until(() => trace.held, 'the real adjustment request was not held')
   await until(() => page.$$eval('.viewer [data-command="viewer.rotate"]', nodes => nodes.length > 0 && nodes.every(node => node.disabled)), 'pending controls were not disabled')
-  await page.keyboard.press('Control+r')
-  await page.keyboard.press('Control+r')
+  await control('r')
+  await control('r')
   await page.keyboard.press('i')
   await page.waitForSelector('.viewer .inspector', { visible: true })
   s.check('pending work is admitted once while an independent viewer command still runs', trace.calls.filter(row => row.name === 'SetAdjustment').length === 1)
@@ -198,7 +202,7 @@ try {
   s.check('restart preserves known and unknown imported overrides', saved.shortcuts?.['viewer.rotate'] === 'Ctrl+R' && saved.shortcuts?.['go.people'] === 'Ctrl+G' && saved.shortcuts?.['legacy.action'] === 'Ctrl+L')
   await viewer()
   const prior = await rotation()
-  await page.keyboard.press('Control+r')
+  await control('r')
   await until(async () => await rotation() === (prior + 1) % 4, 'the stored shortcut did not execute after restart')
   s.check('the reassigned shortcut executes after restart', true)
   await closeViewer()

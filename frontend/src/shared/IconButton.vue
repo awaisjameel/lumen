@@ -52,7 +52,7 @@ defineExpose({
       ref="button"
       v-bind="buttonAttrs"
       :to="to"
-      :icon="icon ?? state?.icon"
+      :icon="icon ?? ($slots.default ? undefined : state?.icon)"
       :aria-label="label ?? state?.title"
       :disabled="!!buttonAttrs.disabled || (state ? !state.enabled : undefined)"
       :loading="!!buttonAttrs.loading || state?.busy"

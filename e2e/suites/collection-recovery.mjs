@@ -211,6 +211,9 @@ try {
     )
 
     phase = 'reload after automatic name Undo and correction'
+    // Finish the correction's UI reads before deliberately replacing its page.
+    await app.page.waitForFunction(name => document.querySelector('h1')?.textContent.trim() === name, {}, corrected.name)
+    await app.page.waitForNetworkIdle()
     await app.page.reload()
     phase = 'custom event name Undo'
     await rename(app.page, 'Our trip')

@@ -2,7 +2,7 @@
 
 This records the pre-implementation inventory, accepted scope and command contract for
 [#46](https://github.com/awaisjameel/lumen/issues/46), against integration parent
-`70f186e1`. Implementation is on the child branch; fresh Windows acceptance is pending. The branch is
+`70f186e1`. Implementation and the current Windows acceptance record are in [PR #55](https://github.com/awaisjameel/lumen/pull/55). The branch is
 `refactor/46-command-contract`; its PR targets `feat/31-feature-completion` for
 the owner's parent-branch review, with no final main PR.
 
@@ -30,8 +30,8 @@ is absent.
 ## Accepted ownership and execution policy
 
 Keep the existing command registry, shortcut settings/help, preferences,
-notifications, overlays and feature action owners. One shared catalogue will
-own identities, default presentation, groups, zones, keys and repeat policy.
+notifications, overlays and feature action owners. One shared catalogue
+owns identities, default presentation, groups, zones, keys and repeat policy.
 Types and shortcut/help entries derive from those executable definitions.
 Features bind callbacks and reactive availability, reasons and context labels;
 they do not repeat default shortcut metadata. Public command reads must not
@@ -130,7 +130,7 @@ stored-chord validation fixtures; Go's existing Windows path assumptions prevent
 a complete core-package pass on Linux, while the affected shortcut race tests
 pass. The native `commands` suite joins all nine existing regression suites in
 Windows CI and preserves its reports/screenshots. Native/production/package
-results must be recorded from that run before merge; a syntax check supplies
+results are recorded in [the PR checks](https://github.com/awaisjameel/lumen/pull/55/checks) and must pass before merge; a syntax check supplies
 none of those results. Milestone latency and external release acceptance remain
 separate gates in the feature audit.
 
@@ -140,5 +140,22 @@ control/preferences check passes 56. Type checking, zero-warning ESLint, formatt
 21 command/18 navigation compiler rejections, all three navigation mutation checks,
 production frontend build, documentation/screenshot integrity, affected Go shortcut
 race tests and core static checks pass. The existing bundle-size advisory remains.
-Generated bindings and Go manifests are unchanged. Windows acceptance remains
-pending; these local results do not establish native or installer acceptance.
+Generated bindings and Go manifests are unchanged. These local results do not establish native or installer acceptance; the current
+Windows record is the linked PR checks and its uploaded native reports.
+
+The first Windows run, [72](https://github.com/awaisjameel/lumen/actions/runs/42222154897)
+at `c79ba23`, passes production/current bindings, static checks, 1,168 frontend
+tests and all three Go race shards. Eight native suites pass; collection recovery
+passes 50/51 because a deliberate reload aborts its count/place reads, and the
+new suite stops on Puppeteer's unsupported combined-key spelling. These failures
+are retained as failed evidence. The harness now sends separate modifier-down/
+key/modifier-up events and settles the corrected header and reads before reload;
+fetch errors are not suppressed. Installer packaging is skipped by that failed
+run. Follow-up native acceptance and packaging are required in the PR checks.
+
+Two additional control regressions confirm and prevent an extra catalogue icon
+beside content supplied by a custom default slot. Explicit icon props retain
+their meaning. Both controls, Person-header aliases and runner policies pass
+29 focused checks after the fix; the current Windows run verifies the final
+control implementation with the full suite. Shortcut help acceptance checks the
+reassigned action's own key caps, rather than unrelated text elsewhere in help.

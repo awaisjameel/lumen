@@ -978,9 +978,24 @@ explicit. No service, wire, schema, original-media or budget change is needed.
 Twenty-one negative TypeScript/Vue fixtures plus valid controls run alongside the
 18 navigation compiler fixtures. Native `commands` acceptance uses generated
 scratch files, real controls and held/refused transport for retry; it is added to
-the existing nine suites, followed by installer packaging. Fresh Windows evidence
-is pending and must pass before the child is merged. The parent remains for owner
+the existing nine suites, followed by installer packaging. Current Windows evidence is recorded in [PR #55 checks](https://github.com/awaisjameel/lumen/pull/55/checks)
+and must pass before the child is merged. The parent remains for owner
 review, with no final PR to `main`.
+
+The initial #46 Windows run [72](https://github.com/awaisjameel/lumen/actions/runs/42222154897)
+passes the production build, current bindings/modules, static checks, all 1,168
+frontend tests and all three Go race shards. Eight native suites pass. The new
+commands fixture stops at an unsupported Puppeteer combined-key spelling; the
+collection recovery fixture deliberately reloads while count/place reads remain
+active and reports two fetch failures. That is failed native evidence, with
+installer packaging skipped. The fixtures now send native modifier events and
+wait for the corrected header and reads before reload; no error is ignored.
+Custom-content icon duplication also has two failing-before/passing-after
+control regressions. Current full native/package acceptance is linked from
+[PR #55](https://github.com/awaisjameel/lumen/pull/55), whose checks must pass
+before integration. The unchanged hosted latency report exceeds folder
+`SetEventName` (9.515/5 ms) and unblocked `SaveEmbeddings64` (217.914/70 ms);
+the calibrated-machine milestone gate remains open.
 
 ### Current disposition of accepted work
 
@@ -1000,7 +1015,7 @@ specific runs and suites recorded above.
 | Live collection place metadata | Integrated: #44 | #52; current metadata suite 22/22 |
 | Album draft lifetime and guarded saving | Integrated: #45 | #53; current draft suite 26/26 |
 | Typed navigation and runtime input | Verified implementation; integration record in #54 | Code `91f54d3b`, navigation 74/74; [contract guide](navigation-contract.md) |
-| Command contract hardening | #46 implementation and verification in progress | [Command contract](command-contract.md); native/production/package acceptance pending |
+| Command contract hardening | Implemented in [PR #55](https://github.com/awaisjameel/lumen/pull/55), with integration recorded there | [Command contract](command-contract.md); current native/production/package evidence is in the PR checks and uploaded reports |
 | Performance and release prerequisites | External acceptance remains open | Unchanged configured-machine gate in #31; signing/trust and installed-machine acceptance stay separate |
 
 ### Baseline inventory
