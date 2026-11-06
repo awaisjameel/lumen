@@ -8,13 +8,17 @@ import USelect from '@nuxt/ui/components/Select.vue'
 import { AlbumKind, BatchAction, engine } from '../bridge'
 import type { Selection } from '../bridge'
 import { useAlbums } from '../albums/store'
+import { useAlbumChanges } from '../albums/changes'
+import type { AlbumOutcome } from '../albums/changes'
 import { confirm } from '../shared/confirm'
-import { errorText, failureText, logError } from '../shared/errors'
+import { errorText, failureText, logError, reportError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { nameTooLong, trimName } from '../shared/names'
+import { useFavouriteWrites } from '../shared/favouriteWrites'
+import { SELECTION_PART } from '../shared/undo'
 import { showTrashUndo } from '../trash/undo'
 import { blockAssets } from '../shared/block'
-import OutcomeList from './OutcomeList.vue'
+import OutcomeList from '../shared/OutcomeList.vue'
 
 type Operation = BatchAction | 'tag' | 'block' | 'delete'
 interface Result {
@@ -33,8 +37,10 @@ const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>('open', { default: false })
 // How many assets one call to the engine takes: few enough that Cancel and the
 // progress line keep up, enough that a whole library is not a call per photo.
-const PART = 200
+const PART = SELECTION_PART
 const albums = useAlbums()
+const favouriteWrites = useFavouriteWrites()
+const albumChanges = useAlbumChanges()
 const operation = ref<Operation>(BatchAction.BatchFavourite)
 const tag = ref('')
 const album = ref(0)
@@ -132,10 +138,13 @@ async function apply(retryIDs?: number[]) {
   stopped.value = false
   error.value = ''
   results.value = retryIDs ? results.value.filter((result) => !retryIDs.includes(result.id)) : []
+  let membership: ReturnType<typeof albumChanges.begin> | undefined
   try {
     if (mine !== generation || key !== inputKey.value) return
     if (selection) await engine.validateSelection(selection)
     if (mine !== generation || key !== inputKey.value || isStopped()) return
+    if (selectedOperation === BatchAction.BatchAlbum || selectedOperation === BatchAction.BatchRemoveAlbum)
+      membership = albumChanges.begin(albumID, ids, selectedOperation === BatchAction.BatchAlbum)
     if (selectedOperation === 'block') {
       await blockAssets(
         ids,
@@ -192,16 +201,26 @@ async function apply(retryIDs?: number[]) {
           continue
         }
         try {
-          const outcomes =
+          const outcomes: AlbumOutcome[] | null =
             selectedOperation === 'tag'
               ? await engine.tagAssets(part, name)
-              : await engine.applyBatch(part, selectedOperation, albumID)
+              : selectedOperation === BatchAction.BatchFavourite || selectedOperation === BatchAction.BatchUnfavourite
+                ? await favouriteWrites.write(part, () =>
+                    isStopped() ? Promise.resolve(null) : engine.applyBatch(part, selectedOperation, albumID),
+                  )
+                : membership
+                  ? await membership.apply(part, isStopped)
+                  : await engine.applyBatch(part, selectedOperation, albumID)
           if (mine !== generation) return
+          if (outcomes === null) {
+            results.value.push(...cancelled(part))
+            continue
+          }
           results.value.push(
             ...outcomes.map((o): Result => ({
               id: o.id,
               error: o.error ? failureText(o.code, o.error) : '',
-              state: o.error ? 'failed' : 'done',
+              state: o.cancelled ? 'cancelled' : o.error ? 'failed' : 'done',
             })),
           )
         } catch (e) {
@@ -223,6 +242,11 @@ async function apply(retryIDs?: number[]) {
   } catch (e) {
     if (mine === generation) error.value = errorText(e)
   } finally {
+    if (membership) {
+      albumChanges.offer([membership], t('albums.saved'), () => emit('changed'))
+      membership.release()
+      await albumChanges.reconcile().catch(reportError)
+    }
     if (mine === generation) {
       busy.value = false
       emit('changed')

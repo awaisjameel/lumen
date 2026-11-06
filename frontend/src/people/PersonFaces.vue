@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import UButton from '@nuxt/ui/components/Button.vue'
+import CommandButton from '../shared/CommandButton.vue'
+import { runCommand } from '../shared/commands'
+import { destination } from '../shared/navigation/contract'
+import UButton from '../shared/navigation/NavButton.vue'
 import UPopover from '@nuxt/ui/components/Popover.vue'
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useDestination, useNavigation } from '../shared/navigation/router'
 import { BlockKind, engine, ErrorCode, errorCode } from '../bridge'
 import type { Face, Person } from '../bridge'
 import { icons } from '../design/icons'
@@ -27,10 +30,10 @@ import PersonHeader from './PersonHeader.vue'
 import PersonPicker from './PersonPicker.vue'
 import { usePeople } from './store'
 
-const route = useRoute()
-const router = useRouter()
+const route = useDestination('personFaces')
+const router = useNavigation()
 const people = usePeople()
-const id = computed(() => Number(route.params.id))
+const id = computed(() => route.value?.params.id ?? 0)
 const person = ref<Person | null>(null)
 const faces = shallowRef<Face[]>([])
 const selected = shallowRef(new Set<number>())
@@ -39,7 +42,7 @@ const loading = ref(false)
 const error = ref('')
 const picker = ref(false)
 const limit = ref(24)
-const pictureHint = ref(route.query.picture === '1')
+const pictureHint = ref(route.value?.query.picture === '1')
 let revision = 0
 let loadRequest = 0
 onBeforeUnmount(() => {
@@ -50,6 +53,7 @@ const name = computed(() => person.value?.name || t('person.unnamed'))
 const count = computed(() => selected.value.size)
 
 async function load() {
+  if (!id.value) return
   const request = ++loadRequest
   loading.value = true
   try {
@@ -141,7 +145,7 @@ async function act(fn: (ids: number[], before: Person) => Promise<void>) {
     await load().catch(async (e: unknown) => {
       if (requested !== revision) return
       if (errorCode(e) !== ErrorCode.NotFound) throw e
-      await router.replace({ name: 'people' })
+      await router.replace(destination({ name: 'people' }))
     })
   } catch (e) {
     if (requested === revision) error.value = errorText(e)
@@ -197,9 +201,7 @@ async function blockFace(face: Face | undefined) {
 }
 const rejectCommand: Command = {
   id: 'faces.reject',
-  group: 'media',
   title: () => t('faces.notThem', { name: name.value }),
-  icon: 'user-remove',
   available: () => count.value > 0,
   enabled: () => !busy.value,
   reason: () => t('faces.saving'),
@@ -207,9 +209,6 @@ const rejectCommand: Command = {
 }
 const coverCommand: Command = {
   id: 'faces.cover',
-  group: 'media',
-  title: () => t('faces.cover'),
-  icon: 'face',
   available: () => faces.value.length > 0,
   enabled: () => count.value === 1 && !busy.value,
   reason: () => (busy.value ? t('faces.saving') : t('faces.coverReason')),
@@ -217,9 +216,6 @@ const coverCommand: Command = {
 }
 const blockCommand: Command = {
   id: 'faces.block',
-  group: 'media',
-  title: () => t('faces.block'),
-  icon: 'blocked',
   available: () => count.value > 0,
   enabled: () => count.value === 1 && !busy.value,
   reason: () => (busy.value ? t('faces.saving') : t('faces.blockReason')),
@@ -231,18 +227,12 @@ useCommands([
   blockCommand,
   {
     id: 'faces.clear',
-    group: 'view',
-    title: () => t('faces.clear'),
-    icon: 'close',
     available: () => count.value > 0,
     enabled: () => !busy.value,
     run: clear,
   },
   {
     id: 'faces.selectAll',
-    group: 'view',
-    title: () => t('faces.selectAll'),
-    icon: 'check',
     available: () => faces.value.length > 0,
     enabled: () => !busy.value,
     run: selectAll,
@@ -256,7 +246,7 @@ useCommands([
       <PageHeader
         :title="t('faces.title', { name })"
         :subtitle="person ? t('faces.count', { n: faces.length }) : t('faces.loading')"
-        :back="{ to: { name: 'person', params: { id } }, label: name }"
+        :back="id ? { to: destination({ name: 'person', params: { id } }), label: name } : undefined"
       >
         <IconButton
           :icon="icons.refresh"
@@ -272,14 +262,14 @@ useCommands([
     <ViewBar class="faces-viewbar" :label="t('faces.title', { name })"
       ><p class="text-sm text-muted">{{ t('faces.hint', { name }) }}</p>
       <template #end
-        ><UButton
+        ><CommandButton
           v-if="faces.length"
           color="neutral"
           variant="ghost"
           :disabled="busy"
           :aria-pressed="count === faces.length"
-          @click="selectAll"
-          >{{ count === faces.length ? t('faces.clear') : t('faces.selectAll') }}</UButton
+          command="faces.selectAll"
+          >{{ count === faces.length ? t('faces.clear') : t('faces.selectAll') }}</CommandButton
         ></template
       ></ViewBar
     >
@@ -349,20 +339,27 @@ useCommands([
       icon="face"
       :title="t('faces.none')"
       :text="t('faces.noneHint')"
-      ><UButton color="primary" variant="solid" to="/people">{{ t('person.back') }}</UButton></FeatureState
+      ><UButton color="primary" variant="solid" :to="destination({ name: 'people' })">{{
+        t('person.back')
+      }}</UButton></FeatureState
     >
     <p v-if="person" class="kept"><Icon name="info" :size="16" />{{ t('faces.kept') }}</p>
     <template #dock>
-      <SelectionDock class="faces-dock" :count="count" :summary="t('faces.selected', { n: count })" @clear="clear">
-        <UButton
+      <SelectionDock
+        class="faces-dock"
+        :count="count"
+        :summary="t('faces.selected', { n: count })"
+        @clear="runCommand('faces.clear')"
+      >
+        <CommandButton
           color="primary"
           variant="solid"
           data-action="reject"
           :icon="icons['user-remove']"
           :disabled="busy"
           :loading="busy"
-          @click="reject"
-          >{{ t('faces.notThem', { name }) }}</UButton
+          command="faces.reject"
+          >{{ t('faces.notThem', { name }) }}</CommandButton
         >
         <UPopover
           v-model:open="picker"
@@ -383,15 +380,15 @@ useCommands([
               @cancel="picker = false"
           /></template>
         </UPopover>
-        <UButton
+        <CommandButton
           color="neutral"
           variant="ghost"
           :icon="icons.face"
           :disabled="count !== 1 || busy"
           :aria-label="t('faces.cover')"
           :title="count === 1 ? t('faces.cover') : t('faces.coverReason')"
-          @click="useAsCover"
-          ><span class="dock-label">{{ t('faces.cover') }}</span></UButton
+          command="faces.cover"
+          ><span class="dock-label">{{ t('faces.cover') }}</span></CommandButton
         >
         <IconButton
           :icon="icons.blocked"

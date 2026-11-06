@@ -1,19 +1,19 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 import IconButton from '../shared/IconButton.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useNavigation } from '../shared/navigation/router'
 import { altKeysOf, keyCaps, keysOf, runCommand } from '../shared/commands'
 import { shortcutCatalogue, shortcutZones, zoneOf } from '../shared/shortcuts'
 import { t } from '../shared/i18n'
 import { icons } from '../design/icons'
 import { whenPortalsClosed } from '../shared/overlay'
-import { reportError } from '../shared/errors'
 
 const open = defineModel<boolean>('open', { required: true })
-const router = useRouter()
+const router = useNavigation()
 const query = ref('')
 watch(open, (value) => {
   if (value) query.value = ''
@@ -91,11 +91,11 @@ const groups = computed(() => {
 async function back() {
   open.value = false
   await whenPortalsClosed()
-  void runCommand('app.commandPalette').catch(reportError)
+  void runCommand('app.commandPalette')
 }
 function customise() {
   open.value = false
-  void router.push('/settings?section=accessibility')
+  void router.push(destination({ name: 'settings', query: { section: 'accessibility' } }))
 }
 </script>
 

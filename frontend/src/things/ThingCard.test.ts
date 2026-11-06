@@ -1,4 +1,4 @@
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { createPinia } from 'pinia'
@@ -29,13 +29,7 @@ it('keeps an invalid draft editable, restores a blank name and uses a named cove
     coverThumb: 0,
     pinned: false,
   }
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      { name: 'thing', path: '/things/:id', component: { template: '<div />' } },
-    ],
-  })
+  const router = createTestNavigation()
   wrapper = mountInApp(ThingCard, { props: { tag, icon: 'things', deletable: false, rename }, plugins: [router] })
   expect(wrapper.get('a[aria-label="Dogs"]').attributes('href')).toBe('/things/1')
   expect(wrapper.text()).toContain('123,456')
@@ -69,13 +63,7 @@ it('loads a visible Thing mosaic on demand and clears it immediately when blocks
   vi.mocked(engine.days).mockResolvedValue([
     { day: '2026-10-01', items: [1, 2, 3].map((id) => ({ id, w: 100, h: 100, t: 1 })) },
   ])
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      { name: 'thing', path: '/things/:id', component: { template: '<div />' } },
-    ],
-  })
+  const router = createTestNavigation()
   wrapper = mountInApp(ThingCard, {
     plugins: [router, createPinia()],
     props: {

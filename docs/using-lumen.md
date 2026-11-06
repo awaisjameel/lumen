@@ -61,6 +61,12 @@ open the best matching moment. Hidden/blocked content follows the same visibilit
 rules as the Library. Search is not a guarantee that a particular object,
 person or exact phrase will be recognised.
 
+An empty search box offers recent searches saved in your library. **Clear recent
+searches** forgets them; new searches are saved again. If clearing fails, Lumen
+reports the failure and reloads the engine's current, privacy-filtered history
+unless a newer search or reload has already taken over. If that read also fails,
+the list stays empty until you reopen the box and it can read the library again.
+
 ![Search results for snowy mountains at sunrise, best matches first](screenshots/search.webp)
 
 ## Name a person and correct faces
@@ -95,7 +101,12 @@ tracks that work. Recheck these instructions and the People screenshots after it
 ## Correct Things and make albums
 
 Open a photo's details to add a manual tag such as `Weekend`, or remove an
-incorrect Thing. A manual correction overrides AI tagging. On **Things**, a
+incorrect Thing. A manual correction overrides AI tagging. If scheduling text
+reading fails after a tag saves, the tag appears immediately and the activity
+card says **Text reading will retry**. Lumen retries automatically, including
+after a restart. If the notice persists, follow **Review Settings** to save a
+local problem report. A failed tag save keeps your draft for another attempt.
+On **Things**, a
 custom label such as `red bicycle` searches the existing library immediately;
 it is a semantic prompt, not a newly trained model. The confidence control in
 **AI and search** changes automatic matching without rescanning files.
@@ -106,14 +117,56 @@ without moving files. A **Smart album** saves rules instead and follows the
 library as it changes: for example, turn on **Favourites only** and set **Media**
 to **Photos** for a live view of your favourite photos, or choose a **Thing**
 such as Mountains. Deleting an album does not delete its originals, and
-membership follows files renamed or moved through Lumen.
+membership follows files renamed or moved through Lumen. As you edit a smart
+rule, its preview shows the current matching count and up to three sample
+items. If the preview cannot be read, **Try again** retries the same draft;
+the previous images are cleared until a current read succeeds.
+
+An unrelated privacy change pauses an open album draft while Lumen checks
+visibility. The form returns with your unsaved fields if the album is still
+available. **Try again** after a failed check only reads the current state.
+A hidden or deleted album closes its editor; a hidden Thing or person requires
+an explicit replacement. A preview that detects an unavailable reference also
+clears its old name while checking the current choices. **Try again** reloads
+those choices; choose a replacement explicitly before saving. If the saved definition changed elsewhere, your draft
+stays visible but cannot overwrite it: **Reload saved version** asks before
+discarding your unsaved changes and waits for the current album and choices,
+or **Cancel** closes the draft.
+
+Undo of favourite selections, album memberships and date/place corrections
+shows progress and **Cancel remaining**.
+Completed changes stay in place. **View outcomes** lists results a page at a
+time; **Retry failed items** retries failures, while **Resume cancelled items**
+continues the remainder. A newer edit to the same photo's field or album membership
+supersedes its older Undo, so later choices are kept. This includes a newer request that later
+fails or is cancelled; use that action's feedback to recover it. Undo continues
+when you browse elsewhere and leaves the current selection alone. Dismissing
+its notice stops future work and discards its remaining recovery; these offers
+are kept only for the current app session. A failed view refresh has its own
+retry and never repeats completed changes.
+
+Album Undo includes only memberships that action actually changed; memberships
+already present stay in place. Deleting an album retires its pending membership
+Undo. A blocked target can fail and be retried after unblocking. Date/place Undo
+restores an earlier user correction when present, or returns to the underlying
+metadata (including no GPS). It can reverse a correction that hid its own photo
+under a place block. The details panel currently corrects one photo at a time.
 
 ![Three smart albums, By the sea, City walks and Mountain views, each following a Thing](screenshots/albums.webp)
 
 Places need GPS or a location correction; the bundled atlas is an approximate
 nearest-city grouping, not an online street map. Events group photos by time
-gaps and location changes. Rename or pin these collections without changing
+gaps and location changes. You can rename or pin an event without changing
 the source files' metadata. See [Places and Events](features.md#9-places-and-events).
+
+An album, Thing or event names its top places in the header. Select a place
+name to open its photos. These links follow location corrections and Undo
+without reopening the collection. If place metadata cannot be read, **Try
+again** reloads it; blocked place names stay hidden during a failed refresh.
+
+On an event's page, **Reset name** restores its automatic title. **Undo** after
+a rename restores the previous naming choice: an automatic title follows later
+date or location corrections, while a custom title keeps your wording.
 
 ## Hide, block and unblock
 
@@ -126,6 +179,10 @@ Open **Settings → Privacy and blocked**, unlock with the PIN, then review or
 unblock an entry. A new block offers a brief Undo. The unlocked gate locks when
 you leave or after 10 idle minutes. Wrong attempts are rate-limited. If the PIN
 is forgotten, use the Windows sign-in reset offered there.
+
+If no Things, Places or Events remain visible, **Manage blocked items** on
+that screen opens the same PIN-protected manager. Unblock the collection and
+return to its screen to see it again.
 
 Blocking is an application visibility feature. It does not encrypt photos,
 erase them or prevent access in Explorer or other applications. Avoid sharing

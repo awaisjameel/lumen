@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import UButton from '@nuxt/ui/components/Button.vue'
+import CommandButton from '../shared/CommandButton.vue'
 import { onBeforeUnmount, watch } from 'vue'
 import { engine } from '../bridge'
 import { icons } from '../design/icons'
 import { useLibrary } from '../library/store'
-import { runCommand, useCommands } from '../shared/commands'
+import { useCommands } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { logError } from '../shared/errors'
 import { useLiveReload } from '../shared/liveReload'
@@ -38,9 +38,6 @@ onBeforeUnmount(() => revision++)
 useCommands([
   {
     id: 'trash.restoreAll',
-    group: 'library',
-    title: () => t('trash.restoreAll'),
-    icon: 'restore',
     available: () => lib.total > 0,
     enabled: () => !actions.reason.value,
     reason: () => actions.reason.value,
@@ -48,10 +45,6 @@ useCommands([
   },
   {
     id: 'trash.deleteAll',
-    group: 'library',
-    title: () => t('trash.deleteAll'),
-    icon: 'recycle',
-    danger: true,
     available: () => lib.total > 0,
     enabled: () => !actions.reason.value,
     reason: () => actions.reason.value,
@@ -67,7 +60,7 @@ useCommands([
     <span v-if="actions.work.busy" role="status" class="sr-only">
       {{ t(actions.work.busy === 'restore' ? 'trash.restoring' : 'trash.recycling') }}
     </span>
-    <UButton
+    <CommandButton
       :icon="icons.restore"
       :disabled="!!actions.reason.value"
       :title="actions.reason.value"
@@ -75,18 +68,18 @@ useCommands([
       color="neutral"
       variant="outline"
       data-trash-restore-all
-      @click="runCommand('trash.restoreAll')"
-      >{{ t('trash.restoreAll') }}</UButton
+      command="trash.restoreAll"
+      >{{ t('trash.restoreAll') }}</CommandButton
     >
-    <UButton
+    <CommandButton
       :disabled="!!actions.reason.value"
       :title="actions.reason.value"
       :loading="actions.work.busy === 'recycle'"
       color="error"
       variant="ghost"
       data-trash-delete-all
-      @click="runCommand('trash.deleteAll')"
-      >{{ t('trash.deleteAll') }}</UButton
+      command="trash.deleteAll"
+      >{{ t('trash.deleteAll') }}</CommandButton
     >
   </div>
 </template>

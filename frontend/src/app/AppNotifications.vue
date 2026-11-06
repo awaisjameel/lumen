@@ -6,6 +6,7 @@ import UButton from '@nuxt/ui/components/Button.vue'
 import { useToast } from '@nuxt/ui/composables'
 import { h, nextTick, onBeforeUnmount } from 'vue'
 import { t } from '../shared/i18n'
+import { portalOpen } from '../shared/overlay'
 import { icons } from '../design/icons'
 import type { IconName } from '../design/icons'
 import { setPresenter } from '../shared/notify'
@@ -58,7 +59,16 @@ function show(n: Notification) {
   // Nuxt UI wraps its actions in Reka's ToastAction, which always closes the
   // toast: an action that keeps its notice is drawn below the description.
   const keeping = n.actions?.filter((a) => a.dismiss === false) ?? []
+  let overlayEscape = false
   const body = {
+    'data-notification': n.id,
+    onEscapeKeyDown: (event: KeyboardEvent) => {
+      // Reka sends Escape to every toast's window listener. Preventing its
+      // default also stops a dialog registered later from closing. Let the
+      // dialog handle the key and retain the notice in its close callback.
+      overlayEscape = portalOpen() && !event.defaultPrevented
+      setTimeout(() => (overlayEscape = false), 0)
+    },
     title: n.title,
     description:
       keeping.length || n.work
@@ -95,15 +105,28 @@ function show(n: Notification) {
         : n.description,
     icon: icons[n.icon ?? look[n.kind].icon],
     color: look[n.kind].color,
+    // Interactive work has its own progress. Its duration changes from a
+    // timed offer to persistent work and back; Reka retains the old remaining
+    // time briefly, which can put a countdown above its maximum.
+    progress:
+      keeping.length || n.work
+        ? false
+        : { color: 'primary' as const, ui: { base: 'h-0.5', indicator: 'transition-none' } },
     // Nuxt UI keeps a toast with no duration for its default time: 0 is
     // "until dismissed".
-    progress: { color: 'primary' as const, ui: { base: 'h-0.5', indicator: 'transition-none' } },
     duration: n.duration ?? (n.kind === 'error' || n.work ? 0 : 6000),
     type: n.kind === 'error' ? ('foreground' as const) : ('background' as const),
     close: { 'aria-label': t('notify.dismiss'), class: 'text-(--lumen-toast-text)' },
     actions: n.actions?.filter((a) => a.dismiss !== false).map(button),
-    'onUpdate:open': (open: boolean) => {
-      if (!open) gone(n.id, toastID)
+    'onUpdate:open': (open: boolean): void => {
+      if (open) return
+      if (overlayEscape) {
+        overlayEscape = false
+        // Nuxt ignores the following automatic removal when updated in the
+        // same tick. Keep this toast and its focus/owner; do not cancel the
+        // shared keyboard event that the dialog still needs to receive.
+        if (shown.get(n.id)?.id === toastID) toast.update(toastID, body)
+      } else gone(n.id, toastID)
     },
   }
   // Removing and adding again would let the removal's delayed clean-up take

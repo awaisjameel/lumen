@@ -1,6 +1,7 @@
+import { destination } from '../shared/navigation/contract'
 import { t } from '../shared/i18n'
 import { mountInApp } from '../shared/testing'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { Place } from '../bridge'
@@ -73,19 +74,7 @@ it('keeps the place after cancelling a block and clears it before a saved block 
 })
 
 function testRouter() {
-  return createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      { path: '/settings', component: { template: '<div />' } },
-      { path: '/blocked', component: { template: '<div />' } },
-      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
-        name,
-        path: `/${name}/:id?`,
-        component: { template: '<div />' },
-      })),
-    ],
-  })
+  return createTestNavigation()
 }
 
 it('filters the atlas and cards together by country and highlights the focused card', async () => {
@@ -107,12 +96,12 @@ it('filters the atlas and cards together by country and highlights the focused c
 it('shows the place a place page sent to the map, with its preview open, once', async () => {
   places = () => Promise.resolve([place, { ...place, id: 2, name: 'Paris', country: 'France', lat: 48.86, lon: 2.35 }])
   const router = testRouter()
-  await router.push({ path: '/', query: { place: '2' } })
+  await router.push(destination({ name: 'places', query: { place: 2 } }))
   wrapper = mountInApp(PlacesView, { plugins: [router, createPinia()] })
   await flushPromises()
   expect(wrapper.get('#place-preview').text()).toContain('Paris')
   expect(engine.timeline).toHaveBeenCalledWith({ filter: '', place: 2 }, expect.any(AbortSignal))
-  expect(router.currentRoute.value.query.place).toBeUndefined()
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1])).place).toBeUndefined()
 })
 
 it('opens a visibility-checked preview, closes it on Escape and returns focus', async () => {
@@ -125,7 +114,7 @@ it('opens a visibility-checked preview, closes it on Escape and returns focus', 
   expect(document.activeElement).toBe(wrapper.get('#place-preview').element)
   expect(engine.timeline).toHaveBeenCalledWith({ filter: '', place: 1 }, expect.any(AbortSignal))
   expect(wrapper.get('button[aria-label="Open photo 4"] img').attributes('src')).toContain('4')
-  expect(wrapper.get('#place-preview a').attributes('href')).toBe('/place/1')
+  expect(wrapper.get('#place-preview a').attributes('href')).toBe('/places/1')
   await wrapper.get('#place-preview').trigger('keydown', { key: 'Escape' })
   await flushPromises()
   expect(wrapper.find('#place-preview').exists()).toBe(false)
@@ -181,13 +170,18 @@ it('announces initial loading and offers a retry after a failed read', async () 
 })
 
 it('offers blocked-item recovery when the last visible place disappears', async () => {
-  wrapper = mountInApp(PlacesView, { plugins: [testRouter(), createPinia()] })
+  const navigation = testRouter()
+  wrapper = mountInApp(PlacesView, { plugins: [navigation, createPinia()] })
   await flushPromises()
   places = () => Promise.resolve([])
   await showBlocksChanged()
   await flushPromises()
   expect(wrapper.text()).toContain(t('places.cleared'))
-  expect(wrapper.get('a[href="/blocked"]').text()).toBe(t('places.manageBlocked'))
+  expect(wrapper.get('a[href="/settings/blocked"]').text()).toBe(t('places.manageBlocked'))
+  await wrapper.get('a[href="/settings/blocked"]').trigger('click')
+  await flushPromises()
+  expect(navigation.location.value).toMatchObject({ kind: 'valid', target: { name: 'blocked' } })
+  expect(navigation.resolve(destination({ name: 'blocked' })).matched).toEqual(['blocked'])
 })
 
 vi.mock('../search/SearchBox.vue', () => ({ default: { render: () => null } }))

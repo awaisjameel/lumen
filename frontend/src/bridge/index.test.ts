@@ -25,12 +25,22 @@ vi.mock('../../bindings/lumen/services', () => ({
     RestoreLocation: vi.fn().mockResolvedValue(undefined),
     Unblock: vi.fn().mockResolvedValue(9),
     UndoUnblock: vi.fn().mockResolvedValue(undefined),
+    ValidateSelection: vi.fn().mockResolvedValue(undefined),
   },
   MediaService: {},
   PeopleService: {},
   SearchService: { Hits: vi.fn() },
   SystemService: { LogUIError: vi.fn() },
 }))
+
+it('admits a large selection by revision without retransmitting or mutating its resolved IDs', async () => {
+  const selection = { ids: Array.from({ length: 500 }, (_, index) => index + 1), revision: 25 }
+  await engine.validateSelection(selection)
+  const [sent] = vi.mocked(LibraryService.ValidateSelection).mock.calls.at(-1) ?? []
+  expect(sent?.revision).toBe(25)
+  expect(sent?.ids).toHaveLength(0)
+  expect(selection.ids).toHaveLength(500)
+})
 
 it('passes correction batches and the unblock receipt through without changing their arguments', async () => {
   await engine.setTakenAt([17, 43], 0)
@@ -108,6 +118,19 @@ it('recognises a late cancelled runtime read without hiding another late failure
   expect(isCancelled(new Call.RuntimeError('context canceled'))).toBe(false)
   expect(isCancelled(new CancelledRejectionError(promise, new Call.RuntimeError('disk full')))).toBe(false)
   expect(isCancelled(new CancelledRejectionError(promise, new Error('context canceled')))).toBe(false)
+})
+
+it('recognises only a coded visibility refusal that arrives after a read was cancelled', () => {
+  const promise = CancellablePromise.resolve()
+  const refused = new Call.RuntimeError('not found', { cause: { code: ErrorCode.NotFound } })
+  expect(isCancelled(new CancelledRejectionError(promise, refused))).toBe(true)
+  expect(isCancelled(refused)).toBe(false)
+  expect(isCancelled(new CancelledRejectionError(promise, new Call.RuntimeError('not found')))).toBe(false)
+  expect(
+    isCancelled(new CancelledRejectionError(promise, new Error('not found', { cause: { code: ErrorCode.NotFound } }))),
+  ).toBe(false)
+  expect(isCancelled(new CancelledRejectionError(promise, new TypeError('Failed to fetch')))).toBe(false)
+  expect(isCancelled(new TypeError('Failed to fetch'))).toBe(false)
 })
 
 it('localizes every invalid-album reason without showing engine prose', () => {

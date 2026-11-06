@@ -1,9 +1,10 @@
 // What every suite starts from: where things are, its own DevTools port and
 // folders, and one way of recording checks. A suite runs on its own
 // (`node suites/viewer.mjs`) or through run.mjs, which reads its report.json.
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { errorRecorder } from './errors.mjs'
 
 export const E2E = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const ROOT = resolve(E2E, '..')
@@ -35,6 +36,46 @@ export const SUITES = {
   collections: {
     port: 9404,
     about: 'albums, smart albums, Trash and Undo, custom Things, About',
+  },
+  'collection-recovery': {
+    port: 9415,
+    about: 'empty collection recovery through the PIN gate and event-name Undo across a restart',
+  },
+  'search-history': {
+    port: 9416,
+    about: 'clear recent searches, run a new query and preserve engine history through navigation and restart',
+  },
+  'favourite-undo': {
+    port: 9417,
+    about: '500-item favourite Undo: bounded calls, progress, cancellation, failed-only retry, newer edits and restart',
+  },
+  'undo-recovery': {
+    port: 9418,
+    about: 'partial album inverses, failed-only retry, correction provenance, privacy, deleted identities and restart',
+  },
+  'tagging-recovery': {
+    port: 9419,
+    about: 'annotation commit/queue faults, draft retention and owned OCR recovery through restart',
+  },
+  'smart-album-preview': {
+    port: 9421,
+    about: 'bounded smart-rule previews: real mixed media, privacy/retry, cancellation and 100,000-row parent comparison',
+  },
+  commands: {
+    port: 9425,
+    about: 'typed commands through real controls, pending/failure/retry, contextual menus, shortcuts and restart',
+  },
+  navigation: {
+    port: 9424,
+    about: 'all production destinations, typed controls, malformed input, startup, history, drawer and PIN/media boundaries',
+  },
+  'album-draft': {
+    port: 9423,
+    about: 'album draft admission across privacy Undo, failed reads, reference removal, guarded saves and navigation',
+  },
+  'collection-places': {
+    port: 9422,
+    about: 'same-count collection place corrections/Undo, privacy/read recovery and navigation ownership',
   },
   organise: {
     port: 9405,
@@ -98,7 +139,14 @@ export function suite(name) {
     mkdirSync(dir, { recursive: true })
   }
   const checks = []
-  const errors = []
+  const methods = new Map()
+  const bindings = join(ROOT, 'frontend', 'bindings', 'lumen', 'services')
+  for (const file of readdirSync(bindings).filter(file => file.endsWith('service.ts'))) {
+    const source = readFileSync(join(bindings, file), 'utf8')
+    for (const match of source.matchAll(/export function (\w+)\([\s\S]*?\$Call\.ByID\((\d+)/g)) methods.set(Number(match[2]), match[1])
+  }
+  const diagnostics = errorRecorder(methods)
+  const errors = diagnostics.records
   const check = (label, pass, detail = '') => {
     const text = typeof detail === 'string' ? detail : JSON.stringify(detail)
     checks.push({ name: label, pass: !!pass, detail: text.slice(0, 600) })
@@ -119,13 +167,14 @@ export function suite(name) {
       check(label, false, `threw: ${String(e).slice(0, 400)}`)
     }
   }
-  /** Records uncaught errors of the page. */
-  const watch = (page) => {
-    page.on('pageerror', (e) => errors.push(String(e).slice(0, 300)))
-    page.on('console', (m) => m.type() === 'error' && errors.push(m.text().slice(0, 300)))
-  }
-  /** Wails asks for an optional /wails/custom.js; its 404 is not the app's error. */
-  const appErrors = () => errors.filter((e) => !/custom\.js|Failed to load resource/.test(e))
+  const cancellableReads = new Set(['Timeline', 'Days', 'Search', 'Hits', 'TopPlaces', 'PreviewAlbum'])
+  /** Only cancelled reads are normal globally; fault suites identify their own refusals. */
+  const watch = (page, options = {}) => diagnostics.watch(page, {
+    ...options,
+    expected: row => (row.kind === 'response' && row.status === 422 && row.errorKind === 'RuntimeError' &&
+      row.message === 'context canceled' && cancellableReads.has(row.method)) || !!options.expected?.(row),
+  })
+  const appErrors = diagnostics.unexpected
   /** Writes report.json and sets the exit code. */
   const finish = (extra = {}) => {
     const failed = checks.filter((c) => !c.pass)
@@ -149,6 +198,7 @@ export function suite(name) {
     guard,
     watch,
     appErrors,
+    settleErrors: diagnostics.settle,
     finish,
   }
 }

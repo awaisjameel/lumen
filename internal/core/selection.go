@@ -26,4 +26,8 @@ type BatchOutcome struct {
 	ID    int64  `json:"id"`
 	Code  string `json:"code"`
 	Error string `json:"error"`
+	// Changed is true only when a successful album membership action changed
+	// the stored value. Other actions leave it false. It is captured beside
+	// the write so Undo never reverses a pre-existing membership.
+	Changed bool `json:"changed,omitempty"`
 }

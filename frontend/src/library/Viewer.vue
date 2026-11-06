@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+
 // Full-window viewer. Shows the 1024px preview instantly, then swaps in the
 // original when the WebView can display it (JPEG, PNG, WebP, AVIF). Its
 // photos, the one beside each and what may be done with it come from a
@@ -6,7 +8,7 @@
 import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { engine, isCancelled, videosAvailable, ViewerWheel } from '../bridge'
 import type { AssetDetail, GridItem } from '../bridge'
@@ -125,16 +127,18 @@ watch(
 )
 const moreItems = computed(() =>
   menuItems(
-    [
-      'viewer.openFile',
-      'viewer.chooseApp',
-      'viewer.folder',
-      'viewer.files',
-      'viewer.compress',
-      'viewer.filmstrip',
-      'viewer.autoHide',
-      'viewer.trash',
-    ].flatMap((id) => {
+    (
+      [
+        'viewer.openFile',
+        'viewer.chooseApp',
+        'viewer.folder',
+        'viewer.files',
+        'viewer.compress',
+        'viewer.filmstrip',
+        'viewer.autoHide',
+        'viewer.trash',
+      ] as const
+    ).flatMap((id) => {
       const command = commandById(id)
       return command ? [command] : []
     }),
@@ -142,7 +146,7 @@ const moreItems = computed(() =>
 )
 const zoomItems = computed(() =>
   menuItems(
-    ['viewer.fit', 'viewer.actual', 'viewer.doubleZoom'].flatMap((id) => {
+    (['viewer.fit', 'viewer.actual', 'viewer.doubleZoom'] as const).flatMap((id) => {
       const command = commandById(id)
       return command ? [command] : []
     }),
@@ -406,57 +410,40 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
+// Saving disables the adjustment family without surrendering its keyboard
+// events to browser accelerators such as a reassigned Ctrl+R.
+const adjustmentAvailability = {
+  available: () => !!image.value && ordinary.value,
+  enabled: () => !adjusting.value,
+  reason: () => (adjusting.value ? t('commands.running') : undefined),
+}
 useCommands([
   {
     id: 'viewer.openFile',
-    group: 'media',
-    title: () => t('files.open'),
-    icon: 'external',
-    zone: 'viewer',
     available: () => !!detail.value?.paths.length,
     run: openDefault,
   },
   {
     id: 'viewer.chooseApp',
-    group: 'media',
-    title: () => t('files.openWith'),
-    icon: 'external',
-    zone: 'viewer',
     available: () => !!detail.value?.paths.length,
     run: () => detail.value && engine.openMedia(detail.value.id, '', true),
   },
   {
     id: 'viewer.folder',
-    group: 'media',
-    title: () => t('common.showInFolder'),
-    icon: 'folder',
-    zone: 'viewer',
     available: () => !!detail.value?.paths.length,
     run: () => detail.value && engine.showInFolder(detail.value.id),
   },
   {
     id: 'viewer.files',
-    group: 'media',
-    title: () => t('files.title'),
-    icon: 'files',
-    zone: 'viewer',
     available: () => ordinary.value && !!detail.value,
     run: () => (filesOpen.value = true),
   },
   {
     id: 'viewer.autoHide',
-    group: 'view',
-    title: () => t('viewer.autoHide'),
-    icon: 'eye-off',
-    zone: 'viewer',
     run: () => prefs.setViewer({ autoHide: !viewing.value.autoHide }),
   },
   {
     id: 'viewer.doubleZoom',
-    group: 'view',
-    title: () => t('viewer.doubleZoom'),
-    icon: 'zoom-in',
-    zone: 'viewer',
     available: () => !!image.value,
     run: () => image.value?.zoom(200 / Math.max(1, image.value.scale)),
   },
@@ -464,187 +451,102 @@ useCommands([
     'viewer.compress',
     () => !!image.value && ordinary.value,
     () => (detail.value ? [{ assetId: detail.value.id, path: '' }] : []),
-    'viewer',
   ),
   {
     id: 'viewer.fullscreen',
-    group: 'view',
-    title: () => t('viewer.fullscreen'),
-    icon: 'maximize',
-    zone: 'viewer',
     run: fullscreen,
   },
   {
     id: 'viewer.filmstrip',
-    group: 'view',
-    title: () => t('viewer.filmstrip'),
-    icon: 'film',
-    zone: 'viewer',
     available: () => !!src.value.window,
     run: () => prefs.setViewer({ filmstrip: !viewing.value.filmstrip }),
   },
   {
     id: 'viewer.slideshow',
-    group: 'view',
-    title: () => t('viewer.slideshow'),
-    icon: 'slideshow',
     enabled: () => sliding.value || canNext.value || viewing.value.loop,
-    zone: 'viewer',
     run: () => (sliding.value = !sliding.value),
   },
   {
     id: 'viewer.compare',
-    group: 'view',
-    title: () => t('viewer.compare'),
-    icon: 'layers',
-    zone: 'viewer',
     available: () => !!image.value && !!src.value.window,
     enabled: () => comparing.value || canCompare.value,
     run: () => (comparing.value = !comparing.value),
   },
   {
     id: 'viewer.rotate',
-    group: 'media',
-    title: () => t('viewer.rotate'),
-    icon: 'rotate',
-    zone: 'viewer',
-    available: () => !!image.value && ordinary.value && !adjusting.value,
+    ...adjustmentAvailability,
     run: () => adjust((detail.value?.adjustment?.rotation ?? 0) + 1, detail.value?.adjustment?.flip ?? false),
   },
   {
     id: 'viewer.flip',
-    group: 'media',
-    title: () => t('viewer.flip'),
-    icon: 'flip',
-    zone: 'viewer',
-    available: () => !!image.value && ordinary.value && !adjusting.value,
+    ...adjustmentAvailability,
     run: () => adjust(detail.value?.adjustment?.rotation ?? 0, !detail.value?.adjustment?.flip),
   },
   {
     id: 'viewer.resetAdjustment',
-    group: 'media',
-    title: () => t('viewer.resetAdjustment'),
-    enabled: () => adjusted.value,
-    icon: 'undo',
-    zone: 'viewer',
-    available: () => !!image.value && ordinary.value && !adjusting.value,
+    ...adjustmentAvailability,
+    enabled: () => adjusted.value && adjustmentAvailability.enabled(),
     run: () => adjust(0, false),
   },
   {
     id: 'viewer.zoomIn',
-    group: 'view',
-    title: () => t('viewer.zoomIn'),
     enabled: () => !!image.value?.canZoomIn,
-    icon: 'zoom-in',
-    keys: '=',
-    zone: 'viewer',
     available: () => !!image.value,
     run: () => image.value?.zoom(1.25),
   },
   {
     id: 'viewer.zoomOut',
-    group: 'view',
-    title: () => t('viewer.zoomOut'),
     enabled: () => !!image.value?.canZoomOut,
-    icon: 'zoom-out',
-    keys: '-',
-    zone: 'viewer',
     available: () => !!image.value,
     run: () => image.value?.zoom(0.8),
   },
   {
     id: 'viewer.fit',
-    group: 'view',
-    title: () => t('viewer.fit'),
-    icon: 'maximize',
-    keys: '0',
-    zone: 'viewer',
     available: () => !!image.value,
     run: () => image.value?.fit(),
   },
   {
     id: 'viewer.actual',
-    group: 'view',
-    title: () => t('viewer.actual'),
-    icon: 'image',
-    keys: '1',
-    zone: 'viewer',
     available: () => !!image.value,
     run: () => image.value?.actual(),
   },
   {
     id: 'viewer.close',
-    group: 'view',
-    title: () => t('common.close'),
-    icon: 'close',
-    keys: 'Escape',
-    zone: 'viewer',
     run: close,
   },
   {
     id: 'viewer.previous',
-    group: 'view',
-    title: () => t('viewer.prev'),
     enabled: () => canPrevious.value,
-    icon: 'chevron-left',
-    keys: 'ArrowLeft',
-    zone: 'viewer',
     run: () => go(-1),
   },
   {
     id: 'viewer.next',
-    group: 'view',
-    title: () => t('viewer.next'),
     enabled: () => canNext.value,
-    icon: 'chevron-right',
-    keys: 'ArrowRight',
-    zone: 'viewer',
     run: () => go(1),
   },
   {
     id: 'viewer.favourite',
-    group: 'media',
     title: () => t(item.value?.f ? 'details.unfavourite' : 'details.favourite'),
-    icon: 'heart',
-    keys: 'F',
-    zone: 'viewer',
     available: () => !!actions.value.favourite,
     run: () => actions.value.favourite?.(),
   },
   {
     id: 'viewer.details',
-    group: 'view',
-    title: () => t('library.info'),
-    icon: 'info',
-    keys: 'I',
-    zone: 'viewer',
     available: () => actions.value.details,
     run: () => (lib.showDetails = !lib.showDetails),
   },
   {
     id: 'viewer.trash',
-    group: 'media',
-    title: () => t('trash.move'),
-    icon: 'trash',
-    zone: 'viewer',
     available: () => !!actions.value.moveToTrash,
     run: () => actions.value.moveToTrash?.(),
   },
   {
     id: 'viewer.restore',
-    group: 'media',
-    title: () => t('trash.restore'),
-    icon: 'restore',
-    zone: 'viewer',
     available: () => !!actions.value.restore,
     run: () => actions.value.restore?.(),
   },
   {
     id: 'viewer.delete',
-    group: 'media',
-    title: () => t('trash.deleteFromDisk'),
-    icon: 'trash',
-    zone: 'viewer',
     available: () => !!actions.value.deleteFromDisk,
     run: () => actions.value.deleteFromDisk?.(),
   },
@@ -725,7 +627,7 @@ onBeforeUnmount(() => {
             :label="t('common.close')"
             :tip="t('viewer.return')"
             variant="ghost"
-            @click="runCommand('viewer.close')"
+            command="viewer.close"
           />
           <img class="brand" src="/lumen.png" alt="" />
           <div class="identity">
@@ -739,7 +641,7 @@ onBeforeUnmount(() => {
             :kbds="capsOf('viewer.favourite')"
             :aria-pressed="!!item?.f"
             variant="ghost"
-            @click="runCommand('viewer.favourite')"
+            command="viewer.favourite"
             ><Icon name="heart" :filled="!!item?.f"
           /></IconButton>
           <IconButton
@@ -752,7 +654,7 @@ onBeforeUnmount(() => {
             :kbds="capsOf('viewer.details')"
             :aria-pressed="lib.showDetails"
             variant="ghost"
-            @click="runCommand('viewer.details')"
+            command="viewer.details"
           />
           <!-- Blocked media (a covered photo) keeps its bar to Close and Move to
                Trash: nothing invites lingering over it. -->
@@ -765,7 +667,7 @@ onBeforeUnmount(() => {
             :disabled="!comparing && !canCompare"
             :aria-pressed="comparing"
             variant="ghost"
-            @click="runCommand('viewer.compare')"
+            command="viewer.compare"
           />
           <IconButton
             v-if="(image || sliding) && ordinary"
@@ -776,17 +678,17 @@ onBeforeUnmount(() => {
             :aria-pressed="sliding"
             :disabled="!sliding && !canNext && !viewing.loop"
             variant="ghost"
-            @click="runCommand('viewer.slideshow')"
+            command="viewer.slideshow"
           />
           <!-- Blocked media has one thing to do: its bar offers it directly. -->
-          <UButton
+          <CommandButton
             v-if="!ordinary && actions.moveToTrash"
             class="viewer-control"
             :icon="icons.trash"
             color="error"
             variant="ghost"
-            @click="runCommand('viewer.trash')"
-            >{{ t('trash.move') }}</UButton
+            command="viewer.trash"
+            >{{ t('trash.move') }}</CommandButton
           >
           <UDropdownMenu v-else v-model:open="menuOpen" :items="moreItems" :portal="false" :content="{ align: 'end' }">
             <IconButton class="viewer-control" :icon="icons.more" :label="t('viewer.more')" variant="ghost" />
@@ -819,16 +721,12 @@ onBeforeUnmount(() => {
         </header>
         <div v-if="!ordinary" class="private-notice" role="status">
           <span>{{ t(actions.restore ? 'viewer.trashContext' : 'viewer.blockedContext') }}</span>
-          <UButton v-if="actions.restore" :icon="icons.restore" variant="ghost" @click="runCommand('viewer.restore')">{{
+          <CommandButton v-if="actions.restore" :icon="icons.restore" variant="ghost" command="viewer.restore">{{
             t('trash.restore')
-          }}</UButton>
-          <UButton
-            v-if="actions.deleteFromDisk"
-            :icon="icons.recycle"
-            variant="ghost"
-            @click="runCommand('viewer.delete')"
-            >{{ t('trash.deleteFromDisk') }}</UButton
-          >
+          }}</CommandButton>
+          <CommandButton v-if="actions.deleteFromDisk" :icon="icons.recycle" variant="ghost" command="viewer.delete">{{
+            t('trash.deleteFromDisk')
+          }}</CommandButton>
         </div>
 
         <div
@@ -841,7 +739,9 @@ onBeforeUnmount(() => {
         >
           <FeatureState v-if="loadError" kind="error" :title="t('viewer.loadFailed')" :text="loadError"
             ><UButton @click="retry++">{{ t('common.retry') }}</UButton
-            ><UButton variant="ghost" @click="close">{{ t('viewer.return') }}</UButton></FeatureState
+            ><CommandButton variant="ghost" command="viewer.close">{{
+              t('viewer.return')
+            }}</CommandButton></FeatureState
           >
           <FeatureState v-else-if="!item && !loading" kind="empty" icon="image-off" :title="t('viewer.notFound')" />
           <template v-else-if="item">
@@ -893,9 +793,9 @@ onBeforeUnmount(() => {
                 icon="image-off"
                 :title="loading ? t('details.loading') : t('viewer.noPreview')"
                 :text="loading ? undefined : t('viewer.noPreviewHint')"
-                ><UButton v-if="!loading && detail?.paths.length" @click="openDefault">{{
+                ><CommandButton v-if="!loading && detail?.paths.length" command="viewer.openFile">{{
                   t('files.open')
-                }}</UButton></FeatureState
+                }}</CommandButton></FeatureState
               >
             </template>
           </template>
@@ -984,14 +884,14 @@ onBeforeUnmount(() => {
                     :label="t('viewer.rotate')"
                     :disabled="adjusting"
                     variant="ghost"
-                    @click="runCommand('viewer.rotate')"
+                    command="viewer.rotate"
                   />
                   <IconButton
                     :icon="icons.flip"
                     :label="t('viewer.flip')"
                     :disabled="adjusting"
                     variant="ghost"
-                    @click="runCommand('viewer.flip')"
+                    command="viewer.flip"
                   />
                   <IconButton
                     :icon="icons.reset"
@@ -999,7 +899,7 @@ onBeforeUnmount(() => {
                     :tip="t(adjusted ? 'viewer.resetAdjustment' : 'viewer.resetUnavailable')"
                     :disabled="adjusting || !adjusted"
                     variant="ghost"
-                    @click="runCommand('viewer.resetAdjustment')"
+                    command="viewer.resetAdjustment"
                   />
                 </div>
                 <IconButton
@@ -1009,14 +909,14 @@ onBeforeUnmount(() => {
                   :tip="t(viewing.filmstrip ? 'viewer.hideFilmstrip' : 'viewer.showFilmstrip')"
                   :aria-pressed="viewing.filmstrip"
                   variant="ghost"
-                  @click="runCommand('viewer.filmstrip')"
+                  command="viewer.filmstrip"
                 />
                 <IconButton
                   v-if="actions.moveToTrash"
                   :icon="icons.trash"
                   :label="t('trash.move')"
                   variant="ghost"
-                  @click="runCommand('viewer.trash')"
+                  command="viewer.trash"
                 />
               </div>
               <span v-if="positionText" class="position">{{ positionText }}</span>
@@ -1029,7 +929,7 @@ onBeforeUnmount(() => {
                     :disabled="!image.canZoomOut"
                     :tip="t(image.canZoomOut ? 'viewer.zoomOut' : 'viewer.minimumZoom')"
                     variant="ghost"
-                    @click="runCommand('viewer.zoomOut')"
+                    command="viewer.zoomOut"
                   />
                   <UDropdownMenu
                     v-model:open="zoomOpen"
@@ -1051,7 +951,7 @@ onBeforeUnmount(() => {
                     :disabled="!image.canZoomIn"
                     :tip="t(image.canZoomIn ? 'viewer.zoomIn' : 'viewer.maximumZoom')"
                     variant="ghost"
-                    @click="runCommand('viewer.zoomIn')"
+                    command="viewer.zoomIn"
                   />
                 </div>
                 <IconButton
@@ -1059,7 +959,7 @@ onBeforeUnmount(() => {
                   :label="t(isFullscreen ? 'viewer.exitFullscreen' : 'viewer.fullscreen')"
                   :aria-pressed="isFullscreen"
                   variant="ghost"
-                  @click="runCommand('viewer.fullscreen')"
+                  command="viewer.fullscreen"
                 />
               </div>
             </div>
@@ -1075,7 +975,7 @@ onBeforeUnmount(() => {
           :disabled="!canPrevious"
           :tip="t(canPrevious ? 'viewer.prev' : 'viewer.firstItem')"
           variant="ghost"
-          @click="runCommand('viewer.previous')"
+          command="viewer.previous"
         />
         <IconButton
           side="left"
@@ -1086,7 +986,7 @@ onBeforeUnmount(() => {
           :disabled="!canNext"
           :tip="t(canNext ? 'viewer.next' : 'viewer.lastItem')"
           variant="ghost"
-          @click="runCommand('viewer.next')"
+          command="viewer.next"
         />
       </div>
       <DetailsPanel v-if="lib.showDetails && actions.details" :sel="src.sel" />

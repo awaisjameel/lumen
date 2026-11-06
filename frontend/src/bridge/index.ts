@@ -62,6 +62,8 @@ import type {
   OriginalLocation,
   About,
   Album,
+  AlbumEdit,
+  AlbumVersion,
   BatchOutcome,
   Block,
   BlockChange,
@@ -73,6 +75,7 @@ import type {
   XMPDelete,
   XMPExport,
   AlbumRule,
+  AlbumPreview as RawAlbumPreview,
   AssetDetail as RawAssetDetail,
   AssetTag,
   Changes,
@@ -172,6 +175,8 @@ export type {
   UpdatePolicy,
   About,
   Album,
+  AlbumEdit,
+  AlbumVersion,
   BatchOutcome,
   AlbumRule,
   Block,
@@ -221,6 +226,8 @@ type NonNullLists<T, K extends keyof T> = Omit<T, K> & { [P in K]-?: NonNullable
 export type AssetDetail = NonNullLists<RawAssetDetail, 'paths'>
 /** One day of the grid. */
 export type DayItems = NonNullLists<RawDayItems, 'items'>
+/** An exact smart-rule count with a bounded representative sample. */
+export type AlbumPreview = NonNullLists<RawAlbumPreview, 'items'>
 /** A search's results, best first. */
 export type SearchResults = NonNullLists<SearchResult, 'items' | 'people'>
 
@@ -420,6 +427,7 @@ export const ErrorCode = {
   AlbumKind: 'album_kind',
   AlbumReference: 'album_reference',
   AlbumManualOnly: 'album_manual_only',
+  AlbumChanged: 'album_changed',
   PersonExists: 'person_exists',
   BlockedName: 'blocked_name',
   TagExists: 'tag_exists',
@@ -480,14 +488,15 @@ export function errorCode(e: unknown): ErrorCode | undefined {
  * no longer wanted the answer, so there is nothing to report.
  */
 export function isCancelled(e: unknown): boolean {
-  // Wails beta.30 reports a late Go cancellation response separately from
-  // the CancelError already handled by the read's owner. Only that known
-  // response is cancellation; other late rejections remain failures.
+  // Wails beta.30 reports late responses separately from the CancelError
+  // already handled by the read's owner. Visibility can retire an inspection
+  // before Go refuses its original target; that coded refusal is expected
+  // only after cancellation. Other late failures still reach the error owner.
   return (
     e instanceof CancelError ||
     (e instanceof CancelledRejectionError &&
       e.cause instanceof Call.RuntimeError &&
-      e.cause.message === 'context canceled')
+      (e.cause.message === 'context canceled' || errorCode(e.cause) === ErrorCode.NotFound))
   )
 }
 
@@ -536,7 +545,9 @@ export const engine = {
     const result = await LibraryService.Selection(view, ids, search)
     return { ...result, ids: result.ids ?? [] }
   },
-  validateSelection: (sel: Selection): Promise<void> => LibraryService.ValidateSelection(sel),
+  // Store.ValidateSelection admits only the revision; resolved IDs remain with their UI owner.
+  validateSelection: (sel: Selection): Promise<void> =>
+    LibraryService.ValidateSelection({ ids: [], revision: sel.revision }),
   /** Does one thing to each asset; one that fails is in the outcomes, not thrown. albumID is the album actions'. */
   applyBatch: async (ids: number[], action: BatchAction, albumID = 0): Promise<BatchOutcome[]> =>
     (await LibraryService.ApplyBatch(ids, action, albumID)) ?? [],
@@ -610,7 +621,8 @@ export const engine = {
     })),
   places: async (): Promise<Place[]> => (await LibraryService.Places()) ?? [],
   place: (id: number): Promise<Place> => LibraryService.Place(id),
-  topPlaces: async (view: View): Promise<NamedPlace[]> => (await LibraryService.TopPlaces(view)) ?? [],
+  topPlaces: async (view: View, signal?: AbortSignal): Promise<NamedPlace[]> =>
+    (await cancellable(LibraryService.TopPlaces(view), signal)) ?? [],
   events: async (): Promise<Event[]> => (await LibraryService.Events()) ?? [],
   event: (id: number): Promise<Event> => LibraryService.Event(id),
   /** How many events a time gap would make, without saving it; a newer preview cancels this one. */
@@ -620,10 +632,14 @@ export const engine = {
   setEventPinned: (id: number, pinned: boolean): Promise<void> => LibraryService.SetEventPinned(id, pinned),
   setFavourite: (id: number, fav: boolean): Promise<void> => LibraryService.SetFavourite(id, fav),
   albums: async (): Promise<Album[]> => (await LibraryService.Albums()) ?? [],
+  previewAlbum: async (rule: AlbumRule, signal?: AbortSignal): Promise<AlbumPreview> => {
+    const result = await cancellable(LibraryService.PreviewAlbum(rule), signal)
+    return { ...result, items: result.items ?? [] }
+  },
   /** Creates a manual album holding items, or a smart album (no items). */
   createAlbum: (name: string, kind: AlbumKind, rule: AlbumRule, items: number[] = []): Promise<number> =>
     LibraryService.CreateAlbum(name, kind, rule, items),
-  updateAlbum: (id: number, name: string, rule: AlbumRule): Promise<void> => LibraryService.UpdateAlbum(id, name, rule),
+  saveAlbum: (edit: AlbumEdit): Promise<AlbumVersion> => LibraryService.SaveAlbum(edit),
   deleteAlbum: (id: number): Promise<void> => LibraryService.DeleteAlbum(id),
   assetAlbums: async (id: number): Promise<number[]> => (await LibraryService.AssetAlbums(id)) ?? [],
   setAlbumItem: (assetID: number, albumID: number, include: boolean): Promise<void> =>

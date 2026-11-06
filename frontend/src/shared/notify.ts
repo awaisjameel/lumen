@@ -11,7 +11,8 @@ export const notificationToaster = {
   expand: true,
   max: Number.MAX_SAFE_INTEGER,
   ui: {
-    viewport: 'bottom-24 data-[expanded=true]:h-auto max-h-[calc(100dvh-7rem)] overflow-y-auto gap-3',
+    viewport:
+      'z-(--lumen-z-notification) bottom-24 data-[expanded=true]:h-auto max-h-[calc(100dvh-7rem)] overflow-y-auto gap-3',
     base: 'relative inset-auto shrink-0 transform-none data-[state=open]:animate-[lumen-rise_var(--lumen-d-base)_var(--lumen-ease-out)] data-[state=closed]:animate-[lumen-fade_var(--lumen-d-fast)_var(--lumen-ease-in)_reverse]',
   },
 } as const

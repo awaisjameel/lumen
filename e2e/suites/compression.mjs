@@ -479,6 +479,7 @@ try {
   for (const [name, before] of originals)
     s.check(`original retained: ${name}`, hash(join(photos, name)) === before)
   s.check('no off-device request', external.length === 0, external)
+  await s.settleErrors()
   s.check('no uncaught UI errors', s.appErrors().length === 0, s.appErrors())
 } catch (error) {
   s.check('suite completed', false, String(error))

@@ -31,19 +31,29 @@ type semanticSearch interface {
 	Search(ctx context.Context, query string, allow func(id int64) bool) (hits []search.Hit, complete bool, err error)
 }
 
+// tagIndexer is the pipeline follow-up and invalidation Things needs.
+// Tests can fail its scheduling call after the annotation has committed.
+type tagIndexer interface {
+	QueueOCR(context.Context) error
+	LibraryChanged(core.Changes)
+}
+
 // SearchService is natural-language search and Things (tags).
 type SearchService struct {
 	store    *store.Store
 	engine   *search.Engine // nil when the AI can't run
 	semantic semanticSearch // engine, but nil (not a nil engine in an interface) when the AI can't run
 	faces    bool           // faces are being recognised (the people engine runs)
-	ix       *index.Indexer // tells the UI what changed; nil in tests
+	ix       tagIndexer     // reports tag changes and queues text; nil in store-only tests
 }
 
 // NewSearchService returns the search service (engine is nil without the AI;
 // faces says whether faces are recognised).
 func NewSearchService(st *store.Store, engine *search.Engine, faces bool, ix *index.Indexer) *SearchService {
-	s := &SearchService{store: st, engine: engine, faces: faces, ix: ix}
+	s := &SearchService{store: st, engine: engine, faces: faces}
+	if ix != nil {
+		s.ix = ix
+	}
 	if engine != nil {
 		s.semantic = engine
 	}
@@ -273,7 +283,8 @@ func (s *SearchService) TagAsset(ctx context.Context, assetID int64, name string
 	if err := s.store.TagAsset(ctx, assetID, id); err != nil {
 		return err
 	}
-	return s.queueOCR(ctx)
+	s.taggingCommitted(ctx)
+	return nil
 }
 
 // TagAssets is TagAsset for a selection: the tag is found or made once, and
@@ -287,12 +298,17 @@ func (s *SearchService) TagAssets(ctx context.Context, ids []int64, name string)
 	if err != nil {
 		return nil, err
 	}
-	// Tagging has committed. A background queue failure must not discard its
-	// per-photo outcomes or tell the UI that those edits failed.
-	if err := s.queueOCR(ctx); err != nil && ctx.Err() == nil {
-		slog.Error("queue ocr after batch tagging", "err", err)
-	}
+	s.taggingCommitted(ctx)
 	return batchOutcomes(results), nil
+}
+
+// taggingCommitted keeps annotation outcomes independent of their background
+// follow-up. The indexer owns retries, including after the caller has left;
+// persisted eligibility also lets startup recover without replaying tags.
+func (s *SearchService) taggingCommitted(ctx context.Context) {
+	if err := s.queueOCR(ctx); err != nil && ctx.Err() == nil {
+		slog.Error("queue ocr after tagging", "err", err)
+	}
 }
 
 // tagNamed is the tag of that name, made if there is none.

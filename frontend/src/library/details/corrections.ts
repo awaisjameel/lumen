@@ -1,6 +1,11 @@
 import { onBeforeUnmount, ref } from 'vue'
+import { engine } from '../../bridge'
+import type { AssetDetail } from '../../bridge'
 import { errorText, reportError } from '../../shared/errors'
-import { notify } from '../../shared/notify'
+import { useMutationWrites } from '../../shared/mutationWrites'
+import { offerBatchUndo } from '../../shared/undo'
+import type { UndoResult } from '../../shared/undo'
+import { useUndoReconcile } from '../undo'
 import { t } from '../../shared/i18n'
 
 /** Camera clock values stay in UTC even when the operating system uses another zone. */
@@ -18,35 +23,75 @@ export function parseDateInput(value: string): number | undefined {
   return date.getTime() / 1000
 }
 
-/** Keep write errors in the dialog; Undo survives its closure and reports through the toast owner. */
-export function useCorrection(changed: () => void, close: () => void) {
+/** Atomic forward corrections and independently recoverable, captured per-asset inverses. */
+export function useCorrection(field: 'date' | 'place', changed: () => void, close: () => void) {
   const busy = ref(false)
   const error = ref('')
+  const owner = useMutationWrites().owner(field)
+  const refresh = useUndoReconcile()
+  const reconcile = () => refresh(changed)
   let alive = true
   onBeforeUnmount(() => (alive = false))
-  async function save(
-    id: string,
+  async function save<State>(
     title: string,
-    /** Makes the change; resolves false when it did not (the dialog moved on). */
+    targets: readonly number[],
     apply: (current: () => boolean) => Promise<boolean>,
-    undo: () => Promise<void>,
+    capture: (asset: AssetDetail) => State,
+    restore: (id: number, previous: NoInfer<State>) => Promise<void>,
   ) {
     if (busy.value) return
+    const ids = [...new Set(targets)]
+    const lease = owner.begin(ids)
+    const previous = new Map<number, { state: State }>()
+    let retained = false
+    const current = () => alive && ids.every(lease.current)
     busy.value = true
     error.value = ''
     try {
-      if (!(await apply(() => alive))) return
-      changed()
-      notify({
-        id,
-        title,
-        kind: 'success',
-        actions: [{ label: t('settings.undo'), run: () => void undo().then(changed).catch(reportError) }],
+      const saved = await owner.take(async () => {
+        for (const id of ids) {
+          if (!alive || !lease.current(id)) return false
+          const asset = await engine.asset(id)
+          if (asset.id !== id) throw new Error(t('error.unexpected'))
+          previous.set(id, { state: capture(asset) })
+        }
+        return current() ? apply(current) : false
       })
+      if (!saved) return
+      const owned = ids.filter(lease.current)
+      if (owned.length) {
+        retained = true
+        offerBatchUndo({
+          title,
+          undoTitle: t(field === 'date' ? 'undo.dates' : 'undo.places'),
+          ids: owned,
+          unitSize: 1,
+          apply: (part, stopped) =>
+            owner.take(async () => {
+              const rows: UndoResult[] = []
+              for (const id of part) {
+                if (stopped()) rows.push({ id, state: 'cancelled', error: '' })
+                else if (!lease.current(id)) rows.push({ id, state: 'superseded', error: '' })
+                else {
+                  const before = previous.get(id)
+                  if (!before) throw new Error(t('error.unexpected'))
+                  await restore(id, before.state)
+                  rows.push({ id, state: 'done', error: '' })
+                }
+              }
+              return rows
+            }),
+          reconcile,
+          release: lease.release,
+        })
+      }
+      const refreshing = reconcile().catch(reportError)
       if (alive) close()
+      await refreshing
     } catch (e) {
       if (alive) error.value = errorText(e)
     } finally {
+      if (!retained) lease.release()
       if (alive) busy.value = false
     }
   }

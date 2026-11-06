@@ -21,6 +21,10 @@ func downgradeToV18(t *testing.T, st *Store) {
 	// This fixture deliberately removes settlement's schema until the next
 	// Open, so build the old database through the raw pool as migrations do.
 	st.w.execContext = st.w.DB.ExecContext
+	// Version 18 predates album creation identities. Remove both additions
+	// before rewinding user_version so the real migration can run on reopen.
+	check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER albums_assign_identity")))
+	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE albums DROP COLUMN identity")))
 	// The kept counts (migration 0037) read tables this version lacks, so they
 	// go with their triggers.
 	for _, table := range []string{"day_counts", "tag_counts", "person_counts_faces", "person_counts", "job_counts", "count_rebuild", "trash_count"} {

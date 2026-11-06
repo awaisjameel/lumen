@@ -3,6 +3,12 @@ import { computed, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef }
 import { onBlocksChanged } from './block'
 import { errorText, logError } from './errors'
 
+/** Wait for every current-state read, then report a failure independently of mutations. */
+export async function refreshAll(...reads: Promise<unknown>[]): Promise<void> {
+  const results = await Promise.allSettled(reads)
+  for (const result of results) if (result.status === 'rejected') throw result.reason
+}
+
 /**
  * Wraps a read of the engine so at most one runs at a time. Calls made while
  * one runs queue a single follow-up read (edits made during it must show), and

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import USelect from '@nuxt/ui/components/Select.vue'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import type { RecordedNotifications } from '../shared/testing'
@@ -37,10 +37,7 @@ beforeEach(() => {
 afterEach(() => notifications.stop())
 
 function show(component: Parameters<typeof mountInApp>[0], query = '') {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/:pathMatch(.*)*', component: { render: () => null } }],
-  })
+  const router = createTestNavigation()
   return mountInApp(component, { props: { query }, plugins: [router] })
 }
 

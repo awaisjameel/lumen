@@ -1,7 +1,8 @@
+import NavigationView from '../shared/navigation/NavigationView.vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { Device, engine, Filter, onLibraryChanged, WaitReason } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event, Progress } from '../bridge'
@@ -16,6 +17,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   engine: {
     timeline: vi.fn<typeof Bridge.engine.timeline>().mockResolvedValue([]),
     event: vi.fn<typeof Bridge.engine.event>(),
+    topPlaces: vi.fn<typeof Bridge.engine.topPlaces>().mockResolvedValue([]),
     days: vi.fn<typeof Bridge.engine.days>().mockResolvedValue([]),
     trashSelection: vi.fn<typeof Bridge.engine.trashSelection>(),
     focus: vi.fn<typeof Bridge.engine.focus>().mockResolvedValue(undefined),
@@ -63,6 +65,8 @@ beforeEach(() => {
   listeners.clear()
   vi.useFakeTimers()
   vi.mocked(engine.event).mockReset()
+  vi.mocked(engine.topPlaces).mockReset().mockResolvedValue([])
+  vi.mocked(engine.timeline).mockReset().mockResolvedValue([])
   vi.mocked(onLibraryChanged).mockImplementation((callback) => {
     listeners.add(callback)
     return () => {
@@ -85,18 +89,21 @@ afterEach(() => {
 })
 
 async function mountedTimeline() {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/events/:id', name: 'event', component: LibraryView },
-      { path: '/events', name: 'events', component: { template: '<div />' } },
-    ],
-  })
-  await router.push('/events/1')
+  const router = createTestNavigation()
+  await router.visit('/events/1')
   const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
   await flushPromises()
   return { wrapper, router }
 }
+
+it('does not request the whole library for a zero person ID in the production routes', async () => {
+  const router = createTestNavigation({ library: LibraryView })
+  await router.visit('/people/0')
+  const wrapper = mountInApp(NavigationView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
+  await flushPromises()
+  expect(engine.timeline).not.toHaveBeenCalled()
+  wrapper.unmount()
+})
 
 it('refreshes an event heading after relevant library changes', async () => {
   vi.mocked(engine.event).mockResolvedValueOnce(event(1, 'Before')).mockResolvedValueOnce(event(1, 'After'))
@@ -110,13 +117,56 @@ it('refreshes an event heading after relevant library changes', async () => {
   wrapper.unmount()
 })
 
+it('refreshes collection places after a correction and Undo keep the same count and days', async () => {
+  vi.mocked(engine.event).mockResolvedValue(event(1, 'Weekend'))
+  vi.mocked(engine.timeline).mockResolvedValue([{ day: '2026-10-04', count: 2 }])
+  let city = { id: 7, name: 'Karachi' }
+  vi.mocked(engine.topPlaces).mockImplementation(() => Promise.resolve([{ ...city }]))
+  const { wrapper } = await mountedTimeline()
+  const lib = useLibrary()
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  const caption = () => wrapper.get('.collection-hero .meta').text().replace(/\s+/g, ' ')
+  expect(caption()).toContain('2 items · Karachi')
+  city = { id: 8, name: 'Lahore' }
+  await lib.refresh()
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(lib.total).toBe(2)
+  expect(caption()).toContain('2 items · Lahore')
+  expect(wrapper.get('[data-collection-place]').attributes('href')).toBe('/places/8')
+  city = { id: 7, name: 'Karachi' }
+  await lib.refresh()
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(caption()).toContain('2 items · Karachi')
+  expect(wrapper.get('[data-collection-place]').attributes('href')).toBe('/places/7')
+  wrapper.unmount()
+})
+
+it('does not reread collection place names for thumbnail-only changes', async () => {
+  vi.mocked(engine.event).mockResolvedValue(event(1, 'Weekend'))
+  vi.mocked(engine.timeline).mockResolvedValue([{ day: '2026-10-04', count: 2 }])
+  vi.mocked(engine.topPlaces).mockResolvedValue([{ id: 7, name: 'Karachi' }])
+  const { wrapper } = await mountedTimeline()
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  vi.mocked(engine.topPlaces).mockClear()
+  await useLibrary().refresh({ assets: false, thumbs: true, tags: false, people: false })
+  await vi.advanceTimersByTimeAsync(3000)
+  await flushPromises()
+  expect(engine.topPlaces).not.toHaveBeenCalled()
+  expect(wrapper.get('[data-collection-place]').text()).toBe('Karachi')
+  wrapper.unmount()
+})
+
 it('does not apply a previous event title after the route changes', async () => {
   let resolve!: (value: Event) => void
   vi.mocked(engine.event)
     .mockReturnValueOnce(new Promise((done) => (resolve = done)))
     .mockResolvedValueOnce(event(2, 'Second event'))
   const { wrapper, router } = await mountedTimeline()
-  await router.push('/events/2')
+  await router.visit('/events/2')
   resolve(event(1, 'Old event'))
   await flushPromises()
   expect(wrapper.get('h1').text()).toBe('Second event')
@@ -137,11 +187,8 @@ it('does not start a queued title read after unmount', async () => {
 })
 
 it('shows the empty Trash with its own message and no toolbar', async () => {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/trash', name: 'trash', component: LibraryView, meta: { filter: Filter.FilterTrash } }],
-  })
-  await router.push('/trash')
+  const router = createTestNavigation()
+  await router.visit('/trash')
   const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
   await flushPromises()
   expect(wrapper.get('h1').text()).toBe('Trash')
@@ -157,11 +204,8 @@ it('shows the empty Trash with its own message and no toolbar', async () => {
 it('puts the Trash actions and its files on disk in the header, with no photo search', async () => {
   vi.mocked(engine.timeline).mockResolvedValueOnce([{ day: '2021-01-23', count: 3 }])
   vi.mocked(engine.trashSelection).mockResolvedValue({ assets: [1, 2, 3], files: 5 })
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/trash', name: 'trash', component: LibraryView, meta: { filter: Filter.FilterTrash } }],
-  })
-  await router.push('/trash')
+  const router = createTestNavigation()
+  await router.visit('/trash')
   const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
   await flushPromises()
   const header = wrapper.get('header')
@@ -210,11 +254,8 @@ it('groups the Trash by the day items were moved there and names each by its fil
     },
   ])
   vi.mocked(engine.trashSelection).mockResolvedValue({ assets: [1, 2], files: 3 })
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/trash', name: 'trash', component: LibraryView, meta: { filter: Filter.FilterTrash } }],
-  })
-  await router.push('/trash')
+  const router = createTestNavigation()
+  await router.visit('/trash')
   const wrapper = mountInApp(LibraryView, {
     plugins: [createPinia(), router],
     stubs: { SearchBox: true, VideoThumb: true, LibraryThumb: true },
@@ -272,11 +313,8 @@ it('rings the one of several selected items that the details panel shows', async
 })
 
 it('uses the Photos title and passes the photos filter to the timeline', async () => {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/', name: 'library', component: LibraryView, meta: { filter: Filter.FilterPhotos } }],
-  })
-  await router.push('/')
+  const router = createTestNavigation()
+  await router.visit('/?media=photos')
   const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
   await flushPromises()
   expect(wrapper.get('h1').text()).toBe('Photos')
@@ -325,11 +363,8 @@ it('says when days could not be loaded and offers to try again', async () => {
 })
 
 it('says it is looking while the first scan runs, and that nothing was found once it ends', async () => {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/', name: 'library', component: LibraryView, meta: { filter: Filter.FilterAll } }],
-  })
-  await router.push('/')
+  const router = createTestNavigation()
+  await router.visit('/')
   const pinia = createPinia()
   const wrapper = mountInApp(LibraryView, { plugins: [pinia, router], stubs: { SearchBox: true } })
   await flushPromises()
@@ -346,16 +381,8 @@ it('says it is looking while the first scan runs, and that nothing was found onc
 })
 
 async function mountedLibrary(path = '/') {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', name: 'library', component: LibraryView },
-      { path: '/videos', name: 'videos', component: LibraryView },
-      { path: '/settings', name: 'settings', component: { template: '<div />' } },
-      { path: '/compression', name: 'compression', component: { template: '<div />' } },
-    ],
-  })
-  await router.push(path)
+  const router = createTestNavigation()
+  await router.visit(path)
   const wrapper = mountInApp(LibraryView, { plugins: [createPinia(), router], stubs: { SearchBox: true } })
   await flushPromises()
   return { wrapper, router, lib: useLibrary() }
@@ -386,7 +413,7 @@ it('hides Videos when disabled and clears selection when the media filter change
     .find((button) => button.text() === 'Photos')
     ?.trigger('click')
   await flushPromises()
-  expect(router.currentRoute.value.query.media).toBe('photos')
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1])).media).toBe('photos')
   expect(lib.selectedIDs.size).toBe(0)
   expect(engine.timeline).toHaveBeenLastCalledWith(
     expect.objectContaining({ filter: Filter.FilterPhotos }),

@@ -14,6 +14,7 @@ vi.mock('../bridge', async (original) => ({
   ...(await original<typeof Bridge>()),
   engine: {
     albums: vi.fn(),
+    counts: vi.fn(),
     applyBatch: vi.fn(),
     tagAssets: vi.fn(),
     validateSelection: vi.fn(),
@@ -43,6 +44,7 @@ it('opens the action chosen by the selection dock', async () => {
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.mocked(engine.albums).mockReset().mockResolvedValue([])
+  vi.mocked(engine.counts).mockResolvedValue({ photos: 3, videos: 0, favourites: 0, people: 0, trash: 0 })
   vi.mocked(engine.applyBatch)
     .mockReset()
     .mockImplementation((ids) => Promise.resolve(done(ids)))

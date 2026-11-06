@@ -1,12 +1,13 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 // Above a search's results: what was searched for, as chips that each take
 // their part out of the search (a person, the description), then why the
 // results may be fewer than asked for (photos not yet understood, the AI
 // unavailable, a blocked name), and how many matched.
 import UAlert from '@nuxt/ui/components/Alert.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import { computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useDestination, useNavigation } from '../shared/navigation/router'
 import { icons } from '../design/icons'
 import type { SearchInfo } from '../library/store'
 import { usePeople } from '../people/store'
@@ -26,8 +27,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ cancel: [] }>()
 
-const route = useRoute()
-const router = useRouter()
+const route = useDestination('search')
+const router = useNavigation()
 const people = usePeople()
 void people.load()
 const info = computed(
@@ -53,7 +54,7 @@ function without(person?: number) {
   ]
     .filter(Boolean)
     .join(' ')
-  void router.push({ name: 'search', query: { ...route.query, q: q || undefined } })
+  void router.push(destination({ name: 'search', query: { ...route.value?.query, q: q || undefined } }))
 }
 </script>
 
@@ -123,7 +124,12 @@ function without(person?: number) {
       data-search-no-ai
     >
       <template #actions>
-        <UButton color="neutral" variant="outline" to="/settings?section=search">{{ t('search.reviewAI') }}</UButton>
+        <UButton
+          color="neutral"
+          variant="outline"
+          :to="destination({ name: 'settings', query: { section: 'search' } })"
+          >{{ t('search.reviewAI') }}</UButton
+        >
       </template>
     </UAlert>
     <UAlert
@@ -136,9 +142,13 @@ function without(person?: number) {
       data-search-blocked
     >
       <template #actions>
-        <UButton color="neutral" variant="outline" to="/settings/blocked" :trailing-icon="icons['arrow-right']">{{
-          t('search.openBlocked')
-        }}</UButton>
+        <UButton
+          color="neutral"
+          variant="outline"
+          :to="destination({ name: 'blocked' })"
+          :trailing-icon="icons['arrow-right']"
+          >{{ t('search.openBlocked') }}</UButton
+        >
       </template>
     </UAlert>
 

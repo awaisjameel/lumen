@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { destination } from '../shared/navigation/contract'
 import UAlert from '@nuxt/ui/components/Alert.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useDestination, useNavigation } from '../shared/navigation/router'
 import { BlockKind, engine, Filter, thumbUrl } from '../bridge'
 import type { Place, View } from '../bridge'
 import { icons } from '../design/icons'
@@ -29,8 +31,8 @@ import { useLibrary } from '../library/store'
 import OfflineAtlas from './OfflineAtlas.vue'
 import PlaceCard from './PlaceCard.vue'
 
-const router = useRouter()
-const route = useRoute()
+const router = useNavigation()
+const route = useDestination('places')
 const { list, loaded, loading, error, load, invalidate } = useList(engine.places)
 const country = ref('')
 const hadPlaces = ref(false)
@@ -91,12 +93,12 @@ async function openPreview(place: Place) {
 // read, that place is shown on the atlas with its preview open, and the
 // query is dropped so going back and forth does not open it again.
 watch(
-  [() => route.query.place, loaded],
+  [() => route.value?.query.place, loaded],
   async ([query, ready]) => {
-    const id = Number(query)
-    if (!ready || !Number.isInteger(id) || id <= 0) return
+    const id = query
+    if (!ready || id === undefined) return
     const place = list.value.find((p) => p.id === id)
-    void router.replace({ query: { ...route.query, place: undefined } })
+    void router.replace(destination({ name: 'places' }))
     if (!place) return
     country.value = ''
     await openPreview(place)
@@ -113,7 +115,7 @@ async function openPhoto(item: PreviewItem) {
   if (!place) return
   const scope: View = { filter: Filter.FilterAll, place: place.id }
   const day = item.day
-  await router.push({ name: 'place', params: { id: place.id } })
+  await router.push(destination({ name: 'place', params: { id: place.id } }))
   const lib = useLibrary()
   await lib.setScope({ kind: 'timeline', view: scope })
   await lib.ensureDays([day])
@@ -124,9 +126,6 @@ async function blockPlace(place: Place) {
 }
 const refreshCommand: Command = {
   id: 'places.refresh',
-  group: 'view',
-  title: () => t('places.refresh'),
-  icon: 'refresh',
   enabled: () => !loading.value,
   run: refresh,
 }
@@ -154,7 +153,7 @@ useCommands([refreshCommand])
           color="neutral"
           :loading="loading && loaded"
           :disabled="loading"
-          @click="refresh" /></PageHeader
+          command="places.refresh" /></PageHeader
     ></template>
     <template v-if="list.length" #toolbar
       ><ViewBar :label="t('places.country')"
@@ -179,13 +178,13 @@ useCommands([refreshCommand])
       <p v-if="loading && loaded" role="status">{{ t('places.refreshing') }}</p>
       <UAlert v-if="error && loaded" role="alert" color="warning" variant="subtle" :title="error">
         <template #actions
-          ><UButton variant="outline" color="neutral" size="sm" @click="refresh">{{
+          ><CommandButton variant="outline" color="neutral" size="sm" command="places.refresh">{{
             t('common.retry')
-          }}</UButton></template
+          }}</CommandButton></template
         >
       </UAlert>
       <FeatureState v-if="error && !loaded" kind="error" :title="error"
-        ><UButton @click="refresh">{{ t('common.retry') }}</UButton></FeatureState
+        ><CommandButton command="places.refresh">{{ t('common.retry') }}</CommandButton></FeatureState
       >
       <section v-else-if="!loaded" aria-busy="true" :aria-label="t('places.loading')">
         <p role="status">{{ t('places.loading') }}</p>
@@ -238,9 +237,10 @@ useCommands([refreshCommand])
               {{ t('status.items', { n: formatNumber(selectedPlace.count) }) }}
             </p>
           </div>
-          <UButton :to="{ name: 'place', params: { id: selectedPlace.id } }" :trailing-icon="icons['arrow-right']">{{
-            t('places.openAll')
-          }}</UButton
+          <UButton
+            :to="destination({ name: 'place', params: { id: selectedPlace.id } })"
+            :trailing-icon="icons['arrow-right']"
+            >{{ t('places.openAll') }}</UButton
           ><IconButton :icon="icons.close" :label="t('places.closePreview')" variant="ghost" @click="closePreview" />
         </header>
         <p v-if="preview.loading.value" role="status">{{ t('places.loadingPhotos') }}</p>
@@ -290,8 +290,14 @@ useCommands([refreshCommand])
         icon="globe"
         :title="t(hadPlaces ? 'places.cleared' : 'places.empty')"
         :text="t(hadPlaces ? 'places.clearedHint' : 'places.emptyHint')"
-        ><UButton to="/settings?section=library" color="primary" variant="solid">{{ t('places.addFolder') }}</UButton
-        ><UButton to="/blocked" variant="ghost">{{ t('places.manageBlocked') }}</UButton></FeatureState
+        ><UButton
+          :to="destination({ name: 'settings', query: { section: 'library' } })"
+          color="primary"
+          variant="solid"
+          >{{ t('places.addFolder') }}</UButton
+        ><UButton :to="destination({ name: 'blocked' })" variant="ghost">{{
+          t('places.manageBlocked')
+        }}</UButton></FeatureState
       >
       <FeatureState
         v-else-if="loaded && list.length && !filtered.length && !error"

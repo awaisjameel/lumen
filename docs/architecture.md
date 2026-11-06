@@ -58,11 +58,125 @@ spikes/              Phase 0 experiments and later feasibility probes (own Go mo
 
 **Tags.** A Thing applies to a photo when SigLIP's probability for its best prompt passes the confidence setting (default 0.02; scores from 0.002 up are stored, so the slider needs no re-scan). Generic concepts rarely pass on probability alone, because SigLIP learned from specific web captions, so ten broad kinds of photo are also assigned by best fit. On one real library this found 94% of the people photos, against 16% on probability alone. Prompts were chosen by measuring them on that library.
 
+Single and bulk manual tagging share a post-commit outcome policy: an OCR
+scheduling failure cannot change a committed annotation into a failed edit.
+The indexer serialises OCR scheduling with opt-in changes and owns one
+coalesced recovery loop. It reconciles saved eligibility at startup and retries
+database failures every five seconds until recovery or shutdown. Healthy idle
+libraries perform no periodic scheduling query. Recovery applies current store
+eligibility and settings, never replays annotations, and hands actual work to
+the existing durable OCR jobs. Optional progress feedback distinguishes pending
+scheduling recovery from a counted stage job; pause still controls processing.
+
+**Application navigation.** `shared/navigation/contract.ts` owns registration
+identities, path shapes, query/parameter codecs, timeline metadata and parent
+groups. Root `router.ts` binds every production view exhaustively, keeps the
+Library eager, loads other views lazily, and excludes Showcase in production.
+The shared navigation provider wraps Vue Router; links, buttons and menus expose
+only typed destinations. Validated reads are discriminated by identity before
+forming engine scopes. Malformed identifiers render a generic unavailable
+state instead of a whole-library request; valid missing/blocked entities retain
+their engine checks. Incoming settings aliases normalise with replace, and an
+unknown path retains the deliberate Library fallback.
+
+Vite derives the embedded `navigation.json` path-shape manifest from that same
+contract. The Go SPA handler uses it to serve malformed dotted IDs to the
+frontend validator while leaving real files and development modules alone.
+Production component tests share these registration records through isolated
+memory histories. AST lint, positive/negative Vue/TypeScript compilation and
+mutation checks prevent bypasses and drift. Navigation diagnostics contain a
+fixed message, never a private URL or query. Each new frontend lifetime first
+closes the previous PIN session, including a hard reload that bypasses Vue
+unmount hooks. Existing preferences, commands,
+notifications, overlays, selection, scroll and PIN owners remain responsible
+for their state. See [the navigation guide](navigation-contract.md).
+
+**Smart-album previews.** `Store.PreviewAlbum` evaluates the same validated
+`albumFilter` as saved smart albums. Reference visibility, exact count and the
+newest three grid items share one read-only snapshot. The thin service applies
+the current tag confidence, and the bridge normalises the generated result.
+The editor debounces and cancels these bounded reads, rejects superseded
+results, and clears samples before privacy refreshes or failed reads. It never
+counts or filters timeline days itself. Preview retry does not save an album
+or replace the editor's draft.
+
+**Album draft admission.** Shared privacy invalidation still clears cached
+lists immediately. The existing album editor retains local fields but removes
+its form and preview until authoritative album/reference reads admit them.
+Failed reads offer a read-only retry; confirmed disappearance or a different
+creation identity closes and clears the editor. Missing references lose their
+IDs and require an explicit choice rather than silently broadening the rule.
+A changed saved definition blocks saving until an explicit confirmed reload.
+If a current preview reports a hidden/deleted reference before its library
+refresh arrives, its existing read owner exposes that classified failure.
+The editor invalidates its selected reference lists immediately and uses the
+same visibility admission; an obsolete preview cannot retire newer choices.
+Reference retry reads current choices without restoring a retired selection.
+A pending reference read is unknown even if an earlier cache was loaded;
+missing-ID reconciliation waits until that read settles. Confirmed definition
+reload refreshes album and reference data together before adopting a rule.
+Deferred first rendering retains the intended field focus.
+
+Album definitions carry an immutable creation identity (migration 0040) and a
+derived revision over their name, kind and rule; counts/covers do not conflict
+with a draft. `Store.SaveAlbum` checks that version in the writer transaction,
+returns the committed version and acknowledges an identical retry without
+another write. Name-only saves retain the server rule; header name Undo uses
+the version returned by its forward save. Both interactive definition writers
+use this guarded contract. The legacy three-argument update remains only for
+compiled clients and native fixtures, sharing the same store implementation.
+No persisted draft owner or membership-turn registry is added.
+
+**Collection place metadata.** The library's existing admitted content revision
+invalidates header places even when counts and day buckets are unchanged.
+The header adds no library-event subscription: background revisions share a
+three-second trailing read, while the existing mutation reconciliation owner
+refreshes corrections and Undo immediately. Both use one `coalescedLoad` owner:
+same-view invalidations let its active read settle and reject obsolete results;
+identity/privacy changes and unmount cancel I/O. Identity follows the wire
+view, so temporarily losing a cached smart/manual presentation does not change
+the target. Privacy invalidation clears names and destinations before I/O;
+failed reads expose retry and never
+restore old metadata. Place links use the existing place route.
+
 **People.** The following figures are historical tuning evidence, not a promise of recognition accuracy on another library. Clustering joins groups of faces while their average cosine similarity is at least 0.42 (Phase 0 found every group at that threshold held one person). A new person needs clear faces in three photos: sharpness (variance of the Laplacian of the aligned face) at least 15, head turn at most 0.45 eye distances. On 204 office photos with 1,000 faces, 92% were placed into 28 people, each checked by eye to hold one person; the rest wait, unplaced, for more photos of them. The faces stage and clustering never undo the user: see `internal/people/cluster.go`.
 
 **Places.** City names come from [GeoNames](https://www.geonames.org/), licensed under CC BY 4.0. Lumen bundles a reduced 30 September 2026 `cities5000` snapshot (69,760 populated places), with region and country names, so lookups make no network request. A city within 75 km is an approximate label, not an exact administrative boundary. See [data provenance](geonames.md).
 
 **Visibility.** One rule feeds grids, search, counts, covers, media URLs and the video server, so a blocked item disappears everywhere at once. Blocked media is served only while the PIN-protected Blocked settings are open.
+
+Notifications sit above the work area and below portalled dialogs, using the
+shared layer tokens. Escape in a portalled overlay preserves its underlying
+recovery notices. Interactive work uses explicit work progress; its toast timer
+can change without showing a second countdown.
+
+**Field writes and session Undo.** `shared/mutationWrites.ts` coordinates
+bounded writes per Pinia app and field (favourites, date, place or one album).
+`shared/favouriteWrites.ts` exposes the favourite owner to grid, viewer, batch
+tools and selection actions. A newer explicit request permanently supersedes older
+inverse ownership for those targets. `library/favouriteBatch.ts` captures flags
+beside each bounded forward write and uses the existing transactional batch
+inverse for genuinely changed items. `shared/undo.ts` owns ephemeral inverse
+outcomes and notification controls independently of view lifetime. It retains
+failed/cancelled rows separately and retries refreshes without replaying
+mutations. `UndoDialog` uses the shared paged `OutcomeList`; neither introduces
+another persisted library or durable Undo journal. SQL, visibility admission
+and transaction outcomes remain with the existing store/service owners.
+
+`albums/changes.ts` captures actual changed memberships from transactional batch
+outcomes, avoiding whole-album snapshots and stale checkbox guesses. Every
+membership surface shares that owner. Compound album/asset outcome identities
+keep separate inverses for a photo in several albums; deleting an album retires
+its inverses before SQLite can reuse its ID. Corrections capture current values
+under their field turn and restore a previous user correction or the latest
+underlying metadata, including absent GPS. Their inverse keeps opaque original
+targets when the correction itself covers an asset. The existing store admission
+rules still govern every write. Reconciliation settles the current grid and its
+selected day before refreshing a mounted inspector's current metadata; a read
+failure is recoverable independently of committed inverse outcomes.
+An inspector that loses file/privacy access uses its existing unavailable/retry
+state and retires pending metadata reads; obsolete inspection failures cannot
+affect a newer selection. Current unexpected inspection failures remain logged.
 
 ## Deviations from the plan
 

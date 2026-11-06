@@ -107,6 +107,7 @@ try {
   )
   must('About shows the version the build was given', (await system(page, 'About')).version === want, want)
   await page.screenshot({ path: join(s.out, 'settings.png') })
+  await s.settleErrors()
   s.check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors().join(' || '))
 } catch (error) {
   s.check('the workflows ran to the end', false, String(error))
