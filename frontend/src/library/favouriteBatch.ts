@@ -1,6 +1,7 @@
 import { BatchAction, engine, ErrorCode } from '../bridge'
 import { errorText, failureText } from '../shared/errors'
 import type { useFavouriteWrites } from '../shared/favouriteWrites'
+import type { MutationLease } from '../shared/mutationWrites'
 import { t } from '../shared/i18n'
 import { attemptBatchUndo, offerBatchUndo } from '../shared/undo'
 
@@ -40,50 +41,61 @@ export function favouriteBatch(writes: ReturnType<typeof useFavouriteWrites>, id
       const targets = [...changed].filter(lease.current)
       if (!targets.length) return false
       offered = true
-      offerBatchUndo({
-        title,
-        undoTitle: t('undo.favourites'),
-        ids: targets,
-        apply: (part, stopped) =>
-          writes.take(async () => {
-            if (stopped()) return part.map((id) => ({ id, state: 'cancelled', error: '' }))
-            const eligible = part.filter(lease.current)
-            let previous: Map<number, boolean>
-            try {
-              previous = new Map(
-                (eligible.length ? await engine.searchHits(eligible) : []).map((item) => [item.id, !!item.f]),
-              )
-            } catch (e) {
-              return part.map((id) => ({
-                id,
-                state: lease.current(id) ? 'failed' : 'superseded',
-                error: lease.current(id) ? errorText(e) : '',
-              }))
-            }
-            if (stopped()) return part.map((id) => ({ id, state: 'cancelled', error: '' }))
-            const current = eligible.filter(lease.current)
-            const owned = new Set(current)
-            // A failed response can hide a committed write. Checking the
-            // current flag makes retry idempotent without another journal.
-            const targets = current.filter((id) => previous.get(id) !== !favourite)
-            const rows = await attemptBatchUndo(targets, () =>
-              engine.applyBatch(targets, favourite ? BatchAction.BatchUnfavourite : BatchAction.BatchFavourite, 0),
-            )
-            return [
-              ...rows,
-              ...current
-                .filter((id) => previous.get(id) === !favourite)
-                .map((id) => ({ id, state: 'done' as const, error: '' })),
-              ...part.filter((id) => !owned.has(id)).map((id) => ({ id, state: 'superseded' as const, error: '' })),
-            ]
-          }),
-        reconcile,
-        release: lease.release,
-      })
+      offerFavouriteUndo(writes, lease, targets, favourite, reconcile)
       return true
     },
     release() {
       if (!offered) lease.release()
     },
   }
+}
+
+/** Single controls and selections retain the same inverse ownership and recovery. */
+export function offerFavouriteUndo(
+  writes: ReturnType<typeof useFavouriteWrites>,
+  lease: MutationLease,
+  targets: number[],
+  favourite: boolean,
+  reconcile: () => Promise<unknown>,
+) {
+  offerBatchUndo({
+    title: t(favourite ? 'library.favourited' : 'library.unfavourited'),
+    undoTitle: t('undo.favourites'),
+    ids: targets,
+    apply: (part, stopped) =>
+      writes.take(async () => {
+        if (stopped()) return part.map((id) => ({ id, state: 'cancelled', error: '' }))
+        const eligible = part.filter(lease.current)
+        let previous: Map<number, boolean>
+        try {
+          previous = new Map(
+            (eligible.length ? await engine.searchHits(eligible) : []).map((item) => [item.id, !!item.f]),
+          )
+        } catch (e) {
+          return part.map((id) => ({
+            id,
+            state: lease.current(id) ? 'failed' : 'superseded',
+            error: lease.current(id) ? errorText(e) : '',
+          }))
+        }
+        if (stopped()) return part.map((id) => ({ id, state: 'cancelled', error: '' }))
+        const current = eligible.filter(lease.current)
+        const owned = new Set(current)
+        // A failed response can hide a committed write. Checking the
+        // current flag makes retry idempotent without another journal.
+        const targets = current.filter((id) => previous.get(id) !== !favourite)
+        const rows = await attemptBatchUndo(targets, () =>
+          engine.applyBatch(targets, favourite ? BatchAction.BatchUnfavourite : BatchAction.BatchFavourite, 0),
+        )
+        return [
+          ...rows,
+          ...current
+            .filter((id) => previous.get(id) === !favourite)
+            .map((id) => ({ id, state: 'done' as const, error: '' })),
+          ...part.filter((id) => !owned.has(id)).map((id) => ({ id, state: 'superseded' as const, error: '' })),
+        ]
+      }),
+    reconcile,
+    release: lease.release,
+  })
 }

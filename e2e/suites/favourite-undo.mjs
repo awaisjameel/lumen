@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { close, launch, lib, resize, search, unthrottle, waitIndexed } from '../lib/app.mjs'
 import { copyLibrary } from '../lib/fixtures.mjs'
 import { mutationTrace } from '../lib/mutation-trace.mjs'
-import { button, dismissNotices, selectAllResults, until } from '../lib/controls.mjs'
+import { button, dismissNotices, selectAllResults, undoNotice, until } from '../lib/controls.mjs'
 import { E2E, suite } from '../lib/suite.mjs'
 
 const s = suite('favourite-undo')
@@ -241,6 +241,27 @@ try {
     (await lib(page, 'Counts')).favourites === 1 && !trace.calls.some((row) => row.ids.includes(edited)),
     { edited, inverse: trace.summary() },
   )
+  phase = 'single inverse versus later batch confirmation'
+  await dismissNotices(page)
+  await page.hover(`#${cell}`)
+  await page.locator(`#${cell} button[aria-label="Remove favourite"]`).click()
+  await until(async () => !(await search(page, 'Hits', [edited]))[0]?.f, 'single unfavourite did not persist')
+  await page.locator(`#${cell} button[aria-label="Favourite"]`).click()
+  await until(async () => !!(await search(page, 'Hits', [edited]))[0]?.f, 'single favourite did not persist')
+  await trace.idle()
+  const singleNotice = await undoNotice(page)
+  await favouriteAll(page)
+  const batchNotice = await undoNotice(page)
+  s.must('single and batch inverses have independent owners', singleNotice !== batchNotice)
+  trace.reset()
+  await button(page, 'Undo', `[data-notification="${singleNotice}"]`)
+  await page.waitForFunction((id) => document.querySelector(`[data-notification="${id}"]`)?.textContent.includes('newer edits kept: 1'), {}, singleNotice)
+  await trace.idle()
+  s.check('single Undo preserves a later same-value batch edit',
+    (await lib(page, 'Counts')).favourites === N && trace.summary().writes === 0, trace.summary())
+  await page.screenshot({ path: join(s.out, 'single-undo-superseded.png') })
+  await button(page, 'Undo', `[data-notification="${batchNotice}"]`)
+  await until(async () => (await lib(page, 'Counts')).favourites === 1, 'batch inverse did not preserve its pre-existing favourite')
   phase = 'restart'
   await close(app)
   app = undefined

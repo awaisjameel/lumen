@@ -32,13 +32,12 @@ import { errorText, logError, reportError } from '../shared/errors'
 import { coalescedLoad, refreshAll } from '../shared/listStore'
 import { latestSave } from '../shared/latestSave'
 import { useFavouriteWrites } from '../shared/favouriteWrites'
+import { offerFavouriteUndo } from './favouriteBatch'
 import type { LatestSave } from '../shared/latestSave'
 import { deleteFromDisk } from '../trash/actions'
 import { showTrashUndo } from '../trash/undo'
 import { usePreferences } from '../shared/preferences'
 import { turns } from '../shared/turns'
-import { notify } from '../shared/notify'
-import { t } from '../shared/i18n'
 
 /** The settings sections whose reset changes engine settings (core.PrefCategory), which are then read again. */
 const ENGINE_CATEGORIES: readonly PrefCategory[] = [
@@ -921,6 +920,7 @@ export const useLibrary = defineStore('library', () => {
     // Reserve at the click, before waiting. A per-asset latestSave queue
     // inside these shared turns could enqueue an old click after a new batch.
     const lease = favouriteWrites.begin([it.id])
+    let retained = false
     set(fav)
     try {
       const written = await favouriteWrites.take(async () => {
@@ -958,27 +958,10 @@ export const useLibrary = defineStore('library', () => {
       } else await refresh().catch(logError)
       await loadCounts()
       if (!written || !lease.current(it.id)) return
-      notify({
-        id: 'library.favourite',
-        kind: 'success',
-        title: t(fav ? 'library.favourited' : 'library.unfavourited'),
-        actions: [
-          {
-            label: t('settings.undo'),
-            run: () => {
-              void favouriteWrites
-                .write([it.id], () => engine.setFavourite(it.id, !fav))
-                .then(async () => {
-                  set(!fav)
-                  await Promise.all([refresh(), loadCounts()])
-                })
-                .catch(reportError)
-            },
-          },
-        ],
-      })
+      offerFavouriteUndo(favouriteWrites, lease, [it.id], fav, reconcileChanges)
+      retained = true
     } finally {
-      lease.release()
+      if (!retained) lease.release()
       if (favouriting.get(it.id) === status && status.revision === revision) favouriting.delete(it.id)
     }
   }
