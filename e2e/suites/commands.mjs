@@ -44,15 +44,20 @@ async function start() {
 }
 async function capture(name) { await page.screenshot({ path: join(s.out, `${name}.png`) }) }
 async function path(expected) { await until(() => page.evaluate(expected => location.pathname === expected, expected), `missing path ${expected}`) }
-async function palette(query, choose = true) {
+async function palette(query, choose = true, empty = false) {
   await control('k')
   const input = await page.waitForSelector('[role="dialog"][data-state="open"] input')
   await input.asLocator().fill(query)
-  await page.waitForFunction((query, choose) => {
+  await page.waitForFunction((query, empty) => {
     const normal = value => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
-    return [...document.querySelectorAll('[role="dialog"][data-state="open"] [role="option"]')].some(row => normal(row.textContent).includes(normal(query))) ||
-      (!choose && document.querySelector('.palette .empty'))
-  }, {}, query, choose)
+    const dialog = document.querySelector('[role="dialog"][data-state="open"]')
+    if (dialog?.querySelector('input')?.value !== query) return false
+    const rows = [...dialog.querySelectorAll('[role="option"]')]
+    // A closing portal can retain old options or its empty slot. Observe the
+    // current palette's requested result before asserting on its commands.
+    return empty ? rows.length === 0 && !!dialog.querySelector('.palette .empty') :
+      rows.some(row => normal(row.textContent).includes(normal(query)))
+  }, {}, query, empty)
   if (choose) {
     // Let startup reads and the portalled opening transition finish before
     // taking pointer coordinates, as the existing native fixtures do.
@@ -209,12 +214,19 @@ try {
   await button(page, 'Save changes')
   await until(async () => (await lib(page, 'Albums') ?? []).find(item => item.id === album)?.name === 'Command after', 'item edit did not commit')
   await palette('Edit Command after', false)
-  s.check('the refreshed item command has the current context label', await page.$$eval('[role="option"]', rows => rows.some(row => row.textContent.includes('Command after')) && rows.every(row => !row.textContent.includes('Command before'))))
+  s.check('the refreshed item command has the current context label', await page.$$eval('[role="dialog"][data-state="open"] [role="option"]', rows => rows.some(row => row.textContent.includes('Command after')) && rows.every(row => !row.textContent.includes('Command before'))))
   await page.keyboard.press('Escape')
   await go(page, '/', 0)
   await page.waitForSelector('.scroller')
-  await palette('Command after', false)
-  s.check('leaving the collection retires its item commands', (await page.$$('[role="option"]')).length === 0)
+  await palette('Command after', false, true)
+  const retired = await page.evaluate(() => ({
+    path: location.pathname,
+    query: document.querySelector('[role="dialog"][data-state="open"] input')?.value,
+    options: [...document.querySelectorAll('[role="dialog"][data-state="open"] [role="option"]')].map(row => row.textContent),
+  }))
+  evidence.push({ phase, retired })
+  s.check('leaving the collection retires its item commands', retired.path === '/' && retired.query === 'Command after' && retired.options.length === 0, retired)
+  await capture('retired-item-commands')
   await page.keyboard.press('Escape')
 
   step('restart and reset compatibility')
