@@ -113,8 +113,9 @@ in native helpers are deliberate browser-input fixtures and exact independent
 expectations, rather than a second production route registry.
 
 AST lint covers raw Vue Router imports, singleton access, native History and
-Location writes, raw route-bearing component props, internal anchor literals
-and raw menu imports. Positive and negative compiler fixtures include templates,
+Location writes, raw route-bearing component props, relative/opaque anchor
+targets and raw menu imports. Only explicit external href literals bypass the
+internal adapters; dynamic targets require the typed navigation boundary. Positive and negative compiler fixtures include templates,
 reusable control props, extra keys in variables and wrong destination queries.
 A scratch copy proves route rename, missing root view/example, and the original
 `/blocked` link fail mandatory compiler checks. Fixtures are excluded only from
@@ -136,7 +137,7 @@ inherit their declared sidebar parent. Overlays and original media are unchanged
 No Go-to-TypeScript service or wire type changes are needed.
 
 The current full frontend run passes 1,144 tests in 118 files. Additional
-history/failure, exact recovery-control and date-input tests pass, as do 19 AST enforcement examples and the 18 negative
+history/failure, exact recovery-control and date-input tests pass, as do 22 AST enforcement examples and the 18 negative
 TypeScript/Vue fixtures. Production frontend build emits all 21 path shapes and
 no production Showcase chunk. A fresh final run, Windows named-package race and
 static checks, installer build and the native suite remain required before

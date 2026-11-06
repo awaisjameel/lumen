@@ -118,10 +118,13 @@ export const navigationRule = {
           const text =
             value?.type === 'VLiteral' || value?.type === 'Literal'
               ? value.value
-              : value?.type === 'TemplateLiteral'
+              : value?.type === 'TemplateLiteral' && value.expressions.length === 0
                 ? value.quasis[0]?.value.cooked
                 : undefined
-          if (typeof text === 'string' && text.startsWith('/') && !text.startsWith('//')) report(node)
+          // An opaque href can hide the same internal route string as a
+          // literal. Dynamic links need the typed adapter; explicit external
+          // literals remain separate from application destinations.
+          if (typeof text !== 'string' || !/^(?:https?:\/\/|mailto:|tel:|\/\/)/.test(text)) report(node)
         }
         if (name !== 'to' || element.name === 'teleport') return
         if (!node.directive) {

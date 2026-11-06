@@ -747,6 +747,37 @@ and installer packaging still require a fresh passing run.
 Hosted unblocked SaveEmbeddings64 is 161.737/70 ms; budgets and configured-machine
 acceptance remain unchanged.
 
+### #38 native recovery accepted; structured refusal follow-up
+
+Head `326776fd`, [run 42130319530](https://github.com/awaisjameel/lumen/actions/runs/42130319530),
+passes production/current bindings/modules, full static/1,144 frontend checks
+and every Go race shard. Artifact `13464192544` retains recovery 51/51, draft
+26/26, metadata 22/22, preview 27/27, tagging 18/18, Undo recovery 20/20,
+history 7/7 and favourite Undo 22/22. There are no fetch errors, uncaught page
+exceptions or erroneous inspection notices. The late cancelled-visibility and
+fixture-readiness repairs are verified in the real application.
+
+Navigation passes all functional checks and independently visits all 21
+production destinations, but remains 73/74 because its error assertion sees
+three runtime HTTP 422 resource messages. The follow-up records method identity,
+kind/code and exact cancellation status, without retaining arguments. Its
+expectations require a structured cancelled read, the deliberate missing-person
+fixture, or the explicit locked-service probe. Unknown methods, other codes,
+unreadable responses and all other console/page errors still fail the assertion.
+Native navigation and installer packaging remain unaccepted at this checkpoint.
+
+The enforcement review also reproduces a bypass through opaque or relative
+plain href attributes: two new examples pass the old lint rule incorrectly.
+All 22 AST cases now pass; typed links, explicit external literals and unrelated
+fixture data remain accepted. The full frontend check pipeline, including all
+three compiler mutations, passes with the stricter rule. This is enforcement
+work; production rendering and the public bridge contract are unchanged.
+
+Hosted over-budget values are folder SaveFaces64 7.897/7 ms, combined-block
+SaveFaces64 8.305/8 ms, unblocked SaveFaces64 8.195/8 ms and unblocked
+SaveEmbeddings64 161.449/70 ms. Budgets and configured-machine acceptance remain
+unchanged. A fresh passing native/installer run is still required before merge.
+
 ### #45 implementation checkpoint
 
 The confirmed mounted regressions fail on parent `e80a1d08`: unrelated privacy

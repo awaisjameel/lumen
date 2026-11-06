@@ -16,6 +16,13 @@ const rule = { kind: '', favourites: false, from: '', to: '', tag: 0, person: 0 
 const errors = []
 const diagnostics = []
 const consoleReads = []
+const responseReads = []
+const runtimeResponses = []
+const runtimeMethods = new Map([
+  ...['Timeline', 'Days', 'Blocks'].map(name => [bindingID('libraryservice', name), name]),
+  ...['Search', 'Hits'].map(name => [bindingID('searchservice', name), name]),
+  [bindingID('peopleservice', 'Person'), 'Person'],
+])
 const external = []
 const visited = new Set()
 let app
@@ -46,6 +53,25 @@ function watch(page) {
     const url = new URL(request.url())
     if (/^https?:$/.test(url.protocol) && !['wails.localhost', 'localhost', '127.0.0.1'].includes(url.hostname)) external.push(url.href)
   })
+  page.on('response', response => {
+    if (response.status() < 400 || new URL(response.url()).pathname !== '/wails/runtime') return
+    const request = JSON.parse(response.request().postData() ?? 'null')
+    const method = runtimeMethods.get(request?.args?.methodID) ?? request?.args?.methodName ?? request?.args?.methodID
+    const current = { phase, status: response.status(), method,
+      staleFixture: method === 'Person' && request?.args?.args?.[0] === 999999 }
+    // Only method identity and structured refusal metadata are retained.
+    // Search text, PINs and all other arguments stay outside diagnostics.
+    responseReads.push(response.json().then(value => runtimeResponses.push({ ...current,
+      kind: value?.kind, code: value?.cause?.code, cancelled: value?.message === 'context canceled' }),
+      () => runtimeResponses.push({ ...current, unreadable: true })))
+  })
+}
+function expectedRefusal(row) {
+  if (row.status !== 422 || row.kind !== 'RuntimeError') return false
+  if (['Search', 'Hits', 'Timeline', 'Days'].includes(row.method) && row.cancelled) return true
+  if (row.phase === 'malformed incoming locations' && row.staleFixture && row.code === 'not_found') return true
+  return row.phase === 'privacy and navigation-away relock' && row.code === 'blocks_locked' &&
+    ['Blocks', 'lumen/services.LibraryService.Blocks'].includes(row.method)
 }
 async function start() {
   // Only this process sees the synthetic profile. SuggestedFolders therefore
@@ -273,12 +299,15 @@ try {
   s.check('every production destination was exercised independently of the contract table', expected.every(name => visited.has(name)) && visited.size === expected.length, [...visited])
   s.check('no external requests', external.length === 0, external)
   await Promise.all(consoleReads)
+  await Promise.all(responseReads)
+  const unexpectedResponses = runtimeResponses.filter(row => !expectedRefusal(row))
   const unexpected = diagnostics.filter(row =>
     !(row.location?.endsWith('/wails/custom.js') && /^Failed to load resource:.*404/.test(row.error)) &&
-    !(row.phase === 'privacy and navigation-away relock' &&
-      ((row.location === protectedURL && /^Failed to load resource:.*40[34]/.test(row.error)) ||
-       (row.location === origin + '/wails/runtime' && /^Failed to load resource:.*422/.test(row.error)))))
-  s.check('no uncaught, unexpected console or navigation errors', errors.length === 0 && unexpected.length === 0, { errors, unexpected })
+    !(row.phase === 'privacy and navigation-away relock' && row.location === protectedURL && /^Failed to load resource:.*40[34]/.test(row.error)) &&
+    !(row.location === origin + '/wails/runtime' && /^Failed to load resource:.*422/.test(row.error) &&
+      runtimeResponses.some(response => response.phase === row.phase && expectedRefusal(response))))
+  s.check('no uncaught, unexpected console or navigation errors', errors.length === 0 && unexpected.length === 0 && unexpectedResponses.length === 0,
+    { errors, unexpected, unexpectedResponses })
 } catch (error) {
   failure = { phase, stack: error.stack ?? String(error) }
   s.check(`navigation completed (${phase})`, false, String(error))
@@ -289,5 +318,6 @@ try {
 } finally {
   await stop().catch(error => { failure ??= { phase, error: String(error) } })
   await Promise.all(consoleReads)
-  s.finish({ failure, visited: [...visited], errors, diagnostics })
+  await Promise.all(responseReads)
+  s.finish({ failure, visited: [...visited], errors, diagnostics, runtimeResponses })
 }

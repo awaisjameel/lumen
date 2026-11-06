@@ -41,6 +41,9 @@ it.each([
 it.each([
   '<template><a href="/blocked">Blocked</a></template>',
   '<template><a :href="\'/blocked\'">Blocked</a></template>',
+  '<template><a :href="path">Blocked</a></template>',
+  '<template><a :href="`/things/${id}`">Thing</a></template>',
+  '<template><a href="blocked">Blocked</a></template>',
   '<template><RouterLink to="/blocked">Blocked</RouterLink></template>',
   '<script setup lang="ts">import UButton from "@nuxt/ui/components/Button.vue"</script><template><UButton :to="{ name: \'blocked\' }" /></template>',
   '<script setup lang="ts">import NavLink from "./shared/navigation/NavLink.vue"</script><template><NavLink to="/blocked" /></template>',
