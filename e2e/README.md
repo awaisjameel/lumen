@@ -152,6 +152,12 @@ metadata before the correction outcome is measured. Later parents must retain
 the live names/destinations; the historical stale-parent comparison is retained
 for checkouts before the repair.
 
+`navigation` records method identity and structured refusal metadata for failed
+runtime responses, never arguments or PINs. Expected cancellations, the explicit
+stale-person fixture and PIN-gate probes are checked by method/kind/code rather
+than allowing all resource errors. Fixture reloads await a rendered, settled
+page; interaction deadlines and the no-unexpected-error assertion remain active.
+
 `undo-recovery` shares the bridge instrumentation in `lib/mutation-trace.mjs`
 and control helpers in `lib/controls.mjs`. Its held requests make partial
 membership failures deterministic without changing service results. Privacy

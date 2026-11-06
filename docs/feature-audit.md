@@ -778,6 +778,37 @@ SaveFaces64 8.305/8 ms, unblocked SaveFaces64 8.195/8 ms and unblocked
 SaveEmbeddings64 161.449/70 ms. Budgets and configured-machine acceptance remain
 unchanged. A fresh passing native/installer run is still required before merge.
 
+### #38 verified code and documentation handoff
+
+Code head `91f54d3b` passes [run 42133839534](https://github.com/awaisjameel/lumen/actions/runs/42133839534):
+production/current bindings/modules, complete static checks, 1,147 frontend
+tests in 118 files, every Go race shard and unsigned installer packaging. The
+build leaves tracked files clean. No release, installed-machine or signing
+acceptance is claimed.
+
+Artifact `13466405989` retains all 267 native checks: navigation 74/74,
+collection recovery 51/51, drafts 26/26, places 22/22, previews 27/27, tagging
+18/18, Undo recovery 20/20, history 7/7 and favourite Undo 22/22. All 21
+production destinations, onboarding/startup, Unicode/history, aliases,
+malformed/stale inputs, themes/drawer and PIN/service/media boundaries pass.
+There are no page exceptions, unexpected console errors, unclassified runtime
+refusals or external requests. Narrow navigation and persisted startup images
+were inspected.
+
+Structured diagnostics identify the resource messages exactly: cancelled
+Timeline/Search reads, the deliberate missing-person fixture and locked-service
+probes. They retain no arguments or PINs. Arbitrary refusals still fail; this
+is not a blanket resource-error exception. Runtime and enforcement regressions
+include before-repair evidence; the [navigation guide](navigation-contract.md)
+records ownership, compatibility, migration coverage and the accepted snapshot.
+
+Hosted overruns are combined-block SetEventPinned 15.374/5 ms and unblocked
+SaveEmbeddings64 127.695/70 ms. Budgets and configured-machine acceptance remain
+unchanged. [PR #54](https://github.com/awaisjameel/lumen/pull/54) records the final
+head checks and parent integration; the documentation handoff must pass its own
+checks before merge. Continue to #46 only after #38 is integrated. No final PR
+to main is authorised by this child.
+
 ### #45 implementation checkpoint
 
 The confirmed mounted regressions fail on parent `e80a1d08`: unrelated privacy
@@ -925,6 +956,29 @@ naming choice. Both are P2 broken journeys with bounded repairs; neither needs
 an original-file mutation or a new product policy.
 
 ## Inventory
+
+### Current disposition of accepted work
+
+The baseline matrix below remains the initial review. This table applies the
+accepted repairs to it; other implementation, deferred and external statuses
+retain their baseline disposition. Fresh runtime claims are limited to the
+specific runs and suites recorded above.
+
+| Workflow | Current disposition | Traceable evidence |
+| --- | --- | --- |
+| Collection recovery and event-name history | Integrated: #35 and #36 | #37; current recovery suite 51/51 |
+| Search history ordering | Integrated: #39 | #47; current history suite 7/7 |
+| Bounded favourite Undo | Integrated: #40 | #48; current favourite suite 22/22 |
+| Partial Undo and failed-item recovery | Integrated: #41 | #49; current Undo suite 20/20 |
+| Truthful tagging/OCR follow-up | Integrated: #43 | #50; current tagging suite 18/18 |
+| Bounded smart-album previews | Integrated: #42 | #51; current preview suite 27/27 |
+| Live collection place metadata | Integrated: #44 | #52; current metadata suite 22/22 |
+| Album draft lifetime and guarded saving | Integrated: #45 | #53; current draft suite 26/26 |
+| Typed navigation and runtime input | Verified implementation; integration record in #54 | Code `91f54d3b`, navigation 74/74; [contract guide](navigation-contract.md) |
+| Command contract hardening | #46 remains the next preventive child | Existing command execution is implemented; no missing global error handling is claimed |
+| Performance and release prerequisites | External acceptance remains open | Unchanged configured-machine gate in #31; signing/trust and installed-machine acceptance stay separate |
+
+### Baseline inventory
 
 Status **implemented** means source and regression coverage exist, with no
 reproduced gap in this initial review; runtime acceptance is tracked separately

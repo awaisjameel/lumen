@@ -185,7 +185,9 @@ file covers how code is written.
   `useNavigation()` and validated `useLocation()` / `useDestination(name)`;
   use the navigation link/button/menu adapters for route-bearing controls.
   Never import raw Vue Router outside its named infrastructure boundary or
-  pass a string/untyped named object to a reusable component. Root view
+  pass a string/untyped named object to a reusable component. Relative or
+  opaque `href` values also bypass the contract and are forbidden outside the
+  navigation boundary; explicit external literals remain separate. Root view
   bindings are exhaustive and lazy; the shell owns labels, order and context.
   Tests use `createTestNavigation()` with production records and optional stub
   views. `.visit()` is an explicit incoming-URL boundary for negative tests,
