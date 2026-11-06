@@ -70,7 +70,7 @@ it('hands shortcut changes to the real Settings accessibility category', async (
 
 it('returns to Commands through its registry action', async () => {
   const run = vi.fn()
-  remove = registerCommands([{ id: 'app.commandPalette', group: 'app', title: () => 'Commands', run }])
+  remove = registerCommands([{ id: 'app.commandPalette', title: () => 'Commands', run }])
   await start()
   button('Back to Commands').click()
   await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))

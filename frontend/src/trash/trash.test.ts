@@ -441,7 +441,7 @@ it('exports dock commands with a shared busy reason, a danger action and snapsho
   await flushPromises()
   expect(isEnabled(restore)).toBe(false)
   expect(isEnabled(recycle)).toBe(false)
-  expect(recycle.reason?.()).toBe('Wait until the current action finishes.')
+  expect(recycle.reason()).toBe('Wait until the current action finishes.')
   expect(await runCommand('trash.recycle')).toBe(false)
   if (!finish) throw new Error('The restore did not start')
   finish()

@@ -36,8 +36,6 @@ if (!props.progress)
   useCommands([
     {
       id: 'app.activity',
-      group: 'app',
-      title: () => t('status.open'),
       available: () => !!p.value,
       run: () => {
         expanded.value = true

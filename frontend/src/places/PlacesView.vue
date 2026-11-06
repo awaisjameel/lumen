@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
 import { destination } from '../shared/navigation/contract'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '../shared/navigation/NavButton.vue'
@@ -125,9 +126,6 @@ async function blockPlace(place: Place) {
 }
 const refreshCommand: Command = {
   id: 'places.refresh',
-  group: 'view',
-  title: () => t('places.refresh'),
-  icon: 'refresh',
   enabled: () => !loading.value,
   run: refresh,
 }
@@ -155,7 +153,7 @@ useCommands([refreshCommand])
           color="neutral"
           :loading="loading && loaded"
           :disabled="loading"
-          @click="refresh" /></PageHeader
+          command="places.refresh" /></PageHeader
     ></template>
     <template v-if="list.length" #toolbar
       ><ViewBar :label="t('places.country')"
@@ -180,13 +178,13 @@ useCommands([refreshCommand])
       <p v-if="loading && loaded" role="status">{{ t('places.refreshing') }}</p>
       <UAlert v-if="error && loaded" role="alert" color="warning" variant="subtle" :title="error">
         <template #actions
-          ><UButton variant="outline" color="neutral" size="sm" @click="refresh">{{
+          ><CommandButton variant="outline" color="neutral" size="sm" command="places.refresh">{{
             t('common.retry')
-          }}</UButton></template
+          }}</CommandButton></template
         >
       </UAlert>
       <FeatureState v-if="error && !loaded" kind="error" :title="error"
-        ><UButton @click="refresh">{{ t('common.retry') }}</UButton></FeatureState
+        ><CommandButton command="places.refresh">{{ t('common.retry') }}</CommandButton></FeatureState
       >
       <section v-else-if="!loaded" aria-busy="true" :aria-label="t('places.loading')">
         <p role="status">{{ t('places.loading') }}</p>

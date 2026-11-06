@@ -75,7 +75,7 @@ it('says how many matched, and that more did when the results are cut short', as
 
 it('links photos still being understood to the library activity', async () => {
   const opened = vi.fn()
-  const unregister = registerCommands([{ id: 'app.activity', group: 'app', title: () => 'Activity', run: opened }])
+  const unregister = registerCommands([{ id: 'app.activity', title: () => 'Activity', run: opened }])
   const w = await show(found({ description: 'sea', pending: 1204 }))
   expect(w.get('[data-search-pending]').text()).toContain('Lumen is still understanding 1,204 photos')
   await w.get('[data-search-pending] button').trigger('click')

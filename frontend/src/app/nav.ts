@@ -27,7 +27,7 @@ export const navSections: readonly { section: NavSection; label?: MessageKey }[]
   { section: 'tools', label: 'nav.group.tools' },
 ]
 
-export const navEntries: readonly NavEntry[] = [
+export const navEntries = [
   { to: destination({ name: 'library' }), label: 'nav.library', icon: 'photos', section: 'library' },
   { to: destination({ name: 'favourites' }), label: 'nav.favourites', icon: 'heart', section: 'library' },
   { to: destination({ name: 'people' }), label: 'nav.people', icon: 'people', section: 'collections' },
@@ -39,7 +39,7 @@ export const navEntries: readonly NavEntry[] = [
   { to: destination({ name: 'compression' }), label: 'compression.title', icon: 'compress', section: 'tools' },
   { to: destination({ name: 'trash' }), label: 'nav.trash', icon: 'trash', section: 'tools' },
   { to: destination({ name: 'settings' }), label: 'nav.settings', icon: 'settings', section: 'app' },
-]
+] satisfies readonly NavEntry[]
 
 /** A detail inherits its declared parent section, independently of its path. */
 export function isActive(entry: NavEntry, target: Destination | undefined): boolean {

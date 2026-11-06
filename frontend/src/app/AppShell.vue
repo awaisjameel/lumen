@@ -11,7 +11,7 @@ import { computed, ref, watch } from 'vue'
 import { useNavigation } from '../shared/navigation/router'
 import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN } from '../bridge'
 import { icons } from '../design/icons'
-import { useCommands } from '../shared/commands'
+import { runCommand, useCommands } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { useLayoutMode } from '../shared/layout'
 import { usePreferences } from '../shared/preferences'
@@ -37,10 +37,6 @@ function toggleSidebar() {
 useCommands([
   {
     id: 'app.toggleSidebar',
-    group: 'view',
-    title: () => t('shell.toggleSidebar'),
-    icon: 'sidebar-collapse',
-    keys: 'Ctrl+B',
     available: () => mode.value !== 'medium',
     run: toggleSidebar,
   },
@@ -55,7 +51,7 @@ useCommands([
       :class="{ collapsed }"
       :style="collapsed ? undefined : { width: `${prefs.prefs.sidebarWidth}px` }"
     >
-      <AppNav :collapsed="collapsed" :collapsible="mode === 'wide'" @toggle="toggleSidebar" />
+      <AppNav :collapsed="collapsed" :collapsible="mode === 'wide'" @toggle="runCommand('app.toggleSidebar')" />
       <ResizeHandle
         v-if="mode === 'wide' && !collapsed"
         edge="right"

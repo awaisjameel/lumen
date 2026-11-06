@@ -1,3 +1,4 @@
+import { registerCommands } from '../shared/commands'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { mountInApp } from '../shared/testing'
 import { createTestNavigation } from '../shared/navigation/testing'
@@ -210,3 +211,29 @@ function mountHeader() {
 function testRouter() {
   return createTestNavigation()
 }
+
+it('uses current command admission for rename aliases and blocking in the real menu', async () => {
+  setActivePinia(createPinia())
+  vi.mocked(engine.person).mockReset().mockResolvedValue(person(1, 'Ali'))
+  wrapper = mountHeader()
+  await flushPromises()
+  const run = vi.fn()
+  const remove = registerCommands([
+    { id: 'person.rename', enabled: () => false, run },
+    { id: 'person.block', enabled: () => false, run },
+  ])
+  try {
+    await wrapper.get('button[aria-label="Person actions"]').trigger('click')
+    await flushPromises()
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    for (const label of ['Change the name', 'Merge with someone…', 'Block this person…']) {
+      const item = items.find((item) => item.textContent.trim() === label)
+      expect(item, label).toBeDefined()
+      expect(item?.getAttribute('aria-disabled'), label).toBe('true')
+      item?.click()
+    }
+    expect(run).not.toHaveBeenCalled()
+  } finally {
+    remove()
+  }
+})

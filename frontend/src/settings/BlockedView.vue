@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { itemCommand, runCommand, useCommands } from '../shared/commands'
 import { destination } from '../shared/navigation/contract'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '../shared/navigation/NavButton.vue'
@@ -22,8 +24,6 @@ import type { ComponentPublicInstance } from 'vue'
 import type { Block } from '../bridge'
 import { showBlocksChanged } from '../shared/block'
 import { icons } from '../design/icons'
-import { registerCommands, runCommand, useCommands } from '../shared/commands'
-import type { Command } from '../shared/commands'
 import { errorText, reportError } from '../shared/errors'
 import { t } from '../shared/i18n'
 import { dismiss, notify } from '../shared/notify'
@@ -486,54 +486,37 @@ const shownRows = computed(() =>
 useCommands([
   {
     id: 'blocked.lock',
-    group: 'view',
-    title: () => t('blocked.lock'),
-    icon: 'lock',
     available: () => unlocked.value,
     run: expire,
   },
 ])
 
-let removeBlockCommands: () => void = () => undefined
-watch(
-  blocks,
-  (items) => {
-    removeBlockCommands()
-    const commands: Command[] = items.flatMap((item) => [
-      {
-        id: `blocked.mode.${item.id}`,
-        group: 'library',
-        title: () => t('blocked.actionFor', { action: t('blocked.switchMode'), name: item.name }),
-        icon: 'refresh',
-        available: () =>
-          unlocked.value && !covered.block && item.kind !== BlockKind.BlockAsset && item.kind !== BlockKind.BlockFolder,
-        enabled: () => !busy.value,
-        run: () => changeMode(item),
-      },
-      {
-        id: `blocked.show.${item.id}`,
-        group: 'view',
-        title: () => t('blocked.actionFor', { action: t('covered.show'), name: item.name }),
-        icon: 'eye',
-        available: () => unlocked.value && !covered.block,
-        enabled: () => !busy.value,
-        run: () => covered.open(item),
-      },
-      {
-        id: `blocked.unblock.${item.id}`,
-        group: 'library',
-        title: () => t('blocked.actionFor', { action: t('blocked.unblock'), name: item.name }),
-        icon: 'unlock',
-        available: () => unlocked.value && !covered.block,
-        enabled: () => !busy.value,
-        run: () => unblock(item),
-      },
-    ])
-    removeBlockCommands = registerCommands(commands)
-  },
-  { immediate: true },
+useCommands(() =>
+  blocks.value.flatMap((item) => [
+    {
+      id: itemCommand('blocked.mode', item.id),
+      title: () => t('blocked.actionFor', { action: t('blocked.switchMode'), name: item.name }),
+      available: () =>
+        unlocked.value && !covered.block && item.kind !== BlockKind.BlockAsset && item.kind !== BlockKind.BlockFolder,
+      enabled: () => !busy.value,
+      run: () => changeMode(item),
+    },
+    {
+      id: itemCommand('blocked.show', item.id),
+      title: () => t('blocked.actionFor', { action: t('covered.show'), name: item.name }),
+      available: () => unlocked.value && !covered.block,
+      enabled: () => !busy.value,
+      run: () => covered.open(item),
+    },
+    {
+      id: itemCommand('blocked.unblock', item.id),
+      title: () => t('blocked.actionFor', { action: t('blocked.unblock'), name: item.name }),
+      available: () => unlocked.value && !covered.block,
+      enabled: () => !busy.value,
+      run: () => unblock(item),
+    },
+  ]),
 )
-onBeforeUnmount(() => removeBlockCommands())
 
 // The browser replaces its trigger's list; once that list is back, restore
 // focus to the same block rather than leaving it on the document body.
@@ -568,9 +551,9 @@ watch(
         </template>
         <template v-if="unlocked">
           <span class="session">{{ t('blocked.session', { n: BLOCK_UNLOCK_IDLE_MINUTES }) }}</span>
-          <UButton :icon="icons.lock" color="neutral" variant="outline" @click="runCommand('blocked.lock')">{{
+          <CommandButton :icon="icons.lock" color="neutral" variant="outline" command="blocked.lock">{{
             t('blocked.lock')
-          }}</UButton>
+          }}</CommandButton>
         </template>
         <span v-else-if="configured" class="scope"><Icon name="lock" :size="14" />{{ t('blocked.protected') }}</span>
       </PageHeader>
@@ -730,7 +713,7 @@ watch(
                 t(row.item.mode === BlockMode.BlockPhotos ? 'blocked.labelPhotos' : 'blocked.labelOnly')
               }}</span>
               <div class="block-actions">
-                <UButton
+                <CommandButton
                   data-blocked="show"
                   :data-block-id="row.item.id"
                   :icon="icons.eye"
@@ -738,27 +721,27 @@ watch(
                   variant="ghost"
                   :disabled="busy"
                   :aria-label="t('blocked.actionFor', { action: t('covered.show'), name: row.item.name })"
-                  @click="runCommand(`blocked.show.${row.item.id}`)"
-                  >{{ t('covered.show') }}</UButton
+                  :command="itemCommand('blocked.show', row.item.id)"
+                  >{{ t('covered.show') }}</CommandButton
                 >
-                <UButton
+                <CommandButton
                   v-if="row.kind !== BlockKind.BlockAsset && row.kind !== BlockKind.BlockFolder"
                   data-blocked="mode"
                   color="neutral"
                   variant="ghost"
                   :disabled="busy"
                   :aria-label="t('blocked.actionFor', { action: t('blocked.switchMode'), name: row.item.name })"
-                  @click="runCommand(`blocked.mode.${row.item.id}`)"
-                  >{{ t('blocked.switchMode') }}</UButton
+                  :command="itemCommand('blocked.mode', row.item.id)"
+                  >{{ t('blocked.switchMode') }}</CommandButton
                 >
-                <UButton
+                <CommandButton
                   data-blocked="unblock"
                   color="neutral"
                   variant="ghost"
                   :disabled="busy"
                   :aria-label="t('blocked.actionFor', { action: t('blocked.unblock'), name: row.item.name })"
-                  @click="runCommand(`blocked.unblock.${row.item.id}`)"
-                  >{{ t('blocked.unblock') }}</UButton
+                  :command="itemCommand('blocked.unblock', row.item.id)"
+                  >{{ t('blocked.unblock') }}</CommandButton
                 >
               </div>
             </template>
@@ -794,14 +777,14 @@ watch(
         :summary="t('blocked.selected', { n: covered.selected.size })"
         @clear="runCommand('blocked.covered.clear')"
       >
-        <UButton
+        <CommandButton
           :disabled="covered.trashing"
           :loading="covered.trashing"
           :icon="icons.trash"
           color="error"
           variant="ghost"
-          @click="runCommand('blocked.covered.trash')"
-          >{{ t('trash.move') }}</UButton
+          command="blocked.covered.trash"
+          >{{ t('trash.move') }}</CommandButton
         >
       </SelectionDock>
     </template>

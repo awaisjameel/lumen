@@ -341,7 +341,7 @@ async function menuAction(
 it('searches photos through the palette, leaving the field to filter Things', async () => {
   const palette = vi.fn()
   const scope = effectScope()
-  scope.run(() => useCommands([{ id: 'app.commandPalette', group: 'app', title: () => 'Palette', run: palette }]))
+  scope.run(() => useCommands([{ id: 'app.commandPalette', title: () => 'Palette', run: palette }]))
   await mountWith([dogs])
   await wrapper?.get(`button[aria-label="${t('shell.search')}"]`).trigger('click')
   await flushPromises()

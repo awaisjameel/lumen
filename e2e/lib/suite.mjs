@@ -60,6 +60,10 @@ export const SUITES = {
     port: 9421,
     about: 'bounded smart-rule previews: real mixed media, privacy/retry, cancellation and 100,000-row parent comparison',
   },
+  commands: {
+    port: 9425,
+    about: 'typed commands through real controls, pending/failure/retry, contextual menus, shortcuts and restart',
+  },
   navigation: {
     port: 9424,
     about: 'all production destinations, typed controls, malformed input, startup, history, drawer and PIN/media boundaries',

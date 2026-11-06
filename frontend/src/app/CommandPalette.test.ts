@@ -52,8 +52,8 @@ function row(text: string) {
 it('matches and highlights subsequences while preserving group order and command shortcuts', async () => {
   setShortcutOverrides({ 'go.people': 'Ctrl+G' })
   await start([
-    { id: 'go.people', group: 'navigate', title: () => 'Go to People', icon: 'people', run: vi.fn() },
-    { id: 'search.focus', group: 'library', title: () => 'Search your photos', run: vi.fn() },
+    { id: 'go.people', title: () => 'Go to People', icon: 'people', run: vi.fn() },
+    { id: 'search.focus', title: () => 'Search your photos', run: vi.fn() },
   ])
   await search('gtp')
   expect(row('Go to People').querySelectorAll('mark')).toHaveLength(3)
@@ -65,10 +65,9 @@ it('omits unavailable actions and explains disabled commands without allowing ex
   const run = vi.fn()
   const enabled = ref(false)
   await start([
-    { id: 'hidden', group: 'media', title: () => 'Open selected', available: () => false, run },
+    { id: 'media.open', title: () => 'Open selected', available: () => false, run },
     {
-      id: 'busy',
-      group: 'media',
+      id: 'media.favourite',
       title: () => 'Favourite',
       enabled: () => enabled.value,
       reason: () => 'Saving favourite… Wait for the current change to finish.',
@@ -87,7 +86,7 @@ it('omits unavailable actions and explains disabled commands without allowing ex
 })
 
 it('recovers from an empty match without closing the palette', async () => {
-  await start([{ id: 'go.people', group: 'navigate', title: () => 'Go to People', run: vi.fn() }])
+  await start([{ id: 'go.people', title: () => 'Go to People', run: vi.fn() }])
   await search('zzzz')
   expect(document.body.textContent).toContain('No commands match')
   const reset = [...document.querySelectorAll('button')].find((el) => el.textContent === 'Show all commands')
@@ -96,9 +95,26 @@ it('recovers from an empty match without closing the palette', async () => {
   expect(row('Go to People')).toBeDefined()
 })
 
+it('cannot run a previously highlighted command after the search excludes it', async () => {
+  const run = vi.fn()
+  await start([{ id: 'go.people', title: () => 'Go to People', run }])
+  const input = await search('People')
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+  await flushPromises()
+  const button = [...document.querySelectorAll('button')].find((element) => element.textContent.includes('Run'))
+  if (!button) throw new Error('Missing palette Run button')
+  expect(button.disabled).toBe(false)
+  await search('zzzz')
+  expect(document.querySelectorAll('[role="option"]')).toHaveLength(0)
+  expect(button.disabled).toBe(true)
+  button.click()
+  await flushPromises()
+  expect(run).not.toHaveBeenCalled()
+})
+
 it('runs a command after dismissal and offers it as a current-session recent on reopening', async () => {
   const run = vi.fn()
-  await start([{ id: 'go.people', group: 'navigate', title: () => 'Go to People', run }])
+  await start([{ id: 'go.people', title: () => 'Go to People', run }])
   row('Go to People').click()
   await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
   opened.value = true
@@ -111,7 +127,7 @@ it('reports a failed action through the shared notification channel', async () =
   const notices = recordNotifications()
   try {
     await start([
-      { id: 'fail', group: 'media', title: () => 'Favourite', run: () => Promise.reject(new Error('save failed')) },
+      { id: 'media.favourite', title: () => 'Favourite', run: () => Promise.reject(new Error('save failed')) },
     ])
     row('Favourite').click()
     await vi.waitFor(() => expect(notices.shown).toHaveLength(1))
@@ -125,8 +141,8 @@ it('moves the active command with arrows and executes it with Enter from the inp
   const first = vi.fn(),
     second = vi.fn()
   await start([
-    { id: 'first', group: 'view', title: () => 'First action', run: first },
-    { id: 'second', group: 'view', title: () => 'Second action', run: second },
+    { id: 'view.details', title: () => 'First action', run: first },
+    { id: 'app.toggleSidebar', title: () => 'Second action', run: second },
   ])
   const input = await search('action')
   input.focus()
@@ -142,7 +158,7 @@ it('closes with Escape and restores the focus that opened the modal', async () =
   document.body.append(trigger)
   trigger.focus()
   try {
-    await start([{ id: 'go.people', group: 'navigate', title: () => 'Go to People', run: vi.fn() }])
+    await start([{ id: 'go.people', title: () => 'Go to People', run: vi.fn() }])
     const input = await search('')
     input.focus()
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -156,7 +172,7 @@ it('closes with Escape and restores the focus that opened the modal', async () =
 it('opens the shortcut reference with its actual keys from inside the palette', async () => {
   setShortcutOverrides({ 'app.shortcuts': 'Ctrl+G' })
   const run = vi.fn()
-  await start([{ id: 'app.shortcuts', group: 'app', title: () => 'Keyboard shortcuts', keys: '?', run }])
+  await start([{ id: 'app.shortcuts', title: () => 'Keyboard shortcuts', run }])
   const input = await search('')
   input.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true, cancelable: true }))
   await flushPromises()

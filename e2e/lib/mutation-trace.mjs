@@ -139,6 +139,11 @@ export async function mutationTrace(page, baselineDir, readMethods = new Map(), 
       held = null
       if (request) await request.continue()
     },
+    async abortHeld() {
+      const request = held
+      held = null
+      if (request) await request.abort('failed')
+    },
     async idle() {
       const until = Date.now() + 30_000
       while (pending.size && Date.now() < until) await sleep(20)

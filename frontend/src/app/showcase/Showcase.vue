@@ -346,7 +346,7 @@ function ask() {
       <section>
         <h2>Commands registered now</h2>
         <ul class="commands">
-          <li v-for="c in availableCommands" :key="c.id">
+          <li v-for="c in availableCommands" :key="c.key">
             <Icon v-if="c.icon" :name="c.icon" :size="16" />
             <span>{{ c.title() }}</span>
             <span v-if="c.keys" class="caps"><UKbd v-for="cap in keyCaps(c.keys)" :key="cap" :value="cap" /></span>

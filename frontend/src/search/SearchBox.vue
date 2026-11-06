@@ -187,11 +187,6 @@ function focusBox() {
 const focusCommands = [
   {
     id: 'search.focus',
-    group: 'library',
-    title: () => t('search.command'),
-    icon: 'search',
-    keys: 'Ctrl+F',
-    altKeys: ['/'],
     run: focusBox,
   },
 ] as const

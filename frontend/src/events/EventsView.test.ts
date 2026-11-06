@@ -1,3 +1,4 @@
+import { itemCommand, commands, runCommand } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import type { RecordedNotifications } from '../shared/testing'
@@ -10,7 +11,6 @@ import { BlockKind, engine, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event } from '../bridge'
 import { blockRequest, showBlocksChanged } from '../shared/block'
-import { commands, runCommand } from '../shared/commands'
 import EventsView from './EventsView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -200,15 +200,15 @@ it('stops reloading for block changes once the view is gone', async () => {
 
 it('shares event actions with the command palette and removes commands for hidden events', async () => {
   const w = await mounted()
-  expect(commands.value.some((command) => command.id === 'event.7.pin')).toBe(true)
-  await runCommand('event.7.pin')
+  expect(commands.value.some((command) => command.key === 'event.7.pin')).toBe(true)
+  await runCommand(itemCommand('event.pin', 7))
   expect(engine.setEventPinned).toHaveBeenCalledWith(trip.id, true)
   vi.mocked(engine.events).mockResolvedValue([])
   await showBlocksChanged()
   await flushPromises()
-  expect(commands.value.some((command) => command.id.startsWith('event.7.'))).toBe(false)
+  expect(commands.value.some((command) => command.key.startsWith('event.7.'))).toBe(false)
   w.unmount()
-  expect(commands.value.some((command) => command.id.startsWith('events.'))).toBe(false)
+  expect(commands.value.some((command) => command.key.startsWith('events.'))).toBe(false)
 })
 
 function testRouter() {

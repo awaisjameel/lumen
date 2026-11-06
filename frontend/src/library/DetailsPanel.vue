@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
 import { destination } from '../shared/navigation/contract'
 import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
@@ -37,7 +38,7 @@ import PlaceDialog from './details/PlaceDialog.vue'
 import AlbumPicker from './details/AlbumPicker.vue'
 import type { MessageKey } from '../shared/i18n'
 import { icons } from '../design/icons'
-import { runCommand, useCommands } from '../shared/commands'
+import { useCommands } from '../shared/commands'
 import FeatureState from '../shared/FeatureState.vue'
 import { useLayoutMode } from '../shared/layout'
 import MetaRow from '../shared/MetaRow.vue'
@@ -640,9 +641,6 @@ const editable = () => hasDetail() && !lib.inTrash
 useCommands([
   {
     id: 'inspector.files',
-    group: 'media',
-    title: () => t('files.title'),
-    icon: 'files',
     available: editable,
     run: () => {
       filesOpen.value = true
@@ -650,9 +648,6 @@ useCommands([
   },
   {
     id: 'inspector.open',
-    group: 'media',
-    title: () => t('files.open'),
-    icon: 'external',
     available: editable,
     run: () => {
       if (detail.value) openCopy(detail.value.id, detail.value.paths[0] || '', false)
@@ -660,57 +655,37 @@ useCommands([
   },
   {
     id: 'inspector.close',
-    group: 'view',
-    title: () => t('common.close'),
-    icon: 'close',
     available: () => lib.showDetails,
     run: () => (lib.showDetails = false),
   },
   {
     id: 'inspector.favourite',
-    group: 'media',
     title: () => t(detail.value?.favourite ? 'details.unfavourite' : 'details.favourite'),
-    icon: 'heart',
     available: () => editable() && !lib.viewer,
     run: () => lib.toggleFavourite(props.sel),
   },
   {
     id: 'inspector.trash',
-    group: 'media',
-    title: () => t('trash.move'),
-    icon: 'trash',
     available: () => editable() && !lib.viewer,
     run: moveToTrash,
   },
   {
     id: 'inspector.restore',
-    group: 'media',
-    title: () => t('trash.restore'),
-    icon: 'restore',
     available: () => hasDetail() && lib.inTrash && !lib.viewer,
     run: restore,
   },
   {
     id: 'inspector.delete',
-    group: 'media',
-    title: () => t('trash.deleteFromDisk'),
-    icon: 'trash',
     available: () => hasDetail() && lib.inTrash && !lib.viewer,
     run: deleteThisFromDisk,
   },
   {
     id: 'inspector.block',
-    group: 'media',
-    title: () => t('blocked.block'),
-    icon: 'eye-off',
     available: editable,
     run: blockAsset,
   },
   {
     id: 'inspector.folder',
-    group: 'media',
-    title: () => t('common.showInFolder'),
-    icon: 'folder',
     available: hasDetail,
     run: () => {
       if (detail.value) showInFolder(detail.value.id)
@@ -783,7 +758,7 @@ useCommands([
           :label="t(detail.favourite ? 'details.unfavourite' : 'details.favourite')"
           :aria-pressed="detail.favourite"
           variant="ghost"
-          @click="runCommand(lib.viewer ? 'viewer.favourite' : 'inspector.favourite')"
+          :command="lib.viewer ? 'viewer.favourite' : 'inspector.favourite'"
         />
       </div>
       <section :aria-label="t('details.overview')">
@@ -1038,34 +1013,34 @@ useCommands([
 
       <div class="actions">
         <template v-if="lib.inTrash">
-          <UButton :icon="icons.restore" @click="runCommand(lib.viewer ? 'viewer.restore' : 'inspector.restore')">{{
+          <CommandButton :icon="icons.restore" :command="lib.viewer ? 'viewer.restore' : 'inspector.restore'">{{
             t('trash.restore')
-          }}</UButton>
-          <UButton :icon="icons.trash" @click="runCommand(lib.viewer ? 'viewer.delete' : 'inspector.delete')">{{
+          }}</CommandButton>
+          <CommandButton :icon="icons.trash" :command="lib.viewer ? 'viewer.delete' : 'inspector.delete'">{{
             t('trash.deleteFromDisk')
-          }}</UButton>
+          }}</CommandButton>
         </template>
         <template v-else>
-          <UButton :icon="icons.files" @click="runCommand('inspector.files')">{{ t('files.title') }}</UButton>
-          <UButton
+          <CommandButton :icon="icons.files" command="inspector.files">{{ t('files.title') }}</CommandButton>
+          <CommandButton
             v-if="detail.kind === Kind.KindPhoto"
             :icon="icons.files"
-            @click="runCommand(lib.viewer ? 'viewer.compress' : 'library.compress')"
-            >{{ t('compression.action') }}</UButton
+            :command="lib.viewer ? 'viewer.compress' : 'library.compress'"
+            >{{ t('compression.action') }}</CommandButton
           >
-          <UButton :icon="icons.external" @click="runCommand('inspector.open')">{{ t('files.open') }}</UButton>
-          <UButton :icon="icons['eye-off']" @click="runCommand('inspector.block')">{{ t('blocked.block') }}</UButton>
-          <UButton
+          <CommandButton :icon="icons.external" command="inspector.open">{{ t('files.open') }}</CommandButton>
+          <CommandButton :icon="icons['eye-off']" command="inspector.block">{{ t('blocked.block') }}</CommandButton>
+          <CommandButton
             :icon="icons.heart"
             :aria-pressed="detail.favourite"
-            @click="runCommand(lib.viewer ? 'viewer.favourite' : 'inspector.favourite')"
-            >{{ detail.favourite ? t('details.unfavourite') : t('details.favourite') }}</UButton
+            :command="lib.viewer ? 'viewer.favourite' : 'inspector.favourite'"
+            >{{ detail.favourite ? t('details.unfavourite') : t('details.favourite') }}</CommandButton
           >
-          <UButton :icon="icons.trash" @click="runCommand(lib.viewer ? 'viewer.trash' : 'inspector.trash')">{{
+          <CommandButton :icon="icons.trash" :command="lib.viewer ? 'viewer.trash' : 'inspector.trash'">{{
             t('trash.move')
-          }}</UButton>
+          }}</CommandButton>
         </template>
-        <UButton :icon="icons.folder" @click="runCommand('inspector.folder')">{{ t('common.showInFolder') }}</UButton>
+        <CommandButton :icon="icons.folder" command="inspector.folder">{{ t('common.showInFolder') }}</CommandButton>
       </div>
       <UAlert v-if="shownError" role="alert" color="error" variant="subtle" :title="shownError" />
     </div>

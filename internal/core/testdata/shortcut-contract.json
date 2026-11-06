@@ -1,0 +1,106 @@
+[
+  {
+    "keys": "",
+    "valid": true
+  },
+  {
+    "keys": "F",
+    "valid": true
+  },
+  {
+    "keys": "Ctrl+K",
+    "valid": true
+  },
+  {
+    "keys": "Ctrl+Shift+Alt+P",
+    "valid": true
+  },
+  {
+    "keys": "Shift+Delete",
+    "valid": true
+  },
+  {
+    "keys": "ArrowLeft",
+    "valid": true
+  },
+  {
+    "keys": "Space",
+    "valid": true
+  },
+  {
+    "keys": "Shift+?",
+    "valid": true
+  },
+  {
+    "keys": "Ctrl+Shift+?",
+    "valid": true
+  },
+  {
+    "keys": "?",
+    "valid": true
+  },
+  {
+    "keys": "é",
+    "valid": true
+  },
+  {
+    "keys": "😀",
+    "valid": true
+  },
+  {
+    "keys": "F2",
+    "valid": true
+  },
+  {
+    "keys": "Escape",
+    "valid": false
+  },
+  {
+    "keys": "Ctrl+Escape",
+    "valid": false
+  },
+  {
+    "keys": "Tab",
+    "valid": false
+  },
+  {
+    "keys": "Alt+F4",
+    "valid": false
+  },
+  {
+    "keys": "Alt+f4",
+    "valid": false
+  },
+  {
+    "keys": "+",
+    "valid": false
+  },
+  {
+    "keys": "Shift+Ctrl+K",
+    "valid": false
+  },
+  {
+    "keys": "Ctrl+",
+    "valid": false
+  },
+  {
+    "keys": "Ctrl+K L",
+    "valid": false
+  },
+  {
+    "keys": "Hyper+K",
+    "valid": false
+  },
+  {
+    "keys": "Ctrl+Ctrl+K",
+    "valid": false
+  },
+  {
+    "keys": "abcdefghijklmn",
+    "valid": false
+  },
+  {
+    "keys": "\n",
+    "valid": false
+  }
+]

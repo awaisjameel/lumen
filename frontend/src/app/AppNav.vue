@@ -12,7 +12,7 @@ import { useLocation } from '../shared/navigation/router'
 import { icons } from '../design/icons'
 import IndexStatus from '../library/IndexStatus.vue'
 import { useLibrary } from '../library/store'
-import { availableCommands, capsOf, runCommand } from '../shared/commands'
+import { availableCommands, capsOf, commandState, runCommand } from '../shared/commands'
 import { formatNumber, t } from '../shared/i18n'
 import BrandMark from '../shared/BrandMark.vue'
 import Icon from '../shared/Icon.vue'
@@ -86,7 +86,13 @@ const toggleLabel = computed(() => t(props.collapsed ? 'shell.expandSidebar' : '
       :content="{ side: 'right' }"
       :disabled="!collapsed"
     >
-      <button type="button" class="search" :aria-label="t('shell.search')" @click="runCommand(PALETTE)">
+      <button
+        :disabled="!commandState(PALETTE).enabled"
+        type="button"
+        class="search"
+        :aria-label="t('shell.search')"
+        @click="runCommand(PALETTE)"
+      >
         <Icon name="search" :size="16" />
         <span class="search-text">{{ t('shell.search') }}</span>
         <kbd v-if="searchKeys.length" class="keys lumen-kbd" aria-hidden="true">{{ searchKeys.join(' ') }}</kbd>

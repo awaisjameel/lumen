@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
 import { destination } from '../shared/navigation/contract'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UButton from '../shared/navigation/NavButton.vue'
@@ -143,9 +144,6 @@ async function tryAgain() {
 useCommands([
   {
     id: 'events.refresh',
-    group: 'view',
-    title: () => t('events.refresh'),
-    icon: 'refresh',
     enabled: () => !busy.value && !loading.value,
     run: refresh,
   },
@@ -165,7 +163,7 @@ useCommands([
           color="neutral"
           :disabled="loading || busy"
           :loading="loading && loaded"
-          @click="refresh"
+          command="events.refresh"
         /><UButton
           v-if="chronological[0]"
           :color="gapOpen ? 'neutral' : 'primary'"
@@ -207,7 +205,7 @@ useCommands([
         ></UAlert
       >
       <FeatureState v-if="error && !loaded" kind="error" :title="t('events.loadError')" :text="error"
-        ><UButton @click="refresh">{{ t('events.refresh') }}</UButton></FeatureState
+        ><CommandButton command="events.refresh">{{ t('events.refresh') }}</CommandButton></FeatureState
       >
       <section v-else-if="!loaded" aria-busy="true" :aria-label="t('events.loading')">
         <p role="status">{{ t('events.loading') }}</p>

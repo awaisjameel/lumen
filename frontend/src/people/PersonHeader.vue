@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
 import { destination } from '../shared/navigation/contract'
 import UButton from '../shared/navigation/NavButton.vue'
 import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
@@ -11,7 +12,7 @@ import { icons } from '../design/icons'
 import { block, onBlocksChanged } from '../shared/block'
 import Chip from '../shared/Chip.vue'
 import CollectionHero from '../shared/CollectionHero.vue'
-import { useCommands } from '../shared/commands'
+import { menuItems, useCommands } from '../shared/commands'
 import { errorText, logError } from '../shared/errors'
 import Icon from '../shared/Icon.vue'
 import IconButton from '../shared/IconButton.vue'
@@ -135,41 +136,35 @@ async function blockPerson(hide = false) {
     await router.push(destination({ name: 'people' }))
   }
 }
-const actions = computed(() => [
-  { label: t('person.rename'), icon: icons.pencil, onSelect: edit },
-  {
-    label: t('person.changePicture'),
-    icon: icons.face,
-    to: destination({ name: 'personFaces', params: { id: props.id }, query: { picture: '1' } }),
-  },
-  { label: t('person.review'), icon: icons.face, to: destination({ name: 'personFaces', params: { id: props.id } }) },
-  { label: t('person.mergeWith'), icon: icons.merge, onSelect: edit },
-  { label: t('people.hide'), icon: icons['eye-off'], onSelect: () => blockPerson(true) },
-  { label: t('people.block'), icon: icons.blocked, color: 'error' as const, onSelect: () => blockPerson() },
-])
+const actions = computed(() => {
+  const rename = menuItems([{ id: 'person.rename' }])
+  return [
+    ...rename,
+    {
+      label: t('person.changePicture'),
+      icon: icons.face,
+      to: destination({ name: 'personFaces', params: { id: props.id }, query: { picture: '1' } }),
+    },
+    { label: t('person.review'), icon: icons.face, to: destination({ name: 'personFaces', params: { id: props.id } }) },
+    ...rename.map((item) => ({ ...item, label: t('person.mergeWith'), icon: icons.merge })),
+    { label: t('people.hide'), icon: icons['eye-off'], onSelect: () => blockPerson(true) },
+    ...menuItems([{ id: 'person.block' }]).map((item) => ({ ...item, color: 'error' as const })),
+  ]
+})
 useCommands([
   {
     id: 'person.rename',
-    group: 'view',
-    title: () => t('person.rename'),
-    icon: 'pencil',
     available: () => person.value !== null,
     enabled: () => !editing.value,
     run: edit,
   },
   {
     id: 'person.review',
-    group: 'view',
-    title: () => t('person.review'),
-    icon: 'face',
     available: () => person.value !== null,
     run: review,
   },
   {
     id: 'person.block',
-    group: 'view',
-    title: () => t('people.block'),
-    icon: 'blocked',
     available: () => person.value !== null,
     run: () => blockPerson(),
   },
@@ -183,17 +178,17 @@ useCommands([
       <template #name>
         <PersonNameEditor v-if="editing" :key="person.id" :person="person" @cancel="rename.close()" @saved="saved" />
         <h2 v-else class="heading">
-          <UButton
+          <CommandButton
             :ref="rename.triggerRef(true)"
             class="name"
             data-action="rename"
             color="neutral"
             variant="ghost"
             :title="t('person.rename')"
-            @click="edit"
+            command="person.rename"
             ><bdi class="name-text" :title="name">{{ name }}</bdi
             ><Icon name="pencil" :size="16"
-          /></UButton>
+          /></CommandButton>
         </h2>
       </template>
       <template #facts>

@@ -105,12 +105,33 @@ jobs:
           npm run build --prefix e2e/.work/baseline/frontend
           echo "LUMEN_BASELINE_FRONTEND=$(cygpath -m "$PWD/e2e/.work/baseline/frontend/dist")" >>"$GITHUB_ENV"
 
-      - name: Native collection, album, tagging, history and recoverable Undo regressions
+      - name: Prepare native regression dependencies
+        id: native_dependencies
         shell: bash
         run: |
           npm ci --prefix e2e
           python -m pip install -r e2e/requirements.txt
-          node e2e/run.mjs navigation collection-recovery album-draft collection-places smart-album-preview tagging-recovery undo-recovery search-history favourite-undo
+
+      - name: Native command contract regressions
+        shell: bash
+        run: node e2e/run.mjs commands
+
+      - name: Preserve command regression reports immediately
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: command-regressions
+          path: e2e/.work/results/commands
+          retention-days: 14
+          include-hidden-files: true
+          if-no-files-found: ignore
+
+      - name: Native collection, album, tagging, history and recoverable Undo regressions
+        # A command failure still leaves all existing suites exercised. Every
+        # failure keeps the job failed and prevents the installer step.
+        if: ${{ !cancelled() && steps.native_dependencies.outcome == 'success' }}
+        shell: bash
+        run: node e2e/run.mjs navigation collection-recovery album-draft collection-places smart-album-preview tagging-recovery undo-recovery search-history favourite-undo
 
       - name: Build the installer with embedded application assets
         shell: bash
@@ -131,6 +152,7 @@ jobs:
             e2e/.work/results/smart-album-preview
             e2e/.work/results/collection-places
             e2e/.work/results/album-draft
+            e2e/.work/results/commands
             e2e/.work/results/navigation
             e2e/.work/results/collection-recovery
           retention-days: 14

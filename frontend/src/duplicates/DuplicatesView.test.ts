@@ -586,7 +586,7 @@ describe('choosing the copy to keep', () => {
 
   it('uses the same confirmation when a group is reviewed from the command registry', async () => {
     await mountWith(similar(2))
-    const command = commands.value.find((entry) => entry.id.startsWith('duplicates.review.'))
+    const command = commands.value.find((entry) => entry.key.startsWith('duplicates.review.'))
     if (!command) throw new Error('the group did not register its Review action')
     expect(await runCommand(command.id)).toBe(true)
     await flushPromises()

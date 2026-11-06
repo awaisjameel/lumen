@@ -202,9 +202,11 @@ file covers how code is written.
     in `Normalised` and a reset category (`Preferences.Reset`); one that
     changes how the page is drawn becomes an attribute on the root
     (`design/appearance.ts`), which the tokens read.
-  - Shortcuts: a command declares its own keys; the user's are an overlay
-    read through `keysOf`. A command worth a shortcut is listed in
-    `shared/shortcuts.ts`, which a test holds to what the views declare.
+  - Shortcuts: `shared/commandContract.ts` owns default keys, zones, labels
+    and repeat policy. Settings/help derive from those executable definitions
+    in `shared/shortcuts.ts`; stored overrides are read through `keysOf`.
+    Known imported overrides remain active outside the editor; unknown legacy
+    keys remain stored until the user resets them.
   - Notifications: `notify()` in `shared/notify.ts`, shown as toasts by the
     shell. No component draws its own notice bar.
   - Overlays: Nuxt UI's modal, slideover, menu and popover (focus trap,
@@ -214,6 +216,12 @@ file covers how code is written.
   - Commands: an action offered in more than one place (toolbar, menu,
     palette, shortcut) is one `Command` registered with `useCommands`; its
     availability is computed, and the engine still validates every call.
+    Static IDs and constrained item constructors derive from the canonical
+    definitions. Buttons use `CommandButton` or `IconButton`'s `command` prop;
+    menus, palette and keyboard use the same `runCommand` admission/error owner.
+    Public reads expose no raw callback. Pending admission belongs to each
+    registration; only explicitly repeatable controls admit repeated work.
+    See [the command contract](docs/command-contract.md) for boundaries and checks.
   - Favourite mutations: `shared/favouriteWrites.ts` owns their per-app turns
     and inverse ownership. Use its `write` for an explicit edit; a control that
     skips superseded queued input reserves `begin` at input, uses `take`, then

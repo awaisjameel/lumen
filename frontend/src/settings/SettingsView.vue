@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
 import { destination, settingsSection, settingsSections } from '../shared/navigation/contract'
 import type { SettingsSection } from '../shared/navigation/contract'
 import type { IconName } from '../design/icons'
@@ -55,7 +56,7 @@ import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
 import PrefRow from '../shared/PrefRow.vue'
 import FeatureState from '../shared/FeatureState.vue'
-import { useCommands, runCommand } from '../shared/commands'
+import { useCommands } from '../shared/commands'
 import type { MessageKey } from '../shared/i18n'
 import UButton from '../shared/navigation/NavButton.vue'
 import IconButton from '../shared/IconButton.vue'
@@ -463,16 +464,10 @@ const { save, hint, savingAny } = useSaveFeedback<keyof Settings>((key) => lib.s
 useCommands([
   {
     id: 'settings.addFolder',
-    group: 'library',
-    title: () => t('settings.addFolder'),
-    icon: 'folder-add',
     run: addFolder,
   },
   {
     id: 'settings.rescan',
-    group: 'library',
-    title: () => t('settings.rescan'),
-    icon: 'refresh',
     run: async () => {
       if (await run(engine.rescan)) notify({ id: 'settings.rescan', kind: 'info', title: t('settings.foldersChecked') })
     },
@@ -928,12 +923,12 @@ async function resetAll() {
               <PrefRow v-if="showFolders" :label="t('settings.folders')" :description="t('settings.foldersHint')">
                 <template #default>
                   <div class="flex flex-wrap gap-2">
-                    <UButton :icon="icons['folder-add']" loading-auto @click="runCommand('settings.addFolder')">{{
+                    <CommandButton :icon="icons['folder-add']" loading-auto command="settings.addFolder">{{
                       t('settings.addFolder')
-                    }}</UButton>
-                    <UButton :icon="icons.refresh" loading-auto @click="runCommand('settings.rescan')">{{
+                    }}</CommandButton>
+                    <CommandButton :icon="icons.refresh" loading-auto command="settings.rescan">{{
                       t('settings.rescan')
-                    }}</UButton>
+                    }}</CommandButton>
                   </div>
                 </template>
               </PrefRow>

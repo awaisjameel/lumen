@@ -62,6 +62,10 @@ export async function selectPhoto(page, id, step = () => undefined) {
   if (!(await page.$(`#cell-${id}`))) await page.$eval('.scroller', (el) => { el.scrollTop = el.scrollHeight })
   step('wait for the target cell')
   await page.waitForSelector(`#cell-${id}`)
+  // Privacy recovery can finish its write before coalesced timeline reads
+  // have moved the virtual rows. Take coordinates only after those settle.
+  step('wait for the library reads')
+  await page.waitForNetworkIdle()
   step('select the target cell')
   await page.locator(`#cell-${id}`).click()
   const details = 'button[aria-label="Details"]'

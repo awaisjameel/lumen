@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { itemCommand, menuItems, useCommands } from '../shared/commands'
 import { destination } from '../shared/navigation/contract'
-import UButton from '@nuxt/ui/components/Button.vue'
 import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import { computed } from 'vue'
 import type { Place } from '../bridge'
@@ -10,24 +11,19 @@ import CollectionCard from '../shared/CollectionCard.vue'
 import CoverMosaic from '../shared/CoverMosaic.vue'
 import IconButton from '../shared/IconButton.vue'
 import { formatNumber, t } from '../shared/i18n'
-import { menuItems, useCommands } from '../shared/commands'
 import type { Command } from '../shared/commands'
 
 const props = defineProps<{ place: Place; active: boolean; refreshCommand?: Command }>()
 const emit = defineEmits<{ hover: []; preview: []; block: [] }>()
 const actions: Command[] = [
   {
-    id: `place.${props.place.id}.preview`,
-    group: 'view',
+    id: itemCommand('place.preview', props.place.id),
     title: () => t('places.preview'),
-    icon: 'photos',
     run: () => emit('preview'),
   },
   {
-    id: `place.${props.place.id}.block`,
-    group: 'view',
+    id: itemCommand('place.block', props.place.id),
     title: () => t('blocked.confirmTitle', { name: props.place.name }),
-    icon: 'eye-off',
     run: () => emit('block'),
   },
 ]
@@ -66,12 +62,12 @@ const items = computed(() =>
           :cover-thumb="place.coverThumb"
           icon="places"
       /></template>
-      <UButton
+      <CommandButton
         variant="soft"
         size="xs"
         :aria-label="t('places.previewNamed', { name: place.name })"
-        @click="emit('preview')"
-        >{{ t('places.preview') }}</UButton
+        :command="itemCommand('place.preview', props.place.id)"
+        >{{ t('places.preview') }}</CommandButton
       >
       <UDropdownMenu :items="items"
         ><IconButton :icon="icons.more" :label="t('places.actions', { name: place.name })"
