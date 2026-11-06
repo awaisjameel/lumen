@@ -43,7 +43,7 @@ async function palette(query, choose = true) {
   await input.asLocator().fill(query)
   await page.waitForFunction((query, choose) => {
     const normal = value => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
-    return [...document.querySelectorAll('[role="option"]')].some(row => normal(row.textContent).includes(normal(query))) ||
+    return [...document.querySelectorAll('[role="dialog"][data-state="open"] [role="option"]')].some(row => normal(row.textContent).includes(normal(query))) ||
       (!choose && document.querySelector('.palette .empty'))
   }, {}, query, choose)
   if (choose) {
@@ -57,11 +57,12 @@ async function palette(query, choose = true) {
         window.__lumenCommandClick = {
           tag: target?.tagName, role: target?.getAttribute('role'),
           option: !!target?.closest('[role="option"]'),
+          dialog: !!target?.closest('[role="dialog"][data-state="open"]'),
           trusted: event.isTrusted, x: event.clientX, y: event.clientY,
         }
       }, { once: true, capture: true })
     })
-    await page.locator('[role="option"]').click()
+    await page.locator('[role="dialog"][data-state="open"] [role="option"]').click()
     evidence.push({ phase, paletteClick: await page.evaluate(() => window.__lumenCommandClick) })
     await until(() => page.$$eval('[role="dialog"][data-state="open"]', rows => rows.length === 0), 'palette did not close')
   }
