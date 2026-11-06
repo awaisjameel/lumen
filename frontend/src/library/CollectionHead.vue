@@ -47,6 +47,8 @@ let writeDraftName: ((name: string) => Promise<void>) | undefined
 const draft = ref('')
 const error = ref('')
 const busy = ref(false)
+let owner = 0
+onBeforeUnmount(() => owner++)
 const picker = ref(false)
 const field = ref<{ inputRef: HTMLInputElement | null } | null>(null)
 const canRename = computed(() => !['favourites', 'place'].includes(props.kind))
@@ -156,13 +158,16 @@ const eyebrow = computed(() =>
     : t(`collection.kind.${props.kind}`),
 )
 watch(
-  () => [props.kind, props.id],
+  () => `${props.kind === 'smart' ? 'album' : props.kind}:${props.id}`,
   () => {
+    owner++
+    busy.value = false
     renaming.value = false
     writeDraftName = undefined
     error.value = ''
     picker.value = false
   },
+  { flush: 'sync' },
 )
 async function rename() {
   writeDraftName = nameWriter()
@@ -173,10 +178,23 @@ async function rename() {
   field.value?.inputRef?.focus()
   field.value?.inputRef?.select()
 }
-async function refresh() {
-  if (props.kind === 'thing') await things.load()
-  if (props.kind === 'album' || props.kind === 'smart') await albums.load()
-  emit('changed')
+function refreshOwner() {
+  const kind = props.kind
+  const current = owner
+  return async () => {
+    if (kind === 'thing') await things.load()
+    if (kind === 'album' || kind === 'smart') await albums.load()
+    if (current === owner) emit('changed')
+    else await library.reconcileChanges()
+  }
+}
+function refresh() {
+  return refreshOwner()()
+}
+function showFailure(e: unknown, current: number) {
+  if (isCancelled(e)) return
+  if (current === owner) error.value = errorText(e)
+  else reportError(e)
 }
 function nameWriter() {
   const id = props.id
@@ -202,12 +220,16 @@ async function saveName(reset = false) {
   // would stop it following later date or location corrections.
   const previous = props.kind === 'event' ? (event.value?.nameOverride ?? '') : props.name
   const writeName = writeDraftName ?? nameWriter()
+  const current = owner
+  const refreshSaved = refreshOwner()
   busy.value = true
   error.value = ''
   try {
     await writeName(name)
-    renaming.value = false
-    await refresh()
+    if (current === owner) {
+      renaming.value = false
+      writeDraftName = undefined
+    }
     notify({
       id: 'collection.name',
       kind: 'success',
@@ -216,15 +238,18 @@ async function saveName(reset = false) {
         {
           label: t('settings.undo'),
           run: () => {
-            void writeName(previous).then(refresh).catch(reportError)
+            void writeName(previous).then(refreshSaved).catch(reportError)
           },
         },
       ],
     })
+    // The write is committed. A failed read must retain its Undo and must
+    // not turn the saved name or pin into an apparently unsaved draft.
+    await refreshSaved().catch(reportError)
   } catch (e) {
-    error.value = errorText(e)
+    showFailure(e, current)
   } finally {
-    busy.value = false
+    if (current === owner) busy.value = false
   }
 }
 async function togglePin() {
@@ -235,11 +260,12 @@ async function togglePin() {
   const name = props.name
   const write = (value: boolean) =>
     kind === 'thing' ? engine.setThingPinned(id, value) : engine.setEventPinned(id, value)
+  const current = owner
+  const refreshSaved = refreshOwner()
   busy.value = true
   error.value = ''
   try {
     await write(!previous)
-    await refresh()
     notify({
       id: 'collection.pin',
       kind: 'success',
@@ -248,15 +274,18 @@ async function togglePin() {
         {
           label: t('settings.undo'),
           run: () => {
-            void write(previous).then(refresh).catch(reportError)
+            void write(previous).then(refreshSaved).catch(reportError)
           },
         },
       ],
     })
+    // The write is committed. A failed read must retain its Undo and must
+    // not turn the saved name or pin into an apparently unsaved draft.
+    await refreshSaved().catch(reportError)
   } catch (e) {
-    error.value = errorText(e)
+    showFailure(e, current)
   } finally {
-    busy.value = false
+    if (current === owner) busy.value = false
   }
 }
 function editRule() {

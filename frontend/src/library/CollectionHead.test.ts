@@ -143,6 +143,88 @@ it('retains a failed rename draft for retry', async () => {
   expect(wrapper.get('input').element.value).toBe('Retained')
   wrapper.unmount()
 })
+
+it('keeps a committed album rename and its Undo when the following list refresh fails', async () => {
+  const original = {
+    id: 1,
+    name: 'Weekend',
+    kind: AlbumKind.AlbumManual,
+    rule: emptyRule(),
+    version: { identity: 'album-1', revision: 'original' },
+    count: 1,
+    cover: 0,
+    coverThumb: 0,
+  }
+  vi.mocked(engine.albums).mockResolvedValueOnce([original]).mockRejectedValueOnce(new Error('List unavailable'))
+  vi.mocked(engine.saveAlbum)
+    .mockReset()
+    .mockResolvedValue({ ...original.version, revision: 'renamed' })
+  const notices = recordNotifications()
+  const { wrapper } = await mountHead('', 'album')
+  await useAlbums().load()
+  await wrapper
+    .findAll('button')
+    .find((b) => b.text() === 'Rename…')
+    ?.trigger('click')
+  await wrapper.get('input').setValue('Renamed')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(engine.saveAlbum).toHaveBeenCalledOnce()
+  expect(notices.find('collection.name')?.actions?.[0]?.label).toBe('Undo')
+  expect(wrapper.find('input').exists()).toBe(false)
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  wrapper.unmount()
+  notices.stop()
+})
+
+it('does not show an older rename failure on a different collection', async () => {
+  const pending = deferred<void>()
+  vi.mocked(engine.setEventName).mockReturnValueOnce(pending.promise)
+  const { wrapper, props } = await mountHead()
+  await wrapper
+    .findAll('button')
+    .find((b) => b.text() === 'Rename…')
+    ?.trigger('click')
+  await wrapper.get('input').setValue('Old collection')
+  await wrapper.get('form').trigger('submit')
+  props.id = 2
+  props.name = 'Current collection'
+  await flushPromises()
+  pending.reject(new Error('Old save failed'))
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('Old save failed')
+  expect(wrapper.text()).toContain('Current collection')
+  wrapper.unmount()
+})
+it('keeps a newer collection draft and pending save when an older save completes', async () => {
+  const older = deferred<void>()
+  const newer = deferred<void>()
+  vi.mocked(engine.setEventName).mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
+  const { wrapper, props } = await mountHead()
+  const rename = async (name: string) => {
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === 'Rename…')
+      ?.trigger('click')
+    await wrapper.get('input').setValue(name)
+    await wrapper.get('form').trigger('submit')
+  }
+  await rename('Older')
+  props.id = 2
+  props.name = 'New collection'
+  await flushPromises()
+  await rename('Newer')
+  expect(engine.setEventName).toHaveBeenLastCalledWith(2, 'Newer')
+  older.resolve()
+  await flushPromises()
+  expect(wrapper.get('input').element.value).toBe('Newer')
+  expect(wrapper.get('input').element.disabled).toBe(true)
+  newer.reject(new Error('New save refused'))
+  await flushPromises()
+  expect(wrapper.get('input').element.disabled).toBe(false)
+  expect(wrapper.get('[role="alert"]').text()).toContain('New save refused')
+  wrapper.unmount()
+})
 it('says where most of the collection was taken after what it holds, and asks again as that changes', async () => {
   vi.useFakeTimers()
   vi.mocked(engine.topPlaces).mockResolvedValue([
