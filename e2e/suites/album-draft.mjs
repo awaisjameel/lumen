@@ -28,6 +28,7 @@ let saveFault = false
 let phase = 'seed'
 let action = 'seed'
 let failure
+let blockNotice = '[data-notification="block.undo"]'
 let a
 let tag
 let initialName = 'Native draft A'
@@ -66,6 +67,9 @@ function watch(page) {
   })
 }
 async function start(label, baseline) {
+  // Main predates logical notification attributes. Select its real open
+  // toast explicitly; candidate checks keep the current identity selector.
+  blockNotice = baseline ? 'li[data-state="open"]' : '[data-notification="block.undo"]'
   dataDir = copyLibrary(seed, join(s.run, label))
   app = await launch({ exe: s.exe, dataDir, port: s.port })
   watch(app.page)
@@ -111,14 +115,14 @@ async function blockOther() {
   await menu(otherName, `Block “${otherName}”?`)
   await app.page.locator('label::-p-text(Hide the name only)').click()
   await app.page.locator('[data-block="save"]').click()
-  await app.page.waitForSelector('[data-notification="block.undo"]', { visible: true })
+  await app.page.waitForSelector(`${blockNotice} button::-p-text(Undo)`, { visible: true })
 }
 async function undoHeld() {
   await trace.idle()
   resetTrace()
   trace.holdNext(row => row.name === 'Albums')
   step('Undo the unrelated block while the edited draft remains open')
-  await button(app.page, 'Undo', '[data-notification="block.undo"]')
+  await button(app.page, 'Undo', blockNotice)
   await until(() => trace.held, 'the privacy invalidation did not reach Albums')
 }
 async function saveDraft() {

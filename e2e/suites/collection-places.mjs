@@ -115,7 +115,7 @@ async function header(page, city) {
   }, `the current header did not link to ${city.name}`)
   return snapshot
 }
-async function correctPlace(page, city) {
+async function correctPlace(page, city, captureUndo = true) {
   await selectPhoto(page, first, step)
   step('open the location correction')
   await page.locator('[data-edit-place]').click()
@@ -127,7 +127,9 @@ async function correctPlace(page, city) {
   await button(page, 'Save place', '[role="dialog"]')
   step('wait for the correction to close')
   await page.waitForSelector('#correct-place', { hidden: true })
-  return undoNotice(page)
+  // The base comparison observes the committed correction, not its inverse.
+  // Main predates the bounded Undo notification identity used by candidates.
+  if (captureUndo) return undoNotice(page)
 }
 async function membership(page, collection) {
   const selection = await lib(page, 'Selection', collection.view, [], false)
@@ -175,7 +177,7 @@ try {
     await openCollection(page, collections[0])
     await until(() => page.$eval('.collection-hero .meta', (node, name) => node.textContent.includes(name), origin.name),
       'the parent did not show the original city')
-    await correctPlace(page, corrected)
+    await correctPlace(page, corrected, false)
     await until(() => page.$eval('.inspector-body', (node, name) => node.textContent.includes(name), corrected.name),
       'the corrected inspector did not refresh')
     let parentHeader

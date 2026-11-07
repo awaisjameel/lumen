@@ -20,7 +20,9 @@ let failure
 const measurements = {}
 const external = []
 function watch(page) {
-  s.watch(page)
+  s.watch(page, { context: () => phase, expected: row => row.context.endsWith(': recapture selection') &&
+    row.kind === 'response' && row.status === 422 && row.method === 'ValidateSelection' &&
+    row.code === 'selection_changed' && row.message === 'the selection changed; select the results again' })
   page.on('pageerror', (error) => console.log(`PAGE ERROR ${error.stack ?? error}`))
   page.on('console', (message) => {
     if (message.type() === 'error') console.log(`CONSOLE ERROR ${message.text()} ${JSON.stringify(message.location())}`)
@@ -34,7 +36,17 @@ function watch(page) {
 async function favouriteAll(page) {
   const clear = await page.$('button[aria-label="Clear selection"]')
   if (clear) await clear.click()
-  await selectAllResults(page)
+  const current = phase
+  phase = `${current}: recapture selection`
+  try {
+    // resultSelection validates its cached revision after the preceding
+    // writes, then reads current IDs on selection_changed. Only that exact
+    // handled refusal is expected here; action admission must still succeed.
+    await selectAllResults(page)
+    await page.waitForSelector(`[role="toolbar"][aria-label="${N} selected"]`, { visible: true })
+    await trace.idle()
+    await s.settleErrors()
+  } finally { phase = current }
   await page.waitForSelector('[data-command="library.favouriteSelection"]', { visible: true })
   await page.click('[data-command="library.favouriteSelection"]')
   await until(async () => (await lib(page, 'Counts')).favourites === N, 'batch favourite did not finish')
