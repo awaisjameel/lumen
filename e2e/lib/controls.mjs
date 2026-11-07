@@ -1,4 +1,5 @@
 import { lib, sleep } from './app.mjs'
+import { TimeoutError } from 'puppeteer-core'
 
 /** Wait on an observable state with a specific failure instead of a blind delay. */
 export async function until(test, message, timeout = 30_000) {
@@ -45,7 +46,21 @@ export function option(page, text) {
 }
 
 export async function dismissNotices(page) {
-  for (const close of await page.$$('button[aria-label="Dismiss notification"]')) await close.asLocator().click()
+  const open = 'li[data-state="open"] button[aria-label="Dismiss notification"]'
+  // Undo can close its toast before this helper runs. Reacquire a current
+  // open control each time; an exiting toast's captured button can disappear
+  // while a locator waits for its geometry to settle.
+  await until(async () => {
+    if (!(await page.$(open))) return true
+    try {
+      await page.locator(open).setTimeout(2000).click()
+    } catch (error) {
+      // Expiry is also a successful dismissal, but other failures still fail.
+      if (!(error instanceof TimeoutError) || await page.$(open)) throw error
+    }
+    return false
+  }, 'notifications did not dismiss')
+  await page.waitForSelector('button[aria-label="Dismiss notification"]', { hidden: true })
 }
 
 export async function selectAllResults(page) {

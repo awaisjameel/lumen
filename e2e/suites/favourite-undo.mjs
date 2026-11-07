@@ -82,8 +82,14 @@ async function measure(label, baselineDir) {
   watch(app.page)
   await lib(app.page, 'SetPaused', true)
   await app.page.waitForSelector('.scroller .cell')
+  // Replacing the frontend must not abort the initial grid's thumbnail reads.
+  await app.page.waitForNetworkIdle()
   trace = await mutationTrace(app.page, baselineDir)
-  if (baselineDir) await app.page.reload()
+  if (baselineDir) {
+    await app.page.reload()
+    await app.page.waitForSelector('.scroller .cell')
+    await app.page.waitForNetworkIdle()
+  }
   await resize(app.page, 1440, 900)
   await app.page.waitForSelector('.scroller .cell')
   trace.reset()

@@ -231,6 +231,7 @@ try {
     await app.page.evaluate(() => document.activeElement?.getAttribute('data-action') === 'new-album'))
 
   phase = 'committed header rename with failed refresh'
+  step('open the header after dismissing the earlier read error')
   await dismissNotices(app.page)
   await app.page.locator(`a[href="/albums/${a}"]`).click()
   await app.page.waitForSelector('.collection-hero', { visible: true })
@@ -252,10 +253,13 @@ try {
   await app.page.screenshot({ path: join(s.out, 'committed-header-refresh-failure.png') })
   fault('restore-read')
   s.check('the failed refresh did not roll back the committed name', (await saved()).name === 'Committed header name')
+  step('Undo the committed header rename')
   await button(app.page, 'Undo', '[data-notification="collection.name"]')
   await until(async () => (await saved()).name === initialName, 'header Undo did not restore its original version')
   await trace.idle()
+  step('dismiss the current notifications after Undo')
   await dismissNotices(app.page)
+  step('return to the album list')
   await app.page.locator('aside a[href="/albums"]').click()
   await app.page.waitForSelector('[data-action="new-album"]', { visible: true })
 
