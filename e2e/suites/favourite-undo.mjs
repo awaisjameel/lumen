@@ -43,7 +43,7 @@ async function favouriteAll(page) {
     // writes, then reads current IDs on selection_changed. Only that exact
     // handled refusal is expected here; action admission must still succeed.
     await selectAllResults(page)
-    await page.waitForSelector(`[role="toolbar"][aria-label="${N} selected"]`, { visible: true })
+    await page.waitForSelector(`[role="toolbar"][aria-label="${N} selected · all results"]`, { visible: true })
     await trace.idle()
     await s.settleErrors()
   } finally { phase = current }
