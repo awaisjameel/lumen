@@ -10,17 +10,73 @@ were already integrated; no review comments or review threads were present.
 Fixes remain on `feat/31-feature-completion`. Nothing is merged or released;
 [#31](https://github.com/awaisjameel/lumen/issues/31) remains open.
 
+## Accepted implementation checkpoint
+
+[Windows run 42411663796](https://github.com/awaisjameel/lumen/actions/runs/42411663796)
+verifies implementation commit
+[`b391b3f`](https://github.com/awaisjameel/lumen/commit/b391b3ffc4149226d5a6ba200c3e0cecdb28c2a3)
+against `main` at `bae949c`. Production build, unchanged generated bindings and
+modules, full static/docs checks, **1,177 frontend tests in 121 files**, all
+three named-package Go race shards and **unsigned installer packaging pass**.
+Static verification retains 21 command and 18 navigation negative compiler
+fixtures, their valid counterparts, three navigation mutation checks and five
+native-harness regressions. The PR description records current-head checks;
+this checkpoint remains stable evidence for the implementation beneath the
+subsequent audit-documentation update.
+
+All **394 native checks across 16 suites pass** against the production executable:
+
+| Suite | Passed |
+| --- | ---: |
+| Commands | 25/25 |
+| Navigation | 74/74 |
+| Collection recovery | 51/51 |
+| Album drafts | 28/28 |
+| Collection places | 22/22 |
+| Smart-album previews | 26/26 |
+| Tagging recovery | 18/18 |
+| Undo recovery | 23/23 |
+| Search history | 7/7 |
+| Favourite Undo | 24/24 |
+| Onboarding | 7/7 |
+| Collections | 8/8 |
+| Organise | 7/7 |
+| File tools | 14/14 |
+| Customisation | 45/45 |
+| Unconfigured updates | 15/15 |
+
+The [native artifact](https://github.com/awaisjameel/lumen/actions/runs/42411663796/artifacts/13590407929)
+contains the inspected JSON reports and screenshots; the separately preserved
+[command artifact](https://github.com/awaisjameel/lumen/actions/runs/42411663796/artifacts/13589898380)
+is also available. Representative captures include
+`album-draft/committed-header-refresh-failure.png`,
+`undo-recovery/blocked-album-undo.png`,
+`favourite-undo/single-undo-superseded.png` and dark narrow navigation. The wider
+review also inspected fullscreen export controls, the narrow unavailable-updater
+screen and shortcut-conflict focus. Injected errors are explicitly attributed;
+unexpected page, transport and resource failures remain failures.
+
+The 500-photo favourite comparison records **500 outstanding individual inverse
+writes → three serial writes of 200/200/100 IDs**, with request payloads
+53,392 → 4,426 bytes. Observed completion was 1,172.74 → 252.31 ms and maximum
+frame gap 234.3 → 15.7 ms on that runner. These are synthetic native observations,
+not calibrated-machine acceptance. The hosted store benchmark still exceeds
+its unchanged budget: unblocked SaveEmbeddings64 **239.694/70 ms**.
+
+The audit fixes are ready for owner review. The performance and external gates
+below remain open; this does not authorise merging, release or closing #31.
+
 ## Confirmed findings and evidence
 
-| Finding and impact | Origin and root cause | Repair and regression evidence | Acceptance still needed |
+| Finding and impact | Origin and root cause | Repair and regression evidence | Verification status |
 | --- | --- | --- | --- |
-| **High: membership Undo could modify a blocked album.** A visible photo could be added to or removed from a label-blocked album, including after an inverse was retained for retry. | Existing single membership admission checked album kind and asset presence; the integrated batch/recovery path reused it without checking album visibility. | `setAlbumItem` now checks the canonical album blocking predicate inside its transaction. The before regression failed for both add and remove; the repaired store race regression verifies unchanged membership on refusal and successful retry after unblocking. Native `undo-recovery` now exercises real header/inspector controls and the PIN gate. | Final Windows native result. |
-| **Medium: single-photo favourite Undo overwrote newer explicit intent.** A later same-value batch confirmation did not protect the photo from an older single-control inverse. | Existing single-control Undo acquired a new write lease at activation, bypassing the PR's shared ownership retained by batch Undo. | Single and batch controls now share the bounded favourite inverse owner. The before regression observed the incorrect `SetFavourite(false)`. Regressions cover supersession and blocked-target retry after navigation without changing the current selection. Native `favourite-undo` now checks the single-control versus newer batch case. | Final Windows native result. |
-| **Medium: committed collection changes lost Undo on refresh failure; late saves changed a replacement header.** | Header code treated saving and refreshing as one operation, and local completion/error state had no collection lifetime guard. The PR's persistent metadata/draft work exposed this existing owner mismatch. | Names and pins retain their committed notification before refresh. Captured collection refresh owners and synchronous lifetime retirement prevent an old save from closing a new draft, clearing its busy state or showing an error in another collection. Two before regressions failed; all 19 header tests pass, including a newer pending save. Native `album-draft` adds a real committed header save followed by an injected read failure and Undo. | Final Windows native result. |
-| **Medium: acceptance could hide unexpected resource failures.** | The existing shared harness and two new fault suites blanket-filtered `Failed to load resource`. Thus unrelated bridge/media failures could disappear from a green report. | Browser errors are attributed to current generated method identities and scenario context. Only exact expected refusals account for their individual resource messages; page errors always fail. Recorder regressions verify that unrelated methods, media failures, duplicate messages and errors outside the injection context remain failures. | Final native runs under stricter attribution. |
-| **Medium: a native cleanup exception could leave CI green.** | New album-draft/navigation cleanup catches recorded `failure` after all checks passed, but the shared finalizer only checked the assertion list. | The finalizer now converts a recorded exception into a failed check and nonzero exit. A subprocess regression failed before the repair (exit 0 despite the exception), then passed; its successful-report counterpart still exits 0. | Final Windows harness/native result. |
-| **Medium: two base comparisons stopped before exercising the candidate.** | The integrated album-draft and collection-place suites assumed notification attributes and bounded inverse identities introduced after the current PR base. Child-parent acceptance had not exercised this older base. | Run 42314147744 reproduced both selector failures. The base draft test now selects its actual open toast; the place comparison observes its committed correction without requiring a candidate inverse identity. Candidate selectors and assertions remain strict. | Repeat comparison against current `main`. |
-| **Low: XMP shutdown acceptance raced the caller.** | Run 42406902126 failed an unchanged test also present on `main`: `joinLifetime` releases its wait group in the export's defer, before the caller sends its result. `Stop` cannot order that later send. | The test now checks persisted sidecar ownership immediately after Stop and separately awaits the caller, deliberately delaying result publication. A deterministic `synctest` check asserts cancellation and that Stop remains blocked until joined work is released. Production shutdown code is unchanged. | Final Windows race result; local index tests cannot compile without libvips headers. |
+| **High: membership Undo could modify a blocked album.** A visible photo could be added to or removed from a label-blocked album, including after an inverse was retained for retry. | Existing single membership admission checked album kind and asset presence; the integrated batch/recovery path reused it without checking album visibility. | `setAlbumItem` now checks the canonical album blocking predicate inside its transaction. The before regression failed for both add and remove; the repaired store race regression verifies unchanged membership on refusal and successful retry after unblocking. Native `undo-recovery` now exercises real header/inspector controls and the PIN gate. | Run 42411663796 passes the native regression. |
+| **Medium: single-photo favourite Undo overwrote newer explicit intent.** A later same-value batch confirmation did not protect the photo from an older single-control inverse. | Existing single-control Undo acquired a new write lease at activation, bypassing the PR's shared ownership retained by batch Undo. | Single and batch controls now share the bounded favourite inverse owner. The before regression observed the incorrect `SetFavourite(false)`. Regressions cover supersession and blocked-target retry after navigation without changing the current selection. Native `favourite-undo` now checks the single-control versus newer batch case. | Run 42411663796 passes the native regression. |
+| **Medium: committed collection changes lost Undo on refresh failure; late saves changed a replacement header.** | Header code treated saving and refreshing as one operation, and local completion/error state had no collection lifetime guard. The PR's persistent metadata/draft work exposed this existing owner mismatch. | Names and pins retain their committed notification before refresh. Captured collection refresh owners and synchronous lifetime retirement prevent an old save from closing a new draft, clearing its busy state or showing an error in another collection. Two before regressions failed; all 19 header tests pass, including a newer pending save. Native `album-draft` adds a real committed header save followed by an injected read failure and Undo. | Run 42411663796 passes the native regression. |
+| **Medium: acceptance could hide unexpected resource failures.** | The existing shared harness and two new fault suites blanket-filtered `Failed to load resource`. Thus unrelated bridge/media failures could disappear from a green report. | Browser errors are attributed to current generated method identities and scenario context. Only exact expected refusals account for their individual resource messages; page errors always fail. Recorder regressions verify that unrelated methods, media failures, duplicate messages and errors outside the injection context remain failures. | All 394 native checks and the recorder regressions pass in run 42411663796. |
+| **Medium: a native cleanup exception could leave CI green.** | New album-draft/navigation cleanup catches recorded `failure` after all checks passed, but the shared finalizer only checked the assertion list. | The finalizer now converts a recorded exception into a failed check and nonzero exit. A subprocess regression failed before the repair (exit 0 despite the exception), then passed; its successful-report counterpart still exits 0. | Subprocess and native verification pass in run 42411663796. |
+| **Medium: two base comparisons stopped before exercising the candidate.** | The integrated album-draft and collection-place suites assumed notification attributes and bounded inverse identities introduced after the current PR base. Child-parent acceptance had not exercised this older base. | Run 42314147744 reproduced both selector failures. The base draft test now selects its actual open toast; the place comparison observes its committed correction without requiring a candidate inverse identity. Candidate selectors and assertions remain strict. | Both current-main comparisons pass in run 42411663796. |
+| **Low: XMP shutdown acceptance raced the caller.** | Run 42406902126 failed an unchanged test also present on `main`: `joinLifetime` releases its wait group in the export's defer, before the caller sends its result. `Stop` cannot order that later send. | The test now checks persisted sidecar ownership immediately after Stop and separately awaits the caller, deliberately delaying result publication. A deterministic `synctest` check asserts cancellation and that Stop remains blocked until joined work is released. Production shutdown code is unchanged. | Windows race run 42411663796 passes; local index compilation remains unavailable without libvips headers. |
 
 ## Review coverage and state ownership
 
@@ -33,12 +89,12 @@ hardware or every possible application interaction.
 
 | Workflow | Authoritative owners and evidence examined |
 | --- | --- |
-| Commands and navigation | Executable command definitions, per-registration runner admission/retirement, shortcut overlays, typed destination codecs/provider/adapters, exhaustive root views and generated Go SPA manifest. Reviewed every migrated production caller, compiler-negative fixtures and valid counterparts, AST checks and three mutation checks. Current static checks and 25 command/74 navigation native checks pass in run 42314147744, including pending keyboard ownership, retries, history, reload/PIN relock, themes and a narrow drawer. |
-| Albums and collection metadata | Editor admission and local draft lifetime, coalesced list/preview reads, library content revision and header refresh ownership, bridge types, service confidence/validation, transactional album creation identity and definition revision, canonical visibility predicates and bounded three-item preview. Store tests cover reference visibility, conflict/idempotent saves and ID reuse. Run 42314147744 passes all 26 preview checks; header/draft candidate acceptance remained blocked by its base fixture. |
-| Undo and corrections | Shared per-field/album turns and retained inverse leases, transactional changed-row outcomes, bounded scheduling/paged recovery, notification lifetime and current inspector reconciliation. Store and component tests cover partial failure, cancellation, retry, newer edits, disposal and correction provenance. Run 42314147744 passes 23 Undo-recovery checks, including the newly blocked-album case; all favourite behavioural assertions pass, with its diagnostic classification corrected separately below. |
-| Tagging/OCR | Thin service distinguishes annotation commit from scheduling; the indexer owns serialised/coalesced retries and current opt-in. Store eligibility and durable jobs recover after restart without replaying annotations. Reviewed cancellation before/after commit, failed queue transactions, shutdown and later user corrections. Run 42314147744 passes all 18 tagging-recovery checks. |
-| Collection recovery and search history | Existing protected block manager and event override semantics, typed recovery links, and recent-search request ordering. Component tests exercise delayed failed clear/reload against newer intent; run 42314147744 passes 51 collection-recovery and seven search-history checks. |
-| Build and infrastructure | Current generated service contracts and navigation manifest, compiler fixture rejection counts, test-runner exit propagation and exact native fault attribution. Production build leaves bindings/modules unchanged; static checks pass in run 42314147744. No release trust, runtime networking, performance budget or original-media write policy changes were introduced. |
+| Commands and navigation | Executable command definitions, per-registration runner admission/retirement, shortcut overlays, typed destination codecs/provider/adapters, exhaustive root views and generated Go SPA manifest. Reviewed every migrated production caller, compiler-negative fixtures and valid counterparts, AST checks and three mutation checks. Static checks and 25 command/74 navigation native checks pass in run 42411663796, including pending keyboard ownership, retries, history, reload/PIN relock, themes and a narrow drawer. |
+| Albums and collection metadata | Editor admission and local draft lifetime, coalesced list/preview reads, library content revision and header refresh ownership, bridge types, service confidence/validation, transactional album creation identity and definition revision, canonical visibility predicates and bounded three-item preview. Store tests cover reference visibility, conflict/idempotent saves and ID reuse. Run 42411663796 passes 26 preview, 28 draft and 22 metadata checks, including the corrected base comparisons and committed-header regression. |
+| Undo and corrections | Shared per-field/album turns and retained inverse leases, transactional changed-row outcomes, bounded scheduling/paged recovery, notification lifetime and current inspector reconciliation. Store and component tests cover partial failure, cancellation, retry, newer edits, disposal and correction provenance. Run 42411663796 passes all 23 Undo-recovery and 24 favourite checks, including blocked-album retry and single-control supersession. |
+| Tagging/OCR | Thin service distinguishes annotation commit from scheduling; the indexer owns serialised/coalesced retries and current opt-in. Store eligibility and durable jobs recover after restart without replaying annotations. Reviewed cancellation before/after commit, failed queue transactions, shutdown and later user corrections. Run 42411663796 passes all 18 tagging-recovery checks. |
+| Collection recovery and search history | Existing protected block manager and event override semantics, typed recovery links, and recent-search request ordering. Component tests exercise delayed failed clear/reload against newer intent; run 42411663796 passes 51 collection-recovery and seven search-history checks. |
+| Build and infrastructure | Current generated service contracts and navigation manifest, compiler fixture rejection counts, test-runner exit propagation and exact native fault attribution. Production build leaves bindings/modules unchanged; static checks and unsigned packaging pass in run 42411663796. No release trust, runtime networking, performance budget or original-media write policy changes were introduced. |
 
 Session Undo is deliberately ephemeral: committed state and OCR recovery
 survive restart, but inverse offers and unsaved drafts are not durable journals.
@@ -122,8 +178,9 @@ creation-identity and inverse-retirement checks. No speculative rewrite was made
 - Five local native-harness regressions pass, including the before-failing
   subprocess check for a recorded cleanup exception. The fault fixture passes
   pinned Ruff 0.17.2 lint/format checks.
-- Final native/race acceptance is pending the corrected run. No historical
-  child pass or reporting-only latency measurement is counted as a final pass.
+- Run 42411663796 supplies the accepted implementation checkpoint above. No
+  historical child pass or reporting-only latency measurement is counted as
+  acceptance of these repairs.
 
 ## External gates
 

@@ -12,6 +12,21 @@ All eleven implementation children are integrated in [PR #56](https://github.com
 The [PR audit ledger](pr56-audit.md) records confirmed integration findings,
 repairs, current verification and remaining acceptance gates. The child entries
 below preserve their original dates and results; they are historical records.
+The integration audit repaired blocked-album membership admission, retained
+single-favourite inverse ownership, and committed collection-name/pin outcomes
+across refresh failure and header replacement. It also strengthened native error
+attribution, base comparisons and failure exits, and corrected an XMP test's
+caller-scheduling assumption. The ledger separates these findings from disproved
+hypotheses and preserves failed intermediate runs.
+
+The implementation checkpoint at `b391b3f` passes
+[Windows run 42411663796](https://github.com/awaisjameel/lumen/actions/runs/42411663796):
+1,177 frontend tests, all static/compiler/docs checks, all three Go race shards,
+394 native checks across 16 suites, production/current bindings and unsigned
+packaging. Hosted unblocked SaveEmbeddings64 still exceeds its unchanged budget
+at 239.694/70 ms; calibrated-machine and other external acceptance remain open.
+The PR description records the current head's check results.
+
 Further cohesive audit fixes use the existing parent head. Keep #31 open pending
 owner review and the recorded external/performance gates; do not merge or release.
 
