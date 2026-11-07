@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"lumen/internal/core"
@@ -596,8 +597,14 @@ func TestExportNowEndsAndIsWaitedForWhenTheIndexerStops(t *testing.T) {
 		return out, err
 	}
 	finished := make(chan error, 1)
+	publish := make(chan struct{})
+	release := sync.OnceFunc(func() { close(publish) })
+	defer release()
 	go func() {
 		_, err := f.ix.exportNow(t.Context(), xmpOptions{full: true, write: write})
+		// Stop waits for the export's work, not for its caller to publish
+		// the return value. Hold that publication to exercise both orders.
+		<-publish
 		finished <- err
 	}()
 	<-written
@@ -608,20 +615,52 @@ func TestExportNowEndsAndIsWaitedForWhenTheIndexerStops(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Stop did not return")
 	}
+	if f.recordedHash(t, f.pathA) == nil {
+		t.Fatal("Stop returned before recording the sidecar written before cancellation")
+	}
+	release()
 	select {
 	case err := <-finished:
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("Export now ended with %v, want the cancellation", err)
 		}
-	default:
-		t.Fatal("Stop returned before Export now finished")
-	}
-	if f.recordedHash(t, f.pathA) == nil {
-		t.Fatal("the sidecar written before Stop was not recorded")
+	case <-time.After(10 * time.Second):
+		t.Fatal("Export now caller did not finish")
 	}
 	if _, err := f.ix.ExportXMPNow(t.Context()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Export now after Stop = %v, want a refusal", err)
 	}
+}
+
+func TestStopCancelsAndWaitsForJoinedWork(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ix := quiet(New(nil, core.Paths{}, nil, Models{}, &fakeEvents{}))
+		ix.rootCtx, ix.cancel = context.WithCancel(t.Context())
+		ctx, done, err := ix.joinLifetime(t.Context())
+		check(t, err)
+		release := sync.OnceFunc(done)
+		defer release()
+		stopped := make(chan struct{})
+		go func() { ix.Stop(); close(stopped) }()
+		// Wait for every goroutine to block; no scheduler delay can make
+		// an early Stop return appear to be a correctly waiting one.
+		synctest.Wait()
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatalf("joined context after Stop = %v", ctx.Err())
+		}
+		select {
+		case <-stopped:
+			t.Fatal("Stop returned while joined work was active")
+		default:
+		}
+		release()
+		synctest.Wait()
+		select {
+		case <-stopped:
+		default:
+			t.Fatal("Stop did not return after joined work finished")
+		}
+	})
 }
 
 func TestExportClaimsAFileThatIsExactlyWhatItWouldWriteAndNothingElse(t *testing.T) {
