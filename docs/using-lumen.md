@@ -133,7 +133,7 @@ stays visible but cannot overwrite it: **Reload saved version** asks before
 discarding your unsaved changes and waits for the current album and choices,
 or **Cancel** closes the draft.
 
-Undo of favourite selections, album memberships and date/place corrections
+Undo of single-photo or selection favourites, album memberships and date/place corrections
 shows progress and **Cancel remaining**.
 Completed changes stay in place. **View outcomes** lists results a page at a
 time; **Retry failed items** retries failures, while **Resume cancelled items**
@@ -151,6 +151,10 @@ Undo. A blocked target can fail and be retried after unblocking. Date/place Undo
 restores an earlier user correction when present, or returns to the underlying
 metadata (including no GPS). It can reverse a correction that hid its own photo
 under a place block. The details panel currently corrects one photo at a time.
+
+A saved collection name or pin keeps its Undo offer if refreshing the screen
+fails. The refresh error does not mean the edit was rolled back. Finishing a
+save after you open another collection does not close that collection's draft.
 
 ![Three smart albums, By the sea, City walks and Mountain views, each following a Thing](screenshots/albums.webp)
 

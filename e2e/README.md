@@ -192,6 +192,15 @@ structured runtime refusals. Call `await s.settleErrors()` before inspecting
 injection suite supplies its exact method, scenario and error code/message to
 `s.watch`; an allowed response accounts for only one matching browser resource
 message. Uncaught page errors and unrelated resource failures remain failures.
+
+Base comparisons select controls from the base's actual source contract. Main
+predates logical notification attributes and bounded inverse notices; its
+comparison must not require candidate-only attributes before reaching the
+behaviour under test. Candidate assertions retain the current identity selectors.
+The favourite suite also distinguishes the handled `ValidateSelection` refusal
+while recapturing a stale selection from an action-admission failure. Only the
+exact `selection_changed` response during that recapture is expected; the
+current selection must settle before the next action.
 Only the optional local `/wails/custom.js` 404 is ignored globally, alongside
 coded cancellation of the named cancellable reads. `scripts/lint.sh` exercises
 the recorder's negative cases with `node --test e2e/lib/errors.test.mjs`.

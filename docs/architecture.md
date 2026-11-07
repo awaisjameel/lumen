@@ -127,6 +127,13 @@ use this guarded contract. The legacy three-argument update remains only for
 compiled clients and native fixtures, sharing the same store implementation.
 No persisted draft owner or membership-turn registry is added.
 
+Collection header writes capture their collection lifetime and refresh owner.
+They publish committed name/pin outcomes before the fallible refresh, retaining
+Undo when that read fails. Identity changes synchronously retire local save
+state; an older completion cannot close a replacement draft or clear its busy
+state. A detached completion reconciles the current library without changing
+its selection.
+
 **Collection place metadata.** The library's existing admitted content revision
 invalidates header places even when counts and day buckets are unchanged.
 The header adds no library-event subscription: background revisions share a
@@ -167,7 +174,10 @@ and transaction outcomes remain with the existing store/service owners.
 outcomes, avoiding whole-album snapshots and stale checkbox guesses. Every
 membership surface shares that owner. Compound album/asset outcome identities
 keep separate inverses for a photo in several albums; deleting an album retires
-its inverses before SQLite can reuse its ID. Corrections capture current values
+its inverses before SQLite can reuse its ID. The membership transaction checks
+album visibility as well as kind; label-blocked albums refuse both forward and
+inverse membership writes, with failed inverse targets retained for recovery.
+Corrections capture current values
 under their field turn and restore a previous user correction or the latest
 underlying metadata, including absent GPS. Their inverse keeps opaque original
 targets when the correction itself covers an asset. The existing store admission
