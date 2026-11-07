@@ -167,7 +167,7 @@ export function suite(name) {
       check(label, false, `threw: ${String(e).slice(0, 400)}`)
     }
   }
-  const cancellableReads = new Set(['Timeline', 'Days', 'Search', 'Hits', 'TopPlaces', 'PreviewAlbum'])
+  const cancellableReads = new Set(['Timeline', 'Days', 'Search', 'Hits', 'TopPlaces', 'PreviewAlbum', 'Inspect'])
   /** Only cancelled reads are normal globally; fault suites identify their own refusals. */
   const watch = (page, options = {}) => diagnostics.watch(page, {
     ...options,

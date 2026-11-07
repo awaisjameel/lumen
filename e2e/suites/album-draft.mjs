@@ -24,6 +24,7 @@ let app
 let trace
 let dataDir = seed
 let readFault = false
+let readFaultMessage = ''
 let saveFault = false
 let phase = 'seed'
 let action = 'seed'
@@ -41,14 +42,15 @@ function step(value) {
   console.log(`album-draft: ${phase}: ${value}`)
 }
 function fault(value) {
-  execFileSync(process.env.PYTHON ?? 'python', [join(E2E, 'fixtures', 'album_draft.py'), value,
-    join(dataDir, 'library.db')], { stdio: 'inherit' })
+  const output = execFileSync(process.env.PYTHON ?? 'python', [join(E2E, 'fixtures', 'album_draft.py'), value,
+    join(dataDir, 'library.db')], { encoding: 'utf8' })
+  if (value === 'refuse-read') readFaultMessage = output.trim()
   if (value.endsWith('read')) readFault = value === 'refuse-read'
   else saveFault = value === 'refuse-save'
 }
 function watch(page) {
   s.watch(page, { context: () => phase, expected: row => (['failed privacy read and read-only retry', 'committed header rename with failed refresh'].includes(row.context) &&
-      row.message === 'no such column: identity' && (row.kind === 'console' || (row.kind === 'response' && row.method === 'Albums'))) ||
+      row.message === readFaultMessage && (row.kind === 'console' || (row.kind === 'response' && row.method === 'Albums'))) ||
     (row.kind === 'response' && row.method === 'SaveAlbum' && (
       (row.context === 'failed save and retry' && row.message === 'album draft write refused') ||
       (row.context === 'save-window conflict' && row.code === 'album_changed') ||
@@ -75,6 +77,9 @@ async function start(label, baseline) {
   watch(app.page)
   await unthrottle(app.page)
   await app.page.waitForSelector('.scroller .cell', { visible: true })
+  // Reloading the current frontend must not abort its still-loading thumbnails.
+  await app.page.waitForFunction(() => [...document.querySelectorAll('.scroller img')].every(image => image.complete && image.naturalWidth > 0))
+  await app.page.waitForNetworkIdle()
   trace = await mutationTrace(app.page, baseline, reads, writes)
   await app.page.reload()
   await app.page.waitForSelector('.scroller .cell', { visible: true })
