@@ -191,14 +191,8 @@ try {
   )
   await page.click('.video-player button[aria-label="Exit fullscreen"]')
   await page.waitForFunction(() => !document.fullscreenElement)
-  // Resizing the window under an open menu makes WebView2 report "ResizeObserver
-  // loop completed with undelivered notifications": a layout notice, counted
-  // in the report, not an exception of the app.
   await s.settleErrors()
-  const notices = s.appErrors().filter((e) => e.includes('ResizeObserver loop'))
-  const failures = s.appErrors().filter((e) => !e.includes('ResizeObserver loop'))
-  if (notices.length) console.log(`NOTE  ${notices.length} ResizeObserver loop notices while resizing`)
-  s.check('no uncaught frontend errors', failures.length === 0, failures.join(' || '))
+  s.check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors())
 } catch (e) {
   s.check('the file tools ran to the end', false, String(e))
   await page.screenshot({ path: join(s.out, 'failure.png') }).catch(() => {})

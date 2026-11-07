@@ -133,6 +133,11 @@ jobs:
         shell: bash
         run: node e2e/run.mjs navigation collection-recovery album-draft collection-places smart-album-preview tagging-recovery undo-recovery search-history favourite-undo
 
+      - name: Native shared-control regressions
+        if: ${{ !cancelled() && steps.native_dependencies.outcome == 'success' }}
+        shell: bash
+        run: node e2e/run.mjs onboarding collections organise file-tools customise updates
+
       - name: Build the installer with embedded application assets
         shell: bash
         run: |
@@ -155,6 +160,12 @@ jobs:
             e2e/.work/results/commands
             e2e/.work/results/navigation
             e2e/.work/results/collection-recovery
+            e2e/.work/results/onboarding
+            e2e/.work/results/collections
+            e2e/.work/results/organise
+            e2e/.work/results/file-tools
+            e2e/.work/results/customise
+            e2e/.work/results/updates
           retention-days: 14
           include-hidden-files: true
           if-no-files-found: ignore

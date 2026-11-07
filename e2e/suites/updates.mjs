@@ -8,11 +8,14 @@ import { suite } from '../lib/suite.mjs'
 const s = suite('updates')
 const dataDir = await libraryCopy(join(s.run, 'data'))
 let app
+let phase = 'startup'
 const external = []
 try {
   app = await launch({ exe: s.exe, dataDir, port: s.port })
   const page = app.page
-  s.watch(page)
+  s.watch(page, { context: () => phase, expected: row => row.kind === 'response' && row.status === 422 &&
+    row.code === 'update_unavailable' && ['Check', 'SetPolicy'].includes(row.method) &&
+    row.context === `unconfigured ${row.method}` })
   page.on('request', (request) => {
     const address = request.url()
     if (
@@ -29,11 +32,15 @@ try {
   s.check('public delivery is disabled without production trust', status.configured === false)
   s.check('a development binary does not infer installation ownership', status.managed === false)
   const refused = async (method, ...args) => {
+    phase = `unconfigured ${method}`
     try {
       await updates(page, method, ...args)
       return false
     } catch (error) {
       return String(error).includes('update_unavailable')
+    } finally {
+      await s.settleErrors()
+      phase = 'settings'
     }
   }
   s.check('manual discovery fails closed before any request', await refused('Check'))
