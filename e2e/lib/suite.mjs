@@ -177,6 +177,10 @@ export function suite(name) {
   const appErrors = diagnostics.unexpected
   /** Writes report.json and sets the exit code. */
   const finish = (extra = {}) => {
+    // Cleanup catches can record an exception after all behavioural checks.
+    // Such a report must fail even when its caller forgot a separate check.
+    if (extra.failure != null && checks.every(check => check.pass))
+      check('suite completed without a recorded exception', false, extra.failure)
     const failed = checks.filter((c) => !c.pass)
     writeFileSync(
       join(out, 'report.json'),
