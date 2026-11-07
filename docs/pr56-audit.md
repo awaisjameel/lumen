@@ -20,7 +20,6 @@ Fixes remain on `feat/31-feature-completion`. Nothing is merged or released;
 | **Medium: acceptance could hide unexpected resource failures.** | The existing shared harness and two new fault suites blanket-filtered `Failed to load resource`. Thus unrelated bridge/media failures could disappear from a green report. | Browser errors are attributed to current generated method identities and scenario context. Only exact expected refusals account for their individual resource messages; page errors always fail. Recorder regressions verify that unrelated methods, media failures, duplicate messages and errors outside the injection context remain failures. | Final native runs under stricter attribution. |
 | **Medium: a native cleanup exception could leave CI green.** | New album-draft/navigation cleanup catches recorded `failure` after all checks passed, but the shared finalizer only checked the assertion list. | The finalizer now converts a recorded exception into a failed check and nonzero exit. A subprocess regression failed before the repair (exit 0 despite the exception), then passed; its successful-report counterpart still exits 0. | Final Windows harness/native result. |
 | **Medium: two base comparisons stopped before exercising the candidate.** | The integrated album-draft and collection-place suites assumed notification attributes and bounded inverse identities introduced after the current PR base. Child-parent acceptance had not exercised this older base. | Run 42314147744 reproduced both selector failures. The base draft test now selects its actual open toast; the place comparison observes its committed correction without requiring a candidate inverse identity. Candidate selectors and assertions remain strict. | Repeat comparison against current `main`. |
-
 | **Low: XMP shutdown acceptance raced the caller.** | Run 42406902126 failed an unchanged test also present on `main`: `joinLifetime` releases its wait group in the export's defer, before the caller sends its result. `Stop` cannot order that later send. | The test now checks persisted sidecar ownership immediately after Stop and separately awaits the caller, deliberately delaying result publication. A deterministic `synctest` check asserts cancellation and that Stop remains blocked until joined work is released. Production shutdown code is unchanged. | Final Windows race result; local index tests cannot compile without libvips headers. |
 
 ## Review coverage and state ownership
@@ -101,6 +100,28 @@ creation-identity and inverse-retirement checks. No speculative rewrite was made
   and unrelated failures still fail acceptance. Packaging was skipped.
   **This is failed intermediate evidence, despite all behavioural album/Undo
   assertions passing.**
+- [Windows run 42406902126](https://github.com/awaisjameel/lumen/actions/runs/42406902126)
+  at `69bb15d` passed production/current bindings, full static checks (1,177
+  frontend tests), the store and store-oracle race shards, and all **96 checks
+  across six additional native suites**: onboarding, collections, organise,
+  file tools, customisation and unconfigured updates. The remaining-package
+  shard exposed the XMP test ordering defect above. Integrated native results
+  were commands 25/25, navigation 74/74, collection recovery 51/51, album draft
+  13/14, places 22/22, previews 26/26, tagging 18/18, Undo 23/23, history 7/7 and
+  favourites 23/24. Album commit/refresh-failure/Undo behaviour passed before
+  notification dismissal timed out on a captured closing control. Dismissal now
+  reacquires open toast controls and awaits their removal. All favourite
+  behaviour passed; only initial baseline thumbnail requests aborted by a reload
+  failed diagnostics. That reload now waits for network idle. No errors are
+  exempted to accommodate either timing failure. Packaging was skipped.
+  **This is failed intermediate evidence.** Artifact `native-regressions`
+  (13588074969) retains the inspected JSON reports and screenshots; the command
+  artifact is 13588446379. The local real-store fault probe also confirms that
+  the disposable invalid rule fails Albums with the exact expected message,
+  leaves the active album's timeline/days valid and restores its original state.
+- Five local native-harness regressions pass, including the before-failing
+  subprocess check for a recorded cleanup exception. The fault fixture passes
+  pinned Ruff 0.17.2 lint/format checks.
 - Final native/race acceptance is pending the corrected run. No historical
   child pass or reporting-only latency measurement is counted as a final pass.
 
@@ -121,3 +142,6 @@ not evidence of calibrated-machine acceptance or proof of a pre-existing cause.
 
 Run 42379659025 measured hosted unblocked SaveEmbeddings64 at **210.932/70 ms**;
 this is another failed hosted budget measurement, with no budget adjustment.
+
+Run 42406902126 measured hosted unblocked SaveEmbeddings64 at **239.443/70 ms**,
+again exceeding the unchanged budget.

@@ -133,13 +133,15 @@ frontend checkout with those bindings, as PR CI does.
 `album-draft` uses the same compiled-parent mechanism. Its source contract
 (`data-draft-state`) selects legacy draft-loss or repaired admission expectations
 before outcomes are observed. It blocks unrelated B, edits A, and uses the real
-global Undo while holding the album read. Scratch-only schema/trigger faults
-refuse actual reads/writes; retry does not replay committed state. Held saves
+global Undo while holding the album read. A disposable invalid rule and a
+scratch-only trigger refuse actual album reads/writes; the read fault leaves the active album and
+its timeline intact, and retry does not replay committed state. Held saves
 exercise a conflicting definition, navigation and a deleted/recreated numeric ID.
 The conflicting rule selects a Thing created after the editor opened, so its
 confirmed reload must fetch current choices before adopting that selection.
-The suite restores its scratch schema, restarts the app and leaves originals
-unchanged. Keep the baseline's sibling `src/` directory, as PR CI does.
+The suite removes its fault record/trigger, restarts the app and leaves original
+album definitions unchanged. Keep the baseline's sibling `src/` directory, as
+PR CI does.
 
 `collection-places` also uses the compiled parent frontend for a native
 before/after comparison. Manual/smart albums, Things and single-photo events
@@ -203,7 +205,10 @@ exact `selection_changed` response during that recapture is expected; the
 current selection must settle before the next action.
 Only the optional local `/wails/custom.js` 404 is ignored globally, alongside
 coded cancellation of the named cancellable reads. `scripts/lint.sh` exercises
-the recorder's negative cases with `node --test e2e/lib/errors.test.mjs`.
+the recorder's negative cases and subprocess exit/report checks with
+`node --test e2e/lib/errors.test.mjs e2e/lib/suite.test.mjs`. A recorded
+`failure`, including a cleanup exception after behavioural checks pass, must
+produce a failed check and a nonzero exit.
 
 ## Writing a suite
 
