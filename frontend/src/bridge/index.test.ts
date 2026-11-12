@@ -16,7 +16,6 @@ vi.mock('../../bindings/lumen/services', () => ({
     RecheckSources: vi.fn().mockResolvedValue(undefined),
     UnlockBlocks: vi.fn().mockResolvedValue(undefined),
     LockBlocks: vi.fn().mockResolvedValue(undefined),
-    SetAlbumItem: vi.fn().mockResolvedValue(undefined),
     Counts: vi.fn(),
     FindCities: vi.fn(),
     SetTakenAt: vi.fn().mockResolvedValue(undefined),
@@ -104,11 +103,6 @@ it('normalizes no remaining search hits and passes cancellation to the engine', 
   expect(await engine.searchHits([1, 2], controller.signal)).toEqual([])
   expect(SearchService.Hits).toHaveBeenCalledWith([1, 2])
   expect(cancelled).toHaveBeenCalledWith(controller.signal)
-})
-
-it('uses asset-first album membership arguments end to end', async () => {
-  await engine.setAlbumItem(17, 43, true)
-  expect(LibraryService.SetAlbumItem).toHaveBeenCalledWith(17, 43, true)
 })
 
 it('recognises a late cancelled runtime read without hiding another late failure', () => {

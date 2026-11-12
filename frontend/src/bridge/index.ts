@@ -642,8 +642,6 @@ export const engine = {
   saveAlbum: (edit: AlbumEdit): Promise<AlbumVersion> => LibraryService.SaveAlbum(edit),
   deleteAlbum: (id: number): Promise<void> => LibraryService.DeleteAlbum(id),
   assetAlbums: async (id: number): Promise<number[]> => (await LibraryService.AssetAlbums(id)) ?? [],
-  setAlbumItem: (assetID: number, albumID: number, include: boolean): Promise<void> =>
-    LibraryService.SetAlbumItem(assetID, albumID, include),
   /** Opens Explorer on one of an asset's files: path, or "" for the first one there. */
   showInFolder: (id: number, path = ''): Promise<void> => LibraryService.ShowInFolder(id, path),
 
