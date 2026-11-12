@@ -2,3 +2,8 @@
 bindings/
 dist/
 package-lock.json
+# Deliberately invalid compiler input; rejection markers identify exact lines.
+tools/navigation-fixtures/invalid.ts
+tools/navigation-fixtures/Invalid.vue
+tools/command-fixtures/invalid.ts
+tools/command-fixtures/Invalid.vue

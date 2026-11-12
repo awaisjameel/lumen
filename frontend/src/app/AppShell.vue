@@ -8,10 +8,10 @@
 import IconButton from '../shared/IconButton.vue'
 import USlideover from '@nuxt/ui/components/Slideover.vue'
 import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useNavigation } from '../shared/navigation/router'
 import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN } from '../bridge'
 import { icons } from '../design/icons'
-import { useCommands } from '../shared/commands'
+import { runCommand, useCommands } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { useLayoutMode } from '../shared/layout'
 import { usePreferences } from '../shared/preferences'
@@ -21,11 +21,11 @@ import AppNav from './AppNav.vue'
 
 const mode = useLayoutMode()
 const prefs = usePreferences()
-const route = useRoute()
+const route = useNavigation()
 
 const drawer = ref(false)
 // Going somewhere puts the drawer away; so does the window growing.
-watch([() => route.fullPath, mode], () => (drawer.value = false))
+watch([() => route.fullPath.value, mode], () => (drawer.value = false))
 
 const collapsed = computed(() => mode.value === 'medium' || prefs.prefs.sidebarCollapsed)
 
@@ -37,10 +37,6 @@ function toggleSidebar() {
 useCommands([
   {
     id: 'app.toggleSidebar',
-    group: 'view',
-    title: () => t('shell.toggleSidebar'),
-    icon: 'sidebar-collapse',
-    keys: 'Ctrl+B',
     available: () => mode.value !== 'medium',
     run: toggleSidebar,
   },
@@ -55,7 +51,7 @@ useCommands([
       :class="{ collapsed }"
       :style="collapsed ? undefined : { width: `${prefs.prefs.sidebarWidth}px` }"
     >
-      <AppNav :collapsed="collapsed" :collapsible="mode === 'wide'" @toggle="toggleSidebar" />
+      <AppNav :collapsed="collapsed" :collapsible="mode === 'wide'" @toggle="runCommand('app.toggleSidebar')" />
       <ResizeHandle
         v-if="mode === 'wide' && !collapsed"
         edge="right"

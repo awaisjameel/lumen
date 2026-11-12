@@ -3,16 +3,18 @@ import { createPinia, getActivePinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, shallowRef } from 'vue'
-import { createMemoryHistory, createRouter } from 'vue-router'
-import { mountInApp, recordNotifications } from '../shared/testing'
+import { createTestNavigation } from '../shared/navigation/testing'
+import { deferred, mountInApp, recordNotifications, undo } from '../shared/testing'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import type { Sel } from './store'
 import {
   AlbumKind,
+  BatchAction,
   BlockKind,
   DateSource,
   engine,
+  ErrorCode,
   INSPECTOR_WIDTH_DEFAULT,
   Kind,
   MAX_NAME_LEN,
@@ -23,7 +25,7 @@ import {
 } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Block from '../shared/block'
-import type { AssetDetail, Changes, Event, Face } from '../bridge'
+import type { AssetDetail, BatchOutcome, Changes, Event, Face } from '../bridge'
 import { emptyRule } from '../albums/store'
 import { block } from '../shared/block'
 import { useLibrary } from './store'
@@ -59,7 +61,8 @@ vi.mock('../bridge', async (importOriginal) => ({
     assetAlbums: vi.fn(),
     albums: vi.fn(),
     createAlbum: vi.fn(),
-    setAlbumItem: vi.fn(),
+    applyBatch: vi.fn(),
+    counts: vi.fn(),
     place: vi.fn(),
     untagAsset: vi.fn().mockResolvedValue(undefined),
     rejectFaces: vi.fn().mockResolvedValue(undefined),
@@ -72,20 +75,6 @@ vi.mock('../bridge', async (importOriginal) => ({
     setTakenAt: vi.fn().mockResolvedValue(undefined),
   },
 }))
-
-function deferred<T>() {
-  let complete: ((value: T) => void) | undefined
-  const promise = new Promise<T>((done) => {
-    complete = done
-  })
-  return {
-    promise,
-    resolve(value: T) {
-      if (!complete) throw new Error('Deferred promise was not initialised')
-      complete(value)
-    },
-  }
-}
 
 const detail = (id: number, camera = ''): AssetDetail => ({
   id,
@@ -119,15 +108,7 @@ function mountDetails(sel: Sel | null) {
   })
   const pinia = getActivePinia()
   if (!pinia) throw new Error('No active test Pinia')
-  const Page = { render: () => h('div') }
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: Page },
-      { path: '/people/:id', name: 'person', component: Page },
-      { path: '/things/:id', name: 'thing', component: Page },
-    ],
-  })
+  const router = createTestNavigation()
   return mountInApp(Host, { plugins: [pinia, router] })
 }
 
@@ -147,7 +128,10 @@ beforeEach(() => {
   vi.mocked(engine.assetFaces).mockReset().mockResolvedValue([])
   vi.mocked(engine.assetAlbums).mockReset().mockResolvedValue([])
   vi.mocked(engine.albums).mockReset().mockResolvedValue([])
-  vi.mocked(engine.setAlbumItem).mockReset().mockResolvedValue(undefined)
+  vi.mocked(engine.applyBatch)
+    .mockReset()
+    .mockImplementation((ids) => Promise.resolve(ids.map((id) => ({ id, code: '', error: '', changed: true }))))
+  vi.mocked(engine.counts).mockResolvedValue({ photos: 2, videos: 0, favourites: 0, people: 0, trash: 0 })
   vi.mocked(engine.createAlbum).mockReset().mockResolvedValue(4)
   vi.mocked(engine.place).mockReset()
   vi.mocked(engine.tagAsset).mockReset().mockResolvedValue(undefined)
@@ -201,9 +185,18 @@ it('refreshes metadata and the place action on asset changes without clearing an
   vi.useFakeTimers()
   const changed = liveChanges()
   vi.mocked(engine.asset).mockResolvedValueOnce({ ...detail(1), width: 0, height: 0 })
-  vi.mocked(engine.setAlbumItem).mockRejectedValueOnce(new Error('album edit failed'))
+  vi.mocked(engine.applyBatch).mockRejectedValueOnce(new Error('album edit failed'))
   vi.mocked(engine.albums).mockResolvedValue([
-    { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
+    {
+      id: 7,
+      version: { identity: 'album-7', revision: 'original' },
+      name: 'Trip',
+      kind: AlbumKind.AlbumManual,
+      rule: emptyRule(),
+      count: 0,
+      cover: 0,
+      coverThumb: 0,
+    },
   ])
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
@@ -288,6 +281,31 @@ it('validates full Unicode tag names in the add tag dialog without truncation', 
   expect(engine.tagAsset).toHaveBeenCalledWith(1, valid)
 })
 
+it('keeps a failed tag draft and reloads only after the annotation is confirmed', async () => {
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  await press(t('details.addTag'))
+  const body = new DOMWrapper(document.body)
+  await body.get('[data-tag-draft]').setValue('Screenshots')
+  vi.mocked(engine.assetTags).mockClear()
+  vi.mocked(engine.tagAsset).mockRejectedValueOnce(new Error('Write unavailable'))
+  await press(t('details.tag.save'))
+  expect(body.get<HTMLInputElement>('[data-tag-draft]').element.value).toBe('Screenshots')
+  expect(body.get('[role="dialog"]').text()).toContain('Write unavailable')
+  expect(engine.assetTags).not.toHaveBeenCalled()
+
+  vi.mocked(engine.assetTags).mockResolvedValue([
+    { id: 7, name: 'Screenshots', source: TagSource.TagByUser, kind: TagKind.TagBuiltin, score: 1 },
+  ])
+  await press(t('details.tag.save'))
+  expect(engine.tagAsset).toHaveBeenCalledTimes(2)
+  expect(engine.assetTags).toHaveBeenCalledWith(1)
+  expect(body.find('[data-tag-draft]').exists()).toBe(false)
+  expect(wrapper.get('.inspector-body').text()).toContain('Screenshots')
+  await press(t('details.addTag'))
+  expect(body.get<HTMLInputElement>('[data-tag-draft]').element.value).toBe('')
+})
+
 it('validates full Unicode album names in the creation dialog without truncation', async () => {
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
@@ -342,11 +360,62 @@ it('does not clear the next selection draft when album creation finishes', async
   ).toBe('Second album')
 })
 
+it('offers Undo for the photo placed in an album it has just created', async () => {
+  const notices = recordNotifications()
+  try {
+    wrapper = mountDetails({ day: 'results', id: 1 })
+    await flushPromises()
+    await press(t('albums.createForItem'))
+    await new DOMWrapper(document.body).get(`input[aria-label="${t('albums.createForItem')}"]`).setValue('Trip')
+    await new DOMWrapper(document.body).get('form').trigger('submit')
+    await flushPromises()
+    expect(engine.applyBatch).not.toHaveBeenCalled()
+    await undo(notices)
+    expect(engine.applyBatch).toHaveBeenCalledWith([1], BatchAction.BatchRemoveAlbum, 4)
+  } finally {
+    for (const notice of notices.shown) notice.closed?.()
+    notices.stop()
+  }
+})
+
+it('explains a refused album change by its code, not as an unknown fault in engine prose', async () => {
+  vi.mocked(engine.albums).mockResolvedValue([
+    {
+      id: 7,
+      version: { identity: 'album-7', revision: 'original' },
+      name: 'Trip',
+      kind: AlbumKind.AlbumManual,
+      rule: emptyRule(),
+      count: 0,
+      cover: 0,
+      coverThumb: 0,
+    },
+  ])
+  vi.mocked(engine.applyBatch).mockResolvedValueOnce([{ id: 1, code: ErrorCode.NotFound, error: 'not found' }])
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  const box = wrapper.get('.album-option [role="checkbox"]')
+  await box.trigger('click')
+  await flushPromises()
+  expect(box.attributes('aria-checked')).toBe('false')
+  expect(wrapper.text()).toContain(t('error.notFound'))
+  expect(wrapper.text()).not.toContain('not found')
+})
+
 it('puts an album checkbox back when the change fails', async () => {
   vi.mocked(engine.albums).mockResolvedValue([
-    { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
+    {
+      id: 7,
+      version: { identity: 'album-7', revision: 'original' },
+      name: 'Trip',
+      kind: AlbumKind.AlbumManual,
+      rule: emptyRule(),
+      count: 0,
+      cover: 0,
+      coverThumb: 0,
+    },
   ])
-  vi.mocked(engine.setAlbumItem).mockRejectedValueOnce(new Error('album deleted'))
+  vi.mocked(engine.applyBatch).mockRejectedValueOnce(new Error('album deleted'))
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
   const box = wrapper.get('.album-option [role="checkbox"]')
@@ -493,6 +562,81 @@ it('renders a narrow inspector as a sheet and closes it without closing the view
   expect(lib.viewer).toEqual({ day: 'results', id: 1 })
 })
 
+it('discards an inspection refusal after its original selection has moved on', async () => {
+  let refuse!: (error: Error) => void
+  vi.mocked(engine.inspect).mockReturnValueOnce(new Promise((_resolve, reject) => (refuse = reject)))
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  await select({ day: 'results', id: 2 })
+  await flushPromises()
+  refuse(new Error('not found'))
+  await flushPromises()
+  expect(logged).not.toHaveBeenCalled()
+  expect(wrapper.text()).toContain('Current')
+  expect(wrapper.find('[data-edit-date]').exists()).toBe(true)
+})
+
+it('discards an inspection refusal after its inspector is disposed', async () => {
+  let refuse!: (error: Error) => void
+  vi.mocked(engine.inspect).mockReturnValueOnce(new Promise((_resolve, reject) => (refuse = reject)))
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  wrapper.unmount()
+  wrapper = undefined
+  refuse(new Error('not found'))
+  await flushPromises()
+  expect(logged).not.toHaveBeenCalled()
+})
+
+it('still reports a current inspection failure', async () => {
+  const failure = new Error('Current file inspection failed')
+  vi.mocked(engine.inspect).mockRejectedValueOnce(failure)
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(logged).toHaveBeenCalledWith(failure)
+})
+
+it('shows a current privacy refusal as unavailable and retries reads without repeating the edit', async () => {
+  const failure = new Error('not found', { cause: { code: ErrorCode.NotFound } })
+  vi.mocked(engine.inspect).mockRejectedValueOnce(failure)
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  const refreshed = vi.spyOn(useLibrary(), 'refresh')
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  expect(logged).not.toHaveBeenCalled()
+  expect(wrapper.get('[role="alert"]').text()).toContain(t('error.notFound'))
+  expect(wrapper.find('[data-edit-date]').exists()).toBe(false)
+  expect(refreshed).toHaveBeenCalledOnce()
+  expect(engine.inspect).toHaveBeenCalledOnce()
+  await wrapper.get('[role="alert"] button').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('[data-edit-date]').exists()).toBe(true)
+  expect(engine.inspect).toHaveBeenCalledTimes(2)
+  expect(engine.applyBatch).not.toHaveBeenCalled()
+  expect(engine.setTakenAt).not.toHaveBeenCalled()
+})
+
+it('retires pending membership, face and tag reads when the current file becomes unavailable', async () => {
+  const tags = deferred<Awaited<ReturnType<typeof engine.assetTags>>>()
+  const faces = deferred<Awaited<ReturnType<typeof engine.assetFaces>>>()
+  const memberships = deferred<number[]>()
+  vi.mocked(engine.assetTags).mockReturnValueOnce(tags.promise)
+  vi.mocked(engine.assetFaces).mockReturnValueOnce(faces.promise)
+  vi.mocked(engine.assetAlbums).mockReturnValueOnce(memberships.promise)
+  vi.mocked(engine.inspect).mockRejectedValueOnce(new Error('not found', { cause: { code: ErrorCode.NotFound } }))
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  for (const read of [tags, faces, memberships]) read.reject(new Error('Obsolete metadata read refused'))
+  await flushPromises()
+  expect(logged).not.toHaveBeenCalled()
+  expect(wrapper.get('[role="alert"]').text()).toContain(t('error.notFound'))
+  expect(wrapper.text()).not.toContain('Current')
+})
+
 it('replaces metadata with a not-found state when a live read loses access to the photo', async () => {
   vi.useFakeTimers()
   const changed = liveChanges()
@@ -509,13 +653,22 @@ it('replaces metadata with a not-found state when a live read loses access to th
 
 it('does not roll back an album checkbox on the next photo when an earlier edit fails', async () => {
   let rejectEdit: ((reason: Error) => void) | undefined
-  const pending = new Promise<void>((_resolve, reject) => {
+  const pending = new Promise<BatchOutcome[]>((_resolve, reject) => {
     rejectEdit = reject
   })
   vi.mocked(engine.albums).mockResolvedValue([
-    { id: 7, name: 'Trip', kind: AlbumKind.AlbumManual, rule: emptyRule(), count: 0, cover: 0, coverThumb: 0 },
+    {
+      id: 7,
+      version: { identity: 'album-7', revision: 'original' },
+      name: 'Trip',
+      kind: AlbumKind.AlbumManual,
+      rule: emptyRule(),
+      count: 0,
+      cover: 0,
+      coverThumb: 0,
+    },
   ])
-  vi.mocked(engine.setAlbumItem).mockReturnValueOnce(pending)
+  vi.mocked(engine.applyBatch).mockReturnValueOnce(pending)
   vi.mocked(engine.assetAlbums).mockResolvedValueOnce([7]).mockResolvedValueOnce([])
   wrapper = mountDetails({ day: 'results', id: 1 })
   await flushPromises()
@@ -708,4 +861,18 @@ it('offers recovery with the exact local path after a Windows hand-off fails', a
   expect(body.get('[role="alert"]').text()).toContain('Drive disconnected')
   await press(t('common.retry'))
   expect(engine.openMedia).toHaveBeenLastCalledWith(1, 'C:/Photos/a.jpg', false)
+})
+
+it('participates in inverse reconciliation and reports a current metadata read failure independently', async () => {
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  const failure = new Error('Current metadata read failed')
+  vi.mocked(engine.asset).mockRejectedValueOnce(failure)
+  await expect(useLibrary().reconcileChanges()).rejects.toBe(failure)
+  expect(wrapper.text()).toContain('Current metadata read failed')
+  vi.mocked(engine.asset).mockResolvedValueOnce(detail(1, 'Refreshed metadata'))
+  await useLibrary().reconcileChanges()
+  expect(wrapper.text()).toContain('Refreshed metadata')
+  expect(wrapper.text()).not.toContain('Current metadata read failed')
+  expect(engine.applyBatch).not.toHaveBeenCalled()
 })

@@ -180,6 +180,19 @@ file covers how code is written.
   - Every list has loading, empty and failure states (`FeatureState`); a
     state is never shown by colour, shadow or motion alone, so reduced
     motion and forced colours lose nothing.
+- **Navigation.** `shared/navigation/contract.ts` owns destination names, paths,
+  params, supported queries and incoming decoding. Use `destination(...)`,
+  `useNavigation()` and validated `useLocation()` / `useDestination(name)`;
+  use the navigation link/button/menu adapters for route-bearing controls.
+  Never import raw Vue Router outside its named infrastructure boundary or
+  pass a string/untyped named object to a reusable component. Relative or
+  opaque `href` values also bypass the contract and are forbidden outside the
+  navigation boundary; explicit external literals remain separate. Root view
+  bindings are exhaustive and lazy; the shell owns labels, order and context.
+  Tests use `createTestNavigation()` with production records and optional stub
+  views. `.visit()` is an explicit incoming-URL boundary for negative tests,
+  not an internal navigation escape hatch. Add independent expected URLs and
+  compiler fixtures when changing the contract; see [the navigation guide](docs/navigation-contract.md).
 - **One owner each**
   - Interface preferences (appearance, layout, viewing, playback, shortcuts,
     export presets): `shared/preferences.ts`, saved in the library's settings
@@ -189,9 +202,11 @@ file covers how code is written.
     in `Normalised` and a reset category (`Preferences.Reset`); one that
     changes how the page is drawn becomes an attribute on the root
     (`design/appearance.ts`), which the tokens read.
-  - Shortcuts: a command declares its own keys; the user's are an overlay
-    read through `keysOf`. A command worth a shortcut is listed in
-    `shared/shortcuts.ts`, which a test holds to what the views declare.
+  - Shortcuts: `shared/commandContract.ts` owns default keys, zones, labels
+    and repeat policy. Settings/help derive from those executable definitions
+    in `shared/shortcuts.ts`; stored overrides are read through `keysOf`.
+    Known imported overrides remain active outside the editor; unknown legacy
+    keys remain stored until the user resets them.
   - Notifications: `notify()` in `shared/notify.ts`, shown as toasts by the
     shell. No component draws its own notice bar.
   - Overlays: Nuxt UI's modal, slideover, menu and popover (focus trap,
@@ -201,6 +216,32 @@ file covers how code is written.
   - Commands: an action offered in more than one place (toolbar, menu,
     palette, shortcut) is one `Command` registered with `useCommands`; its
     availability is computed, and the engine still validates every call.
+    Static IDs and constrained item constructors derive from the canonical
+    definitions. Buttons use `CommandButton` or `IconButton`'s `command` prop;
+    menus, palette and keyboard use the same `runCommand` admission/error owner.
+    Public reads expose no raw callback. Pending admission belongs to each
+    registration; only explicitly repeatable controls admit repeated work.
+    See [the command contract](docs/command-contract.md) for boundaries and checks.
+  - Favourite mutations: `shared/favouriteWrites.ts` owns their per-app turns
+    and inverse ownership. Use its `write` for an explicit edit; a control that
+    skips superseded queued input reserves `begin` at input, uses `take`, then
+    releases its lease. Do not put another write queue inside those turns.
+    Capture and forward writes take the same turns. A newer request permanently supersedes
+    an older inverse for those targets, even if that request later fails or is
+    cancelled. Selection capture is `library/favouriteBatch.ts`; ephemeral
+    inverse progress/recovery is `shared/undo.ts`. Retry checks current flags
+    before writing, and completed rows are never scheduled again. Reconciliation
+    errors have a read-only retry. Do not add direct competing favourite writes
+    or a second persistent Undo owner.
+  - Date/place and membership mutations reuse `shared/mutationWrites.ts` with
+    separate field/album owners. Use `albums/changes.ts` for every membership
+    surface and album deletion; capture actual changed rows from the batch
+    transaction. Never infer an inverse from an old checkbox or read the whole
+    album to capture a selection. Date/place correction capture and writes use
+    the same field turn, preserving user-versus-metadata provenance. Composite
+    targets and heterogeneous inverses use labelled outcomes and one-item units
+    in the shared Undo owner. Current inspector reads register with
+    `lib.onReconcile`; view/count/metadata failures never replay mutations.
 - **Pinia**
   - Only setup stores (`defineStore(id, () => …)`).
   - A list from the engine uses `defineListStore` or `defineCollectionStore`
@@ -215,6 +256,9 @@ file covers how code is written.
   - The user did something and there is no such place: `reportError(e)`.
   - Background work: `logError(e)` or `orFallback`.
   - Cancelled reads are dropped with `isCancelled`.
+  - One item of a batch failed and its view throws it: `outcomeFailure(row)`,
+    which keeps the engine's code so `errorText` words it once. Never
+    `new Error(row.error)`, which shows engine prose as an unknown fault.
   - No other `console.*` calls.
 - **Text** comes only from `t('key', params)`, so placeholders are typed. Add
   keys to `shared/i18n.ts`, and remove the keys you make unused.

@@ -90,6 +90,86 @@ jobs:
         shell: bash
         run: scripts/lint.sh --no-bench
 
+      # Compare built base and candidate frontends against the same synthetic
+      # preview/favourite fixtures and candidate engine; no runtime download.
+      - name: Build the PR base frontend for native comparison
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags origin "$BASE_SHA"
+          mkdir -p e2e/.work/baseline
+          git archive "$BASE_SHA" frontend | tar -x -C e2e/.work/baseline
+          npm ci --prefix e2e/.work/baseline/frontend
+          npm run build --prefix e2e/.work/baseline/frontend
+          echo "LUMEN_BASELINE_FRONTEND=$(cygpath -m "$PWD/e2e/.work/baseline/frontend/dist")" >>"$GITHUB_ENV"
+
+      - name: Prepare native regression dependencies
+        id: native_dependencies
+        shell: bash
+        run: |
+          npm ci --prefix e2e
+          python -m pip install -r e2e/requirements.txt
+
+      - name: Native command contract regressions
+        shell: bash
+        run: node e2e/run.mjs commands
+
+      - name: Preserve command regression reports immediately
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: command-regressions
+          path: e2e/.work/results/commands
+          retention-days: 14
+          include-hidden-files: true
+          if-no-files-found: ignore
+
+      - name: Native collection, album, tagging, history and recoverable Undo regressions
+        # A command failure still leaves all existing suites exercised. Every
+        # failure keeps the job failed and prevents the installer step.
+        if: ${{ !cancelled() && steps.native_dependencies.outcome == 'success' }}
+        shell: bash
+        run: node e2e/run.mjs navigation collection-recovery album-draft collection-places smart-album-preview tagging-recovery undo-recovery search-history favourite-undo
+
+      - name: Native shared-control regressions
+        if: ${{ !cancelled() && steps.native_dependencies.outcome == 'success' }}
+        shell: bash
+        run: node e2e/run.mjs onboarding collections organise file-tools customise updates
+
+      - name: Build the installer with embedded application assets
+        shell: bash
+        run: |
+          wails3 task package
+          test -z "$(git status --porcelain)"
+
+      - name: Preserve native regression reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-regressions
+          path: |
+            e2e/.work/results/search-history
+            e2e/.work/results/favourite-undo
+            e2e/.work/results/undo-recovery
+            e2e/.work/results/tagging-recovery
+            e2e/.work/results/smart-album-preview
+            e2e/.work/results/collection-places
+            e2e/.work/results/album-draft
+            e2e/.work/results/commands
+            e2e/.work/results/navigation
+            e2e/.work/results/collection-recovery
+            e2e/.work/results/onboarding
+            e2e/.work/results/collections
+            e2e/.work/results/organise
+            e2e/.work/results/file-tools
+            e2e/.work/results/customise
+            e2e/.work/results/updates
+          retention-days: 14
+          include-hidden-files: true
+          if-no-files-found: ignore
+
       - if: ${{ !cancelled() }}
         uses: ./.github/actions/save-go-cache
 

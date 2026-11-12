@@ -76,6 +76,18 @@ export interface Album {
     "count": number;
     "cover": number;
     "coverThumb": number;
+    "version": AlbumVersion;
+}
+
+/**
+ * AlbumEdit guards a write against deletion, numeric ID reuse and conflicting
+ * definitions. A nil rule changes only the name, retaining the current rule.
+ */
+export interface AlbumEdit {
+    "id": number;
+    "version": AlbumVersion;
+    "name": string;
+    "rule": AlbumRule | null;
 }
 
 /**
@@ -95,6 +107,15 @@ export enum AlbumKind {
 };
 
 /**
+ * AlbumPreview is an exact visible count and a bounded newest-first sample
+ * from the same read snapshot, without saving an album.
+ */
+export interface AlbumPreview {
+    "count": number;
+    "items": GridItem[] | null;
+}
+
+/**
  * AlbumRule is a conjunction of optional filters, saved for a smart album.
  * Dates are inclusive camera-clock calendar days (YYYY-MM-DD).
  */
@@ -108,6 +129,15 @@ export interface AlbumRule {
     "to": string;
     "tag": number;
     "person": number;
+}
+
+/**
+ * AlbumVersion separates a persistent creation identity from its current
+ * definition. Counts and covers do not invalidate an unsaved definition.
+ */
+export interface AlbumVersion {
+    "identity": string;
+    "revision": string;
 }
 
 /**
@@ -202,6 +232,13 @@ export interface BatchOutcome {
     "id": number;
     "code": string;
     "error": string;
+
+    /**
+     * Changed is true only when a successful album membership action changed
+     * the stored value. Other actions leave it false. It is captured beside
+     * the write so Undo never reverses a pre-existing membership.
+     */
+    "changed"?: boolean;
 }
 
 /**
@@ -1676,6 +1713,11 @@ export interface Progress {
      * photos still waiting for their text to be read
      */
     "ocr": number;
+
+    /**
+     * saved eligibility is waiting for scheduling to recover
+     */
+    "ocrQueueRetry"?: boolean;
 
     /**
      * the stages at work right now; the rest wait their turn

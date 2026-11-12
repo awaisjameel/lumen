@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -99,6 +100,11 @@ func run() (result error) {
 	defer func() { result = errors.Join(result, admission.Close()) }()
 	reports := diag.New(paths.DataDir, version)
 
+	pages, err := spa(application.AssetFileServerFS(assets))
+	if err != nil {
+		return err
+	}
+
 	// The application comes first: a second copy of Lumen must hand over to
 	// the running one before it touches the database (two would fight over
 	// it) or loads the AI. New exits then.
@@ -110,7 +116,7 @@ func run() (result error) {
 		MarshalError: services.MarshalError, // for errors outside bound methods; see service
 		PanicHandler: recordPanics(reports),
 		Assets: application.AssetOptions{
-			Handler:        spa(application.AssetFileServerFS(assets)),
+			Handler:        pages,
 			DisableLogging: true, // thousands of thumbnail requests
 		},
 		SingleInstance: &application.SingleInstanceOptions{
@@ -486,14 +492,65 @@ func (b *background) ServiceShutdown() error {
 // under "/@" is never a route: it is one of the development server's own
 // modules (/@vite/client, /@id/virtual:…), which have no extension either
 // and must reach it as they are, or the UI cannot start in development.
-func spa(files http.Handler) http.Handler {
+func spa(files http.Handler) (http.Handler, error) {
+	data, err := assets.ReadFile("frontend/dist/navigation.json")
+	if err != nil {
+		return nil, fmt.Errorf("read the embedded navigation contract (rebuild the frontend): %w", err)
+	}
+	routes, err := clientRoutes(data)
+	if err != nil {
+		return nil, err
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if path.Ext(r.URL.Path) == "" && r.URL.Path != "/" && !strings.HasPrefix(r.URL.Path, "/@") {
+		if r.URL.Path != "/" && !strings.HasPrefix(r.URL.Path, "/@") &&
+			(path.Ext(r.URL.Path) == "" || clientRoute(routes, r.URL.EscapedPath())) {
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
+			r.URL.RawPath = ""
 		}
 		files.ServeHTTP(w, r)
-	})
+	}), nil
+}
+
+// clientRoutes reads the path shapes Vite derives from the navigation
+// contract, each split into its segments. A frontend built before the
+// contract existed has none: a build fault the user is told about like any
+// other failed start, instead of a crash.
+func clientRoutes(manifest []byte) ([][]string, error) {
+	var paths []string
+	if err := json.Unmarshal(manifest, &paths); err != nil {
+		return nil, fmt.Errorf("parse the embedded navigation contract: %w", err)
+	}
+	if len(paths) == 0 {
+		return nil, errors.New("the embedded navigation contract names no route")
+	}
+	routes := make([][]string, len(paths))
+	for i, route := range paths {
+		routes[i] = strings.Split(strings.Trim(route, "/"), "/")
+	}
+	return routes, nil
+}
+
+// Match only the contract's path shape. Invalid parameter values still reach
+// the frontend's unavailable-location state instead of an asset-server 404.
+func clientRoute(routes [][]string, requestPath string) bool {
+	parts := strings.Split(strings.Trim(requestPath, "/"), "/")
+	for _, pattern := range routes {
+		if len(pattern) != len(parts) {
+			continue
+		}
+		matches := true
+		for i, part := range pattern {
+			if !strings.HasPrefix(part, ":") && !strings.EqualFold(part, parts[i]) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }
 
 // devtoolsArgs opens the WebView's DevTools protocol on localhost when

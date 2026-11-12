@@ -32,6 +32,16 @@ Install the pinned fixture tooling with `python -m pip install -r e2e/requiremen
 | `tour` | Visits every screen at four window widths: no sideways overflow, no errors, no request leaving the PC | base library |
 | `interface` | Themes and preferences, command palette, keyboard in grid and viewer, Escape, reduced motion, forced colours, DPI, narrow windows, video playback (direct and converted), PIN-locked blocks | base library + `videos` |
 | `collections` | Makes an album, trashes and restores from the viewer, smart albums, custom Things, About | base library |
+| `collection-recovery` | Uses empty Things, Places and Events recovery links by keyboard in both themes at 1440 and 800 px, unblocks behind the PIN, undoes event name edits and restarts | twelve generated photos in its own library |
+| `search-history` | Clears recent searches, runs a new query and reopens the controls after navigation and restart | an empty source in its own library |
+| `favourite-undo` | Restores 500 favourite flags, cancels/resumes across navigation, retries a blocked target, preserves a newer edit and restarts; records bridge calls, payloads and frame gaps | 500 indexed synthetic photos, copied for each measurement |
+| `undo-recovery` | Retries partial selection and multi-album inverses, preserves correction provenance and newer edits, reverses a self-covering place correction, retires deleted-album inverses and restarts | three generated photos in its own library |
+| `tagging-recovery` | Injects annotation and OCR queue faults, checks draft retention versus committed tags, and verifies owned scheduling and text recovery in-session and across restart | two generated documents in their own library |
+| `smart-album-preview` | Compares parent/candidate request counts, payloads and latency on 100,000 synthetic rows over 100 days; real editor rules, privacy/retry and cancellation | generated photos/videos and an isolated metadata fixture |
+| `commands` | Reassigns shortcuts, holds/refuses real adjustment calls, checks pending/retry, item menus, focus, overlays, restart and reset | three generated photos in a scratch library |
+| `navigation` | Real onboarding, every production destination, typed shell/collection/command/settings handoffs, aliases/history, malformed IDs, PIN/media relocking, themes/drawer and persisted startup | generated photos/faces in its scratch profile and library |
+| `album-draft` | Parent draft-loss reproduction; global privacy Undo with held/refused reads, local retry, reference redaction, guarded save conflicts/ID reuse, cancellation, navigation and restart | two generated photos in copied scratch libraries |
+| `collection-places` | Reproduces stale parent metadata, then checks same-count correction/Undo, current place links, coalescing, privacy/read retry and back/forward/lifetime ownership | two generated photos in copied scratch libraries |
 | `organise` | Organise on disk: preview, move, Undo, checked on the files themselves | base library + two files of its own |
 | `viewer` | Zoom, pan, rotate, full screen, filmstrip, compare, slideshow; selection and batch; export and rename with Undo; audio tracks, subtitles, frame export; playback history; blocks | `media` |
 | `file-tools` | The File tools dialog and its menu at every width, by keyboard, and inside a full-screen video | `media` |
@@ -89,7 +99,77 @@ Save the previous production executable before rebuilding, then run `LUMEN_PREVI
 
 ## Performance
 
-Not part of `run.mjs`: the figures need a quiet PC on mains power, and take minutes.
+The `favourite-undo` suite records forward capture and inverse call counts,
+maximum outstanding writes, IDs per request, JSON request bytes, elapsed
+restoration time and animation-frame gaps. It asserts bounded work, and reports
+timings without inventing a new machine-independent budget. Set
+`LUMEN_BASELINE_FRONTEND` to a production frontend's `dist` directory
+to compare it with the embedded candidate. The harness serves those compiled
+local assets in the native WebView for the baseline; both use the candidate's
+favourite service/store and separate copies of the same indexed scratch library.
+This isolates the frontend change and does not claim an old executable was run.
+PR CI builds that comparison frontend from its base commit. The trace follows
+method IDs from generated bindings; a missing binding fails instrumentation.
+Failed-row, cancellation and newer-edit acceptance use only the embedded
+candidate, through real controls and the existing PIN gate.
+
+`smart-album-preview` uses the same compiled baseline mechanism and records
+five samples each for photo-only and favourite-video rules. Its scratch
+metadata fixture has 100,000 rows over 100 days, with real generated sample
+thumbnails. A newly scanned image provides a startup-scan barrier before
+injection; no media files change while the metadata fixture is measured.
+Both frontends use copies of the same seed and the candidate's existing
+timeline services. The candidate additionally uses the bounded preview read.
+Reports contain bridge-call counts, request/response bytes and read/total
+latency. This measures synthetic metadata transport, not decoding, scanning,
+an old executable or latency on a user's library. Existing hardware budgets
+remain separate. Native rule/privacy/retry/cancellation checks use generated
+photos and videos, through real editor controls and normal service contracts.
+The baseline's sibling generated bindings identify its contract: a checkout
+before `PreviewAlbum` must reproduce day amplification; a later parent must
+retain the one-call/three-sample bounded contract. Supply the baseline from a
+frontend checkout with those bindings, as PR CI does.
+
+`album-draft` uses the same compiled-parent mechanism. Its source contract
+(`data-draft-state`) selects legacy draft-loss or repaired admission expectations
+before outcomes are observed. It blocks unrelated B, edits A, and uses the real
+global Undo while holding the album read. A disposable invalid rule and a
+scratch-only trigger refuse actual album reads/writes; the read fault leaves the active album and
+its timeline intact, and retry does not replay committed state. Held saves
+exercise a conflicting definition, navigation and a deleted/recreated numeric ID.
+The conflicting rule selects a Thing created after the editor opened, so its
+confirmed reload must fetch current choices before adopting that selection.
+The suite removes its fault record/trigger, restarts the app and leaves original
+album definitions unchanged. Keep the baseline's sibling `src/` directory, as
+PR CI does.
+
+`collection-places` also uses the compiled parent frontend for a native
+before/after comparison. Manual/smart albums, Things and single-photo events
+keep their membership during correction and Undo. Ten background corrections
+exercise bounded refresh work. A scratch-only column rename temporarily refuses
+actual backend place-name reads after a block, then restores the schema for
+retry. Held reads check privacy clearing and navigation ownership. The original
+files are unchanged; only reports and screenshots are uploaded.
+The checkout's header revision-prop contract identifies legacy versus live
+metadata before the correction outcome is measured. Later parents must retain
+the live names/destinations; the historical stale-parent comparison is retained
+for checkouts before the repair.
+
+`navigation` records method identity and structured refusal metadata for failed
+runtime responses, never arguments or PINs. Expected cancellations, the explicit
+stale-person fixture and PIN-gate probes are checked by method/kind/code rather
+than allowing all resource errors. Fixture reloads await a rendered, settled
+page; interaction deadlines and the no-unexpected-error assertion remain active.
+
+`undo-recovery` shares the bridge instrumentation in `lib/mutation-trace.mjs`
+and control helpers in `lib/controls.mjs`. Its held requests make partial
+membership failures deterministic without changing service results. Privacy
+refusals use the real PIN/block contracts. Reports and screenshots contain only
+synthetic scratch data; CI uploads the named result directories, never databases
+or WebView profiles. Date/place production controls remain single-photo editors;
+array-based correction failures and refresh-only retry also have component tests.
+
+The standalone commands below are not part of `run.mjs`: they need a quiet PC on mains power, and take minutes.
 
 ```bash
 node perf/perf.mjs [label]                               # the build under test, on a copy of the base library
@@ -105,6 +185,30 @@ node perf/compare.mjs <exeA> <dataA> <exeB> <dataB>      # two builds, launches 
 ## Documentation screenshots
 
 This folder's `docs/` holds a separate, opt-in capture of the README's face-review screenshot, on a library of pinned public photos; it is not a suite of `run.mjs`. Its steps, the photos' provenance and the review it needs are in [the screenshots guide](../docs/screenshots/README.md#reproducing-the-face-review).
+
+## Error attribution
+
+The shared recorder uses current generated binding identities and retains
+structured runtime refusals. Call `await s.settleErrors()` before inspecting
+`s.appErrors()` so console arguments and response bodies have settled. An
+injection suite supplies its exact method, scenario and error code/message to
+`s.watch`; an allowed response accounts for only one matching browser resource
+message. Uncaught page errors and unrelated resource failures remain failures.
+
+Base comparisons select controls from the base's actual source contract. Main
+predates logical notification attributes and bounded inverse notices; its
+comparison must not require candidate-only attributes before reaching the
+behaviour under test. Candidate assertions retain the current identity selectors.
+The favourite suite also distinguishes the handled `ValidateSelection` refusal
+while recapturing a stale selection from an action-admission failure. Only the
+exact `selection_changed` response during that recapture is expected; the
+current selection must settle before the next action.
+Only the optional local `/wails/custom.js` 404 is ignored globally, alongside
+coded cancellation of the named cancellable reads. `scripts/lint.sh` exercises
+the recorder's negative cases and subprocess exit/report checks with
+`node --test e2e/lib/errors.test.mjs e2e/lib/suite.test.mjs`. A recorded
+`failure`, including a cleanup exception after behavioural checks pass, must
+produce a failed check and a nonzero exit.
 
 ## Writing a suite
 

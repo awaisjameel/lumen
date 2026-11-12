@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+
 // First run keeps the source selection until the local library starts.
 import { computed, onMounted, ref } from 'vue'
 import { engine } from '../bridge'
@@ -11,7 +13,7 @@ import FirstScan from './FirstScan.vue'
 import { fileName } from '../shared/format'
 import WorkProgress from '../shared/WorkProgress.vue'
 import { icons } from '../design/icons'
-import { useCommands, runCommand } from '../shared/commands'
+import { useCommands } from '../shared/commands'
 import { t } from '../shared/i18n'
 import Icon from '../shared/Icon.vue'
 import BrandMark from '../shared/BrandMark.vue'
@@ -89,17 +91,11 @@ async function start() {
 useCommands([
   {
     id: 'welcome.addFolder',
-    group: 'library',
-    title: () => t('welcome.addFolder'),
-    icon: 'folder-add',
     enabled: () => !busy.value && !picking.value && step.value === 0 && !scanning.value,
     run: addFolder,
   },
   {
     id: 'welcome.start',
-    group: 'library',
-    title: () => t('welcome.start'),
-    icon: 'play',
     enabled: () => !!chosen.value.length && loaded.value && !busy.value && step.value === 2 && !scanning.value,
     run: start,
   },
@@ -166,7 +162,7 @@ useCommands([
                   </UCheckbox>
                 </li>
               </ul>
-              <UButton
+              <CommandButton
                 class="add"
                 data-add-folder
                 :icon="icons['folder-add']"
@@ -174,8 +170,8 @@ useCommands([
                 :loading="picking"
                 :color="folders.length ? 'neutral' : 'primary'"
                 :variant="folders.length ? 'ghost' : 'solid'"
-                @click="runCommand('welcome.addFolder')"
-                >{{ t('welcome.addFolder') }}</UButton
+                command="welcome.addFolder"
+                >{{ t('welcome.addFolder') }}</CommandButton
               >
             </template>
             <template v-else-if="step === 1">
@@ -225,7 +221,7 @@ useCommands([
                 @click="step++"
                 >{{ t('welcome.continue') }}</UButton
               >
-              <UButton
+              <CommandButton
                 v-else
                 class="start"
                 size="lg"
@@ -235,8 +231,8 @@ useCommands([
                 color="primary"
                 variant="solid"
                 :trailing-icon="icons['arrow-right']"
-                @click="runCommand('welcome.start')"
-                >{{ busy ? t('welcome.adding') : t('welcome.start') }}</UButton
+                command="welcome.start"
+                >{{ busy ? t('welcome.adding') : t('welcome.start') }}</CommandButton
               >
             </div>
           </section>

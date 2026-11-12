@@ -220,3 +220,18 @@ it('holds a stale first-paint text scale to the supported range before the engin
   expect(prefs.prefs.textScale).toBe(90)
   expect(root().style.getPropertyValue('--lumen-text-scale')).toBe('0.9')
 })
+
+it('preserves imported legacy shortcut data when editing or restoring a known shortcut', async () => {
+  const imported = {
+    ...stored,
+    shortcuts: { 'legacy.action': 'Ctrl+L', 'go.people': 'Ctrl+G', 'viewer.rotate': 'Shift+?' },
+  }
+  vi.mocked(engine.migratePreferences).mockResolvedValueOnce(imported)
+  const prefs = usePreferences()
+  await prefs.load()
+  await prefs.setShortcut('viewer.rotate', 'R')
+  expect(prefs.prefs.shortcuts).toEqual({ ...imported.shortcuts, 'viewer.rotate': 'R' })
+  await prefs.setShortcut('viewer.rotate', undefined)
+  expect(prefs.prefs.shortcuts).toEqual({ 'legacy.action': 'Ctrl+L', 'go.people': 'Ctrl+G' })
+  expect(engine.setPreferences).toHaveBeenLastCalledWith(expect.objectContaining({ shortcuts: prefs.prefs.shortcuts }))
+})

@@ -17,6 +17,9 @@ import type * as Errors from '../shared/errors'
 import type { Changes, DayBucket, DayItems, GridItem, Progress, SearchResults, Selection } from '../bridge'
 import { affects, scopeKey, useLibrary } from './store'
 import { reportError } from '../shared/errors'
+import { useFavouriteWrites } from '../shared/favouriteWrites'
+import { recordNotifications, undo } from '../shared/testing'
+import { undoOutcomes } from '../shared/undo'
 
 vi.mock('../shared/errors', async (importOriginal) => ({
   ...(await importOriginal<typeof Errors>()),
@@ -34,6 +37,7 @@ vi.mock('../bridge', async (importOriginal) => ({
     settings: vi.fn(),
     progress: vi.fn(),
     setFavourite: vi.fn(),
+    applyBatch: vi.fn(),
     setPaused: vi.fn(),
     counts: vi.fn(),
     selection: vi.fn(),
@@ -355,7 +359,97 @@ it('keeps where each loaded day was taken for its heading, and forgets it with t
 })
 
 describe('optimistic actions', () => {
+  it('does not undo a single favourite after a later explicit confirmation of the same value', async () => {
+    const notices = recordNotifications()
+    try {
+      const lib = shownLibrary()
+      await lib.setScope(all)
+      vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+      await lib.ensureDays([day])
+      await lib.toggleFavourite({ day, id: 1 })
+      await useFavouriteWrites().write([1], () => engine.setFavourite(1, true))
+      vi.mocked(engine.setFavourite).mockClear()
+      const job = await undo(notices)
+      expect(job.counts).toMatchObject({ superseded: 1, done: 0, failed: 0 })
+      expect(engine.setFavourite).not.toHaveBeenCalled()
+    } finally {
+      for (const notice of notices.shown) notice.closed?.()
+      notices.stop()
+      undoOutcomes.value = null
+    }
+  })
+
+  it('retains a refused single favourite inverse for retry after navigation', async () => {
+    const notices = recordNotifications()
+    try {
+      const lib = shownLibrary()
+      await lib.setScope(all)
+      vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+      await lib.ensureDays([day])
+      await lib.toggleFavourite({ day, id: 1 })
+      vi.mocked(engine.searchHits).mockResolvedValue([{ id: 1, f: true, w: 100, h: 100, t: 1 }])
+      vi.mocked(engine.applyBatch)
+        .mockReset()
+        .mockResolvedValueOnce([{ id: 1, code: ErrorCode.NotFound, error: 'Unavailable' }])
+        .mockResolvedValueOnce([{ id: 1, code: '', error: '' }])
+      const job = await undo(notices)
+      expect(job.counts).toMatchObject({ done: 0, failed: 1 })
+      lib.detach()
+      lib.selected = { day: 'another view', id: 99 }
+      await job.retry()
+      expect(job.counts).toMatchObject({ done: 1, failed: 0 })
+      expect(engine.applyBatch).toHaveBeenCalledTimes(2)
+      expect(engine.applyBatch).toHaveBeenLastCalledWith([1], 'unfavourite', 0)
+      expect(lib.selected.id).toBe(99)
+    } finally {
+      for (const notice of notices.shown) notice.closed?.()
+      notices.stop()
+      undoOutcomes.value = null
+    }
+  })
+
+  it('does not let a coalesced older click run after a newer batch edit', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+    await lib.ensureDays([day])
+    const firstWrite = deferred<undefined>()
+    let persisted = false
+    vi.mocked(engine.setFavourite).mockImplementation(async (_id, value) => {
+      if (vi.mocked(engine.setFavourite).mock.calls.length === 1) await firstWrite.promise
+      persisted = value
+    })
+    const selected = { day, id: 1 }
+    const first = lib.toggleFavourite(selected)
+    const second = lib.toggleFavourite(selected)
+    const batch = useFavouriteWrites().write([1], () => engine.setFavourite(1, true))
+    firstWrite.resolve(undefined)
+    await Promise.all([first, second, batch])
+    expect(persisted).toBe(true)
+    expect(engine.setFavourite).not.toHaveBeenCalledWith(1, false)
+  })
+
+  it('keeps the newest favourite visible when an older Undo day read finishes after its save', async () => {
+    const lib = shownLibrary()
+    await lib.setScope(all)
+    vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+    await lib.ensureDays([day])
+    const staleRead = deferred<DayItems[]>()
+    await lib.reconcileChanges()
+    vi.mocked(engine.days).mockReturnValueOnce(staleRead.promise)
+    const reading = lib.ensureDays([day])
+    const selected = { day, id: 1 }
+    await lib.toggleFavourite(selected)
+    staleRead.resolve(result(1))
+    await reading
+    expect(lib.itemAt(selected)?.f).toBe(true)
+    vi.mocked(engine.days).mockResolvedValueOnce([{ day, items: [{ id: 1, w: 100, h: 100, t: 1, f: true }] }])
+    await lib.ensureDays([day])
+    expect(lib.itemAt(selected)?.f).toBe(true)
+  })
+
   it('restores the persisted favourite when two queued toggles both fail', async () => {
+    vi.mocked(engine.searchHits).mockResolvedValue(hits(1))
     const lib = shownLibrary()
     await lib.setScope(all)
     vi.mocked(engine.days).mockResolvedValueOnce(result(1))
@@ -994,4 +1088,59 @@ describe('the folders', () => {
     changed({ assets: false, thumbs: false, tags: false, people: false, sources: true })
     await vi.waitFor(() => expect(lib.sources[0]?.availability).toBe(SourceAvailability.SourceUnavailable))
   })
+})
+
+it('reconciles metadata only after the current grid and selection settle, and releases disposed inspectors', async () => {
+  const lib = shownLibrary()
+  await lib.setScope(all)
+  vi.mocked(engine.days).mockResolvedValueOnce(result(1))
+  await lib.ensureDays([day])
+  lib.selected = { day, id: 1 }
+  const reading = deferred<DayBucket[]>()
+  vi.mocked(engine.timeline).mockReturnValueOnce(reading.promise)
+  const inspector = vi.fn(() => Promise.resolve(lib.selected?.id))
+  const stop = lib.onReconcile(inspector)
+  const pending = lib.reconcileChanges()
+  await nextTick()
+  expect(inspector).not.toHaveBeenCalled()
+  reading.resolve([])
+  await pending
+  expect(await inspector.mock.results[0]?.value).toBeUndefined()
+  expect(lib.selected).toBeNull()
+  stop()
+  await lib.reconcileChanges()
+  expect(inspector).toHaveBeenCalledOnce()
+})
+
+it('retains a current inspector refresh failure independently of the grid and counts', async () => {
+  const lib = shownLibrary()
+  await lib.setScope(all)
+  const failure = new Error('Current metadata unavailable')
+  const inspector = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined)
+  lib.onReconcile(inspector)
+  await expect(lib.reconcileChanges()).rejects.toBe(failure)
+  await expect(lib.reconcileChanges()).resolves.toBeUndefined()
+  expect(inspector).toHaveBeenCalledTimes(2)
+  expect(engine.counts).toHaveBeenCalledTimes(2)
+})
+
+it('settles a selected item leaving a retained day before an inspector reads it', async () => {
+  const lib = shownLibrary()
+  vi.mocked(engine.timeline).mockResolvedValue([{ day, count: 2 }])
+  await lib.setScope(all)
+  vi.mocked(engine.days).mockResolvedValueOnce([{ day, items: hits(1, 2) }])
+  await lib.ensureDays([day])
+  lib.selected = { day, id: 1 }
+  vi.mocked(engine.timeline).mockResolvedValueOnce([{ day, count: 1 }])
+  const rows = deferred<DayItems[]>()
+  vi.mocked(engine.days).mockReturnValueOnce(rows.promise)
+  const read = vi.fn(() => Promise.resolve(lib.selected?.id))
+  lib.onReconcile(read)
+  const pending = lib.reconcileChanges()
+  await nextTick()
+  expect(read).not.toHaveBeenCalled()
+  rows.resolve([{ day, items: hits(2) }])
+  await pending
+  expect(lib.selected).toBeNull()
+  expect(await read.mock.results[0]?.value).toBeUndefined()
 })

@@ -8,6 +8,7 @@ import { defineConfigWithVueTs, vueTsConfigs } from '@vue/eslint-config-typescri
 import prettier from 'eslint-config-prettier/flat'
 import pluginVue from 'eslint-plugin-vue'
 import globals from 'globals'
+import { navigationRule } from './tools/navigation-rule.mjs'
 
 // The feature folders: each owns its views and store (CONVENTIONS.md).
 const features = [
@@ -28,12 +29,21 @@ const features = [
 ]
 
 export default defineConfigWithVueTs(
-  { name: 'lumen/ignores', ignores: ['dist/', 'bindings/'] },
+  // Compiler fixtures deliberately contain invalid application code. Their own
+  // project checks positive examples and requires every marked rejection.
+  { name: 'lumen/ignores', ignores: ['dist/', 'bindings/', 'tools/navigation-fixtures/', 'tools/command-fixtures/'] },
 
   js.configs.recommended,
   pluginVue.configs['flat/recommended'],
   vueTsConfigs.strictTypeChecked,
   vueTsConfigs.stylisticTypeChecked,
+
+  {
+    name: 'lumen/navigation-contract',
+    files: ['src/**/*.{ts,vue}'],
+    plugins: { navigation: { rules: { contract: navigationRule } } },
+    rules: { 'navigation/contract': 'error' },
+  },
 
   {
     name: 'lumen/rules',
@@ -159,7 +169,7 @@ export default defineConfigWithVueTs(
   // Tool configs run in Node and sit outside the app's tsconfig.
   {
     name: 'lumen/configs',
-    files: ['*.config.{js,ts}'],
+    files: ['*.config.{js,ts}', 'tools/**/*.mjs'],
     extends: [vueTsConfigs.disableTypeChecked],
     languageOptions: { globals: globals.node, parserOptions: { projectService: false } },
   },

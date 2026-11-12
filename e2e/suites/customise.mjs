@@ -508,6 +508,7 @@ await guard('reset', async () => {
   await page.screenshot({ path: join(s.out, 'reset.png') })
 })
 
+await s.settleErrors()
 check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors().join(' || '))
 check('no request left the PC', external.length === 0, external.join(' '))
 await close(app)

@@ -7,7 +7,7 @@ import USlider from '@nuxt/ui/components/Slider.vue'
 import ConfirmDialog from '../shared/ConfirmDialog.vue'
 import { confirm, question } from '../shared/confirm'
 import { mountInApp } from '../shared/testing'
-import { commandById, runCommand } from '../shared/commands'
+import { commandById, runCommand, setShortcutOverrides } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { DateSource, engine, Kind, Playback, TrackKind, videosAvailable } from '../bridge'
 import type * as Bridge from '../bridge'
@@ -22,6 +22,7 @@ vi.mock('../bridge', async (importOriginal) => ({
   engine: {
     asset: vi.fn(),
     place: vi.fn(),
+    setAdjustment: vi.fn<typeof Bridge.engine.setAdjustment>(),
     albums: vi.fn().mockResolvedValue([]),
     inspect: vi.fn().mockResolvedValue({ tracks: [] }),
     render: vi.fn().mockRejectedValue(new Error('Not available')),
@@ -80,6 +81,7 @@ beforeEach(() => {
   vi.mocked(engine.asset).mockResolvedValue(detail)
 })
 afterEach(() => {
+  setShortcutOverrides({})
   question.value?.answer(false)
   wrapper?.unmount()
   wrapper = undefined
@@ -996,4 +998,30 @@ it('answers the existing playback keys when the viewer itself has focus', async 
   expect(playback.play).toHaveBeenCalledOnce()
   await view().get('[aria-modal="true"]').trigger('keydown', { key: 'm' })
   expect(video.element.muted).toBe(true)
+})
+
+it('keeps adjustment shortcuts owned while disabling peer actions during a save', async () => {
+  vi.mocked(engine.asset).mockResolvedValue({ ...detail, id: 5, kind: Kind.KindPhoto, video: null, ext: '.jpg' })
+  const waiting = deferred<NonNullable<AssetDetail['adjustment']>>()
+  vi.mocked(engine.setAdjustment).mockReturnValueOnce(waiting.promise)
+  wrapper = mountViewer(fakeSource({ favourite: vi.fn() }))
+  await flushPromises()
+  setShortcutOverrides({ 'viewer.rotate': 'Ctrl+R' })
+  expect(commandById('viewer.rotate')?.available()).toBe(true)
+  const active = runCommand('viewer.rotate')
+  try {
+    expect(engine.setAdjustment).toHaveBeenCalledTimes(1)
+    expect(commandById('viewer.rotate')?.available()).toBe(true)
+    expect(commandById('viewer.flip')?.available()).toBe(true)
+    expect(commandById('viewer.flip')?.enabled()).toBe(false)
+    expect(commandById('viewer.flip')?.reason()).toBe(t('commands.running'))
+    const duplicate = new KeyboardEvent('keydown', { key: 'r', ctrlKey: true, cancelable: true })
+    window.dispatchEvent(duplicate)
+    expect(duplicate.defaultPrevented).toBe(true)
+    expect(engine.setAdjustment).toHaveBeenCalledTimes(1)
+  } finally {
+    waiting.resolve({ rotation: 1, flip: false })
+    await active
+  }
+  expect(commandById('viewer.flip')?.enabled()).toBe(true)
 })

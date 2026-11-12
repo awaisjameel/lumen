@@ -114,6 +114,7 @@ try {
   must('the engine and the screen agree the run is undone', runs[0]?.state === 'undone', runs[0]?.state)
   report.runs = runs
   await page.screenshot({ path: join(s.out, 'undone.png') })
+  await s.settleErrors()
   s.check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors().join(' || '))
 } catch (e) {
   s.check('organise ran to the end', false, String(e))

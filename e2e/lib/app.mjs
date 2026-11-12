@@ -4,7 +4,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
-import puppeteer from 'puppeteer-core'
+import puppeteer, { ElementHandle } from 'puppeteer-core'
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -61,7 +61,40 @@ export async function launch({ exe, dataDir, port, env = {}, args = [] }) {
     kill(proc)
     throw new Error('no app page')
   }
+  // A control can be drawn again between being found and being clicked (a
+  // notice updating its actions). A locator finds it again; a handle fails.
+  page.click = (selector, options) => page.locator(selector).click(options)
   return { proc, browser, page, started }
+}
+
+/**
+ * Puppeteer clicks where an element is drawn, whether or not that point
+ * takes input or the element is still moving. While a menu or dialog
+ * closes, the page beneath it takes none, and a dock re-centres as its text
+ * changes: a click made at once is lost or lands beside its control without
+ * an error, and how long that lasts depends on the PC. Every element click
+ * therefore first waits, as a person would, until the element rests and its
+ * centre is its own. One that stays covered (a styled checkbox under its
+ * label) is clicked after the wait, as before.
+ */
+const elementClick = ElementHandle.prototype.click
+ElementHandle.prototype.click = async function (options) {
+  await this.evaluate(async (element) => {
+    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve))
+    const place = () => {
+      const r = element.getBoundingClientRect()
+      return [r.x, r.y, r.width, r.height]
+    }
+    const end = performance.now() + 1500
+    for (let before = place(); performance.now() < end; ) {
+      await frame()
+      const now = place()
+      const hit = document.elementFromPoint(now[0] + now[2] / 2, now[1] + now[3] / 2)
+      if (now.every((value, i) => value === before[i]) && hit && (element.contains(hit) || hit.contains(element)) && hit !== document.documentElement) return
+      before = now
+    }
+  }).catch(() => undefined) // detached or navigating: the click reports it
+  return elementClick.call(this, options)
 }
 
 // Only this run's own process tree: never another Lumen on the PC.
@@ -159,9 +192,20 @@ export async function resize(page, width, height) {
   const session = await page.createCDPSession()
   const { windowId } = await session.send('Browser.getWindowForTarget')
   await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
-  await session.send('Browser.setWindowBounds', { windowId, bounds: { width, height } })
+  // A window that is still opening can drop the request without an error and
+  // go on reporting the bounds it was asked for, so the suite would run at
+  // the wrong width. Ask until the page itself has the size.
+  let size = []
+  for (let i = 0; i < 30; i++) {
+    await session.send('Browser.setWindowBounds', { windowId, bounds: { width, height } })
+    await sleep(100)
+    size = await page.evaluate(() => [window.outerWidth, window.outerHeight])
+    if (Math.abs(size[0] - width) <= 2 && Math.abs(size[1] - height) <= 2) break
+  }
   await session.detach()
-  await sleep(400)
+  if (Math.abs(size[0] - width) > 2 || Math.abs(size[1] - height) > 2)
+    console.warn(`resize: asked for ${width}x${height}, the window stayed ${size.join('x')}`)
+  await sleep(300)
 }
 
 /** Moves the app's router to path, as a link would, without reloading the page. */

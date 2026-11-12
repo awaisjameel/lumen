@@ -7,9 +7,9 @@ resolution and vulnerability checks use the network on the development PC.
 
 ## Setup
 
-Needs Go 1.27.3, a supported Node release (the exact ranges are below), npm 12.2.1+, a C compiler for cgo, Git Bash, 7-Zip on `PATH`, and Python 3.15.1 (`ruff.toml` targets 3.15). Toolchain used:
+Needs Go 1.27.4, a supported Node release (the exact ranges are below), npm 12.2.1+, a C compiler for cgo, Git Bash, 7-Zip on `PATH`, and Python 3.15.1 (`ruff.toml` targets 3.15). Toolchain used:
 
-- Go 1.27.3 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) 20261020 (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
+- Go 1.27.4 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) 20261020 (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
 - User environment: `CGO_ENABLED=1`, `CC=clang`, `CXX=clang++`
 - Wails CLI pinned to the beta the project uses: `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30`
 
@@ -149,6 +149,25 @@ are in [e2e/README.md](../e2e/README.md). Do not run `--clean` during another
 capture or test. [Documentation screenshots](screenshots/README.md) have their
 own reproducible capture command and media attribution.
 
+## Changing application navigation
+
+Start with [the contract and migration inventory](navigation-contract.md).
+Declare a destination in `shared/navigation/contract.ts`, bind its view in root
+`router.ts`, add its independent expected URL, and construct internal targets
+with `destination(...)`. A settings section also requires exhaustive UI
+metadata. Keep shell presentation in `app/nav.ts`; raw incoming URLs belong at
+the provider boundary. Reuse the memory-navigation factory in component tests.
+
+`npm run check` includes actual negative TypeScript/Vue compilation and isolated
+mutations proving a renamed route, missing view binding and `/blocked` link
+fail required checks. The fixtures use a separate compiler project; rejection
+markers identify expected failing lines without casts or suppression comments.
+Vite emits the route-shape manifest consumed by Go's SPA handler, so rebuild the
+frontend before Go checks after changing navigation. The native `navigation`
+suite covers production controls and input boundaries; CI retains its reports,
+the collection-recovery suite and all existing child regressions, then builds
+the installer. This packaging check creates no release or distribution.
+
 ## Troubleshooting the build
 
 | Symptom | Check |
@@ -174,7 +193,7 @@ own reproducible capture command and media attribution.
 
 `scripts/lint.sh` runs the static checks, the frontend tests, the documentation's links and the large-library latency gate. It runs every step and reports all failures at the end; `scripts/lint.sh --fix` first applies every automatic fix.
 
-CI ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request, on GitHub's Windows runners, with the toolchain and `deps/` set up as [Setup](#setup) describes ([.github/actions/setup](../.github/actions/setup/action.yml)). It checks the pull request's commit messages, then runs three kinds of job side by side: a production build, which must leave the bindings and `go.mod` as committed, followed by `scripts/lint.sh --no-bench`; the Go race tests, split three ways (the store's randomised oracle tests, the rest of the store, and every other package, the Go tools in `scripts/` included); and the latency gate. The race tests run one package at a time (`-p 1`) with a 30-minute per-package timeout, so native models and filesystem tests do not compete on the smaller runners. The toolchain, `deps/` and each job's Go build cache are cached as soon as they are ready, so a failing run does not send the next one back to a cold build. A merge to `main` runs CI again only when it changes what those caches hold (Go modules, the frontend's lockfile, the dependency scripts or the CI set-up), because only caches saved on `main` are shared with later pull requests; a release tag always runs it in full. The latency gate is only reported in the job summary: the runners are slower than the machine the budgets were set on, so `scripts/lint.sh` on a developer's machine stays the binding gate. Each tool is pinned and configured in the repository:
+CI ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request, on GitHub's Windows runners, with the toolchain and `deps/` set up as [Setup](#setup) describes ([.github/actions/setup](../.github/actions/setup/action.yml)). It checks the pull request's commit messages, then runs three kinds of job side by side: a production build, which must leave the bindings and `go.mod` as committed, followed by `scripts/lint.sh --no-bench`; the Go race tests, split three ways (the store's randomised oracle tests, the rest of the store, and every other package, the Go tools in `scripts/` included); and the latency gate. The build job also runs native `search-history`, 500-item `favourite-undo` and partial-inverse `undo-recovery` scratch-library suites against its production executable. On pull requests it builds the base frontend for the favourite comparison; both measurements use the candidate engine on copied synthetic libraries. The race tests run one package at a time (`-p 1`) with a 30-minute per-package timeout, so native models and filesystem tests do not compete on the smaller runners. The toolchain, `deps/` and each job's Go build cache are cached as soon as they are ready, so a failing run does not send the next one back to a cold build. A merge to `main` runs CI again only when it changes what those caches hold (Go modules, the frontend's lockfile, the dependency scripts or the CI set-up), because only caches saved on `main` are shared with later pull requests; a release tag always runs it in full. The latency gate is only reported in the job summary: the runners are slower than the machine the budgets were set on, so `scripts/lint.sh` on a developer's machine stays the binding gate. Each tool is pinned and configured in the repository:
 
 | Code | Formatting | Linting | Config |
 | --- | --- | --- | --- |

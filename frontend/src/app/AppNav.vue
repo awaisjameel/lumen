@@ -7,11 +7,12 @@
 import IconButton from '../shared/IconButton.vue'
 import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { computed } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import RouterLink from '../shared/navigation/NavLink.vue'
+import { useLocation } from '../shared/navigation/router'
 import { icons } from '../design/icons'
 import IndexStatus from '../library/IndexStatus.vue'
 import { useLibrary } from '../library/store'
-import { availableCommands, capsOf, runCommand } from '../shared/commands'
+import { availableCommands, capsOf, commandState, runCommand } from '../shared/commands'
 import { formatNumber, t } from '../shared/i18n'
 import BrandMark from '../shared/BrandMark.vue'
 import Icon from '../shared/Icon.vue'
@@ -27,7 +28,7 @@ const props = defineProps<{
 const emit = defineEmits<{ toggle: [] }>()
 
 const lib = useLibrary()
-const route = useRoute()
+const route = useLocation()
 
 const PALETTE = 'app.commandPalette'
 const canSearch = computed(() => availableCommands.value.some((c) => c.id === PALETTE))
@@ -44,13 +45,13 @@ const settings = navEntries.find((e) => e.section === 'app')
 function badge(e: NavEntry): string | undefined {
   if (!lib.countsLoaded) return undefined
   const n =
-    e.name === 'library'
+    e.to.name === 'library'
       ? lib.counts.photos + lib.counts.videos
-      : e.name === 'favourites'
+      : e.to.name === 'favourites'
         ? lib.counts.favourites
-        : e.name === 'people'
+        : e.to.name === 'people'
           ? lib.counts.people
-          : e.name === 'trash'
+          : e.to.name === 'trash'
             ? lib.counts.trash
             : undefined
   if (n !== undefined) return formatNumber(n)
@@ -85,7 +86,13 @@ const toggleLabel = computed(() => t(props.collapsed ? 'shell.expandSidebar' : '
       :content="{ side: 'right' }"
       :disabled="!collapsed"
     >
-      <button type="button" class="search" :aria-label="t('shell.search')" @click="runCommand(PALETTE)">
+      <button
+        :disabled="!commandState(PALETTE).enabled"
+        type="button"
+        class="search"
+        :aria-label="t('shell.search')"
+        @click="runCommand(PALETTE)"
+      >
         <Icon name="search" :size="16" />
         <span class="search-text">{{ t('shell.search') }}</span>
         <kbd v-if="searchKeys.length" class="keys lumen-kbd" aria-hidden="true">{{ searchKeys.join(' ') }}</kbd>
@@ -105,16 +112,16 @@ const toggleLabel = computed(() => t(props.collapsed ? 'shell.expandSidebar' : '
         <p v-if="g.label && !collapsed" class="heading" aria-hidden="true">{{ t(g.label) }}</p>
         <UTooltip
           v-for="e in g.entries"
-          :key="e.name"
+          :key="e.to.name"
           :text="t(e.label)"
           :content="{ side: 'right' }"
           :disabled="!collapsed"
         >
           <RouterLink
-            :to="e.path"
+            :to="e.to"
             class="item"
-            :class="{ active: isActive(e, route.path) }"
-            :aria-current="isActive(e, route.path) ? 'page' : undefined"
+            :class="{ active: isActive(e, route) }"
+            :aria-current="isActive(e, route) ? 'page' : undefined"
             :aria-label="collapsed ? t(e.label) : undefined"
           >
             <Icon :name="e.icon" :size="18" />
@@ -129,10 +136,10 @@ const toggleLabel = computed(() => t(props.collapsed ? 'shell.expandSidebar' : '
       <IndexStatus :compact="collapsed" />
       <UTooltip v-if="settings" :text="t(settings.label)" :content="{ side: 'right' }" :disabled="!collapsed">
         <RouterLink
-          :to="settings.path"
+          :to="settings.to"
           class="item"
-          :class="{ active: isActive(settings, route.path) }"
-          :aria-current="isActive(settings, route.path) ? 'page' : undefined"
+          :class="{ active: isActive(settings, route) }"
+          :aria-current="isActive(settings, route) ? 'page' : undefined"
           :aria-label="collapsed ? t(settings.label) : undefined"
         >
           <Icon :name="settings.icon" :size="18" />

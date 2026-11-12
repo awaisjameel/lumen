@@ -1,15 +1,18 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { itemCommand, runCommand, useCommands } from '../shared/commands'
+import { destination } from '../shared/navigation/contract'
 // Organise files on disk: move photos into folders by a scheme the user
 // writes, after a dry-run preview, with live progress and a full undo. The
 // engine does all the moving (internal/fileops); this page only asks.
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
 import { storeToRefs } from 'pinia'
-import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   ORGANISE_DEFAULT_TEMPLATE,
   ORGANISE_TOKENS,
@@ -25,8 +28,6 @@ import { FileTools } from '../media/lazy'
 import Chip from '../shared/Chip.vue'
 import ViewBar from '../shared/ViewBar.vue'
 import Segmented from '../shared/Segmented.vue'
-import { registerCommands, runCommand, useCommands } from '../shared/commands'
-import type { Command } from '../shared/commands'
 import { confirm } from '../shared/confirm'
 import FeatureState from '../shared/FeatureState.vue'
 import { reasonText } from '../shared/fileReasons'
@@ -411,18 +412,13 @@ function organiseMore() {
 useCommands([
   {
     id: 'organise.preview',
-    group: 'library',
-    title: () => t('organise.preview'),
-    icon: 'eye',
     enabled: () => !planning.value && !busy.value && valid.value,
     reason: () => (!valid.value ? t('organise.fixFirst') : busy.value ? t('organise.busyReason') : undefined),
     run: () => organise.preview(),
   },
   {
     id: 'organise.move',
-    group: 'library',
     title: () => t('organise.move', { n: toMove.value }),
-    icon: 'organise',
     available: () => plan.value !== null,
     enabled: () => toMove.value > 0 && !busy.value,
     reason: () => (busy.value ? t('organise.busyReason') : !toMove.value ? t('organise.noneToMove') : undefined),
@@ -432,38 +428,26 @@ useCommands([
 
 // Run actions follow the live history, so the palette and its buttons use
 // the same run and availability checks even after a progress event.
-let removeRunCommands: () => void = () => undefined
-watch(
-  runs,
-  (history) => {
-    removeRunCommands()
-    const commands: Command[] = history.flatMap((run) => [
-      {
-        id: `organise.resume.${run.id}`,
-        group: 'library',
-        title: () => `${t('organise.resume')} · ${when(run.createdAt)}`,
-        icon: 'play',
-        available: () => run.state === OrganiseRunState.OrganiseFailed,
-        enabled: () => !busy.value,
-        reason: () => (busy.value ? t('organise.busyReason') : undefined),
-        run: () => organise.resume(run),
-      },
-      {
-        id: `organise.undo.${run.id}`,
-        group: 'library',
-        title: () => `${t('organise.undo')} · ${when(run.createdAt)}`,
-        icon: 'undo',
-        available: () => canUndo(run),
-        enabled: () => !busy.value,
-        reason: () => (busy.value ? t('organise.busyReason') : undefined),
-        run: () => undoRun(run),
-      },
-    ])
-    removeRunCommands = registerCommands(commands)
-  },
-  { immediate: true },
+useCommands(() =>
+  runs.value.flatMap((run) => [
+    {
+      id: itemCommand('organise.resume', run.id),
+      title: () => `${t('organise.resume')} · ${when(run.createdAt)}`,
+      available: () => run.state === OrganiseRunState.OrganiseFailed,
+      enabled: () => !busy.value,
+      reason: () => (busy.value ? t('organise.busyReason') : undefined),
+      run: () => organise.resume(run),
+    },
+    {
+      id: itemCommand('organise.undo', run.id),
+      title: () => `${t('organise.undo')} · ${when(run.createdAt)}`,
+      available: () => canUndo(run),
+      enabled: () => !busy.value,
+      reason: () => (busy.value ? t('organise.busyReason') : undefined),
+      run: () => undoRun(run),
+    },
+  ]),
 )
-onScopeDispose(() => removeRunCommands())
 </script>
 
 <template>
@@ -472,7 +456,7 @@ onScopeDispose(() => removeRunCommands())
       ><PageHeader
         :title="t(tool === 'files' ? 'organise.filesTitle' : 'organise.title')"
         :subtitle="caption"
-        :back="{ to: '/settings', label: t('organise.back') }"
+        :back="{ to: destination({ name: 'settings' }), label: t('organise.back') }"
     /></template>
     <template #toolbar
       ><ViewBar :label="t('organise.tools')"
@@ -501,7 +485,9 @@ onScopeDispose(() => removeRunCommands())
         icon="files"
         :title="t('organise.filesEmptyTitle')"
         :text="t('organise.filesEmptyText')"
-        ><UButton to="/" color="primary" variant="solid">{{ t('organise.selectFiles') }}</UButton></FeatureState
+        ><UButton :to="destination({ name: 'library' })" color="primary" variant="solid">{{
+          t('organise.selectFiles')
+        }}</UButton></FeatureState
       >
       <section v-else class="card">
         <h2>{{ t('organise.filesHeading') }}</h2>
@@ -511,7 +497,7 @@ onScopeDispose(() => removeRunCommands())
           <UButton color="primary" variant="solid" :disabled="busy" @click="filesOpen = true">{{
             t('organise.openFiles')
           }}</UButton
-          ><UButton to="/" variant="ghost">{{ t('organise.changeSelection') }}</UButton>
+          ><UButton :to="destination({ name: 'library' })" variant="ghost">{{ t('organise.changeSelection') }}</UButton>
         </div>
       </section>
     </section>
@@ -566,7 +552,9 @@ onScopeDispose(() => removeRunCommands())
         icon="organise"
         :title="t('organise.emptyTitle')"
         :text="t('organise.emptyText')"
-        ><UButton to="/settings" color="primary" variant="solid">{{ t('organise.addFolder') }}</UButton></FeatureState
+        ><UButton :to="destination({ name: 'settings' })" color="primary" variant="solid">{{
+          t('organise.addFolder')
+        }}</UButton></FeatureState
       >
 
       <section v-if="editing" data-organise-editor class="scheme">
@@ -649,14 +637,14 @@ onScopeDispose(() => removeRunCommands())
           <span class="hint">{{
             !valid ? t('organise.fixFirst') : stale ? t('organise.stale') : t('organise.previewHint')
           }}</span>
-          <UButton
+          <CommandButton
             color="primary"
             variant="solid"
             :icon="icons.eye"
             :disabled="busy || !valid"
             :title="!valid ? t('organise.fixFirst') : busy ? t('organise.busyReason') : t('organise.previewHint')"
-            @click="runCommand('organise.preview')"
-            >{{ t('organise.preview') }}</UButton
+            command="organise.preview"
+            >{{ t('organise.preview') }}</CommandButton
           >
         </div>
       </section>
@@ -789,15 +777,15 @@ onScopeDispose(() => removeRunCommands())
               {{ plan.renamed ? t('organise.renameSummary', { n: toMove }) : t('organise.noRenames') }}
             </p>
           </div>
-          <UButton
+          <CommandButton
             color="primary"
             variant="solid"
             size="lg"
             :trailing-icon="icons['arrow-right']"
             :disabled="!toMove || busy"
             :title="busy ? t('organise.busyReason') : !toMove ? t('organise.noneToMove') : undefined"
-            @click="runCommand('organise.move')"
-            >{{ t('organise.move', { n: toMove }) }}</UButton
+            command="organise.move"
+            >{{ t('organise.move', { n: toMove }) }}</CommandButton
           >
         </div>
       </section>
@@ -814,7 +802,9 @@ onScopeDispose(() => removeRunCommands())
           }}</span></WorkProgress
         >
         <div class="actions">
-          <UButton to="/" color="neutral" variant="outline">{{ t('organise.backToLibrary') }}</UButton>
+          <UButton :to="destination({ name: 'library' })" color="neutral" variant="outline">{{
+            t('organise.backToLibrary')
+          }}</UButton>
         </div>
       </section>
 
@@ -831,14 +821,14 @@ onScopeDispose(() => removeRunCommands())
           <p>{{ ending === 'undone' ? t('organise.undone', { n: progress?.done ?? 0 }) : doneText }}</p>
         </div>
         <div class="actions">
-          <UButton
+          <CommandButton
             v-if="ending === 'done' && endedRun && canUndo(endedRun)"
             color="primary"
             variant="solid"
             :icon="icons.undo"
             :disabled="busy"
-            @click="runCommand(`organise.undo.${endedRun.id}`)"
-            >{{ t('organise.undoThis') }}</UButton
+            :command="itemCommand('organise.undo', endedRun.id)"
+            >{{ t('organise.undoThis') }}</CommandButton
           >
           <UButton
             :color="ending === 'done' ? 'neutral' : 'primary'"
@@ -846,7 +836,7 @@ onScopeDispose(() => removeRunCommands())
             @click="organiseMore"
             >{{ t('organise.more') }}</UButton
           >
-          <UButton to="/" variant="ghost">{{ t('organise.backToLibrary') }}</UButton>
+          <UButton :to="destination({ name: 'library' })" variant="ghost">{{ t('organise.backToLibrary') }}</UButton>
         </div>
       </section>
       <UAlert
@@ -871,7 +861,7 @@ onScopeDispose(() => removeRunCommands())
                   color: 'primary',
                   variant: 'solid',
                   disabled: busy,
-                  onClick: () => runCommand(`organise.undo.${endedRun?.id}`),
+                  onClick: () => endedRun && runCommand(itemCommand('organise.undo', endedRun.id)),
                 },
                 { label: t('organise.more'), color: 'neutral', variant: 'outline', onClick: organiseMore },
               ]
@@ -888,22 +878,22 @@ onScopeDispose(() => removeRunCommands())
           :description="t('organise.stoppedText', { moved: endedRun?.moved ?? 0, total: endedRun?.total ?? 0 })"
         />
         <div v-if="endedRun" class="actions">
-          <UButton
+          <CommandButton
             color="primary"
             variant="solid"
             :icon="icons.play"
             :disabled="busy"
-            @click="runCommand(`organise.resume.${endedRun.id}`)"
-            >{{ t('organise.resume') }}</UButton
+            :command="itemCommand('organise.resume', endedRun.id)"
+            >{{ t('organise.resume') }}</CommandButton
           >
-          <UButton
+          <CommandButton
             color="neutral"
             variant="outline"
             :icon="icons.undo"
             :disabled="busy || !canUndo(endedRun)"
             :title="!endedRun.moved ? t('organise.noneMoved') : undefined"
-            @click="runCommand(`organise.undo.${endedRun.id}`)"
-            >{{ t('organise.undoMoved') }}</UButton
+            :command="itemCommand('organise.undo', endedRun.id)"
+            >{{ t('organise.undoMoved') }}</CommandButton
           >
           <UButton variant="ghost" @click="organiseMore">{{ t('organise.more') }}</UButton>
         </div>
@@ -936,7 +926,7 @@ onScopeDispose(() => removeRunCommands())
             </div>
             <UBadge :color="stateColor(run.state)" variant="subtle">{{ t(stateText(run.state)) }}</UBadge>
             <div class="run-actions">
-              <UButton
+              <CommandButton
                 v-if="run.state === OrganiseRunState.OrganiseFailed"
                 color="neutral"
                 variant="outline"
@@ -944,18 +934,18 @@ onScopeDispose(() => removeRunCommands())
                 :icon="icons.play"
                 :disabled="busy"
                 :title="busy ? t('organise.busyReason') : undefined"
-                @click="runCommand(`organise.resume.${run.id}`)"
-                >{{ t('organise.resume') }}</UButton
+                :command="itemCommand('organise.resume', run.id)"
+                >{{ t('organise.resume') }}</CommandButton
               >
-              <UButton
+              <CommandButton
                 v-if="canUndo(run)"
                 variant="ghost"
                 size="sm"
                 :icon="icons.undo"
                 :disabled="busy"
                 :title="busy ? t('organise.busyReason') : undefined"
-                @click="runCommand(`organise.undo.${run.id}`)"
-                >{{ t('organise.undoRun') }}</UButton
+                :command="itemCommand('organise.undo', run.id)"
+                >{{ t('organise.undoRun') }}</CommandButton
               >
             </div>
           </li>

@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 import { computed } from 'vue'
 import USelect from '@nuxt/ui/components/Select.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import { COMPRESSION_SAVINGS_MAX } from '../bridge'
 import type { CompressionOptions } from '../bridge'
 import { compressionModes, compressionEfforts } from '../shared/compression'
@@ -96,7 +97,9 @@ function number(event: Event, key: 'minSavings' | 'threads') {
       v-if="shows('settings.compressionReview', 'settings.compressionReviewHint')"
       :label="t('settings.compressionReview')"
       :description="t('settings.compressionReviewHint')"
-      ><UButton to="/compression" variant="outline">{{ t('settings.compressionOpen') }}</UButton></PrefRow
+      ><UButton :to="destination({ name: 'compression' })" variant="outline">{{
+        t('settings.compressionOpen')
+      }}</UButton></PrefRow
     >
   </div>
 </template>

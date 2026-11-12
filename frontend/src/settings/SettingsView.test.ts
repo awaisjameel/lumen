@@ -4,7 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import USlider from '@nuxt/ui/components/Slider.vue'
 import { nextTick } from 'vue'
 import { mountInApp, recordNotifications } from '../shared/testing'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { usePreferences } from '../shared/preferences'
 import {
   Accent,
@@ -97,10 +97,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 function mountSettings() {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/:pathMatch(.*)*', component: SettingsView }],
-  })
+  const router = createTestNavigation()
   return mountInApp(SettingsView, { plugins: [router] })
 }
 async function chooseAppearance(wrapper: ReturnType<typeof mountInApp>, group: string, index: number) {

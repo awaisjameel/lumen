@@ -1,7 +1,9 @@
+import { itemCommand, commands, runCommand } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import type { RecordedNotifications } from '../shared/testing'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { destination } from '../shared/navigation/contract'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
@@ -9,7 +11,6 @@ import { BlockKind, engine, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Event } from '../bridge'
 import { blockRequest, showBlocksChanged } from '../shared/block'
-import { commands, runCommand } from '../shared/commands'
 import EventsView from './EventsView.vue'
 
 vi.mock('../bridge', async (importOriginal) => ({
@@ -49,8 +50,8 @@ afterEach(() => {
   notices.stop()
 })
 
-async function mounted() {
-  wrapper = mountInApp(EventsView, { plugins: [testRouter(), createPinia()] })
+async function mounted(navigation = testRouter()) {
+  wrapper = mountInApp(EventsView, { plugins: [navigation, createPinia()] })
   await flushPromises()
   return wrapper
 }
@@ -169,13 +170,19 @@ it('offers to block an event through the shared block flow', async () => {
 })
 
 it('drops a blocked event from the list and shows it again when the block is undone', async () => {
-  const w = await mounted()
+  const navigation = testRouter()
+  const w = await mounted(navigation)
   expect(w.findAll('[data-collection]')).toHaveLength(1)
   vi.mocked(engine.events).mockResolvedValue([])
   await showBlocksChanged() // what the block dialog does once the block is saved
   await flushPromises()
   expect(w.findAll('[data-collection]')).toHaveLength(0)
   expect(w.text()).toContain(t('events.cleared'))
+  expect(w.get('a[href="/settings/blocked"]').text()).toBe(t('events.manageBlocked'))
+  await w.get('a[href="/settings/blocked"]').trigger('click')
+  await flushPromises()
+  expect(navigation.location.value).toMatchObject({ kind: 'valid', target: { name: 'blocked' } })
+  expect(navigation.resolve(destination({ name: 'blocked' })).matched).toEqual(['blocked'])
   vi.mocked(engine.events).mockResolvedValue([trip])
   await showBlocksChanged() // and what Undo, or unblocking, does
   await flushPromises()
@@ -193,31 +200,19 @@ it('stops reloading for block changes once the view is gone', async () => {
 
 it('shares event actions with the command palette and removes commands for hidden events', async () => {
   const w = await mounted()
-  expect(commands.value.some((command) => command.id === 'event.7.pin')).toBe(true)
-  await runCommand('event.7.pin')
+  expect(commands.value.some((command) => command.key === 'event.7.pin')).toBe(true)
+  await runCommand(itemCommand('event.pin', 7))
   expect(engine.setEventPinned).toHaveBeenCalledWith(trip.id, true)
   vi.mocked(engine.events).mockResolvedValue([])
   await showBlocksChanged()
   await flushPromises()
-  expect(commands.value.some((command) => command.id.startsWith('event.7.'))).toBe(false)
+  expect(commands.value.some((command) => command.key.startsWith('event.7.'))).toBe(false)
   w.unmount()
-  expect(commands.value.some((command) => command.id.startsWith('events.'))).toBe(false)
+  expect(commands.value.some((command) => command.key.startsWith('events.'))).toBe(false)
 })
 
 function testRouter() {
-  return createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      { path: '/settings', component: { template: '<div />' } },
-      { path: '/blocked', component: { template: '<div />' } },
-      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
-        name,
-        path: `/${name}/:id?`,
-        component: { template: '<div />' },
-      })),
-    ],
-  })
+  return createTestNavigation()
 }
 
 it('groups pinned events first then unpinned events by camera-clock month', async () => {

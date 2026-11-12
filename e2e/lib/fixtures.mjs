@@ -56,8 +56,11 @@ export function fixtureCopy(name, to) {
 export async function baseLibrary() {
   const dir = join(WORK, 'libraries', `base-${PHOTOS}`)
   const ready = join(dir, 'e2e-ready.json')
-  if (existsSync(ready)) return dir
   const corpus = fixture('library')
+  // The library records where its photos are. One built before the checkout
+  // moved still has its thumbnails, so it looks whole until an original is
+  // asked for; it is only ready for the corpus it was indexed from.
+  if (existsSync(ready) && JSON.parse(readFileSync(ready, 'utf8')).corpus === corpus) return dir
   rmSync(dir, { recursive: true, force: true })
   console.log(`indexing ${PHOTOS} photos into the base library (once)`)
   const app = await launch({ exe: EXE, dataDir: dir, port: BASE_PORT })
@@ -85,6 +88,7 @@ export async function baseLibrary() {
     await lib(page, 'TrashAssets', [100, 101, 102])
     await search(page, 'CreateLabel', 'acceptance label')
     const state = {
+      corpus,
       photos: progress.total,
       albums: (await lib(page, 'Albums')).map((a) => `${a.name}:${a.count}`),
       trash: await lib(page, 'TrashCount'),
@@ -103,7 +107,11 @@ export async function baseLibrary() {
 
 /** A fresh copy of the base library for one suite: whatever it does stays its own. */
 export async function libraryCopy(to) {
-  const base = await baseLibrary()
+  return copyLibrary(await baseLibrary(), to)
+}
+
+/** Copies a closed scratch library without another run's WebView profile or logs. */
+export function copyLibrary(base, to) {
   rmSync(to, { recursive: true, force: true })
   mkdirSync(to, { recursive: true })
   // The WebView's profile, the log and crash reports belong to the run that made them.

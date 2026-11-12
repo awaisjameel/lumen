@@ -1,3 +1,4 @@
+import type { ShortcutCommandId } from './commandContract'
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import {
@@ -195,7 +196,7 @@ export const usePreferences = defineStore('preferences', () => {
   }
 
   /** Reassigns a command's shortcut ("" leaves it without one), or gives it back its own (undefined). */
-  function setShortcut(id: string, keys: string | undefined): Promise<boolean> {
+  function setShortcut(id: ShortcutCommandId, keys: string | undefined): Promise<boolean> {
     return change((now) => {
       const others = Object.entries(now.shortcuts).filter(([command]) => command !== id)
       return { shortcuts: Object.fromEntries(keys === undefined ? others : [...others, [id, keys]]) }
