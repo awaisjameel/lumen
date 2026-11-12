@@ -85,7 +85,9 @@ try {
   watch(app.page)
   await unthrottle(app.page)
   await lib(app.page, 'AddSources', [photos])
-  await waitIndexed(app.page, { atLeast: 3, timeout: 120_000, log: console.log })
+  // The AI stages too: a tag or face saved after the grid is selected changes
+  // the selection's revision, and the engine then rightly refuses the batch.
+  await waitIndexed(app.page, { ai: true, atLeast: 3, timeout: 120_000, log: console.log })
   await lib(app.page, 'SetPaused', true)
   await close(app)
   app = await launch({ exe: s.exe, dataDir, port: s.port })

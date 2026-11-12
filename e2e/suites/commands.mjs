@@ -213,6 +213,9 @@ try {
   await name.asLocator().fill('Command after')
   await button(page, 'Save changes')
   await until(async () => (await lib(page, 'Albums') ?? []).find(item => item.id === album)?.name === 'Command after', 'item edit did not commit')
+  // The editor closes only after its list read. Until then it is the open
+  // dialog: Ctrl+K is suspended and the query would be typed into its name.
+  await page.waitForSelector('#album-editor', { hidden: true })
   await palette('Edit Command after', false)
   s.check('the refreshed item command has the current context label', await page.$$eval('[role="dialog"][data-state="open"] [role="option"]', rows => rows.some(row => row.textContent.includes('Command after')) && rows.every(row => !row.textContent.includes('Command before'))))
   await page.keyboard.press('Escape')

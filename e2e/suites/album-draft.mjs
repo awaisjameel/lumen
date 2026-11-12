@@ -195,7 +195,8 @@ try {
   const focus = await app.page.evaluate(() => {
     const field = document.querySelector('#album-editor input[aria-label="Album name"]')
     return { field: document.activeElement === field, start: field.selectionStart, end: field.selectionEnd,
-      notification: !!document.activeElement?.closest('[data-notification]') }
+      notification: !!document.activeElement?.closest('[data-notification]'),
+      owner: document.activeElement?.outerHTML.slice(0, 160) }
   })
   s.check('readmission respects the current focus owner or restores the draft caret',
     focus.notification || (focus.field && focus.start === 3 && focus.end === 7), focus)

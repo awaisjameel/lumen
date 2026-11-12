@@ -119,6 +119,9 @@ async function unlock() {
 
 try {
   mkdirSync(photos, { recursive: true })
+  // WebView2's browser process does not start on every Windows build when the
+  // profile it is given has no application-data folders of its own.
+  for (const folder of [['AppData', 'Local', 'Temp'], ['AppData', 'Roaming']]) mkdirSync(join(home, ...folder), { recursive: true })
   execFileSync(process.env.PYTHON ?? 'python', [join(E2E, 'fixtures', 'build.py'), 'library', photos, '3'], { stdio: 'inherit' })
   await start()
   await app.page.waitForSelector('[data-welcome]', { visible: true })
