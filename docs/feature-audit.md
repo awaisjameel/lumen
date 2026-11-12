@@ -9,7 +9,7 @@ are not counted as results for this checkout.
 ## Current integration review
 
 All eleven implementation children are integrated in [PR #56](https://github.com/awaisjameel/lumen/pull/56).
-The [PR audit ledger](pr56-audit.md) records confirmed integration findings,
+The [PR audit ledger](history/pr56-integration-audit-2026-11-06.md) records confirmed integration findings,
 repairs, current verification and remaining acceptance gates. The child entries
 below preserve their original dates and results; they are historical records.
 The integration audit repaired blocked-album membership admission, retained

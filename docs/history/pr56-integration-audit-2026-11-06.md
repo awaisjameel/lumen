@@ -202,3 +202,41 @@ this is another failed hosted budget measurement, with no budget adjustment.
 
 Run 42406902126 measured hosted unblocked SaveEmbeddings64 at **239.443/70 ms**,
 again exceeding the unchanged budget.
+
+## Local addendum, 11 to 12 November 2026
+
+A second review ran on a Windows 11 workstation with the calibrated
+i7-13700H, against head `6b6b594` plus the repairs below. It is local
+evidence: hosted Windows CI has not yet run these commits.
+
+| Finding and impact | Root cause | Repair and regression evidence |
+| --- | --- | --- |
+| **Medium: a refused album change was shown as an unknown fault.** The inspector showed “Something went wrong: not found” and the album picker wrapped the localised reason in the same generic sentence. | The PR moved both surfaces from a rejected call to batch outcome rows and rethrew a row as a plain `Error`, losing its code. | `outcomeFailure` in `shared/errors.ts` keeps the code; both surfaces use it. Three regressions failed before the repair. |
+| **Low: creating an album from the inspector bypassed the membership owner.** It offered no Undo, and a failed read after the committed creation was reported as a failed creation. | `createAlbumForItem` still called the bridge and reloaded directly. | It now uses `albums/changes.ts` like the album picker and reconciles separately. A regression failed before the repair. |
+| **Low: the album editor lost focus after an answered notice closed.** A draft readmitted while its Undo notice still held focus was left with focus on the page once that notice went. | Readmission deferred to the notice but nothing restored the field when the notice closed. The native album-draft check failed about one run in three on this workstation. | The editor watches the notice that held focus and restores the draft's field and caret when it goes. A component regression failed before the repair. |
+| **Low: a dead direct membership writer remained in the bridge.** | Every caller had moved to the shared owner; `engine.setAlbumItem` stayed. | Removed with its test. The Go method remains for the base-frontend comparison and native fixtures. |
+| **Low: a frontend built without the navigation manifest crashed the start.** | `spa` panicked on a missing or malformed `navigation.json`. | `spa` returns an error that reaches the start-up dialog; `TestClientRoutesRefuseAMissingOrMalformedContract` covers the parser. |
+| **Toolchain: `govulncheck` failed on GO-2026-6859** (`net/http`, fixed in Go 1.27.4). | The pinned Go 1.27.3. | `go.mod` pins 1.27.4. That release refuses the `-l:libvips.lib` linker flag, so `internal/media/vips` now links `-llibvips`, which resolves the same import library. |
+| **Native harness: nine suites failed on this workstation and on the unmodified head.** | Harness defects exposed by a faster PC and a scaled display, none in the application: clicks made while a closing menu still blocked input or while a dock was re-centring; a control drawn again between being found and clicked; a window resize dropped while the window opened; a cached base library indexed from another checkout path; a synthetic profile without application-data folders; one suite selecting before the AI stages finished; and one opening the palette before the album editor had closed. | Element clicks wait until the control rests and takes input, and selector clicks find their control again; `resize` verifies the page's size; the base library records its corpus; the navigation profile has its folders; `undo-recovery` waits for the AI stages and `commands` for the editor to close. |
+
+Verification on this workstation, Go 1.27.4, Node 24.22.1, npm 12.2.1:
+
+- `scripts/lint.sh` exits 0, including `govulncheck`, **1,181 frontend tests
+  in 121 files** and the large-library latency gate.
+- **The calibrated latency gate passes.** The three budgets the hosted runner
+  exceeded measured, in two clean runs: unblocked SaveEmbeddings64
+  16.469 and 18.349 ms against 70; folder SaveFaces64 3.721 and 3.556 ms
+  against 7; unblocked Things 2.866 and 2.846 ms against 10. No budget was
+  changed. An earlier run that overlapped another build is discarded.
+- The Go race suite passes for all named packages.
+- The production build leaves bindings and modules unchanged.
+- **All 383 native checks across the same 16 suites pass in two consecutive
+  complete runs** against the production executable and scratch libraries.
+  The base-frontend comparisons need `LUMEN_BASELINE_FRONTEND` and were not
+  run locally, so album-draft (26), collection-places (20),
+  smart-album-preview (22) and favourite-undo (21) report fewer checks than
+  CI. The fixtures used the pinned Pillow 13.0.0 on Python 3.14.4, not the
+  documented 3.15.1.
+
+Real corpus and hardware acceptance, signing, release trust, signed upgrades
+and installed-machine acceptance remain open, as above.
