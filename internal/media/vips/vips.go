@@ -8,7 +8,7 @@ package vips
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../../deps/vips/include -I${SRCDIR}/../../../deps/vips/include/glib-2.0 -I${SRCDIR}/../../../deps/vips/lib/glib-2.0/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../deps/vips/lib -l:libvips.lib
+#cgo LDFLAGS: -L${SRCDIR}/../../../deps/vips/lib -llibvips
 #include <stdlib.h>
 #include <string.h>
 #include <vips/vips.h>
