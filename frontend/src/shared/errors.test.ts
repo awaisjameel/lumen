@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ErrorCode, logUIError } from '../bridge'
 import type * as Bridge from '../bridge'
-import { ERROR_NOTIFICATION, errorText, failureText, logError, reportUnexpected } from './errors'
+import { ERROR_NOTIFICATION, errorText, failureText, logError, outcomeFailure, reportUnexpected } from './errors'
 import { dismiss } from './notify'
 import { recordNotifications } from './testing'
 import type { RecordedNotifications } from './testing'
@@ -45,6 +45,13 @@ it('words one asset’s failure of a selection action as it words a thrown one',
   expect(failureText(ErrorCode.NotFound, 'not found')).toBe(errorText(failure('not found', ErrorCode.NotFound)))
   expect(failureText('', 'Access is denied.')).toBe('Something went wrong: Access is denied.')
   expect(failureText('not_a_code', 'odd')).toBe('Something went wrong: odd')
+})
+
+it('keeps a failed outcome’s code when it is thrown, so its catcher words it once', () => {
+  expect(errorText(outcomeFailure({ code: ErrorCode.NotFound, error: 'not found' }))).toBe(
+    failureText(ErrorCode.NotFound, ''),
+  )
+  expect(errorText(outcomeFailure({ code: '', error: 'disk full' }))).toBe(failureText('', 'disk full'))
 })
 
 it('shows the message of other failures, and of codes it does not know', () => {

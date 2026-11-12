@@ -4,12 +4,13 @@ import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, shallowRef } from 'vue'
 import { createTestNavigation } from '../shared/navigation/testing'
-import { deferred, mountInApp, recordNotifications } from '../shared/testing'
+import { deferred, mountInApp, recordNotifications, undo } from '../shared/testing'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import type { Sel } from './store'
 import {
   AlbumKind,
+  BatchAction,
   BlockKind,
   DateSource,
   engine,
@@ -357,6 +358,48 @@ it('does not clear the next selection draft when album creation finishes', async
     new DOMWrapper(document.body).get<HTMLInputElement>(`input[aria-label="${t('albums.createForItem')}"]`).element
       .value,
   ).toBe('Second album')
+})
+
+it('offers Undo for the photo placed in an album it has just created', async () => {
+  const notices = recordNotifications()
+  try {
+    wrapper = mountDetails({ day: 'results', id: 1 })
+    await flushPromises()
+    await press(t('albums.createForItem'))
+    await new DOMWrapper(document.body).get(`input[aria-label="${t('albums.createForItem')}"]`).setValue('Trip')
+    await new DOMWrapper(document.body).get('form').trigger('submit')
+    await flushPromises()
+    expect(engine.applyBatch).not.toHaveBeenCalled()
+    await undo(notices)
+    expect(engine.applyBatch).toHaveBeenCalledWith([1], BatchAction.BatchRemoveAlbum, 4)
+  } finally {
+    for (const notice of notices.shown) notice.closed?.()
+    notices.stop()
+  }
+})
+
+it('explains a refused album change by its code, not as an unknown fault in engine prose', async () => {
+  vi.mocked(engine.albums).mockResolvedValue([
+    {
+      id: 7,
+      version: { identity: 'album-7', revision: 'original' },
+      name: 'Trip',
+      kind: AlbumKind.AlbumManual,
+      rule: emptyRule(),
+      count: 0,
+      cover: 0,
+      coverThumb: 0,
+    },
+  ])
+  vi.mocked(engine.applyBatch).mockResolvedValueOnce([{ id: 1, code: ErrorCode.NotFound, error: 'not found' }])
+  wrapper = mountDetails({ day: 'results', id: 1 })
+  await flushPromises()
+  const box = wrapper.get('.album-option [role="checkbox"]')
+  await box.trigger('click')
+  await flushPromises()
+  expect(box.attributes('aria-checked')).toBe('false')
+  expect(wrapper.text()).toContain(t('error.notFound'))
+  expect(wrapper.text()).not.toContain('not found')
 })
 
 it('puts an album checkbox back when the change fails', async () => {

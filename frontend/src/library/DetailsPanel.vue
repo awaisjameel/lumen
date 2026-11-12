@@ -28,7 +28,7 @@ import {
 } from '../bridge'
 import type { AssetDetail, AssetTag, Face, MediaInspection } from '../bridge'
 import { FileTools } from '../media/lazy'
-import { errorText, logError, reportError } from '../shared/errors'
+import { errorText, logError, outcomeFailure, reportError } from '../shared/errors'
 import { block } from '../shared/block'
 import { bytes, dateTime, duration, megapixels, fileName } from '../shared/format'
 import { t, formatNumber } from '../shared/i18n'
@@ -276,7 +276,7 @@ function toggleAlbum(albumID: number, checked: boolean | 'indeterminate') {
     async () => {
       const rows = await change.apply([assetID])
       const failure = rows.find((row) => row.error)
-      if (failure) throw new Error(failure.error)
+      if (failure) throw outcomeFailure(failure)
     },
     () => albumChanges.reconcile().catch(reportError),
   )
@@ -302,12 +302,17 @@ async function createAlbumForItem() {
   creatingAlbum.value = true
   error.value = ''
   try {
-    await engine.createAlbum(name, AlbumKind.AlbumManual, emptyRule(), [assetID]) // with the photo in it, at once
+    const album = await engine.createAlbum(name, AlbumKind.AlbumManual, emptyRule(), [assetID]) // with the photo in it, at once
     if (revision === selectionRevision) {
       newAlbum.value = ''
       createOpen.value = false
     }
-    await Promise.all([loadAlbums(assetID), albums.load()])
+    // The album is saved. Its membership has the same owner and Undo as a
+    // ticked box, and a failed read afterwards is not a failed creation.
+    const change = albumChanges.created(album, [assetID])
+    albumChanges.offer([change], t('details.album.saved'))
+    change.release()
+    await albumChanges.reconcile().catch(reportError)
   } catch (e) {
     if (revision === selectionRevision) error.value = errorText(e)
   } finally {

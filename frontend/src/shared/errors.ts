@@ -86,6 +86,15 @@ export function errorText(e: unknown): string {
 }
 
 /**
+ * A failed outcome as a thrown value that keeps the engine's code, so the
+ * view that catches it explains it exactly as it would the single call:
+ * a plain Error of its message would show engine prose as an unknown fault.
+ */
+export function outcomeFailure(row: { readonly code: string; readonly error: string }): Error {
+  return new Error(row.error, { cause: { code: row.code } })
+}
+
+/**
  * errorText for a failure that was not thrown: one asset's of a selection
  * action, which arrives as the engine's code (if it has one) and message.
  */

@@ -7,7 +7,7 @@ import UInput from '@nuxt/ui/components/Input.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
 import { AlbumKind, engine } from '../../bridge'
 import { emptyRule, useAlbums } from '../../albums/store'
-import { errorText, failureText, reportError } from '../../shared/errors'
+import { errorText, outcomeFailure, reportError } from '../../shared/errors'
 import { nameTooLong, trimName } from '../../shared/names'
 import { useAlbumChanges } from '../../albums/changes'
 import { t } from '../../shared/i18n'
@@ -81,7 +81,7 @@ async function apply(create = false) {
       if (!current()) return
       const rows = await change.apply([id], () => !current())
       const failure = rows.find((row) => row.error)
-      if (failure) throw new Error(failureText(failure.code, failure.error))
+      if (failure) throw outcomeFailure(failure)
     }
     if (current()) open.value = false
   } catch (e) {

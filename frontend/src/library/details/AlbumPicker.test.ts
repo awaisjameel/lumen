@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { AlbumKind, BatchAction, engine } from '../../bridge'
+import { AlbumKind, BatchAction, engine, ErrorCode } from '../../bridge'
 import type * as Bridge from '../../bridge'
 import { emptyRule } from '../../albums/store'
 import { t } from '../../shared/i18n'
@@ -88,6 +88,15 @@ it('keeps staged membership and an error when Apply fails', async () => {
   expect(notices.shown).toHaveLength(0)
   await press(t('details.album.apply'))
   expect(engine.applyBatch).toHaveBeenCalledTimes(2)
+})
+
+it('explains a refused album by its code, not as an unknown fault in engine prose', async () => {
+  vi.mocked(engine.applyBatch).mockResolvedValueOnce([{ id: 9, code: ErrorCode.NotFound, error: 'not found' }])
+  mountPicker([])
+  await flushPromises()
+  await body().get('[role="checkbox"]').trigger('click')
+  await press(t('details.album.apply'))
+  expect(body().get('[role="alert"]').text()).toBe(t('error.notFound'))
 })
 
 it('reconciles a completed membership inverse even when another album refuses it', async () => {

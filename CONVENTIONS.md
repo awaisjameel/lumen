@@ -256,6 +256,9 @@ file covers how code is written.
   - The user did something and there is no such place: `reportError(e)`.
   - Background work: `logError(e)` or `orFallback`.
   - Cancelled reads are dropped with `isCancelled`.
+  - One item of a batch failed and its view throws it: `outcomeFailure(row)`,
+    which keeps the engine's code so `errorText` words it once. Never
+    `new Error(row.error)`, which shows engine prose as an unknown fault.
   - No other `console.*` calls.
 - **Text** comes only from `t('key', params)`, so placeholders are typed. Add
   keys to `shared/i18n.ts`, and remove the keys you make unused.
