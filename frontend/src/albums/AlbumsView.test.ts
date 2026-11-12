@@ -379,6 +379,33 @@ it('restores the focused field and caret after a valid draft is readmitted', asy
   expect([restored.selectionStart, restored.selectionEnd]).toEqual([3, 5])
 })
 
+it('restores the draft caret when the notice that held focus at readmission then closes', async () => {
+  const w = await mounted()
+  await menuAction(w, t('albums.editNamed', { name: album.name }))
+  const field = editor().get<HTMLInputElement>('form input')
+  field.element.focus()
+  await field.setValue('Local name')
+  field.element.setSelectionRange(3, 5)
+  await field.trigger('select')
+  const notices = document.createElement('ol')
+  notices.innerHTML = '<li data-notification="undo.block"><button>Undo</button></li>'
+  document.body.append(notices)
+  const pending = deferred<Album[]>()
+  vi.mocked(engine.albums).mockReturnValueOnce(pending.promise)
+  const refreshing = showBlocksChanged()
+  await flushPromises()
+  notices.querySelector('button')?.focus()
+  pending.resolve([album])
+  await refreshing
+  await flushPromises()
+  expect(document.activeElement).toBe(notices.querySelector('button'))
+  notices.replaceChildren()
+  await flushPromises()
+  const restored = editor().get<HTMLInputElement>('form input').element
+  expect(document.activeElement).toBe(restored)
+  expect([restored.selectionStart, restored.selectionEnd]).toEqual([3, 5])
+})
+
 it('closes a draft instead of saving into a replacement album with the same numeric ID', async () => {
   const w = await mounted()
   await menuAction(w, t('albums.editNamed', { name: album.name }))

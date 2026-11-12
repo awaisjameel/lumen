@@ -151,6 +151,7 @@ useLiveReload(async () => {
 
 function reset() {
   session++
+  releaseFocusOwner()
   version.value = null
   conflict.value = false
   missingTag.value = false
@@ -230,20 +231,44 @@ function rememberField(e: Event) {
     end: target instanceof HTMLInputElement ? target.selectionEnd : null,
   }
 }
-watch(suspended, async (paused, wasPaused) => {
-  if (paused || !wasPaused || !focusedField) return
-  const currentSession = session
-  await nextTick()
-  if (!active || session !== currentSession || !editorOpen.value) return
+// A notice the user answered (its Undo) keeps focus while it shows, and takes
+// it away when it closes: the draft's field is restored then, not lost.
+let focusOwner: MutationObserver | undefined
+function releaseFocusOwner() {
+  focusOwner?.disconnect()
+  focusOwner = undefined
+}
+onBeforeUnmount(releaseFocusOwner)
+function restoreField() {
   // Do not take focus back from a control the user deliberately chose meanwhile.
   if (document.activeElement !== document.body && !document.activeElement?.closest('[data-draft-state]')) return
   const selection = focusedField
+  if (!selection) return
   const field = [...document.querySelectorAll<HTMLElement>('#album-editor [aria-label]')].find(
     (element) => element.getAttribute('aria-label') === selection.label,
   )
   field?.focus()
   if (field instanceof HTMLInputElement && selection.start !== null)
     field.setSelectionRange(selection.start, selection.end)
+}
+watch(suspended, async (paused, wasPaused) => {
+  releaseFocusOwner()
+  if (paused || !wasPaused || !focusedField) return
+  const currentSession = session
+  await nextTick()
+  if (!active || session !== currentSession || !editorOpen.value) return
+  const notice = document.activeElement?.closest('[data-notification]')
+  if (!notice?.parentNode) {
+    restoreField()
+    return
+  }
+  // A removed element's blur is not reported, so watch the notices themselves.
+  focusOwner = new MutationObserver(() => {
+    if (notice.isConnected) return
+    releaseFocusOwner()
+    if (active && session === currentSession && editorOpen.value && !suspended.value) restoreField()
+  })
+  focusOwner.observe(notice.parentNode, { childList: true })
 })
 async function retryDraft() {
   await refreshAll(albums.load(), things.load(), people.load()).catch(logError)
