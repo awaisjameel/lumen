@@ -365,7 +365,10 @@ func TestInstallerNamesTheReleasesPage(t *testing.T) {
 // server's own modules are asked for as they are.
 func TestSPAServesRoutesAsThePageAndLeavesFilesAndDevModulesAlone(t *testing.T) {
 	var asked string
-	h := spa(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { asked = r.URL.Path }))
+	h, err := spa(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { asked = r.URL.Path }))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for path, want := range map[string]string{
 		"/":                                   "/",
 		"/things":                             "/",
@@ -387,5 +390,22 @@ func TestSPAServesRoutesAsThePageAndLeavesFilesAndDevModulesAlone(t *testing.T) 
 		if asked != want {
 			t.Errorf("spa asked the files for %q on a request for %q, want %q", asked, path, want)
 		}
+	}
+}
+
+// A frontend built without the navigation contract stops the start with an
+// error the user is shown, never a panic.
+func TestClientRoutesRefuseAMissingOrMalformedContract(t *testing.T) {
+	for _, manifest := range []string{"", "{}", "[]", "null", `["/", 3]`} {
+		if routes, err := clientRoutes([]byte(manifest)); err == nil {
+			t.Errorf("clientRoutes(%q) = %v, want an error", manifest, routes)
+		}
+	}
+	routes, err := clientRoutes([]byte(`["/", "/people/:id/faces"]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !clientRoute(routes, "/people/1.5/faces") || clientRoute(routes, "/assets/index-abc.js") {
+		t.Errorf("the parsed contract %v does not match its own path shapes", routes)
 	}
 }
