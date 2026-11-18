@@ -3,13 +3,13 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { Pinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../../shared/navigation/testing'
 import URadioGroup from '@nuxt/ui/components/RadioGroup.vue'
 import { engine, Theme } from '../../bridge'
 import type * as Bridge from '../../bridge'
 import { usePreferences } from '../../shared/preferences'
 import { mountInApp } from '../../shared/testing'
-import { router as appRouter } from '../../router'
+import { destination } from '../../shared/navigation/contract'
 import Showcase from './Showcase.vue'
 
 vi.mock('../../bridge', async (importOriginal) => ({
@@ -33,11 +33,8 @@ afterEach(() => {
 })
 
 async function mountShowcase() {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/', component: { render: () => null } }],
-  })
-  await router.push('/')
+  const router = createTestNavigation()
+  await router.visit('/')
   wrapper = mountInApp(Showcase, { plugins: [pinia, router] })
   await flushPromises()
   return wrapper
@@ -78,9 +75,8 @@ it('tries a theme on without saving it, and gives the user’s own back on leavi
 })
 
 it('has no route in a production build', () => {
-  // Tests run as a development build, where the route exists; the
-  // production bundle is checked for its absence when it is built (see the
-  // Phase 7 record). Here: it is the only route guarded by DEV.
-  const showcase = appRouter.getRoutes().filter((r) => r.name === 'showcase')
-  expect(showcase).toHaveLength(import.meta.env.DEV ? 1 : 0)
+  const production = createTestNavigation({}, false)
+  const development = createTestNavigation({}, true)
+  expect(() => production.resolve(destination({ name: 'showcase' }))).toThrow()
+  expect(development.resolve(destination({ name: 'showcase' })).matched).toEqual(['showcase'])
 })

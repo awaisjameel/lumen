@@ -701,6 +701,43 @@ func TestTurningOCROnFailsWholeWhenTheQueueCannotBeWritten(t *testing.T) {
 	}
 }
 
+func TestOCRReconciliationAfterAFailureUsesCurrentAnnotationsAndOptIn(t *testing.T) {
+	l := newOCRLibrary(t)
+	st, ctx := l.st, t.Context()
+	kept, rejected := l.photo(t, "kept"), l.photo(t, "rejected")
+	check(t, st.SetOCR(ctx, true))
+	check(t, st.TagAsset(ctx, kept, l.shots))
+	check(t, st.TagAsset(ctx, rejected, l.shots))
+	check(t, errOf(st.w.ExecContext(ctx, `CREATE TRIGGER ocr_queue_fails BEFORE INSERT ON asset_jobs
+		WHEN NEW.stage = 'ocr' BEGIN SELECT RAISE(ABORT, 'queue unavailable'); END`)))
+	if _, err := st.QueueOCR(ctx); err == nil {
+		t.Fatal("queue fault did not fail reconciliation")
+	}
+	if ids := ocrJobIDs(t, st); len(ids) != 0 {
+		t.Fatalf("failed reconciliation left jobs: %v", ids)
+	}
+	// A correction and opt-out after the failed attempt govern its retry.
+	check(t, st.UntagAsset(ctx, rejected, l.shots))
+	check(t, st.SetOCR(ctx, false))
+	check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER ocr_queue_fails")))
+	if n, err := st.QueueOCR(ctx); err != nil || n != 0 {
+		t.Fatalf("retry while off queued %d, %v", n, err)
+	}
+	check(t, st.SetOCR(ctx, true))
+	if ids := ocrJobIDs(t, st); !slices.Equal(ids, []int64{kept}) {
+		t.Fatalf("recovered jobs = %v, want only %d", ids, kept)
+	}
+	if n, err := st.QueueOCR(ctx); err != nil || n != 0 {
+		t.Fatalf("repeat reconciliation queued %d, %v", n, err)
+	}
+	var users, rejections int
+	check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM asset_tags WHERE source = 'user'").Scan(&users))
+	check(t, st.r.QueryRowContext(ctx, "SELECT count(*) FROM asset_tags WHERE source = 'rejected'").Scan(&rejections))
+	if users != 1 || rejections != 1 {
+		t.Fatalf("annotations were replayed: %d user tags, %d rejections", users, rejections)
+	}
+}
+
 func TestQueuedPhotosThatAreNoLongerScreenshotsAreDroppedWhenFetched(t *testing.T) {
 	l := newOCRLibrary(t)
 	st, ctx := l.st, t.Context()

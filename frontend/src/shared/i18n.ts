@@ -334,6 +334,9 @@ const en = {
   'shell.search': 'Search or jump to…',
   'shell.backTo': 'Back to {place}',
 
+  'commands.running': 'Running…',
+  'commands.unavailable': 'This action is unavailable.',
+  'commands.rejectFaces': 'Reject selected faces',
   'commands.title': 'Commands',
   'commands.hint': 'Search for something to do or somewhere to go.',
   'commands.placeholder': 'Type a command…',
@@ -387,6 +390,8 @@ const en = {
   'shortcuts.hint': 'What the keys do. Shortcuts for a photo work while it is selected or open.',
 
   'nav.library': 'Library',
+  'navigation.unavailable': 'This location is unavailable',
+  'navigation.unavailableText': 'Open Library to continue, or go back to the previous page.',
   'nav.people': 'People',
   'nav.favourites': 'Favourites',
   'nav.videos': 'Videos',
@@ -714,7 +719,14 @@ const en = {
     'You choose what belongs here. Select photos or videos in the Library, then choose “Add to album”.',
   'albums.after': 'From {date}',
   'albums.before': 'Until {date}',
-  'albums.referenceMissing': 'The selected Thing or person no longer exists. Choose another person or Thing.',
+  'albums.referenceMissing': 'A selected Thing or person is unavailable. Choose another option before saving.',
+  'albums.referenceUnavailable': 'Unavailable — choose another option',
+  'albums.draftUnavailable': 'This album is no longer available. Its draft has been closed.',
+  'albums.verifyingDraft': 'Checking that this album and its selected rules are still available…',
+  'albums.draftReadFailed': 'Your draft is paused until its current visibility can be checked.',
+  'albums.reloadSaved': 'Reload saved version',
+  'albums.reloadTitle': 'Discard this draft?',
+  'albums.reloadText': 'Reloading replaces your unsaved changes with the current saved album.',
   'albums.live': 'Live',
   'albums.checking': 'Checking matches…',
   'albums.previewUnavailable': 'Preview unavailable',
@@ -984,6 +996,9 @@ const en = {
   'status.faces': 'Finding people',
   'status.videos': 'Understanding your videos',
   'status.ocr': 'Reading text in your photos',
+  'status.ocrRetry': 'Text reading will retry',
+  'status.ocrRetryHint':
+    'Your tags are saved. Lumen will retry text reading automatically. If this continues, save a problem report in Settings.',
   'status.upToDate': 'Up to date',
   'status.paused': 'Paused',
   'status.battery': 'Waiting for mains power',
@@ -1048,6 +1063,26 @@ const en = {
   'library.outcomes': 'View outcomes',
   'library.retryFailed': 'Retry failed items',
   'library.batchTitle': 'Selection outcomes',
+  'undo.outcomes': 'Undo outcomes',
+  'undo.favourites': 'Undo favourite changes',
+  'undo.albums': 'Undo album membership changes',
+  'undo.albumTarget': 'Asset {asset} · album {album}',
+  'undo.dates': 'Undo date corrections',
+  'undo.places': 'Undo place corrections',
+  'undo.description': 'Completed changes are kept. Retry failed items or resume cancelled items separately.',
+  'undo.summary':
+    '{done} restored · {failed} failed · {cancelled} cancelled · newer edits kept: {superseded} · {pending} waiting',
+  'undo.retry': 'Retry failed items',
+  'undo.resume': 'Resume cancelled items',
+  'undo.refresh': 'Retry view refresh',
+  'undo.refreshFailed': 'The current view could not refresh: {error}',
+  'undo.expired': 'This Undo was dismissed. Its remaining changes will not run.',
+  'undo.unconfirmed': 'Completion could not be confirmed. Retry checks the current state. {error}',
+  'undo.state.pending': 'Waiting',
+  'undo.state.done': 'Restored',
+  'undo.state.failed': 'Failed',
+  'undo.state.cancelled': 'Cancelled',
+  'undo.state.superseded': 'Newer edit kept',
   'library.sidebar': 'Show or hide sidebar',
   'library.jump': 'Jump to {year}',
   'library.timeline': 'Jump through the timeline',
@@ -1479,7 +1514,8 @@ const en = {
   'error.albumDateOrder': 'The start date must not follow the end date.',
   'error.albumSmartItems': 'Smart albums choose their own items.',
   'error.albumKind': 'Choose a manual or smart album.',
-  'error.albumReference': 'The selected Thing or person no longer exists.',
+  'error.albumReference': 'The selected Thing or person is unavailable.',
+  'error.albumChanged': 'This album changed while you were editing. Reload its saved version before saving.',
   'error.albumManualOnly': 'Only manual albums accept items.',
   'error.personExists': 'Someone already has that name.',
   'error.blockedName': 'That name belongs to a blocked person or Thing. Open Blocked in Settings to manage it.',
@@ -2051,6 +2087,11 @@ type VarNames<K extends MessageKey> = (typeof en)[K] extends infer M
     ? Placeholders<M>
     : Placeholders<M[keyof M]> | 'n'
   : never
+
+/** A stable label that needs no contextual placeholder values. */
+export type SimpleMessageKey = {
+  [K in MessageKey]: [VarNames<K>] extends [never] ? K : never
+}[MessageKey]
 
 type Vars = Record<string, string | number>
 

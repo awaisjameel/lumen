@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { itemCommand, menuItems, useCommands } from '../shared/commands'
+import { destination } from '../shared/navigation/contract'
 // Card actions share their definitions with the command palette.
 import IconButton from '../shared/IconButton.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UButton from '../shared/navigation/NavButton.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, ref, watch } from 'vue'
 import { Filter, MAX_NAME_LEN, TagKind, thumbUrl } from '../bridge'
@@ -13,7 +16,6 @@ import type { IconName } from '../design/icons'
 import CollectionCard from '../shared/CollectionCard.vue'
 import CoverMosaic from '../shared/CoverMosaic.vue'
 import Icon from '../shared/Icon.vue'
-import { menuItems, useCommands } from '../shared/commands'
 import type { Command } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { nameTooLong } from '../shared/names'
@@ -51,18 +53,14 @@ async function save(name: string) {
 
 const actions: Command[] = [
   {
-    id: `thing.${props.tag.id}.pin`,
-    group: 'view',
+    id: itemCommand('thing.pin', props.tag.id),
     title: () => t(props.tag.pinned ? 'things.unpinNamed' : 'things.pinNamed', { name: props.tag.name }),
-    icon: 'pin',
     enabled: () => !props.working && !saving.value,
     run: () => emit('pin'),
   },
   {
-    id: `thing.${props.tag.id}.rename`,
-    group: 'view',
+    id: itemCommand('thing.rename', props.tag.id),
     title: () => t('things.renameNamed', { name: props.tag.name }),
-    icon: 'pencil',
     enabled: () => !saving.value && !props.working,
     run: () => {
       renameFrom.value = 'menu'
@@ -70,31 +68,24 @@ const actions: Command[] = [
     },
   },
   {
-    id: `thing.${props.tag.id}.reset`,
-    group: 'view',
+    id: itemCommand('thing.reset', props.tag.id),
     title: () => t('things.resetName'),
-    icon: 'reset',
     available: () => !!props.tag.original,
     enabled: () => !saving.value && !props.working,
     run: () => save(''),
   },
   {
-    id: `thing.${props.tag.id}.block`,
-    group: 'view',
+    id: itemCommand('thing.block', props.tag.id),
     title: () => t('blocked.confirmTitle', { name: props.tag.name }),
-    icon: 'eye-off',
     enabled: () => !saving.value && !props.working,
     run: () => emit('block'),
   },
   {
-    id: `thing.${props.tag.id}.delete`,
-    group: 'view',
+    id: itemCommand('thing.delete', props.tag.id),
     title: () => t('things.deleteNamed', { name: props.tag.name }),
-    icon: 'trash',
     available: () => props.deletable,
     enabled: () => !props.inAlbum && !props.working,
     reason: () => (props.inAlbum ? t('things.inAlbum') : undefined),
-    danger: true,
     run: () => emit('remove'),
   },
 ]
@@ -126,7 +117,7 @@ function renameTitle() {
     <CollectionCard
       class="thing-card"
       :data-collection="tag.id"
-      :to="{ name: 'thing', params: { id: tag.id } }"
+      :to="destination({ name: 'thing', params: { id: tag.id } })"
       :title="tag.name"
       :cover="tag.cover && tag.coverThumb ? thumbUrl(tag.cover, tag.coverThumb) : undefined"
       :icon="icon"
@@ -163,7 +154,7 @@ function renameTitle() {
               :variant="tag.pinned ? 'soft' : 'ghost'"
               :color="tag.pinned ? 'primary' : 'neutral'"
               size="sm"
-              @click="emit('pin')"
+              :command="itemCommand('thing.pin', props.tag.id)"
             />
             <UDropdownMenu :items="items" :content="{ onCloseAutoFocus: keepEditorFocus }">
               <IconButton
@@ -206,9 +197,15 @@ function renameTitle() {
           <UButton type="button" size="sm" variant="ghost" :disabled="saving" @click="editor.close()">{{
             t('common.cancel')
           }}</UButton>
-          <UButton v-if="tag.original" type="button" size="sm" variant="ghost" :disabled="saving" @click="save('')">{{
-            t('things.resetName')
-          }}</UButton>
+          <CommandButton
+            v-if="tag.original"
+            type="button"
+            size="sm"
+            variant="ghost"
+            :disabled="saving"
+            :command="itemCommand('thing.reset', props.tag.id)"
+            >{{ t('things.resetName') }}</CommandButton
+          >
         </form>
         <div class="count-row">
           <span>{{ tag.count ? t('status.items', { n: tag.count }) : t('things.noPhotos') }}</span
@@ -222,7 +219,8 @@ function renameTitle() {
         </div>
         <p v-if="!tag.count" class="text-xs text-dimmed">{{ t('things.viewEmptyHint') }}</p>
         <div v-if="inAlbum" class="text-xs text-dimmed">
-          {{ t('things.inAlbum') }} <UButton to="/albums" size="xs" variant="link">{{ t('things.editAlbum') }}</UButton>
+          {{ t('things.inAlbum') }}
+          <UButton :to="destination({ name: 'albums' })" size="xs" variant="link">{{ t('things.editAlbum') }}</UButton>
         </div>
       </template>
     </CollectionCard>

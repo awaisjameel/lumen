@@ -15,6 +15,7 @@ it('refreshes album membership counts after an overlapping read', async () => {
   let finish: ((value: Album[]) => void) | undefined
   const album: Album = {
     id: 1,
+    version: { identity: 'album-1', revision: 'original' },
     name: 'Trip',
     kind: AlbumKind.AlbumManual,
     count: 1,

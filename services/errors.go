@@ -38,6 +38,7 @@ const (
 	CodeAlbumKind           ErrorCode = "album_kind"
 	CodeAlbumReference      ErrorCode = "album_reference"
 	CodeAlbumManualOnly     ErrorCode = "album_manual_only"
+	CodeAlbumChanged        ErrorCode = "album_changed"
 	CodePersonExists        ErrorCode = "person_exists"   // someone else has that name
 	CodeBlockedName         ErrorCode = "blocked_name"    // a name belongs to a blocked person or Thing
 	CodeTagExists           ErrorCode = "tag_exists"      // another Thing has that name
@@ -122,6 +123,7 @@ var errorCodes = []struct {
 	{store.ErrAlbumKind, CodeAlbumKind},
 	{store.ErrAlbumReference, CodeAlbumReference},
 	{store.ErrAlbumManualOnly, CodeAlbumManualOnly},
+	{store.ErrAlbumChanged, CodeAlbumChanged},
 	{store.ErrInvalidAlbum, CodeInvalidAlbum},
 	{store.ErrPersonExists, CodePersonExists},
 	{store.ErrBlockedName, CodeBlockedName},

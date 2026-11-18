@@ -361,6 +361,15 @@ func (s *LibraryService) Albums(ctx context.Context) ([]core.Album, error) {
 	return s.store.Albums(ctx, minScore)
 }
 
+// PreviewAlbum counts and samples the visible members of an unsaved smart rule.
+func (s *LibraryService) PreviewAlbum(ctx context.Context, rule core.AlbumRule) (core.AlbumPreview, error) {
+	minScore, err := tagConfidence(ctx, s.store)
+	if err != nil {
+		return core.AlbumPreview{}, err
+	}
+	return s.store.PreviewAlbum(ctx, rule, minScore)
+}
+
 // CreateAlbum saves a new manual album holding items, or a smart rule (no
 // items), in one step.
 func (s *LibraryService) CreateAlbum(ctx context.Context, name string, kind core.AlbumKind, rule core.AlbumRule,
@@ -369,13 +378,29 @@ func (s *LibraryService) CreateAlbum(ctx context.Context, name string, kind core
 }
 
 // UpdateAlbum changes an album's name and smart rule.
+// Existing compiled clients and native fixtures retain this signature; the
+// current editor and name Undo use SaveAlbum's guarded definition contract.
 func (s *LibraryService) UpdateAlbum(ctx context.Context, id int64, name string, rule core.AlbumRule) error {
 	return s.store.UpdateAlbum(ctx, id, name, rule)
 }
 
+// SaveAlbum changes only the intended album and definition, returning its
+// committed version without a fallible read after the transaction.
+func (s *LibraryService) SaveAlbum(ctx context.Context, edit core.AlbumEdit) (core.AlbumVersion, error) {
+	version, err := s.store.SaveAlbum(ctx, edit)
+	if err == nil {
+		s.viewsChanged()
+	}
+	return version, err
+}
+
 // DeleteAlbum removes an album without touching media files.
 func (s *LibraryService) DeleteAlbum(ctx context.Context, id int64) error {
-	return s.store.DeleteAlbum(ctx, id)
+	if err := s.store.DeleteAlbum(ctx, id); err != nil {
+		return err
+	}
+	s.viewsChanged()
+	return nil
 }
 
 // AssetAlbums lists the manual albums containing an asset.
@@ -385,7 +410,11 @@ func (s *LibraryService) AssetAlbums(ctx context.Context, id int64) ([]int64, er
 
 // SetAlbumItem changes membership in a manual album.
 func (s *LibraryService) SetAlbumItem(ctx context.Context, assetID, albumID int64, include bool) error {
-	return s.store.SetAlbumItem(ctx, assetID, albumID, include)
+	if err := s.store.SetAlbumItem(ctx, assetID, albumID, include); err != nil {
+		return err
+	}
+	s.viewsChanged()
+	return nil
 }
 
 // ShowInFolder opens Explorer with one of the asset's files selected: path,

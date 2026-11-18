@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+
 // Settings → About Lumen: the version and where new ones are published, the
 // log and a problem report the user may choose to share, the licences, and
 // the credit GeoNames' licence asks for. These links open in the user's browser;
@@ -11,7 +13,7 @@ import MetaRow from '../shared/MetaRow.vue'
 import PrefRow from '../shared/PrefRow.vue'
 import FeatureState from '../shared/FeatureState.vue'
 import BrandMark from '../shared/BrandMark.vue'
-import { useCommands, runCommand } from '../shared/commands'
+import { useCommands } from '../shared/commands'
 import type { MessageKey } from '../shared/i18n'
 import { engine, Link } from '../bridge'
 import { errorText } from '../shared/errors'
@@ -54,24 +56,15 @@ function openReleases() {
 useCommands([
   {
     id: 'about.logs',
-    group: 'app',
-    title: () => t('about.openLogs'),
-    icon: 'folder',
     run: () => run(engine.openLogFolder),
   },
   {
     id: 'about.report',
-    group: 'app',
-    title: () => t('about.saveReport'),
-    icon: 'bug',
     enabled: () => !about.savingReport,
     run: saveReport,
   },
   {
     id: 'about.licences',
-    group: 'app',
-    title: () => t('about.licences'),
-    icon: 'document',
     run: () => run(engine.openNotices),
   },
 ])
@@ -104,20 +97,20 @@ useCommands([
       :label="t('about.openLogs')"
       :description="t('about.logsHint')"
     >
-      <UButton :icon="icons.folder" loading-auto @click="runCommand('about.logs')">{{ t('about.openLogs') }}</UButton>
+      <CommandButton :icon="icons.folder" loading-auto command="about.logs">{{ t('about.openLogs') }}</CommandButton>
     </PrefRow>
     <PrefRow
       v-if="matches('about.saveReport', 'about.reportHint')"
       :label="t('about.saveReport')"
       :description="t('about.reportHint')"
     >
-      <UButton
+      <CommandButton
         :icon="icons.bug"
         :loading="about.savingReport"
         :disabled="about.savingReport"
-        @click="runCommand('about.report')"
+        command="about.report"
         >{{ about.savingReport ? t('about.saving') : t('about.saveReport') }}
-      </UButton>
+      </CommandButton>
     </PrefRow>
     <p v-if="savedTo" class="text-muted lumen-selectable break-words" role="status">
       {{ t('about.saved', { path: savedTo }) }}
@@ -127,9 +120,9 @@ useCommands([
       :label="t('about.licences')"
       :description="t('about.licencesHint')"
     >
-      <UButton :icon="icons.document" loading-auto @click="runCommand('about.licences')">{{
+      <CommandButton :icon="icons.document" loading-auto command="about.licences">{{
         t('about.licences')
-      }}</UButton>
+      }}</CommandButton>
     </PrefRow>
     <UAlert
       v-if="error || about.loadError"

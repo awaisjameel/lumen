@@ -345,6 +345,13 @@ export function Preferences(): $CancellablePromise<core$0.Preferences> {
 }
 
 /**
+ * PreviewAlbum counts and samples the visible members of an unsaved smart rule.
+ */
+export function PreviewAlbum(rule: core$0.AlbumRule): $CancellablePromise<core$0.AlbumPreview> {
+    return $Call.ByID(3086506886, rule);
+}
+
+/**
  * Progress returns the current indexing state.
  */
 export function Progress(): $CancellablePromise<core$0.Progress> {
@@ -449,6 +456,14 @@ export function RestoreTakenAt(ids: number[] | null): $CancellablePromise<void> 
  */
 export function RunExport(batch: number): $CancellablePromise<core$0.ExportJob[] | null> {
     return $Call.ByID(3295920176, batch);
+}
+
+/**
+ * SaveAlbum changes only the intended album and definition, returning its
+ * committed version without a fallible read after the transaction.
+ */
+export function SaveAlbum(edit: core$0.AlbumEdit): $CancellablePromise<core$0.AlbumVersion> {
+    return $Call.ByID(1006543071, edit);
 }
 
 /**
@@ -788,6 +803,8 @@ export function UnlockBlocks(pin: string): $CancellablePromise<void> {
 
 /**
  * UpdateAlbum changes an album's name and smart rule.
+ * Existing compiled clients and native fixtures retain this signature; the
+ * current editor and name Undo use SaveAlbum's guarded definition contract.
  */
 export function UpdateAlbum(id: number, name: string, rule: core$0.AlbumRule): $CancellablePromise<void> {
     return $Call.ByID(2490788795, id, name, rule);

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 // How the library is browsed: the screen Lumen opens on, how thumbnails fill
 // their squares and which badges they carry. The thumbnail size and the
 // panels' widths are set where they are used (the library toolbar, the
@@ -6,9 +7,11 @@
 import { computed } from 'vue'
 import URadioGroup from '@nuxt/ui/components/RadioGroup.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import USwitch from '@nuxt/ui/components/Switch.vue'
-import { START_VIEWS, StartView, ThumbFit } from '../bridge'
+import { StartView, ThumbFit } from '../bridge'
+import { startViews } from '../shared/navigation/start'
+import { startDestination } from '../shared/navigation/contract'
 import { t } from '../shared/i18n'
 import { defaultPreferences, usePreferences } from '../shared/preferences'
 import PrefRow from '../shared/PrefRow.vue'
@@ -20,10 +23,13 @@ const prefs = usePreferences()
 const defaults = defaultPreferences()
 
 const startItems = computed(() =>
-  START_VIEWS.filter((value) => value !== StartView.StartVideos).map((value) => ({ value, label: t(`nav.${value}`) })),
+  startViews
+    .filter((value) => value !== StartView.StartVideos && startDestination(value))
+    .map((value) => ({ value, label: t(`nav.${value}`) })),
 )
 function setStart(value: unknown) {
-  for (const startView of START_VIEWS) if (startView === value) void prefs.set({ startView })
+  for (const startView of startViews)
+    if (startView === value && startDestination(startView)) void prefs.set({ startView })
 }
 
 const fits = [ThumbFit.ThumbCover, ThumbFit.ThumbContain] as const
@@ -111,7 +117,9 @@ function setFit(value: unknown) {
       v-if="shows('settings.sort', 'settings.sortHint')"
       :label="t('settings.sort')"
       :description="t('settings.sortHint')"
-      ><UButton to="/" variant="outline">{{ t('settings.openLibrary') }}</UButton></PrefRow
+      ><UButton :to="destination({ name: 'library' })" variant="outline">{{
+        t('settings.openLibrary')
+      }}</UButton></PrefRow
     >
   </div>
 </template>

@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { mountInApp } from '../shared/testing'
@@ -83,8 +83,8 @@ async function mountFiles(props: {
   selection?: Selection
   initialOperation?: ExportFormat | 'move' | 'rename'
 }) {
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: FileTools }] })
-  await router.push('/')
+  const router = createTestNavigation()
+  await router.visit('/')
   return mountInApp(FileTools, { props, plugins: [router] })
 }
 
@@ -197,8 +197,8 @@ it('refuses an export when captured frame inputs change during validation', asyn
 })
 
 it('opens frame saving as an image export and plans the captured source time', async () => {
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: FileTools }] })
-  await router.push('/')
+  const router = createTestNavigation()
+  await router.visit('/')
   const wrapper = mountInApp(FileTools, { props: { open: true, ids: [1], frame: 1500 }, plugins: [router] })
   try {
     await flushPromises()

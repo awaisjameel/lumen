@@ -1,11 +1,12 @@
+import { destination } from '../shared/navigation/contract'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Pinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { h } from 'vue'
-import { createMemoryHistory, createRouter } from 'vue-router'
-import type { Router } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
+import type { Navigation as Router } from '../shared/navigation/router'
 import { engine } from '../bridge'
 import type * as Bridge from '../bridge'
 import { useLibrary } from '../library/store'
@@ -47,15 +48,8 @@ function setWidth(px: number) {
 beforeEach(async () => {
   pinia = createPinia()
   setActivePinia(pinia)
-  router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      ...navEntries.map((e) => ({ path: e.path, name: e.name, component: Blank })),
-      { path: '/people/:id', name: 'person', component: Blank },
-      { path: '/videos', name: 'videos', component: Blank },
-    ],
-  })
-  await router.push('/')
+  router = createTestNavigation()
+  await router.visit('/')
   vi.mocked(engine.setPreferences).mockClear()
 })
 afterEach(() => {
@@ -77,14 +71,14 @@ function mountShell() {
 const links = () => [...document.body.querySelectorAll('nav a')].map((a) => a.textContent.trim())
 
 it('names every destination once, in one place', () => {
-  expect(new Set(navEntries.map((e) => e.name)).size).toBe(navEntries.length)
-  const people = navEntries.find((e) => e.name === 'people')
-  const library = navEntries.find((e) => e.name === 'library')
-  expect(people && isActive(people, '/people/3')).toBe(true)
-  expect(people && isActive(people, '/people')).toBe(true)
+  expect(new Set(navEntries.map((e) => e.to.name)).size).toBe(navEntries.length)
+  const people = navEntries.find((e) => e.to.name === 'people')
+  const library = navEntries.find((e) => e.to.name === 'library')
+  expect(people && isActive(people, destination({ name: 'person', params: { id: 3 } }))).toBe(true)
+  expect(people && isActive(people, destination({ name: 'people' }))).toBe(true)
   // The library is the root: it is not "under" every other page.
-  expect(library && isActive(library, '/people')).toBe(false)
-  expect(library && isActive(library, '/')).toBe(true)
+  expect(library && isActive(library, destination({ name: 'people' }))).toBe(false)
+  expect(library && isActive(library, destination({ name: 'library' }))).toBe(true)
 })
 
 it('shows the sidebar on a wide window, grouped, with no Videos page even while videos are indexed', async () => {
@@ -104,7 +98,7 @@ it('shows the sidebar on a wide window, grouped, with no Videos page even while 
 
 it('marks the section a deeper page belongs to as current', async () => {
   setWidth(1400)
-  await router.push('/people/3')
+  await router.visit('/people/3')
   mountShell()
   await flushPromises()
   const current = [...document.body.querySelectorAll('nav a[aria-current="page"], nav a[data-active]')]
@@ -157,7 +151,7 @@ it('is a rail of icons at medium width and a drawer at narrow width', async () =
   expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('Library')
 
   // Going somewhere puts the drawer away.
-  await router.push('/people')
+  await router.visit('/people')
   await flushPromises()
   await vi.waitFor(() => expect(document.body.querySelector('[role="dialog"][data-state="open"]')).toBeNull())
 })
@@ -173,14 +167,14 @@ it('offers navigation and its own commands only once there is a library', async 
   lib.sources = [{ id: 1, path: 'C:\\Photos', enabled: true }]
   expect(await runCommand('go.people')).toBe(true)
   await flushPromises()
-  expect(router.currentRoute.value.path).toBe('/people')
+  expect(router.fullPath.value.split('?')[0]).toBe('/people')
 
   // Videos open Library on its filter, and only while they are indexed.
   expect(await runCommand('go.videos')).toBe(false)
   lib.settings = { ...lib.settings, videos: true }
   expect(await runCommand('go.videos')).toBe(true)
   await flushPromises()
-  expect(router.currentRoute.value.path).toBe('/videos')
+  expect(router.fullPath.value.split('?')[0]).toBe('/videos')
 
   // The palette is loaded when first asked for. Importing it first keeps a
   // slow first transform on a busy machine out of the wait for its dialog.

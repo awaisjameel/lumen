@@ -236,6 +236,7 @@ func TestAlbumValidationFailuresHaveSpecificCodes(t *testing.T) {
 		{store.ErrAlbumKind, CodeAlbumKind},
 		{store.ErrAlbumReference, CodeAlbumReference},
 		{store.ErrAlbumManualOnly, CodeAlbumManualOnly},
+		{store.ErrAlbumChanged, CodeAlbumChanged},
 	} {
 		var failure Failure
 		if err := json.Unmarshal(MarshalError(fmt.Errorf("save failed: %w", c.err)), &failure); err != nil {

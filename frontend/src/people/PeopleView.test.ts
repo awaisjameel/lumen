@@ -1,3 +1,4 @@
+import { itemCommand, runCommand } from '../shared/commands'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
@@ -5,7 +6,6 @@ import { engine, ErrorCode } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Person } from '../bridge'
 import { blockRequest } from '../shared/block'
-import { runCommand } from '../shared/commands'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import { usePeople } from './store'
 import PeopleView from './PeopleView.vue'
@@ -97,7 +97,7 @@ it('uses the inline merge prompt and preserves the draft if putting photos toget
 })
 it('uses the protected label-only owner for hiding and provides the recovery destination', async () => {
   const w = await mounted()
-  void runCommand('person.1.hide')
+  void runCommand(itemCommand('person.hide', 1))
   expect(blockRequest.value?.targetID).toBe(1)
   expect(blockRequest.value?.photosAllowed).toBe(false)
   expect(w.get('a[href="/settings/blocked"]').text()).toBe('Show hidden people')

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { CompressionMode, CompressionState, engine } from '../bridge'
@@ -113,11 +113,8 @@ afterEach(() => {
   compressionRequest.value = null
 })
 async function open() {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/:pathMatch(.*)*', component: { render: () => null } }],
-  })
-  await router.push('/compression')
+  const router = createTestNavigation()
+  await router.visit('/compression')
   wrapper = mountInApp(CompressionView, { plugins: [router] })
   await flushPromises()
   return wrapper

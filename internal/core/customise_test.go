@@ -1,7 +1,9 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -26,28 +28,20 @@ func TestNormalisedPreferencesReplaceNewChoicesTheUICannotApply(t *testing.T) {
 }
 
 func TestOnlyAssignableShortcutsAreValid(t *testing.T) {
-	for keys, want := range map[string]bool{
-		"":             true, // no shortcut
-		"F":            true,
-		"Ctrl+K":       true,
-		"Ctrl+Shift+P": true,
-		"Shift+Delete": true,
-		"ArrowLeft":    true,
-		"?":            true,
-		"F2":           true,
-		"Escape":       false, // always leaves the viewer or a dialog
-		"Ctrl+Escape":  false,
-		"Tab":          false,
-		"Alt+F4":       false,
-		"Alt+f4":       false,
-		"+":            false, // joins the parts
-		"Shift+Ctrl+K": false, // modifiers out of order
-		"Ctrl+":        false,
-		"Ctrl+K L":     false,
-		"Hyper+K":      false,
-	} {
-		if got := ValidShortcut(keys); got != want {
-			t.Errorf("ValidShortcut(%q) = %v, want %v", keys, got, want)
+	data, err := os.ReadFile("testdata/shortcut-contract.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []struct {
+		Keys  string
+		Valid bool
+	}
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range fixtures {
+		if got := ValidShortcut(fixture.Keys); got != fixture.Valid {
+			t.Errorf("ValidShortcut(%q) = %v, want %v", fixture.Keys, got, fixture.Valid)
 		}
 	}
 }
@@ -215,5 +209,13 @@ func TestOnlyPhotoFormatsCanBeExcluded(t *testing.T) {
 	}
 	if none := NormalisedFamilies(nil); none != nil {
 		t.Errorf("no families normalise to %v, want nil", none)
+	}
+}
+
+func TestNormalisedShortcutsPreserveUnknownLegacyIdentities(t *testing.T) {
+	original := map[string]string{"legacy.action": "Ctrl+L", "go.people": "Ctrl+G", "viewer.rotate": "Shift+?"}
+	got := Preferences{Shortcuts: original}.Normalised().Shortcuts
+	if !reflect.DeepEqual(got, original) {
+		t.Errorf("shortcuts = %v, want %v", got, original)
 	}
 }

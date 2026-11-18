@@ -44,6 +44,7 @@ const codeText: Record<ErrorCode, MessageKey> = {
   [ErrorCode.AlbumKind]: 'error.albumKind',
   [ErrorCode.AlbumReference]: 'error.albumReference',
   [ErrorCode.AlbumManualOnly]: 'error.albumManualOnly',
+  [ErrorCode.AlbumChanged]: 'error.albumChanged',
   [ErrorCode.PersonExists]: 'error.personExists',
   [ErrorCode.BlockedName]: 'error.blockedName',
   [ErrorCode.TagExists]: 'error.tagExists',
@@ -82,6 +83,15 @@ const codeText: Record<ErrorCode, MessageKey> = {
 /** A user-facing message for a failed engine call or other thrown value. */
 export function errorText(e: unknown): string {
   return failureText(errorCode(e), e instanceof Error ? e.message : String(e))
+}
+
+/**
+ * A failed outcome as a thrown value that keeps the engine's code, so the
+ * view that catches it explains it exactly as it would the single call:
+ * a plain Error of its message would show engine prose as an unknown fault.
+ */
+export function outcomeFailure(row: { readonly code: string; readonly error: string }): Error {
+  return new Error(row.error, { cause: { code: row.code } })
 }
 
 /**

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from './CommandButton.vue'
+
 // The dock that comes up while something is selected, and only then: how
 // many are selected (with the way to clear it), the main things to do with
 // them, and the rest in a menu. It sits at the foot of the page, in the
@@ -6,13 +8,12 @@
 // are commands (shared/commands.ts), so the dock, menus, the palette and
 // shortcuts share one name, icon and rule. On a narrow page the labels
 // give way to icons, whose names stay as tooltips.
-import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UDropdownMenu from './navigation/NavDropdownMenu.vue'
 import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import { computed } from 'vue'
 import { icons } from '../design/icons'
-import { capsOf, isEnabled, menuItems, runCommand } from './commands'
-import type { Command } from './commands'
+import { capsOf, commandById, isEnabled, menuItems } from './commands'
+import type { CommandReference, ExecutableCommand } from './commands'
 import { t } from './i18n'
 import IconButton from './IconButton.vue'
 
@@ -22,14 +23,20 @@ const props = defineProps<{
   /** What is selected, already worded ("3 selected"). */
   summary: string
   /** The main actions, as buttons. */
-  actions?: readonly Command[]
+  actions?: readonly CommandReference[]
   /** The rest, under More. */
-  more?: readonly Command[]
+  more?: readonly CommandReference[]
 }>()
 const emit = defineEmits<{ clear: [] }>()
 
 const moreItems = computed(() => menuItems(props.more ?? []))
-const tip = (c: Command) => (isEnabled(c) ? c.title() : (c.reason?.() ?? c.title()))
+const actions = computed(() =>
+  (props.actions ?? []).flatMap((reference) => {
+    const current = commandById(reference.id)
+    return current?.available() ? [current] : []
+  }),
+)
+const tip = (c: ExecutableCommand) => (isEnabled(c) ? c.title() : (c.reason() ?? c.title()))
 </script>
 
 <template>
@@ -48,18 +55,18 @@ const tip = (c: Command) => (isEnabled(c) ? c.title() : (c.reason?.() ?? c.title
         <span aria-live="polite">{{ summary }}</span>
       </span>
       <span class="divider" aria-hidden="true" />
-      <UTooltip v-for="c in actions" :key="c.id" :text="tip(c)" :kbds="capsOf(c.id)">
-        <UButton
+      <UTooltip v-for="c in actions" :key="c.key" :text="tip(c)" :kbds="capsOf(c.id)">
+        <CommandButton
           :icon="c.icon ? icons[c.icon] : undefined"
           :color="c.danger ? 'error' : 'neutral'"
           variant="ghost"
           :disabled="!isEnabled(c)"
           :aria-label="c.title()"
-          :data-command="c.id"
-          @click="runCommand(c.id)"
+          :data-command="c.key"
+          :command="c.id"
         >
           <span class="dock-label">{{ c.title() }}</span>
-        </UButton>
+        </CommandButton>
       </UTooltip>
       <slot />
       <UDropdownMenu v-if="moreItems.length" :items="moreItems" :content="{ side: 'top', align: 'end' }">

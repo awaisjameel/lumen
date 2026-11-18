@@ -4,15 +4,15 @@
 // search to try. On, it takes the accent's soft colour. Given somewhere to
 // go (a person someone is often with), it is a link instead. Everything
 // given to it reaches the element, so it can open a menu or a popover.
-import { RouterLink } from 'vue-router'
-import type { RouteLocationRaw } from 'vue-router'
+import RouterLink from './navigation/NavLink.vue'
+import type { Destination } from './navigation/contract'
 
 withDefaults(
   defineProps<{
     /** Whether it is on; left out for a chip that only acts. */
     pressed?: boolean
     /** Where it leads, which makes it a link. */
-    to?: RouteLocationRaw
+    to?: Destination
   }>(),
   { pressed: undefined, to: undefined },
 )

@@ -364,7 +364,13 @@ func (s *Store) RestoreRemovedBlock(ctx context.Context, r *BlockRemoval) error 
 
 // IsBlocked checks whether a named view target has been removed from browsing.
 func (s *Store) IsBlocked(ctx context.Context, kind core.BlockKind, targetID int64) (bool, error) {
+	return isBlocked(ctx, s.r, kind, targetID)
+}
+
+// isBlocked also admits a read transaction, so compound reads validate their
+// references in the same snapshot as their results.
+func isBlocked(ctx context.Context, q querier, kind core.BlockKind, targetID int64) (bool, error) {
 	var blocked bool
-	err := s.r.QueryRowContext(ctx, "SELECT "+labelBlocked(kind, "?"), targetID).Scan(&blocked)
+	err := q.QueryRowContext(ctx, "SELECT "+labelBlocked(kind, "?"), targetID).Scan(&blocked)
 	return blocked, err
 }

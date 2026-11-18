@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "typecheck": "vue-tsc --noEmit",
+    "typecheck": "vue-tsc --noEmit && node tools/check-navigation.mjs && node tools/check-commands.mjs",
     "test": "vitest run",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
@@ -19,7 +19,7 @@
     "preview": "vite preview",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "vue-tsc --noEmit && eslint . --max-warnings 0 && prettier --check ."
+    "check": "npm run typecheck && eslint . --max-warnings 0 && prettier --check . && node tools/check-navigation-mutations.mjs"
   },
   "dependencies": {
     "@iconify/vue": "^5.0.3",
@@ -28,6 +28,7 @@
     "@vueuse/core": "^15.0.0",
     "@wailsio/runtime": "3.0.0-beta.30",
     "pinia": "^4.1.0",
+    "reka-ui": "2.11.0",
     "tailwindcss": "^4.3.3",
     "vue": "^3.5.44",
     "vue-router": "^5.4.0"

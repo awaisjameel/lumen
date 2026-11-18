@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { engine, Filter } from '../bridge'
 import type * as Bridge from '../bridge'
 import { daySpan } from '../shared/format'
@@ -13,14 +13,11 @@ vi.mock('../bridge', async (original) => ({
   engine: { places: vi.fn() },
 }))
 
-const router = createRouter({
-  history: createMemoryHistory(),
-  routes: [{ path: '/search', name: 'search', component: { template: '<div />' } }],
-})
+const router = createTestNavigation()
 let wrapper: VueWrapper | undefined
 
 async function show(path: string, media = Filter.FilterAll, videos = true) {
-  await router.push(path)
+  await router.visit(path)
   wrapper = mountInApp(SearchRefine, { plugins: [router], props: { media, videos } })
   await flushPromises()
   return wrapper
@@ -54,10 +51,17 @@ it('chooses one kind of item, with Favourites on or off beside it', async () => 
   await flushPromises()
   await w.get('[data-search-favourites]').trigger('click')
   await flushPromises()
-  expect(router.currentRoute.value.query).toEqual({ q: 'sea', media: 'videos', favourites: 'true' })
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1]))).toEqual({
+    q: 'sea',
+    media: 'videos',
+    favourites: 'true',
+  })
   await w.get('[data-search-favourites]').trigger('click')
   await flushPromises()
-  expect(router.currentRoute.value.query).toEqual({ q: 'sea', media: 'videos' })
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1]))).toEqual({
+    q: 'sea',
+    media: 'videos',
+  })
 })
 
 it('leaves out Videos while the library shows none', async () => {
@@ -73,7 +77,7 @@ it('names the chosen dates and place, and clears every refinement but the words'
   expect(pressed(w)).toEqual(['Photos', 'Favourites', days, 'Lahore'])
   await w.get('[data-search-clear-filters]').trigger('click')
   await flushPromises()
-  expect(router.currentRoute.value.query).toEqual({ q: 'sea' })
+  expect(Object.fromEntries(new URLSearchParams(router.fullPath.value.split('?')[1]))).toEqual({ q: 'sea' })
 })
 
 it('offers no Clear filters while nothing is refined', async () => {
@@ -82,4 +86,17 @@ it('offers no Clear filters while nothing is refined', async () => {
   expect(w.get('[data-search-where]').text()).toBe('Any place')
   expect(w.find('[data-search-clear-filters]').exists()).toBe(false)
   expect(engine.places).not.toHaveBeenCalled()
+})
+
+it('keeps the admitted date query while an invalid date edit is corrected', async () => {
+  const w = await show('/search?q=sea&from=2026-10-03&to=2026-10-04')
+  await w.get('[data-search-when]').trigger('click')
+  await flushPromises()
+  const input = new DOMWrapper(document.body).get<HTMLInputElement>('input[type="date"][max]')
+  await input.setValue('2026-10-05')
+  await flushPromises()
+  expect(router.fullPath.value).toBe('/search?q=sea&from=2026-10-03&to=2026-10-04')
+  await input.setValue('2026-10-02')
+  await flushPromises()
+  expect(router.fullPath.value).toBe('/search?q=sea&from=2026-10-02&to=2026-10-04')
 })

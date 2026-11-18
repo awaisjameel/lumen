@@ -1,6 +1,12 @@
+import { createTestNavigation } from '../../shared/navigation/testing'
+import { vi } from 'vitest'
+import { createPinia } from 'pinia'
+import type { Pinia } from 'pinia'
+import type { Component } from 'vue'
+import { mountInApp } from '../../shared/testing'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
-import { DateSource, Kind } from '../../bridge'
-import type { AssetDetail } from '../../bridge'
+import { DateSource, Kind, engine } from '../../bridge'
+import type { AssetDetail, Selection } from '../../bridge'
 
 export function asset(id = 1): AssetDetail {
   return {
@@ -31,3 +37,21 @@ export async function press(label: string) {
   await button.trigger('click')
   await flushPromises()
 }
+
+/** Correction fixtures return the initial authoritative metadata through the real bridge facade. */
+export function mountCorrection(
+  component: Component,
+  options: {
+    props: { open: boolean; assets: AssetDetail[]; selection?: Selection | null }
+    pinia?: Pinia
+  },
+) {
+  vi.mocked(engine.asset).mockImplementation((id) => {
+    const value = options.props.assets.find((asset) => asset.id === id)
+    return value ? Promise.resolve(value) : Promise.reject(new Error('Unknown fixture asset'))
+  })
+  const router = createTestNavigation()
+  return mountInApp(component, { props: options.props, plugins: [options.pinia ?? createPinia(), router] })
+}
+
+export { undo } from '../../shared/testing'

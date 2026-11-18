@@ -467,6 +467,16 @@ type AlbumRule struct {
 	Person     int64  `json:"person"`
 }
 
+// AlbumPreviewSize bounds the sample returned for an unsaved smart rule.
+const AlbumPreviewSize = 3
+
+// AlbumPreview is an exact visible count and a bounded newest-first sample
+// from the same read snapshot, without saving an album.
+type AlbumPreview struct {
+	Count int        `json:"count"`
+	Items []GridItem `json:"items"`
+}
+
 // AlbumKind identifies how an album selects its members.
 type AlbumKind string
 
@@ -478,13 +488,30 @@ const (
 
 // Album is a manual collection or a saved rule with its current visible count and cover.
 type Album struct {
-	ID         int64     `json:"id"`
-	Name       string    `json:"name"`
-	Kind       AlbumKind `json:"kind"`
-	Rule       AlbumRule `json:"rule"`
-	Count      int       `json:"count"`
-	Cover      int64     `json:"cover"`
-	CoverThumb int       `json:"coverThumb"`
+	ID         int64        `json:"id"`
+	Name       string       `json:"name"`
+	Kind       AlbumKind    `json:"kind"`
+	Rule       AlbumRule    `json:"rule"`
+	Count      int          `json:"count"`
+	Cover      int64        `json:"cover"`
+	CoverThumb int          `json:"coverThumb"`
+	Version    AlbumVersion `json:"version"`
+}
+
+// AlbumVersion separates a persistent creation identity from its current
+// definition. Counts and covers do not invalidate an unsaved definition.
+type AlbumVersion struct {
+	Identity string `json:"identity"`
+	Revision string `json:"revision"`
+}
+
+// AlbumEdit guards a write against deletion, numeric ID reuse and conflicting
+// definitions. A nil rule changes only the name, retaining the current rule.
+type AlbumEdit struct {
+	ID      int64        `json:"id"`
+	Version AlbumVersion `json:"version"`
+	Name    string       `json:"name"`
+	Rule    *AlbumRule   `json:"rule"`
 }
 
 // DuplicateItem is one indexed asset and all of its visible file copies.
@@ -715,21 +742,22 @@ var (
 
 // Progress is the payload of the index:progress event.
 type Progress struct {
-	Scanning  bool    `json:"scanning"`
-	ScanPath  string  `json:"scanPath"`  // the folder being looked through, while scanning
-	ScanSeen  int     `json:"scanSeen"`  // photos and videos found in it so far
-	Total     int     `json:"total"`     // assets in the library
-	Metadata  int     `json:"metadata"`  // assets still waiting for metadata
-	Thumbnail int     `json:"thumbnail"` // assets still waiting for thumbnails
-	Embedding int     `json:"embedding"` // photos still waiting for the AI
-	Faces     int     `json:"faces"`     // photos still waiting for face recognition
-	Videos    int     `json:"videos"`    // videos still waiting for the AI or face recognition
-	OCR       int     `json:"ocr"`       // photos still waiting for their text to be read
-	Working   Working `json:"working"`   // the stages at work right now; the rest wait their turn
-	Errors    int     `json:"errors"`
-	Skipped   int     `json:"skipped"`
-	Paused    bool    `json:"paused"`
-	OnBattery bool    `json:"onBattery"` // AI work is waiting for mains power
+	Scanning      bool    `json:"scanning"`
+	ScanPath      string  `json:"scanPath"`                // the folder being looked through, while scanning
+	ScanSeen      int     `json:"scanSeen"`                // photos and videos found in it so far
+	Total         int     `json:"total"`                   // assets in the library
+	Metadata      int     `json:"metadata"`                // assets still waiting for metadata
+	Thumbnail     int     `json:"thumbnail"`               // assets still waiting for thumbnails
+	Embedding     int     `json:"embedding"`               // photos still waiting for the AI
+	Faces         int     `json:"faces"`                   // photos still waiting for face recognition
+	Videos        int     `json:"videos"`                  // videos still waiting for the AI or face recognition
+	OCR           int     `json:"ocr"`                     // photos still waiting for their text to be read
+	OCRQueueRetry bool    `json:"ocrQueueRetry,omitempty"` // saved eligibility is waiting for scheduling to recover
+	Working       Working `json:"working"`                 // the stages at work right now; the rest wait their turn
+	Errors        int     `json:"errors"`
+	Skipped       int     `json:"skipped"`
+	Paused        bool    `json:"paused"`
+	OnBattery     bool    `json:"onBattery"` // AI work is waiting for mains power
 	// Waiting is why every stage waits for the PC, though not paused:
 	// WaitNone when nothing holds them.
 	Waiting WaitReason `json:"waiting"`

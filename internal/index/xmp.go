@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"slices"
-	"sync"
 	"time"
 
 	"lumen/internal/core"
@@ -59,41 +58,6 @@ type xmpTiming struct {
 }
 
 var defaultXMPTiming = xmpTiming{cooldown: 15 * time.Second, poll: 15 * time.Second, retry: retryDelay}
-
-// xmpState is the exporter's share of the Indexer. The zero value is ready.
-type xmpState struct {
-	once sync.Once
-	wake chan struct{} // nudged when the setting changes
-	turn chan struct{} // holds a token while a batch is being exported: one at a time
-}
-
-func (x *xmpState) init() {
-	x.once.Do(func() {
-		x.wake = make(chan struct{}, 1)
-		x.turn = make(chan struct{}, 1)
-	})
-}
-
-// wakeCh is the wake channel.
-func (x *xmpState) wakeCh() chan struct{} {
-	x.init()
-	return x.wake
-}
-
-// acquire waits for the turn to export a batch, or for ctx to end. A pass holds
-// it for one batch at a time and never while it waits for a pause to lift, so
-// Export now is never stuck behind a paused background pass.
-func (x *xmpState) acquire(ctx context.Context) error {
-	x.init()
-	select {
-	case x.turn <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (x *xmpState) release() { <-x.turn }
 
 // xmpOptions say how a pass runs.
 type xmpOptions struct {

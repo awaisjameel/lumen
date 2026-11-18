@@ -1,8 +1,8 @@
-import type * as Router from 'vue-router'
+import { destination } from '../shared/navigation/contract'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import { blockRequest } from '../shared/block'
 import { BlockKind } from '../bridge'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
@@ -11,12 +11,7 @@ import type * as Bridge from '../bridge'
 import type { Changes, Face, Person } from '../bridge'
 import PersonFaces from './PersonFaces.vue'
 
-const { replace } = vi.hoisted(() => ({ replace: vi.fn() }))
-vi.mock('vue-router', async (importOriginal) => ({
-  ...(await importOriginal<typeof Router>()),
-  useRoute: () => ({ params: { id: '1' }, query: {} }),
-  useRouter: () => ({ replace }),
-}))
+let navigation = createTestNavigation()
 vi.mock('../bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof Bridge>()),
   onLibraryChanged: vi.fn(() => () => undefined),
@@ -67,7 +62,7 @@ afterEach(() => {
 
 it('keeps the dock absent without a selection and explains why two faces cannot be a picture', async () => {
   vi.mocked(engine.personFaces).mockResolvedValue([face, { ...face, id: 12 }])
-  wrapper = mountInApp(PersonFaces, { plugins: [testRouter()] })
+  wrapper = mountInApp(PersonFaces, { plugins: [await testRouter()] })
   await flushPromises()
   expect(wrapper.find('[role="toolbar"][aria-label="0 selected"]').exists()).toBe(false)
   expect(wrapper.find('[data-action="reject"]').exists()).toBe(false)
@@ -123,7 +118,7 @@ it('restores the previous representative face through the quiet picture notifica
 })
 
 async function mounted() {
-  wrapper = mountInApp(PersonFaces, { plugins: [testRouter()] })
+  wrapper = mountInApp(PersonFaces, { plugins: [await testRouter()] })
   await flushPromises()
   await wrapper.get('[aria-label="Face 1"]').trigger('click')
   return wrapper
@@ -131,6 +126,7 @@ async function mounted() {
 
 it('shows a failed reload after a correction without treating it as a missing person', async () => {
   const w = await mounted()
+  const replace = vi.spyOn(navigation, 'replace')
   vi.mocked(engine.personFaces).mockRejectedValue(new Error('disk full'))
   await w.get('[data-action="reject"]').trigger('click')
   await flushPromises()
@@ -141,10 +137,11 @@ it('shows a failed reload after a correction without treating it as a missing pe
 
 it('leaves face review when a correction removes the person', async () => {
   const w = await mounted()
+  const replace = vi.spyOn(navigation, 'replace')
   vi.mocked(engine.person).mockRejectedValue(new Error('gone', { cause: { code: ErrorCode.NotFound } }))
   await w.get('[data-action="reject"]').trigger('click')
   await flushPromises()
-  expect(replace).toHaveBeenCalledWith({ name: 'people' })
+  expect(replace).toHaveBeenCalledWith(destination({ name: 'people' }))
   expect(w.find('[role="alert"]').exists()).toBe(false)
 })
 
@@ -171,16 +168,8 @@ it('updates memoised faces and prunes the selection when a reload replaces the l
   expect(w.text()).not.toContain('1 selected')
 })
 
-function testRouter() {
-  return createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
-        name,
-        path: `/${name}/:id?`,
-        component: { template: '<div />' },
-      })),
-    ],
-  })
+async function testRouter() {
+  navigation = createTestNavigation()
+  await navigation.push(destination({ name: 'personFaces', params: { id: 1 } }))
+  return navigation
 }

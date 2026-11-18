@@ -1,9 +1,9 @@
-import type * as Router from 'vue-router'
 import { effectScope, reactive } from 'vue'
 import { t } from '../shared/i18n'
 import { mountInApp, recordNotifications } from '../shared/testing'
 import type { RecordedNotifications } from '../shared/testing'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { destination } from '../shared/navigation/contract'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
@@ -14,10 +14,6 @@ import ThingsView from './ThingsView.vue'
 import { question } from '../shared/confirm'
 import { useCommands } from '../shared/commands'
 
-vi.mock('vue-router', async (importOriginal) => ({
-  ...(await importOriginal<typeof Router>()),
-  useRouter: () => ({ push: vi.fn() }),
-}))
 const library = reactive({ progress: { ai: { error: '' }, embedding: 0 } })
 vi.mock('../library/store', () => ({ useLibrary: () => library }))
 vi.mock('../bridge', async (importOriginal) => ({
@@ -73,12 +69,12 @@ const dogs: Tag = {
   original: 'Dogs',
 }
 
-async function mountWith(tags: Tag[]) {
+async function mountWith(tags: Tag[], navigation = testRouter()) {
   setActivePinia(createPinia())
   vi.mocked(engine.things).mockReset().mockResolvedValue(tags)
   vi.mocked(engine.renameThing).mockReset().mockResolvedValue(undefined)
   vi.mocked(engine.setThingPinned).mockReset().mockResolvedValue(undefined)
-  wrapper = mountInApp(ThingsView, { plugins: [testRouter(), createPinia()] })
+  wrapper = mountInApp(ThingsView, { plugins: [navigation, createPinia()] })
   await flushPromises()
   return wrapper
 }
@@ -187,19 +183,7 @@ it('keeps focus in the rename field and returns it to the action menu on Escape'
 })
 
 function testRouter() {
-  return createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      { path: '/settings', component: { template: '<div />' } },
-      { path: '/blocked', component: { template: '<div />' } },
-      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album'].map((name) => ({
-        name,
-        path: `/${name}/:id?`,
-        component: { template: '<div />' },
-      })),
-    ],
-  })
+  return createTestNavigation()
 }
 
 it('keeps a created Thing available when refreshing its result fails without creating it again', async () => {
@@ -209,7 +193,7 @@ it('keeps a created Thing available when refreshing its result fails without cre
   await w.get('form[data-create-thing] input').setValue('Red boats')
   await w.get('form[data-create-thing]').trigger('submit')
   await flushPromises()
-  expect(w.get('a[href="/thing/99"]').text()).toBe(t('things.openPhotos'))
+  expect(w.get('a[href="/things/99"]').text()).toBe(t('things.openPhotos'))
   expect(w.get<HTMLInputElement>('form[data-create-thing] input').element.value).toBe('')
   expect(w.get('[role="alert"]').text()).toContain('refresh failed')
   vi.mocked(engine.things).mockResolvedValue([{ ...dogs, id: 99, name: 'Red boats', kind: TagKind.TagLabel, count: 0 }])
@@ -323,7 +307,8 @@ it('keeps saved Things available while AI is unavailable and explains why Find i
 })
 
 it('deletes a custom Thing only after its destructive confirmation', async () => {
-  const w = await mountWith([{ ...dogs, kind: TagKind.TagLabel }])
+  const navigation = testRouter()
+  const w = await mountWith([{ ...dogs, kind: TagKind.TagLabel }], navigation)
   await menuAction(w, t('things.deleteNamed', { name: dogs.name }))
   vi.mocked(engine.things).mockResolvedValue([])
   question.value?.answer(true)
@@ -331,6 +316,11 @@ it('deletes a custom Thing only after its destructive confirmation', async () =>
   expect(engine.deleteTag).toHaveBeenCalledWith(dogs.id)
   expect(w.find('[data-collection]').exists()).toBe(false)
   expect(w.text()).toContain(t('things.cleared'))
+  expect(w.get('a[href="/settings/blocked"]').text()).toBe(t('things.manageBlocked'))
+  await w.get('a[href="/settings/blocked"]').trigger('click')
+  await flushPromises()
+  expect(navigation.location.value).toMatchObject({ kind: 'valid', target: { name: 'blocked' } })
+  expect(navigation.resolve(destination({ name: 'blocked' })).matched).toEqual(['blocked'])
 })
 
 async function menuAction(
@@ -351,7 +341,7 @@ async function menuAction(
 it('searches photos through the palette, leaving the field to filter Things', async () => {
   const palette = vi.fn()
   const scope = effectScope()
-  scope.run(() => useCommands([{ id: 'app.commandPalette', group: 'app', title: () => 'Palette', run: palette }]))
+  scope.run(() => useCommands([{ id: 'app.commandPalette', title: () => 'Palette', run: palette }]))
   await mountWith([dogs])
   await wrapper?.get(`button[aria-label="${t('shell.search')}"]`).trigger('click')
   await flushPromises()

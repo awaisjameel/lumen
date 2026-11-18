@@ -96,6 +96,19 @@ func TestSelectionRetainsSearchOrderAndRefusesMembershipDrift(t *testing.T) {
 	}
 }
 
+func TestSelectionAdmissionNeedsOnlyTheRevisionAndStillRefusesDrift(t *testing.T) {
+	st, ids := viewingFixture(t)
+	ctx := t.Context()
+	selection, err := st.Selection(ctx, core.View{}, nil, false)
+	check(t, err)
+	admission := core.Selection{Revision: selection.Revision}
+	check(t, st.ValidateSelection(ctx, admission))
+	check(t, st.SetFavourite(ctx, ids[0], true))
+	if !errors.Is(st.ValidateSelection(ctx, admission), ErrSelectionChanged) {
+		t.Fatal("accepted a stale revision when IDs were omitted")
+	}
+}
+
 func TestDisplayAdjustmentsLeaveCanonicalMetadataAndInvalidateTileURLs(t *testing.T) {
 	st, ids := viewingFixture(t)
 	id := ids[0]

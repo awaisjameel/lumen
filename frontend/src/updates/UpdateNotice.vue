@@ -1,15 +1,16 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 // Tells the user, wherever they are, that an update is available, ready, or
 // has just been installed: once per release, until they answer.
 import { onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useNavigation } from '../shared/navigation/router'
 import { UpdatePhase } from '../bridge'
 import { notify } from '../shared/notify'
 import { t } from '../shared/i18n'
 import { useUpdates } from './store'
 
 const updates = useUpdates()
-const router = useRouter()
+const router = useNavigation()
 onMounted(() => void updates.start())
 let announced = ''
 watch(
@@ -41,7 +42,10 @@ watch(
       title: status.phase === UpdatePhase.UpdateReady ? t('update.phase.ready') : t('update.phase.available'),
       description: t('update.notice', { version: status.offer.version }),
       actions: [
-        { label: t('update.title'), run: () => void router.push({ name: 'settings', query: { section: 'updates' } }) },
+        {
+          label: t('update.title'),
+          run: () => void router.push(destination({ name: 'settings', query: { section: 'updates' } })),
+        },
         { label: t('update.later'), run: () => void updates.dismiss() },
       ],
     })

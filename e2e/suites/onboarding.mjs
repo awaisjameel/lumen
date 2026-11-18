@@ -38,6 +38,7 @@ await guard('welcome', async () => {
   const progress = await lib(page, 'Progress')
   check('nothing is indexed before the user chooses', progress.total === 0 && !progress.scanning, progress)
 })
+await s.settleErrors()
 check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors().join(' || '))
 await close(app)
 s.finish()

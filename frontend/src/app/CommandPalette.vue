@@ -8,6 +8,8 @@ import { computed, ref, useId, watch } from 'vue'
 import {
   availableCommands,
   chordOf,
+  commandKey,
+  commandIdFromKey,
   commandGroups,
   isEnabled,
   keyCaps,
@@ -15,8 +17,7 @@ import {
   runCommand,
   sameKeys,
 } from '../shared/commands'
-import type { Command } from '../shared/commands'
-import { reportError } from '../shared/errors'
+import type { CommandId, ExecutableCommand } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { icons } from '../design/icons'
 import { whenPortalsClosed } from '../shared/overlay'
@@ -25,8 +26,12 @@ import Icon from '../shared/Icon.vue'
 const open = defineModel<boolean>('open', { required: true })
 const query = ref('')
 const inputId = useId()
-const activeId = ref('')
-const activeCommand = computed(() => availableCommands.value.find((command) => command.id === activeId.value))
+const activeId = ref<CommandId>()
+const activeCommand = computed(() =>
+  availableCommands.value.find(
+    (command) => activeId.value && command.key === commandKey(activeId.value) && parts(command.title()) !== undefined,
+  ),
+)
 const helpCommand = computed(() => availableCommands.value.find((command) => command.id === 'app.shortcuts'))
 const helpCaps = computed(() => {
   const keys = helpCommand.value ? keysOf(helpCommand.value) : undefined
@@ -44,10 +49,10 @@ function onKey(event: KeyboardEvent) {
 }
 function highlight(payload: { value: unknown } | undefined) {
   const value = payload?.value
-  activeId.value = value && typeof value === 'object' && 'id' in value && typeof value.id === 'string' ? value.id : ''
+  activeId.value = value && typeof value === 'object' && 'id' in value ? commandIdFromKey(value.id) : undefined
 }
 // Recents live only for this session; commands are resolved against current availability.
-const recent = ref<string[]>([])
+const recent = ref<CommandId[]>([])
 watch(open, (value) => {
   if (value) query.value = ''
 })
@@ -70,27 +75,24 @@ function parts(label: string): Part[] | undefined {
   return next === needle.length ? result : undefined
 }
 
-async function execute(id: string) {
+async function execute(id: CommandId) {
   open.value = false
   // Let the modal return focus before an action focuses a field or opens another layer.
   await whenPortalsClosed()
-  try {
-    if (await runCommand(id)) recent.value = [id, ...recent.value.filter((value) => value !== id)].slice(0, 3)
-  } catch (error) {
-    reportError(error)
-  }
+  if (await runCommand(id))
+    recent.value = [id, ...recent.value.filter((value) => commandKey(value) !== commandKey(id))].slice(0, 3)
 }
-function item(command: Command): CommandPaletteItem[] {
+function item(command: ExecutableCommand): CommandPaletteItem[] {
   const matched = parts(command.title())
   if (!matched) return []
   const keys = keysOf(command)
   return [
     {
-      id: command.id,
+      id: command.key,
       label: command.title(),
       icon: command.icon ? icons[command.icon] : undefined,
       kbds: keys ? keyCaps(keys) : undefined,
-      description: isEnabled(command) ? undefined : command.reason?.(),
+      description: isEnabled(command) ? undefined : command.reason(),
       disabled: !isEnabled(command),
       onSelect: () => {
         void execute(command.id)
@@ -114,7 +116,7 @@ const groups = computed<CommandPaletteGroup[]>(() => {
           label: t('commands.recent'),
           ignoreFilter: true,
           items: recent.value.flatMap((id) => {
-            const command = catalogue.find((c) => c.id === id)
+            const command = catalogue.find((c) => c.key === commandKey(id))
             return command ? item(command) : []
           }),
         },

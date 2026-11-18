@@ -20,6 +20,7 @@ const cities = shallowRef<CityMatch[]>([])
 const searching = ref(false)
 const searchError = ref('')
 const { busy, error, save } = useCorrection(
+  'place',
   () => emit('changed'),
   () => (open.value = false),
 )
@@ -83,34 +84,22 @@ async function apply(restore = false) {
     error.value = t('details.place.invalid')
     return
   }
-  const previous = props.assets.map((asset) => ({
-    id: asset.id,
-    lat: asset.lat,
-    lon: asset.lon,
-    corrected: !!asset.originalLocation,
-  }))
+  const ids = props.assets.map((asset) => asset.id)
   await save(
-    'correct-place',
     t(restore ? 'details.place.restored' : 'details.place.saved'),
+    ids,
     async (current) => {
       if (props.selection) await engine.validateSelection(props.selection)
-      const ids = previous.map((asset) => asset.id)
-      if (
-        !current() ||
-        !open.value ||
-        props.assets.map((asset) => asset.id).join(',') !== previous.map((asset) => asset.id).join(',')
-      )
-        return false
+      if (!current() || !open.value || props.assets.map((asset) => asset.id).join(',') !== ids.join(',')) return false
       if (restore) await engine.restoreLocation(ids)
       else await engine.setLocation(ids, latitude, longitude)
       return true
     },
-    async () => {
-      for (const asset of previous) {
-        if (asset.corrected && asset.lat !== null && asset.lon !== null)
-          await engine.setLocation([asset.id], asset.lat, asset.lon)
-        else await engine.restoreLocation([asset.id])
-      }
+    (asset) => ({ lat: asset.lat, lon: asset.lon, corrected: !!asset.originalLocation }),
+    async (id, previous) => {
+      if (previous.corrected && previous.lat !== null && previous.lon !== null)
+        await engine.setLocation([id], previous.lat, previous.lon)
+      else await engine.restoreLocation([id])
     },
   )
 }

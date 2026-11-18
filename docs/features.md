@@ -68,6 +68,10 @@ sequential chain for every photo.
 - About **180 built-in labels**, each kept because it performed well on a real library. The AI also sorts every photo into one of ten broad kinds: People, Screenshots, Documents and so on.
 - **Custom labels:** type something like "Eiffel Tower" and Lumen finds it across the whole library immediately.
 - **Manual tags:** add or remove tags on any photo. Your edits always override the AI.
+- A saved tag remains a successful edit if text reading cannot be scheduled.
+  The activity card explains that text reading will retry; recovery uses saved
+  eligibility, including after restarting, and still honours the OCR opt-in
+  and later tag corrections. Genuine save failures keep the editor's draft.
 - A **confidence slider** controls how strict tagging is. It takes effect without rescanning.
 - **Pin** Things to keep them at the top, and **rename** built-in ones. A renamed Thing keeps its AI matching, search uses the new name, and "Reset name" brings back the original.
 
@@ -92,11 +96,20 @@ sequential chain for every photo.
 
 - **Manual albums** collect photos and videos without moving any files. Membership follows a file when you rename or move it.
 - **Smart albums** save a rule (media type, favourites, a date range, a Thing, a person) and update automatically as the library changes.
+- Their editor shows an exact visible count and up to three sample items.
+  A failed preview can be retried without changing or saving the draft.
+- **Album drafts** survive unrelated privacy refreshes. Visibility checks pause
+  private fields; read retry preserves local input. Hidden/deleted targets close,
+  unavailable rule references require a choice, and concurrent saved changes
+  require an explicit confirmed reload before another save.
 - Albums have live counts, covers, rename, editing and deletion.
 
 ## 9. Places and Events
 
 - **Places** groups GPS-tagged media by the nearest city (within 75 km), using a bundled offline copy of GeoNames with about 70,000 places.
+- Collection headers link to their current top places after corrections and
+  Undo, even when membership stays the same. Failed place reads offer a retry;
+  privacy changes clear earlier names before reading again.
 - **Events** start a new group after a time gap (12 hours by default, configurable) or a jump of more than 100 km in location.
   - Names, pins and blocks you set follow the photos when events regroup. If an event splits, both halves keep them.
   - Reset brings back the automatic name.

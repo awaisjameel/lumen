@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { destination } from '../../shared/navigation/contract'
 // The component showcase: the reference for reviewing screens against the
 // design system. Development only: the router adds its route in a dev
 // build alone, so nothing of it ships. It tries every theme, accent,
@@ -12,7 +13,7 @@ import UAlert from '@nuxt/ui/components/Alert.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
+import UDropdownMenu from '../../shared/navigation/NavDropdownMenu.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import UKbd from '@nuxt/ui/components/Kbd.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
@@ -159,7 +160,11 @@ function ask() {
     <div class="frame" :style="{ width }">
       <section>
         <h2>Page header, long title</h2>
-        <PageHeader :title="LONG" subtitle="1,234 items" :back="{ to: '/', label: 'Library' }">
+        <PageHeader
+          :title="LONG"
+          subtitle="1,234 items"
+          :back="{ to: destination({ name: 'library' }), label: 'Library' }"
+        >
           <template #search><UInput :leading-icon="icons.search" placeholder="Search" class="w-full" /></template>
           <UButton :icon="icons.plus" color="primary" variant="solid">New album</UButton>
           <IconButton :icon="icons.more" label="More actions" color="neutral" variant="ghost" />
@@ -251,23 +256,36 @@ function ask() {
       <section>
         <h2>Collection cards</h2>
         <CardGrid>
-          <CollectionCard to="/" title="Ali" count="124 items" icon="user" round />
-          <CollectionCard to="/" :title="LONG" count="1 item" icon="things">
+          <CollectionCard :to="destination({ name: 'library' })" title="Ali" count="124 items" icon="user" round />
+          <CollectionCard :to="destination({ name: 'library' })" :title="LONG" count="1 item" icon="things">
             <template #badge><UBadge size="sm" color="neutral" variant="solid">Built in</UBadge></template>
             <IconButton :icon="icons.more" label="More actions" size="xs" color="neutral" variant="solid" />
           </CollectionCard>
-          <CollectionCard to="/" title="Holiday 2024" subtitle="Smart album" count="2,301 items" icon="albums" />
+          <CollectionCard
+            :to="destination({ name: 'library' })"
+            title="Holiday 2024"
+            subtitle="Smart album"
+            count="2,301 items"
+            icon="albums"
+          />
         </CardGrid>
         <CardGrid layout="row">
           <CollectionCard
-            to="/"
+            :to="destination({ name: 'library' })"
             title="Lahore"
             subtitle="Punjab, Pakistan"
             count="88 items"
             icon="places"
             layout="row"
           />
-          <CollectionCard to="/" :title="LONG" :subtitle="LONG" count="12 items" icon="events" layout="row">
+          <CollectionCard
+            :to="destination({ name: 'library' })"
+            :title="LONG"
+            :subtitle="LONG"
+            count="12 items"
+            icon="events"
+            layout="row"
+          >
             <IconButton :icon="icons.pin" label="Pin" variant="ghost" />
             <IconButton :icon="icons.more" label="More actions" variant="ghost" />
           </CollectionCard>
@@ -328,7 +346,7 @@ function ask() {
       <section>
         <h2>Commands registered now</h2>
         <ul class="commands">
-          <li v-for="c in availableCommands" :key="c.id">
+          <li v-for="c in availableCommands" :key="c.key">
             <Icon v-if="c.icon" :name="c.icon" :size="16" />
             <span>{{ c.title() }}</span>
             <span v-if="c.keys" class="caps"><UKbd v-for="cap in keyCaps(c.keys)" :key="cap" :value="cap" /></span>

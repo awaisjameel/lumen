@@ -142,6 +142,8 @@ with your Lumen and Windows versions, what you did, and what you expected. The
   [production signing](docs/production-signing.md).
 - [The documentation map](docs/README.md) names the one place each topic is
   explained; [the history](docs/history/README.md) keeps the dated records.
+- [Feature completion audit](docs/feature-audit.md): the current inventory,
+  confirmed gaps, accepted repair scope and remaining acceptance for issue #31.
 
 ## Licence
 

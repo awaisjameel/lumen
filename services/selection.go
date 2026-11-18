@@ -25,7 +25,11 @@ func (s *LibraryService) ApplyBatch(ctx context.Context, ids []int64, action cor
 	if err != nil {
 		return nil, err
 	}
-	if action == core.BatchTrash || action == core.BatchRestore {
+	changed := action == core.BatchTrash || action == core.BatchRestore
+	for _, result := range results {
+		changed = changed || result.Changed
+	}
+	if changed {
 		s.viewsChanged()
 	}
 	return batchOutcomes(results), nil
@@ -35,6 +39,7 @@ func batchOutcomes(results []store.BatchResult) []core.BatchOutcome {
 	outcomes := make([]core.BatchOutcome, len(results))
 	for i, result := range results {
 		outcomes[i].ID = result.ID
+		outcomes[i].Changed = result.Changed
 		if result.Err != nil {
 			outcomes[i].Code, outcomes[i].Error = string(errorCodeOf(result.Err)), result.Err.Error()
 		}

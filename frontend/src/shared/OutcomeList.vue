@@ -3,9 +3,9 @@
 // selection can hold every result of the library.
 import { computed, ref, watch } from 'vue'
 import UButton from '@nuxt/ui/components/Button.vue'
-import { t } from '../shared/i18n'
+import { t } from './i18n'
 
-const props = defineProps<{ items: T[] }>()
+const props = defineProps<{ items: readonly T[] }>()
 defineSlots<{ default?: (props: { item: T }) => unknown }>()
 const PAGE = 100
 const page = ref(0)

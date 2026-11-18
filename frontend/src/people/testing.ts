@@ -1,4 +1,4 @@
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import type { Face, Person } from '../bridge'
 
 export const faceFixture: Face = {
@@ -19,15 +19,5 @@ export const faceFixture: Face = {
 }
 export const personFixture = (id = 1, name = 'Ali', count = 1): Person => ({ id, name, count, cover: faceFixture })
 export function peopleRouter() {
-  return createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { template: '<div />' } },
-      ...['person', 'people', 'personFaces', 'thing', 'event', 'place', 'album', 'blocked', 'settings'].map((name) => ({
-        name,
-        path: `/${name}/:id?`,
-        component: { template: '<div />' },
-      })),
-    ],
-  })
+  return createTestNavigation()
 }

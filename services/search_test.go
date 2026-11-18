@@ -579,17 +579,91 @@ func TestTaggingAPhotoAScreenshotQueuesItsTextWhileOCRIsOn(t *testing.T) {
 	}
 }
 
-func TestBatchTaggingKeepsCommittedOutcomesWhenOCRQueueingFails(t *testing.T) {
-	l, _ := screenshotLibrary(t)
+func refuseOCRQueue(t *testing.T, l *textLibrary) {
+	t.Helper()
 	ctx := t.Context()
-	check(t, l.st.SetOCR(ctx, true))
 	w, err := sql.Open("sqlite3", l.db)
 	check(t, err)
-	defer w.Close()
+	t.Cleanup(func() { w.Close() })
 	// Fail only the background queue write, after the tag edit has committed.
 	_, err = w.ExecContext(ctx, `CREATE TRIGGER refuse_ocr_queue BEFORE INSERT ON asset_jobs
 		WHEN NEW.stage = 'ocr' BEGIN SELECT RAISE(ABORT, 'queue unavailable'); END`)
 	check(t, err)
+}
+
+func TestSingleTaggingKeepsItsCommittedResultWhenOCRQueueingFails(t *testing.T) {
+	l, _ := screenshotLibrary(t)
+	ctx := t.Context()
+	check(t, l.st.SetOCR(ctx, true))
+	refuseOCRQueue(t, l)
+	if err := l.svc.TagAsset(ctx, l.a, "Screenshots"); err != nil {
+		t.Errorf("committed tag reported as failed: %v", err)
+	}
+	tags, err := l.st.AssetTags(ctx, l.a, core.TagConfidenceDefault)
+	check(t, err)
+	if len(tags) != 1 || tags[0].Name != "Screenshots" || tags[0].Source != core.TagByUser {
+		t.Fatalf("committed tag = %+v", tags)
+	}
+	if n, err := l.st.CountPending(ctx, core.StageOCR); err != nil || n != 0 {
+		t.Fatalf("refused queue = %d, %v", n, err)
+	}
+}
+
+type ocrQueueFunc func(context.Context) error
+
+func (f ocrQueueFunc) QueueOCR(ctx context.Context) error { return f(ctx) }
+func (f ocrQueueFunc) LibraryChanged(core.Changes)        {}
+
+func TestTaggingCancellationAfterCommitDoesNotBecomeAMutationFailure(t *testing.T) {
+	for name, bulk := range map[string]bool{"single": false, "batch": true} {
+		t.Run(name, func(t *testing.T) {
+			l, _ := screenshotLibrary(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			l.svc.ix = ocrQueueFunc(func(context.Context) error {
+				// The callback runs only after the annotation transaction returned.
+				tags, err := l.st.AssetTags(t.Context(), l.a, core.TagConfidenceDefault)
+				check(t, err)
+				if len(tags) != 1 {
+					t.Fatalf("follow-up preceded commit: %+v", tags)
+				}
+				cancel()
+				return ctx.Err()
+			})
+			if bulk {
+				rows, err := l.svc.TagAssets(ctx, []int64{l.a}, "Screenshots")
+				check(t, err)
+				if len(rows) != 1 || rows[0].Error != "" {
+					t.Fatalf("committed outcomes = %+v", rows)
+				}
+			} else if err := l.svc.TagAsset(ctx, l.a, "Screenshots"); err != nil {
+				t.Fatalf("committed tag reported as cancelled: %v", err)
+			}
+		})
+	}
+}
+
+func TestTaggingCancellationBeforeCommitRemainsAFailedMutation(t *testing.T) {
+	l, _ := screenshotLibrary(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	called := false
+	l.svc.ix = ocrQueueFunc(func(context.Context) error { called = true; return nil })
+	if err := l.svc.TagAsset(ctx, l.a, "Screenshots"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-commit cancellation = %v", err)
+	}
+	tags, err := l.st.AssetTags(t.Context(), l.a, core.TagConfidenceDefault)
+	check(t, err)
+	if len(tags) != 0 || called {
+		t.Fatalf("failed mutation tags=%+v, follow-up=%v", tags, called)
+	}
+}
+
+func TestBatchTaggingKeepsCommittedOutcomesWhenOCRQueueingFails(t *testing.T) {
+	l, _ := screenshotLibrary(t)
+	ctx := t.Context()
+	check(t, l.st.SetOCR(ctx, true))
+	refuseOCRQueue(t, l)
 	results, err := l.svc.TagAssets(ctx, []int64{l.a}, "Screenshots")
 	check(t, err)
 	if len(results) != 1 || results[0].Error != "" {

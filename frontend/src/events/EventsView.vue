@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { destination } from '../shared/navigation/contract'
 import UAlert from '@nuxt/ui/components/Alert.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { BlockKind, engine } from '../bridge'
 import type { Event as LibraryEvent } from '../bridge'
@@ -142,9 +144,6 @@ async function tryAgain() {
 useCommands([
   {
     id: 'events.refresh',
-    group: 'view',
-    title: () => t('events.refresh'),
-    icon: 'refresh',
     enabled: () => !busy.value && !loading.value,
     run: refresh,
   },
@@ -164,12 +163,12 @@ useCommands([
           color="neutral"
           :disabled="loading || busy"
           :loading="loading && loaded"
-          @click="refresh"
+          command="events.refresh"
         /><UButton
           v-if="chronological[0]"
           :color="gapOpen ? 'neutral' : 'primary'"
           :variant="gapOpen ? 'outline' : 'solid'"
-          :to="{ name: 'event', params: { id: chronological[0].id } }"
+          :to="destination({ name: 'event', params: { id: chronological[0].id } })"
           :trailing-icon="icons['arrow-right']"
           >{{ t('events.latest') }}</UButton
         ></PageHeader
@@ -206,7 +205,7 @@ useCommands([
         ></UAlert
       >
       <FeatureState v-if="error && !loaded" kind="error" :title="t('events.loadError')" :text="error"
-        ><UButton @click="refresh">{{ t('events.refresh') }}</UButton></FeatureState
+        ><CommandButton command="events.refresh">{{ t('events.refresh') }}</CommandButton></FeatureState
       >
       <section v-else-if="!loaded" aria-busy="true" :aria-label="t('events.loading')">
         <p role="status">{{ t('events.loading') }}</p>
@@ -245,8 +244,14 @@ useCommands([
         icon="events"
         :title="t(hadEvents ? 'events.cleared' : 'events.empty')"
         :text="t(hadEvents ? 'events.clearedHint' : 'events.emptyHint')"
-        ><UButton to="/settings?section=library" color="primary" variant="solid">{{ t('events.addFolder') }}</UButton
-        ><UButton to="/blocked" variant="ghost">{{ t('events.manageBlocked') }}</UButton></FeatureState
+        ><UButton
+          :to="destination({ name: 'settings', query: { section: 'library' } })"
+          color="primary"
+          variant="solid"
+          >{{ t('events.addFolder') }}</UButton
+        ><UButton :to="destination({ name: 'blocked' })" variant="ghost">{{
+          t('events.manageBlocked')
+        }}</UButton></FeatureState
       >
       <p v-if="list.length" class="regrouping">
         <Icon name="info" :size="14" />{{ t('events.followHint')

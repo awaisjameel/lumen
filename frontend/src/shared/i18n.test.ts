@@ -1,3 +1,4 @@
+import { staticCommands } from './commandContract'
 import { expect, it } from 'vitest'
 import { t } from './i18n'
 
@@ -27,7 +28,7 @@ it('formats PIN guidance from the mirrored engine bounds and cooldown', () => {
 // A message no screen shows is a drift waiting to happen: text that reads
 // right but is never seen, and is not kept in step with what is.
 it('shows every message somewhere, by its name or as part of a name built from a value', () => {
-  const sources = import.meta.glob<string>(['../**/*.{ts,vue}', '!../**/*.test.ts', '!./i18n.ts'], {
+  const sources = import.meta.glob<string>(['/src/**/*.{ts,vue}', '!/src/**/*.test.ts', '!/src/shared/i18n.ts'], {
     query: '?raw',
     import: 'default',
     eager: true,
@@ -38,7 +39,11 @@ it('shows every message somewhere, by its name or as part of a name built from a
   // Names built from a value: t(`compression.mode.${value}`) shows every compression.mode.* message.
   const built = [...code.matchAll(/`([\w.]+)\.\$\{/g)].map((m) => `${m[1] ?? ''}.`)
   const unshown = keys.filter(
-    (key) => !code.includes(`'${key}'`) && !code.includes(`"${key}"`) && !built.some((p) => key.startsWith(p)),
+    (key) =>
+      !staticCommands.some((command) => command.label === key) &&
+      !code.includes(`'${key}'`) &&
+      !code.includes(`"${key}"`) &&
+      !built.some((p) => key.startsWith(p)),
   )
   expect(keys.length).toBeGreaterThan(1000)
   expect(unshown).toEqual([])

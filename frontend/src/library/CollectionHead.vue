@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import UButton from '@nuxt/ui/components/Button.vue'
+import { destination } from '../shared/navigation/contract'
+import UButton from '../shared/navigation/NavButton.vue'
 import UInput from '@nuxt/ui/components/Input.vue'
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { AlbumKind, BlockKind, engine, Filter, TagKind, thumbUrl } from '../bridge'
+import RouterLink from '../shared/navigation/NavLink.vue'
+import { useNavigation } from '../shared/navigation/router'
+import { AlbumKind, BlockKind, engine, Filter, isCancelled, TagKind, thumbUrl } from '../bridge'
 import type { Event, NamedPlace, Place, View } from '../bridge'
 import { useAlbums } from '../albums/store'
 import CoverMosaic from '../shared/CoverMosaic.vue'
@@ -18,28 +20,35 @@ import { nameTooLong, trimName } from '../shared/names'
 import { notify } from '../shared/notify'
 import { icons } from '../design/icons'
 import AlbumPhotoPicker from './AlbumPhotoPicker.vue'
+import { coalescedLoad } from '../shared/listStore'
+import { useLibrary } from './store'
 
 const props = defineProps<{
   kind: 'thing' | 'place' | 'event' | 'album' | 'smart' | 'favourites'
   id: number
   name: string
   count: number
+  revision: number
   days: string[]
   group?: Event | Place | null
 }>()
 const emit = defineEmits<{ changed: [] }>()
-const router = useRouter()
+const router = useNavigation()
 const things = useThings()
 const albums = useAlbums()
+const library = useLibrary()
 const thing = computed(() => things.byId.get(props.id))
 const album = computed(() => albums.byId.get(props.id))
 const event = computed(() => (props.group && 'startAt' in props.group ? props.group : null))
 const place = computed(() => (props.group && 'country' in props.group ? props.group : null))
 const cover = computed(() => (props.kind === 'thing' ? thing.value : props.group))
 const renaming = ref(false)
+let writeDraftName: ((name: string) => Promise<void>) | undefined
 const draft = ref('')
 const error = ref('')
 const busy = ref(false)
+let owner = 0
+onBeforeUnmount(() => owner++)
 const picker = ref(false)
 const field = ref<{ inputRef: HTMLInputElement | null } | null>(null)
 const canRename = computed(() => !['favourites', 'place'].includes(props.kind))
@@ -57,21 +66,78 @@ const view = computed((): View | null => {
   return null
 })
 const places = shallowRef<NamedPlace[]>([])
+const placesError = ref('')
+const placesPending = ref(0)
 let placesAsked = 0
-async function loadPlaces() {
-  const asked = ++placesAsked
-  const scope = view.value
+let placesActive = true
+let placesAbort: AbortController | undefined
+let placesTimer: ReturnType<typeof setTimeout> | undefined
+// A privacy refresh also emits an ordinary library change. Let same-view
+// reads settle under their coalesced owner instead of aborting them again.
+// Identity, privacy and unmount still end the underlying read's context.
+function clearPlaces(cancel = false) {
+  placesAsked++
+  if (cancel) placesAbort?.abort()
+  places.value = []
+  placesError.value = ''
+}
+const readPlaces = coalescedLoad(
+  async () => {
+    const asked = placesAsked
+    const scope = view.value
+    const request = new AbortController()
+    placesAbort = request
+    try {
+      const top = placesActive && scope ? await engine.topPlaces(scope, request.signal) : []
+      return { asked, top }
+    } catch (e) {
+      if (!placesActive || asked !== placesAsked || isCancelled(e)) return { asked, top: [] }
+      placesError.value = errorText(e)
+      throw e
+    }
+  },
+  ({ asked, top }) => {
+    if (placesActive && asked === placesAsked) places.value = top
+  },
+)
+async function loadPlaces(cancel = false) {
+  clearTimeout(placesTimer)
+  placesTimer = undefined
+  clearPlaces(cancel)
+  placesPending.value++
   try {
-    const top = scope ? await engine.topPlaces(scope) : []
-    if (asked === placesAsked) places.value = top
-  } catch (e) {
-    if (asked === placesAsked) places.value = []
-    logError(e)
+    await readPlaces()
+  } finally {
+    placesPending.value--
   }
 }
-// The count changes whenever what the collection holds does.
-watch([view, () => props.count], () => void loadPlaces(), { immediate: true })
-onBeforeUnmount(onBlocksChanged(loadPlaces))
+// Album kind is presentation: clearing its list during privacy refresh can
+// switch smart/manual temporarily without changing the wire view's identity.
+watch(
+  () => JSON.stringify(view.value),
+  () => void loadPlaces(true).catch(logError),
+  { immediate: true },
+)
+// The library owns change admission. Reuse its revision rather than adding
+// another event subscription or guessing changes from count/day equality.
+watch(
+  [() => props.revision, () => props.count],
+  () => {
+    clearPlaces()
+    if (!view.value || placesTimer !== undefined) return
+    placesTimer = setTimeout(() => void loadPlaces().catch(logError), 3000)
+  },
+  { flush: 'sync' },
+)
+onBeforeUnmount(onBlocksChanged(() => loadPlaces(true)))
+// Explicit corrections and Undo reconcile immediately; background bursts
+// share the trailing read above. Both paths use the same coalesced owner.
+onBeforeUnmount(library.onReconcile(loadPlaces))
+onBeforeUnmount(() => {
+  placesActive = false
+  clearPlaces(true)
+  clearTimeout(placesTimer)
+})
 
 const meta = computed(() => {
   return [
@@ -82,7 +148,6 @@ const meta = computed(() => {
       : props.kind === 'favourites'
         ? t('collection.favouritesHint')
         : '',
-    ...places.value.map((p) => p.name),
   ]
     .filter(Boolean)
     .join(' · ')
@@ -93,14 +158,19 @@ const eyebrow = computed(() =>
     : t(`collection.kind.${props.kind}`),
 )
 watch(
-  () => [props.kind, props.id],
+  () => `${props.kind === 'smart' ? 'album' : props.kind}:${props.id}`,
   () => {
+    owner++
+    busy.value = false
     renaming.value = false
+    writeDraftName = undefined
     error.value = ''
     picker.value = false
   },
+  { flush: 'sync' },
 )
 async function rename() {
+  writeDraftName = nameWriter()
   draft.value = props.name
   error.value = ''
   renaming.value = true
@@ -108,19 +178,35 @@ async function rename() {
   field.value?.inputRef?.focus()
   field.value?.inputRef?.select()
 }
-async function refresh() {
-  if (props.kind === 'thing') await things.load()
-  if (props.kind === 'album' || props.kind === 'smart') await albums.load()
-  emit('changed')
+function refreshOwner() {
+  const kind = props.kind
+  const current = owner
+  return async () => {
+    if (kind === 'thing') await things.load()
+    if (kind === 'album' || kind === 'smart') await albums.load()
+    if (current === owner) emit('changed')
+    else await library.reconcileChanges()
+  }
+}
+function refresh() {
+  return refreshOwner()()
+}
+function showFailure(e: unknown, current: number) {
+  if (isCancelled(e)) return
+  if (current === owner) error.value = errorText(e)
+  else reportError(e)
 }
 function nameWriter() {
   const id = props.id
   const kind = props.kind
-  const rule = album.value ? { ...album.value.rule } : null
+  let version = album.value?.version
   return async (name: string) => {
     if (kind === 'thing') await engine.renameThing(id, name)
     else if (kind === 'event') await engine.setEventName(id, name)
-    else if (rule) await engine.updateAlbum(id, name, rule)
+    else {
+      if (!version) throw new Error(t('error.notFound'))
+      version = await engine.saveAlbum({ id, version, name, rule: null })
+    }
   }
 }
 async function saveName(reset = false) {
@@ -130,14 +216,20 @@ async function saveName(reset = false) {
     error.value = t('collection.nameInvalid')
     return
   }
-  const previous = props.name
-  const writeName = nameWriter()
+  // An automatic title has no override; storing its displayed name on Undo
+  // would stop it following later date or location corrections.
+  const previous = props.kind === 'event' ? (event.value?.nameOverride ?? '') : props.name
+  const writeName = writeDraftName ?? nameWriter()
+  const current = owner
+  const refreshSaved = refreshOwner()
   busy.value = true
   error.value = ''
   try {
     await writeName(name)
-    renaming.value = false
-    await refresh()
+    if (current === owner) {
+      renaming.value = false
+      writeDraftName = undefined
+    }
     notify({
       id: 'collection.name',
       kind: 'success',
@@ -146,15 +238,18 @@ async function saveName(reset = false) {
         {
           label: t('settings.undo'),
           run: () => {
-            void writeName(previous).then(refresh).catch(reportError)
+            void writeName(previous).then(refreshSaved).catch(reportError)
           },
         },
       ],
     })
+    // The write is committed. A failed read must retain its Undo and must
+    // not turn the saved name or pin into an apparently unsaved draft.
+    await refreshSaved().catch(reportError)
   } catch (e) {
-    error.value = errorText(e)
+    showFailure(e, current)
   } finally {
-    busy.value = false
+    if (current === owner) busy.value = false
   }
 }
 async function togglePin() {
@@ -165,11 +260,12 @@ async function togglePin() {
   const name = props.name
   const write = (value: boolean) =>
     kind === 'thing' ? engine.setThingPinned(id, value) : engine.setEventPinned(id, value)
+  const current = owner
+  const refreshSaved = refreshOwner()
   busy.value = true
   error.value = ''
   try {
     await write(!previous)
-    await refresh()
     notify({
       id: 'collection.pin',
       kind: 'success',
@@ -178,19 +274,22 @@ async function togglePin() {
         {
           label: t('settings.undo'),
           run: () => {
-            void write(previous).then(refresh).catch(reportError)
+            void write(previous).then(refreshSaved).catch(reportError)
           },
         },
       ],
     })
+    // The write is committed. A failed read must retain its Undo and must
+    // not turn the saved name or pin into an apparently unsaved draft.
+    await refreshSaved().catch(reportError)
   } catch (e) {
-    error.value = errorText(e)
+    showFailure(e, current)
   } finally {
-    busy.value = false
+    if (current === owner) busy.value = false
   }
 }
 function editRule() {
-  void router.push({ name: 'albums', query: { edit: props.id } })
+  void router.push(destination({ name: 'albums', query: { edit: props.id } }))
 }
 function addPhotos() {
   picker.value = true
@@ -211,6 +310,18 @@ defineExpose({ addPhotos, editRule })
 
 <template>
   <CollectionHero :kind="eyebrow" :name="name" :meta="meta">
+    <template #meta>
+      {{ meta }}
+      <template v-for="p in places" :key="p.id">
+        <span aria-hidden="true"> · </span>
+        <RouterLink
+          :to="destination({ name: 'place', params: { id: p.id } })"
+          class="underline decoration-dotted underline-offset-2 hover:text-highlighted"
+          data-collection-place
+          ><bdi>{{ p.name }}</bdi></RouterLink
+        >
+      </template>
+    </template>
     <template #cover>
       <CoverMosaic
         v-if="album && (kind === 'album' || kind === 'smart')"
@@ -271,7 +382,7 @@ defineExpose({ addPhotos, editRule })
         :icon="icons.map"
         color="primary"
         variant="solid"
-        :to="{ name: 'places', query: { place: id } }"
+        :to="destination({ name: 'places', query: { place: id } })"
         >{{ t('collection.openMap') }}</UButton
       >
       <UButton v-if="kind !== 'favourites'" color="neutral" variant="ghost" :disabled="busy" @click="blockCollection">{{
@@ -279,6 +390,12 @@ defineExpose({ addPhotos, editRule })
       }}</UButton>
     </template>
   </CollectionHero>
+  <p v-if="placesError" role="alert" class="error" data-collection-places-error>
+    {{ placesError }}
+    <UButton color="neutral" variant="outline" :loading="placesPending > 0" @click="loadPlaces().catch(logError)">{{
+      t('common.retry')
+    }}</UButton>
+  </p>
   <p v-if="error" role="alert" class="error">{{ error }}</p>
   <AlbumPhotoPicker v-if="picker" v-model:open="picker" :album-id="id" :name="name" @changed="refresh" />
 </template>

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { createPinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
@@ -11,10 +11,7 @@ import { commandById, runCommand } from '../shared/commands'
 import { mountInApp } from '../shared/testing'
 
 let mounted: VueWrapper | undefined
-const router = createRouter({
-  history: createMemoryHistory(),
-  routes: [{ path: '/settings', component: { render: () => null } }],
-})
+const router = createTestNavigation()
 
 const idle: Progress = {
   scanning: false,
@@ -148,6 +145,31 @@ it('says the library is up to date, with nothing behind it', () => {
   expect(status.text()).toContain('100 items')
   expect(status.find('[data-activity-details]').exists()).toBe(false)
   expect(status.find('[data-activity-progress]').exists()).toBe(false)
+})
+
+it('shows scheduling recovery without inventing queued files or hiding other work', async () => {
+  const status = show({ ocrQueueRetry: true })
+  expect(label(status)).toBe('Text reading will retry')
+  expect(status.find('[data-activity-progress]').exists()).toBe(false)
+  expect(status.find('.lumen-light-dot.idle').exists()).toBe(false)
+  await open(status)
+  expect(rows()).toEqual([])
+  expect(details().get('[data-ocr-retry]').text()).toContain('Your tags are saved.')
+  expect(details().get('[data-ocr-retry] a').attributes('href')).toBe('/settings?section=updates')
+
+  useLibrary().progress = { ...idle, ocrQueueRetry: true, thumbnail: 3, working: { ...idle.working, thumbnail: true } }
+  await flushPromises()
+  expect(label(status)).toBe('Making thumbnails')
+  expect(details().find('[data-ocr-retry]').exists()).toBe(true)
+  useLibrary().progress = { ...idle, ocr: 1, paused: true }
+  await flushPromises()
+  expect(label(status)).toBe('Paused')
+  expect(details().find('[data-ocr-retry]').exists()).toBe(false)
+  expect(rows()).toEqual([expect.stringMatching(/Reading text in your photos\s*1 left/)])
+  useLibrary().progress = { ...idle }
+  await flushPromises()
+  expect(label(status)).toBe('Up to date')
+  expect(status.find('.lumen-light-dot.idle').exists()).toBe(true)
 })
 
 it('says why files couldn’t be read, reading it only when the list opens', async () => {

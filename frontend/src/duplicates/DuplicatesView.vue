@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CommandButton from '../shared/CommandButton.vue'
+import { destination } from '../shared/navigation/contract'
 // Duplicates: exact file copies and similar-looking photos. Each group
 // pre-selects the copy to keep (the engine's suggestion, or the user's own
 // pick); its Review button lists what would happen and does nothing until the
@@ -8,7 +10,7 @@ import IconButton from '../shared/IconButton.vue'
 import UAlert from '@nuxt/ui/components/Alert.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
-import UButton from '@nuxt/ui/components/Button.vue'
+import UButton from '../shared/navigation/NavButton.vue'
 import ViewBar from '../shared/ViewBar.vue'
 import Segmented from '../shared/Segmented.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
@@ -18,7 +20,7 @@ import { DuplicateKind, engine, THUMB_LARGE, thumbUrl } from '../bridge'
 import type { DuplicateGroup, DuplicateItem } from '../bridge'
 import { icons } from '../design/icons'
 import { useLibrary } from '../library/store'
-import { runCommand, useCommands } from '../shared/commands'
+import { useCommands } from '../shared/commands'
 import FeatureState from '../shared/FeatureState.vue'
 import Page from '../shared/Page.vue'
 import PageHeader from '../shared/PageHeader.vue'
@@ -327,9 +329,6 @@ function openPreview(item: DuplicateItem, path = item.paths[0] ?? '') {
 useCommands([
   {
     id: 'duplicates.refresh',
-    group: 'view',
-    title: () => t('duplicates.refresh'),
-    icon: 'refresh',
     enabled: () => !busy.value && !acting.value,
     run: checkAgain,
   },
@@ -340,15 +339,15 @@ useCommands([
   <Page :scroll="false">
     <template #header>
       <PageHeader :title="t('nav.duplicates')" :subtitle="groups.length ? summary : undefined">
-        <UButton
+        <CommandButton
           v-if="!settled"
           :icon="icons.refresh"
           :loading="busy"
           :disabled="acting"
           color="neutral"
           variant="ghost"
-          @click="runCommand('duplicates.refresh')"
-          >{{ t('duplicates.refresh') }}</UButton
+          command="duplicates.refresh"
+          >{{ t('duplicates.refresh') }}</CommandButton
         >
         <UButton
           v-if="groups.length && !queue"
@@ -481,14 +480,16 @@ useCommands([
         icon="duplicates"
         :title="t(completed ? 'duplicates.done' : 'duplicates.empty')"
         :text="completed ? t('duplicates.queueStats', { reviewed, skipped }) : t('duplicates.emptyHint')"
-        ><UButton v-if="completed" to="/" color="primary">{{ t('duplicates.library') }}</UButton
-        ><UButton variant="outline" color="neutral" @click="checkAgain">{{
+        ><UButton v-if="completed" :to="destination({ name: 'library' })" color="primary">{{
+          t('duplicates.library')
+        }}</UButton
+        ><CommandButton variant="outline" color="neutral" command="duplicates.refresh">{{
           t('duplicates.refresh')
-        }}</UButton></FeatureState
+        }}</CommandButton></FeatureState
       >
-      <UButton v-if="duplicates.error || error" variant="outline" color="neutral" @click="checkAgain">{{
+      <CommandButton v-if="duplicates.error || error" variant="outline" color="neutral" command="duplicates.refresh">{{
         t('duplicates.refresh')
-      }}</UButton>
+      }}</CommandButton>
     </div>
     <UModal
       v-model:open="previewOpen"

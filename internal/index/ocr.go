@@ -3,8 +3,10 @@ package index
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"lumen/internal/ai"
 	"lumen/internal/core"
@@ -61,9 +63,14 @@ func (ix *Indexer) openOCR() *model[textReader] {
 // SetOCR turns reading the text in screenshots and documents on or off, and
 // wakes the stage to start or stop at once.
 func (ix *Indexer) SetOCR(ctx context.Context, on bool) error {
+	if err := ix.ocrQueue.acquire(ctx); err != nil {
+		return err
+	}
+	defer ix.ocrQueue.release()
 	if err := ix.store.SetOCR(ctx, on); err != nil {
 		return err
 	}
+	ix.setOCRQueueRetry(false)
 	nudge(ix.wakeOCR)
 	ix.stale.Store(true) // the progress counts it, or no longer does
 	return nil
@@ -92,14 +99,61 @@ func (ix *Indexer) fetchOCR(ctx context.Context, n int) ([]store.JobItem, error)
 
 // QueueOCR queues the photos that have just become screenshots or documents
 // (the user changed the tag confidence, or tagged a photo), and wakes the
-// stage. It does nothing while reading text is off.
+// stage. A failed attempt is retained by the indexer's owned reconciliation
+// loop, independently of this caller's lifetime. It does nothing while
+// reading text is off.
 func (ix *Indexer) QueueOCR(ctx context.Context) error {
+	err := ix.queueOCR(ctx)
+	if err != nil {
+		nudge(ix.ocrQueue.wakeCh())
+	}
+	return err
+}
+
+func (ix *Indexer) setOCRQueueRetry(retry bool) {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	if ix.ocrQueueRetry != retry {
+		ix.ocrQueueRetry = retry
+		ix.stale.Store(true)
+	}
+}
+
+// queueOCR performs one attempt, without scheduling another one itself.
+func (ix *Indexer) queueOCR(ctx context.Context) error {
+	if err := ix.ocrQueue.acquire(ctx); err != nil {
+		return err
+	}
+	defer ix.ocrQueue.release()
 	n, err := ix.store.QueueOCR(ctx)
+	ix.setOCRQueueRetry(err != nil)
 	if n > 0 {
 		nudge(ix.wakeOCR)
 		ix.stale.Store(true)
 	}
 	return err
+}
+
+// runOCRQueue reconciles persisted eligibility on every startup and retries
+// failures until they recover or the indexer stops. No annotations are
+// replayed, and the store applies the current opt-in and corrections on each
+// attempt. A healthy idle library performs no periodic scheduling query.
+func (ix *Indexer) runOCRQueue(ctx context.Context, delay time.Duration) {
+	for ctx.Err() == nil {
+		if err := ix.queueOCR(ctx); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			slog.Error("queue text reading; will retry", "err", err)
+			sleep(ctx, delay)
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ix.ocrQueue.wakeCh():
+		}
+	}
 }
 
 // doOCR reads the text of a batch of photos.

@@ -38,14 +38,15 @@ export const useRecentSearches = defineStore('recentSearches', () => {
   }
 
   async function clear(): Promise<void> {
-    const before = list.value
-    revision++
+    const mine = ++revision
     list.value = []
     try {
       await engine.clearRecentSearches()
     } catch (e) {
-      list.value = before
       reportError(e)
+      // Only the latest operation may recover the list. Read through the
+      // engine again: a cached snapshot may now name something blocked.
+      if (mine === revision) await load()
     }
   }
 

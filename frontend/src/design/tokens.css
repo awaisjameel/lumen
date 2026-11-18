@@ -107,6 +107,7 @@
   --lumen-z-panel: 20;
   --lumen-z-dock: 25;
   --lumen-z-viewer: 30;
+  --lumen-z-notification: 35;
   --lumen-z-portal: 40;
 
   /* The viewer is dark in either theme, as photo viewers are. */

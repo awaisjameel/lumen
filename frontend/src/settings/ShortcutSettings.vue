@@ -11,7 +11,7 @@ import { chordOf, keyCaps, keysOf, sameKeys } from '../shared/commands'
 import { t } from '../shared/i18n'
 import { usePreferences } from '../shared/preferences'
 import { assignmentConflict, canReassign, shortcutCatalogue, shortcutZones, zoneOf } from '../shared/shortcuts'
-import type { ShortcutEntry } from '../shared/shortcuts'
+import type { EditableShortcut } from '../shared/shortcuts'
 import { useRowFilter } from './rowFilter'
 
 const props = withDefaults(defineProps<{ query?: string }>(), { query: '' })
@@ -45,16 +45,16 @@ const recording = ref('')
 /** What the last change did, or why it was refused, and for which action. */
 const note = ref<{ id: string; text: string; failed: boolean } | null>(null)
 
-function say(entry: ShortcutEntry, text: string, failed = false) {
+function say(entry: EditableShortcut, text: string, failed = false) {
   note.value = { id: entry.id, text, failed }
 }
 
-function record(entry: ShortcutEntry) {
+function record(entry: EditableShortcut) {
   note.value = null
   recording.value = recording.value === entry.id ? '' : entry.id
 }
 
-async function assign(entry: ShortcutEntry, keys: string | undefined) {
+async function assign(entry: EditableShortcut, keys: string | undefined) {
   // The action's own keys are no reassignment: it simply has its own again.
   const own = keys !== undefined && entry.keys !== undefined && sameKeys(keys, entry.keys)
   const next = own ? undefined : keys
@@ -73,7 +73,7 @@ async function assign(entry: ShortcutEntry, keys: string | undefined) {
   )
 }
 
-function onKey(e: KeyboardEvent, entry: ShortcutEntry) {
+function onKey(e: KeyboardEvent, entry: EditableShortcut) {
   if (recording.value !== entry.id) return
   // While recording, the press is the answer: it must not also run a shortcut.
   e.stopPropagation()

@@ -146,9 +146,6 @@ export function useTrashActions(lib: Library) {
   const commands: Command[] = [
     {
       id: 'trash.restore',
-      group: 'media',
-      title: () => t('trash.restore'),
-      icon: 'restore',
       available: () => inTrash() && lib.selectedIDs.size > 0,
       enabled: () => !reason.value,
       reason: () => reason.value,
@@ -156,10 +153,6 @@ export function useTrashActions(lib: Library) {
     },
     {
       id: 'trash.recycle',
-      group: 'media',
-      title: () => t('trash.deleteFromDisk'),
-      icon: 'recycle',
-      danger: true,
       available: () => inTrash() && lib.selectedIDs.size > 0,
       enabled: () => !reason.value,
       reason: () => reason.value,

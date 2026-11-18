@@ -5,13 +5,13 @@
 // go in the default slot (shown on hover or focus for tiles), and badges
 // over the cover in #badge.
 import { computed } from 'vue'
-import { RouterLink } from 'vue-router'
-import type { RouteLocationRaw } from 'vue-router'
+import RouterLink from './navigation/NavLink.vue'
+import type { Destination } from './navigation/contract'
 import type { IconName } from '../design/icons'
 import Icon from './Icon.vue'
 
 const props = defineProps<{
-  to: RouteLocationRaw
+  to: Destination
   title: string
   /** A second line: where, when, what kind. */
   subtitle?: string

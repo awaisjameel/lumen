@@ -69,3 +69,16 @@ func TestTaggingASelectionMakesTheTagOnceAndReportsEachPhoto(t *testing.T) {
 		t.Fatalf("an empty tag name: %v", err)
 	}
 }
+
+func TestAlbumBatchOutcomesExposeOnlyCommittedMembershipChanges(t *testing.T) {
+	l := newShownLibrary(t, 2)
+	ctx := t.Context()
+	album, err := l.st.CreateAlbum(ctx, "Existing", core.AlbumManual, core.AlbumRule{}, []int64{1})
+	check(t, err)
+	s := NewLibraryService(l.st, nil, nil, nil)
+	rows, err := s.ApplyBatch(ctx, []int64{1, 2, 99}, core.BatchAlbum, album)
+	check(t, err)
+	if len(rows) != 3 || rows[0].Changed || !rows[1].Changed || rows[2].Changed || rows[2].Error == "" {
+		t.Fatalf("membership outcomes: %+v", rows)
+	}
+}

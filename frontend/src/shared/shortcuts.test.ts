@@ -1,3 +1,5 @@
+import shortcutFixtures from '../../../internal/core/testdata/shortcut-contract.json'
+import { staticCommand } from './commandContract'
 import { afterEach, expect, it } from 'vitest'
 import {
   chordOf,
@@ -7,6 +9,7 @@ import {
   sameKeys,
   setShortcutOverrides,
   zonesOverlap,
+  validShortcut,
 } from './commands'
 import type { Command } from './commands'
 import { t } from './i18n'
@@ -31,45 +34,21 @@ function press(init: KeyboardEventInit): KeyboardEvent {
   return new KeyboardEvent('keydown', { ...init, cancelable: true })
 }
 
-// Every command as the views declare it, read from their source: id, and the
-// group, keys and zone written beside it.
-function declared(): Map<string, { group?: string; keys?: string; altKeys?: string[]; zone?: string }> {
-  const sources = import.meta.glob<string>('../**/*.vue', { query: '?raw', import: 'default', eager: true })
-  const factories = import.meta.glob<string>('./compression.ts', { query: '?raw', import: 'default', eager: true })
-  const compressionGroup = /group: '([^']+)'/.exec(Object.values(factories).join('\n'))?.[1]
-  const out = new Map<string, { group?: string; keys?: string; altKeys?: string[]; zone?: string }>()
-  for (const source of Object.values(sources)) {
-    for (const call of source.matchAll(/compressionCommand\(\s*'([^']+)'[\s\S]*?\n\s*'(grid|viewer)',/g)) {
-      if (call[1]) out.set(call[1], { group: compressionGroup, zone: call[2] })
-    }
-    for (const block of source.split(/\n\s*\{\n\s*id: '/).slice(1)) {
-      const id = block.slice(0, block.indexOf("'"))
-      const body = block.slice(0, block.search(/\n\s*run[:(]|\n\s*run,/))
-      const field = (name: string) => new RegExp(`\\n\\s*${name}: '([^']+)'`).exec(body)?.[1]
-      const aliases = /\n\s*altKeys: \[([^\]]*)\]/.exec(body)?.[1]
-      const altKeys = aliases === undefined ? undefined : [...aliases.matchAll(/'([^']+)'/g)].flatMap((m) => m[1] ?? [])
-      out.set(id, { group: field('group'), keys: field('keys'), altKeys, zone: field('zone') })
-    }
-  }
-  return out
-}
-
-it('lists each command exactly as its view declares it', () => {
-  const commands = declared()
-  expect(commands.size).toBeGreaterThan(40)
+it('derives every curated shortcut from executable metadata', () => {
+  expect(shortcutCatalogue).toHaveLength(31)
   for (const e of shortcutCatalogue) {
-    const command = commands.get(e.id)
-    expect(command, `${e.id} is not a declared command`).toBeDefined()
-    expect({ id: e.id, group: e.group, keys: e.keys, altKeys: e.altKeys, zone: e.zone }).toEqual({
-      id: e.id,
-      ...command,
-    })
+    const command = staticCommand(e.id)
+    expect({
+      group: e.group,
+      title: e.title,
+      keys: e.keys,
+      altKeys: e.altKeys,
+      zone: e.zone,
+      locked: e.locked,
+    }).toEqual({ group: command.group, title: command.label, ...command.shortcut, zone: command.zone })
     expect(t(e.title)).not.toBe('')
   }
-  // No command with a shortcut of its own is missing from the settings.
-  const listed = new Set(shortcutCatalogue.map((e) => e.id))
-  for (const [id, command] of commands) if (command.keys) expect(listed, id).toContain(id)
-  expect(listed.size).toBe(shortcutCatalogue.length)
+  expect(new Set(shortcutCatalogue.map((e) => e.id)).size).toBe(shortcutCatalogue.length)
 })
 
 it('starts with no two actions on the same keys where both would hear them', () => {
@@ -84,11 +63,7 @@ it('runs a command by the keys the user gave it, and no longer by its own', () =
   let ran = 0
   const command: Command = {
     id: 'viewer.zoomIn',
-    group: 'view',
     title: () => 'Zoom in',
-    keys: '=',
-    altKeys: ['+'],
-    zone: 'viewer',
     run: () => ran++,
   }
   undo.push(registerCommands([command]))
@@ -122,7 +97,8 @@ it('spells a key press as the shortcut it is stored as', () => {
   expect(chordOf(press({ key: 'F4', altKey: true }))).toBeNull()
   // The space bar then runs what was given "Space".
   let ran = 0
-  undo.push(registerCommands([{ id: 'test.space', group: 'view', title: () => '', keys: 'Space', run: () => ran++ }]))
+  undo.push(registerCommands([{ id: 'app.shortcuts', title: () => '', run: () => ran++ }]))
+  setShortcutOverrides({ 'app.shortcuts': 'Space' })
   expect(dispatchKey(press({ key: ' ' }), 'global')).toBe(true)
   expect(ran).toBe(1)
 })
@@ -170,4 +146,24 @@ it('stops reassigning at the number of shortcuts the library keeps', () => {
   expect(canReassign(many, 'viewer.rotate')).toBe(false)
   expect(canReassign(many, 'test.command3')).toBe(true) // changing one already changed
   expect(canReassign({}, 'viewer.rotate')).toBe(true)
+})
+
+it('keeps known imported overrides active outside the editor and includes them in conflicts', () => {
+  setShortcutOverrides({ 'go.people': 'Ctrl+G', 'legacy.action': 'Ctrl+L', 'viewer.close': 'X' })
+  const run = () => undefined
+  undo.push(
+    registerCommands([
+      { id: 'go.people', run },
+      { id: 'viewer.close', run },
+    ]),
+  )
+  expect(dispatchKey(press({ key: 'g', ctrlKey: true }), 'global')).toBe(true)
+  expect(shortcutConflict(entry('viewer.rotate'), 'Ctrl+G')?.id).toBe('go.people')
+  expect(shortcutConflict(entry('viewer.rotate'), 'Ctrl+L')).toBeUndefined()
+  expect(dispatchKey(press({ key: 'x' }), 'viewer')).toBe(false)
+  expect(dispatchKey(press({ key: 'Escape' }), 'viewer')).toBe(true)
+})
+
+it('validates stored chords against the same fixtures as core preferences', () => {
+  for (const fixture of shortcutFixtures) expect(validShortcut(fixture.keys), fixture.keys).toBe(fixture.valid)
 })

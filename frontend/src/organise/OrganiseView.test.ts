@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../shared/navigation/testing'
 import { mountInApp } from '../shared/testing'
 import {
   DateSource,
@@ -178,13 +178,7 @@ afterEach(() => {
 })
 
 async function open() {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { render: () => null } },
-      { path: '/settings', component: { render: () => null } },
-    ],
-  })
+  const router = createTestNavigation()
   wrapper = mountInApp(OrganiseView, { plugins: [router] })
   await flushPromises()
   return wrapper

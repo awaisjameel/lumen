@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createTestNavigation } from '../../shared/navigation/testing'
 import { enableAutoUnmount, DOMWrapper, flushPromises } from '@vue/test-utils'
 import USelect from '@nuxt/ui/components/Select.vue'
 import { mountInApp, recordNotifications } from '../../shared/testing'
@@ -9,11 +9,8 @@ import StatesShowcase from './StatesShowcase.vue'
 enableAutoUnmount(afterEach)
 beforeEach(() => setActivePinia(createPinia()))
 async function show() {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/', component: { render: () => null } }],
-  })
-  await router.push('/')
+  const router = createTestNavigation()
+  await router.visit('/')
   return mountInApp(StatesShowcase, { plugins: [router] })
 }
 it('previews failure details and retry through the actual activity popover', async () => {

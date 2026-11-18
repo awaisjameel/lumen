@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, shallowRef } from 'vue'
 import {
   availableCommands,
+  itemCommand,
+  setShortcutOverrides,
   commandById,
   commands,
   dispatchKey,
@@ -22,6 +24,7 @@ function register(cmds: Command[]) {
 afterEach(() => {
   for (const u of undo) u()
   undo = []
+  setShortcutOverrides({})
   document.body.innerHTML = ''
 })
 
@@ -38,7 +41,6 @@ it('offers a command only while it is available, and runs it only while enabled'
   register([
     {
       id: 'media.favourite',
-      group: 'media',
       title: () => 'Favourite',
       available: () => selected,
       enabled: () => !busy,
@@ -62,20 +64,21 @@ it('offers a command only while it is available, and runs it only while enabled'
 
 it('removes a command when its owner goes, and lets a remounted owner replace its own', () => {
   const scope = effectScope()
-  scope.run(() => useCommands([{ id: 'view.details', group: 'view', title: () => 'Details', run: vi.fn() }]))
+  scope.run(() => useCommands([{ id: 'view.details', title: () => 'Details', run: vi.fn() }]))
   const replacement = vi.fn()
-  register([{ id: 'view.details', group: 'view', title: () => 'Details', run: replacement }])
+  register([{ id: 'view.details', title: () => 'Details', run: replacement }])
   expect(commands.value.filter((c) => c.id === 'view.details')).toHaveLength(1)
   scope.stop() // the first owner's disposal must not remove the newer registration
-  expect(commandById('view.details')?.run).toBe(replacement)
+  void runCommand('view.details')
+  expect(replacement).toHaveBeenCalledOnce()
 })
 
 it('runs a shortcut only in its own zone, and spends the event when it does', () => {
   const favourite = vi.fn()
   const palette = vi.fn()
   register([
-    { id: 'media.favourite', group: 'media', title: () => 'Favourite', keys: 'F', zone: 'grid', run: favourite },
-    { id: 'app.palette', group: 'app', title: () => 'Commands', keys: 'Ctrl+K', run: palette },
+    { id: 'media.favourite', title: () => 'Favourite', run: favourite },
+    { id: 'app.commandPalette', title: () => 'Commands', run: palette },
   ])
   const inGlobal = key({ key: 'f' })
   expect(dispatchKey(inGlobal, 'global')).toBe(false)
@@ -97,8 +100,8 @@ it('takes a second key for the same command, and a character typed with Shift', 
   const search = vi.fn()
   const help = vi.fn()
   register([
-    { id: 'search.focus', group: 'library', title: () => 'Search', keys: 'Ctrl+F', altKeys: ['/'], run: search },
-    { id: 'app.shortcuts', group: 'app', title: () => 'Shortcuts', keys: '?', run: help },
+    { id: 'search.focus', title: () => 'Search', run: search },
+    { id: 'app.shortcuts', title: () => 'Shortcuts', run: help },
   ])
   expect(dispatchKey(key({ key: '/' }), 'global')).toBe(true)
   expect(dispatchKey(key({ key: 'F', ctrlKey: true }), 'global')).toBe(true)
@@ -109,10 +112,11 @@ it('takes a second key for the same command, and a character typed with Shift', 
 
 it('does not run a shortcut whose command cannot run now', () => {
   const run = vi.fn()
-  register([{ id: 'media.trash', group: 'media', title: () => 'Trash', keys: 'Delete', enabled: () => false, run }])
+  register([{ id: 'viewer.trash', title: () => 'Trash', enabled: () => false, run }])
+  setShortcutOverrides({ 'viewer.trash': 'Delete' })
   const e = key({ key: 'Delete' })
-  expect(dispatchKey(e, 'global')).toBe(false)
-  expect(e.defaultPrevented).toBe(false)
+  expect(dispatchKey(e, 'viewer')).toBe(true)
+  expect(e.defaultPrevented).toBe(true)
   expect(run).not.toHaveBeenCalled()
 })
 
@@ -120,8 +124,8 @@ it('leaves single keys to a text field, but lets a modified chord through', () =
   const help = vi.fn()
   const palette = vi.fn()
   register([
-    { id: 'app.shortcuts', group: 'app', title: () => 'Shortcuts', keys: '?', run: help },
-    { id: 'app.palette', group: 'app', title: () => 'Commands', keys: 'Ctrl+K', run: palette },
+    { id: 'app.shortcuts', title: () => 'Shortcuts', run: help },
+    { id: 'app.commandPalette', title: () => 'Commands', run: palette },
   ])
   const input = document.createElement('input')
   document.body.append(input)
@@ -134,7 +138,7 @@ it('leaves single keys to a text field, but lets a modified chord through', () =
 
 it('suspends page shortcuts while an overlay owns the keyboard', () => {
   const palette = vi.fn()
-  register([{ id: 'app.palette', group: 'app', title: () => 'Commands', keys: 'Ctrl+K', run: palette }])
+  register([{ id: 'app.commandPalette', title: () => 'Commands', run: palette }])
   document.body.addEventListener('keydown', onGlobalKey)
   const dialog = document.createElement('div')
   dialog.setAttribute('role', 'dialog')
@@ -167,8 +171,7 @@ it('keeps collection menus and the palette on the current item and availability'
       (item) => item.id,
       (item) => [
         {
-          id: `item.${item.id}.edit`,
-          group: 'view',
+          id: itemCommand('album.edit', item.id),
           title: () => item.name,
           enabled: () => !busy.value,
           run: () => run(item.name),
@@ -189,9 +192,9 @@ it('keeps collection menus and the palette on the current item and availability'
     items.value = [{ id: 1, name: 'After' }]
     await nextTick()
     expect(menu(1)[0]?.label).toBe('After')
-    expect(commandById('item.1.edit')?.title()).toBe('After')
+    expect(commandById(itemCommand('album.edit', 1))?.title()).toBe('After')
     expect(menu(2)).toEqual([])
-    expect(commandById('item.2.edit')).toBeUndefined()
+    expect(commandById(itemCommand('album.edit', 2))).toBeUndefined()
     await original?.onSelect?.(new Event('select'))
     expect(run).toHaveBeenCalledExactlyOnceWith('After')
     items.value = []
@@ -201,5 +204,5 @@ it('keeps collection menus and the palette on the current item and availability'
   } finally {
     scope.stop()
   }
-  expect(commandById('item.1.edit')).toBeUndefined()
+  expect(commandById(itemCommand('album.edit', 1))).toBeUndefined()
 })

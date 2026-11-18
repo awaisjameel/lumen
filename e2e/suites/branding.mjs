@@ -132,6 +132,7 @@ try {
     await page.keyboard.press('Escape')
     await sleep(250)
   }
+  await s.settleErrors()
   check('no uncaught frontend errors', s.appErrors().length === 0, s.appErrors().join(' || '))
 } catch (e) {
   check('branding ran to the end', false, String(e))

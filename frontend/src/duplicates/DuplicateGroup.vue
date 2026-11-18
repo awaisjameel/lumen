@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { duplicateCommand, isDuplicateCommandKind } from '../shared/commandContract'
 import IconButton from '../shared/IconButton.vue'
 import UBadge from '@nuxt/ui/components/Badge.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
@@ -53,17 +54,22 @@ const outcome = computed(() =>
     n: exact.value ? (review.value?.recycle.length ?? 0) : (review.value?.trash.length ?? 0),
   }),
 )
-const commandId = `duplicates.review.${props.group.kind}.${props.group.items[0]?.id ?? 0}`
-useCommands([
-  {
-    id: commandId,
-    group: 'library',
-    title: () => t('duplicates.reviewNamed', { name: fileName(props.group.items[0]?.paths[0] ?? '') }),
-    icon: 'duplicates',
-    enabled: () => !props.busy && review.value !== null,
-    run: () => emit('review', props.group),
-  },
-])
+const commandId = computed(() => {
+  const id = props.group.items[0]?.id
+  return id && isDuplicateCommandKind(props.group.kind) ? duplicateCommand(props.group.kind, id) : undefined
+})
+useCommands(() =>
+  commandId.value
+    ? [
+        {
+          id: commandId.value,
+          title: () => t('duplicates.reviewNamed', { name: fileName(props.group.items[0]?.paths[0] ?? '') }),
+          enabled: () => !props.busy && review.value !== null,
+          run: () => emit('review', props.group),
+        },
+      ]
+    : [],
+)
 
 function chooseCopy(value: unknown) {
   const copy = copies.value.find((item) => item.value === value)
@@ -175,7 +181,7 @@ function chooseCopy(value: unknown) {
         color="neutral"
         variant="outline"
         data-review
-        @click="runCommand(commandId)"
+        @click="commandId && runCommand(commandId)"
         >{{ t('duplicates.review') }}</UButton
       >
     </div>

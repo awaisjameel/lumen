@@ -1,17 +1,18 @@
 <script setup lang="ts">
+import { destination } from '../shared/navigation/contract'
 // The search's refinements, as chips in the view bar: which kind of item
 // (All, Photos, Videos), Favourites on its own, and menus for when and where.
 // They live in the route's query beside the words, so a refined search is
 // a place the back button returns to; the library store reads them from the
 // scope and narrows the results without searching again.
 import UButton from '@nuxt/ui/components/Button.vue'
-import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
-import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
+import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
+import type { NavigationMenuItem as DropdownMenuItem } from '../shared/navigation/menu'
 import UInput from '@nuxt/ui/components/Input.vue'
 import UPopover from '@nuxt/ui/components/Popover.vue'
 import { computed, onMounted, shallowRef } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import type { LocationQueryRaw } from 'vue-router'
+import { useDestination, useNavigation } from '../shared/navigation/router'
+import type { SearchQuery } from '../shared/navigation/contract'
 import { engine, Filter } from '../bridge'
 import type { Place } from '../bridge'
 import Chip from '../shared/Chip.vue'
@@ -27,26 +28,46 @@ const props = defineProps<{
   videos: boolean
 }>()
 
-const route = useRoute()
-const router = useRouter()
+const route = useDestination('search')
+const router = useNavigation()
 
-const favourites = computed(() => route.query.favourites === 'true')
-const from = computed(() => String(route.query.from ?? ''))
-const to = computed(() => String(route.query.to ?? ''))
-const place = computed(() => Number(route.query.place) || 0)
+const favourites = computed(() => route.value?.query.favourites === true)
+const from = computed(() => route.value?.query.from ?? '')
+const to = computed(() => route.value?.query.to ?? '')
+const place = computed(() => route.value?.query.place ?? 0)
 const refined = computed(
   () => props.media !== Filter.FilterAll || favourites.value || !!from.value || !!to.value || !!place.value,
 )
 
-type Refinement = 'media' | 'favourites' | 'from' | 'to' | 'place'
+interface Refinement {
+  media?: Filter
+  favourites?: boolean
+  from?: string
+  to?: string
+  place?: number
+}
 /** Sets refinements in one navigation, so none overwrites another. */
-function refine(changes: Partial<Record<Refinement, string | number | boolean>>) {
-  const query: LocationQueryRaw = { ...route.query }
-  for (const [key, value] of Object.entries(changes)) query[key] = value ? String(value) : undefined
-  void router.replace({ query })
+function refine(changes: Refinement) {
+  if (!route.value) return
+  const query: SearchQuery = { ...route.value.query }
+  if ('media' in changes)
+    query.media =
+      changes.media === Filter.FilterPhotos ? 'photos' : changes.media === Filter.FilterVideos ? 'videos' : undefined
+  if ('favourites' in changes) query.favourites = changes.favourites ? true : undefined
+  if ('from' in changes) query.from = changes.from || undefined
+  if ('to' in changes) query.to = changes.to || undefined
+  if ('place' in changes) query.place = changes.place && changes.place > 0 ? changes.place : undefined
+  void router.replace(destination({ name: 'search', query }))
+}
+// Typed date entry can temporarily violate min/max even when the picker
+// disallows it. Keep the admitted route until the native control is valid.
+function refineDate(key: 'from' | 'to', event: Event) {
+  const input = event.target
+  if (!(input instanceof HTMLInputElement) || !input.reportValidity()) return
+  refine(key === 'from' ? { from: input.value } : { to: input.value })
 }
 function clear() {
-  void router.replace({ query: { q: route.query.q } })
+  void router.replace(destination({ name: 'search', query: { q: route.value?.query.q } }))
 }
 
 const kinds = computed(() => [
@@ -120,19 +141,11 @@ const placeItems = computed<DropdownMenuItem[]>(() => [
         <div class="when">
           <label
             >{{ t('search.resultsFrom')
-            }}<UInput
-              type="date"
-              :model-value="from"
-              :max="to || undefined"
-              @update:model-value="refine({ from: $event })"
+            }}<UInput type="date" :model-value="from" :max="to || undefined" @change="refineDate('from', $event)"
           /></label>
           <label
             >{{ t('search.resultsTo')
-            }}<UInput
-              type="date"
-              :model-value="to"
-              :min="from || undefined"
-              @update:model-value="refine({ to: $event })"
+            }}<UInput type="date" :model-value="to" :min="from || undefined" @change="refineDate('to', $event)"
           /></label>
           <UButton v-if="from || to" color="neutral" variant="ghost" @click="refine({ from: '', to: '' })">{{
             t('search.anyTime')
