@@ -92,6 +92,8 @@ jobs:
 
       # Compare built base and candidate frontends against the same synthetic
       # preview/favourite fixtures and candidate engine; no runtime download.
+      # The whole base tree is extracted because the frontend reads shared
+      # contract data from outside frontend/ (internal/core/testdata).
       - name: Build the PR base frontend for native comparison
         if: github.event_name == 'pull_request'
         shell: bash
@@ -100,7 +102,7 @@ jobs:
         run: |
           git fetch --no-tags origin "$BASE_SHA"
           mkdir -p e2e/.work/baseline
-          git archive "$BASE_SHA" frontend | tar -x -C e2e/.work/baseline
+          git archive "$BASE_SHA" | tar -x -C e2e/.work/baseline
           npm ci --prefix e2e/.work/baseline/frontend
           npm run build --prefix e2e/.work/baseline/frontend
           echo "LUMEN_BASELINE_FRONTEND=$(cygpath -m "$PWD/e2e/.work/baseline/frontend/dist")" >>"$GITHUB_ENV"
