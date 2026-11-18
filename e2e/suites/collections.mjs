@@ -69,6 +69,10 @@ try {
     "the toast's Undo restores the photo and its album membership",
     (await lib(page, 'TrashCount')) === before && (await lib(page, 'AssetAlbums', PHOTO)).includes(albumId),
   )
+  // Leave the album's page first, as deleting it in the UI does: a delete
+  // under an open view races its refresh, whose read of the deleted album
+  // fails and is reported, and that is not what this suite checks.
+  await go(page, '/albums', 600)
   await lib(page, 'DeleteAlbum', albumId)
 
   const rule = { kind: 'photo', favourites: true, from: '', to: '', tag: 0, person: 0 }
@@ -95,6 +99,7 @@ try {
     'a custom Thing created in the UI reaches the semantic search engine',
     (await search(page, 'Things')).some((t) => t.id === tag && t.name === 'End to end red circle'),
   )
+  await go(page, '/things', 600) // as for the album above
   await search(page, 'DeleteTag', tag)
 
   // About is in the Updates and about category.
