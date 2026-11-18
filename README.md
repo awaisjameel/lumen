@@ -100,8 +100,8 @@ share it, and can contain file paths: [check it first](docs/beta-testing.md#send
 
 ## Status
 
-Lumen is in beta. As checked on **24 October 2026**, the latest release is
-[v0.12.1](https://github.com/awaisjameel/lumen/releases/tag/v0.12.1), unsigned.
+Lumen is in beta. As checked on **18 November 2026**, the latest release is
+[v0.13.0](https://github.com/awaisjameel/lumen/releases/tag/v0.13.0), unsigned.
 [Release status](docs/release-status.md) separates what is published, what was
 accepted and when, and what is still to do before a signed release.
 
