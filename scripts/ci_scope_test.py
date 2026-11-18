@@ -67,13 +67,21 @@ class ChangeScope(unittest.TestCase):
     def test_go_outside_the_benchmark_skips_latency(self) -> None:
         self.assertEqual(scope(["main.go", "services/library.go", "internal/ai/ai.go"]), Scope(app=True, go=True))
 
-    def test_the_store_and_its_imports_run_everything(self) -> None:
-        for path in ("internal/store/albums.go", "internal/core/types.go", "go.sum"):
+    def test_the_store_and_its_imports_run_the_latency_report(self) -> None:
+        for path in ("internal/store/albums.go", "internal/core/types.go", "scripts/bench.sh"):
             with self.subTest(path=path):
-                self.assertEqual(classify(path), EVERYTHING)
+                self.assertEqual(classify(path), Scope(app=True, go=True, latency=True))
+
+    def test_dependency_manifests_run_the_vulnerability_checks(self) -> None:
+        self.assertEqual(classify("go.sum"), EVERYTHING)
+        self.assertEqual(classify("frontend/package-lock.json"), Scope(app=True, go=True, vuln=True))
+        self.assertEqual(classify("e2e/package-lock.json"), Scope(app=True, vuln=True))
+
+    def test_other_changes_leave_the_live_advisory_database_alone(self) -> None:
+        self.assertFalse(scope(["internal/store/albums.go", "frontend/src/App.vue", "main.go"]).vuln)
 
     def test_a_ci_change_runs_everything(self) -> None:
-        for path in (".github/workflows/ci.yml", ".github/actions/setup/action.yml", "scripts/ci_scope.py"):
+        for path in (".github/workflows/ci.yml", ".github/actions/setup/action.yml", "scripts/lint.sh"):
             with self.subTest(path=path):
                 self.assertEqual(classify(path), EVERYTHING)
 
@@ -85,7 +93,7 @@ class ChangeScope(unittest.TestCase):
         self.assertEqual(scope([]), Scope())
 
     def test_output_is_one_line_per_scope(self) -> None:
-        self.assertEqual(lines(Scope(docs=True)), ["app=false", "go=false", "latency=false", "docs=true"])
+        self.assertEqual(lines(Scope(docs=True)), ["app=false", "go=false", "latency=false", "vuln=false", "docs=true"])
 
 
 class RulesMatchTheCode(unittest.TestCase):

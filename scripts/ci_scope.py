@@ -6,8 +6,11 @@
 Prints one `name=true|false` line per scope, the format of $GITHUB_OUTPUT:
 
 - app: the Windows build, static checks, native suites and installer;
-- go: the Go race tests;
+- go: the Go race tests, and the Go linters in the static checks;
 - latency: the large-library latency report;
+- vuln: the vulnerability checks (govulncheck, npm audit), which read a live
+  advisory database, so they run when dependencies change and on every other
+  event (the weekly run reports advisories against unchanged dependencies);
 - docs: the documentation checks alone, for a change that touches nothing else
   (when app runs, scripts/lint.sh already checks the documentation).
 
@@ -19,7 +22,7 @@ only for what its benchmark compiles, a list the test checks against `go list`.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 
 # Documentation content: read by scripts/check-docs.sh and by nothing that is
 # built or tested. The checkers themselves are code, linted by the build job.
@@ -68,9 +71,22 @@ LATENCY_PREFIXES = (
 )
 LATENCY_FILES = frozenset({"go.mod", "go.sum", "scripts/bench.sh", "scripts/env.sh", "scripts/deps.sh"})
 
+# The manifests the vulnerability checks read, and the script pinning govulncheck.
+DEPENDENCY_FILES = frozenset(
+    {
+        "go.mod",
+        "go.sum",
+        "frontend/package.json",
+        "frontend/package-lock.json",
+        "e2e/package.json",
+        "e2e/package-lock.json",
+        "scripts/deps.sh",
+    }
+)
+
 # CI's own definition: a change here runs everything, to prove itself.
 CI_PREFIXES = (".github/",)
-CI_FILES = frozenset({"scripts/ci_scope.py", "scripts/ci_scope_test.py"})
+CI_FILES = frozenset({"scripts/ci_scope.py", "scripts/ci_scope_test.py", "scripts/lint.sh"})
 
 
 @dataclass(frozen=True)
@@ -78,33 +94,30 @@ class Scope:
     app: bool = False
     go: bool = False
     latency: bool = False
+    vuln: bool = False
     docs: bool = False
 
     def __or__(self, other: Scope) -> Scope:
-        return Scope(
-            app=self.app or other.app,
-            go=self.go or other.go,
-            latency=self.latency or other.latency,
-            docs=self.docs or other.docs,
-        )
+        return Scope(**{f.name: getattr(self, f.name) or getattr(other, f.name) for f in fields(self)})
 
 
-EVERYTHING = Scope(app=True, go=True, latency=True)
+EVERYTHING = Scope(app=True, go=True, latency=True, vuln=True)
 
 
 def classify(path: str) -> Scope:
     """Return the jobs one changed path needs."""
     if path in CI_FILES or path.startswith(CI_PREFIXES):
         return EVERYTHING
+    vuln = Scope(vuln=path in DEPENDENCY_FILES)
     if path.startswith(DOCS_PREFIXES) or path.endswith(DOCS_SUFFIXES):
         return Scope(docs=True)
     if path.startswith(GO_READS_FRONTEND):
-        return Scope(app=True, go=True)
+        return Scope(app=True, go=True) | vuln
     if path in APP_ONLY_FILES or path.startswith(APP_ONLY_PREFIXES) or path.endswith(APP_ONLY_SUFFIXES):
-        return Scope(app=True)
+        return Scope(app=True) | vuln
     if path in LATENCY_FILES or path.startswith(LATENCY_PREFIXES):
-        return EVERYTHING
-    return Scope(app=True, go=True)
+        return Scope(app=True, go=True, latency=True) | vuln
+    return Scope(app=True, go=True) | vuln
 
 
 def scope(paths: list[str]) -> Scope:
@@ -112,13 +125,11 @@ def scope(paths: list[str]) -> Scope:
     result = Scope()
     for path in paths:
         result |= classify(path)
-    if result.app:
-        result = Scope(app=True, go=result.go, latency=result.latency)
-    return result
+    return replace(result, docs=False) if result.app else result
 
 
 def lines(result: Scope) -> list[str]:
-    return [f"{name}={str(getattr(result, name)).lower()}" for name in ("app", "go", "latency", "docs")]
+    return [f"{f.name}={str(getattr(result, f.name)).lower()}" for f in fields(result)]
 
 
 def main(argv: list[str]) -> int:

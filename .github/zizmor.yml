@@ -1,0 +1,9 @@
+# zizmor (scripts/lint.sh, "workflows: zizmor"). Findings in composite
+# actions can only be ignored inline, with their reason, beside the step.
+rules:
+  # It asks for `uses: $/...` in place of `uses: ./...`, so a step cannot run
+  # a local action that an earlier step replaced in the workspace. No job here
+  # writes into .github/ before using one, and the pinned actionlint predates
+  # the new syntax and rejects it.
+  self-repository:
+    disable: true

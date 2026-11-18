@@ -12,7 +12,7 @@
 #   deps/runtime/   exactly what ships beside Lumen.exe (DLLs, ffmpeg/, models/)
 #   deps/licenses/  the licence texts of what ships, for scripts/notices.py
 #   deps/installer/ what only the installer carries: the WebView2 runtime
-#   deps/tools/     development tools: golangci-lint, deadcode, govulncheck, ruff, shellcheck, NSIS
+#   deps/tools/     development tools: golangci-lint, deadcode, govulncheck, ruff, shellcheck, actionlint, zizmor, NSIS
 #
 # The last step copies deps/runtime into bin/ (hard links, so it's instant).
 set -euo pipefail
@@ -210,6 +210,16 @@ get https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-
   shellcheck-v0.11.0.zip 8a4e35ab0b331c85d73567b12f2a444df187f483e5079ceffa6bda1faa2e740e
 "$T/shellcheck.exe" --version 2>/dev/null | grep -q '^version: 0.11.0$' ||
   unzip -q -o -j "$D/cache/shellcheck-v0.11.0.zip" shellcheck.exe -d "$T"
+# The GitHub workflows' linters: actionlint (expressions, job graphs, run:
+# blocks through shellcheck) and zizmor (security).
+get https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_windows_amd64.zip \
+  actionlint-1.7.12.zip 6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9
+"$T/actionlint.exe" --version 2>/dev/null | grep -q '^1\.7\.12$' ||
+  unzip -q -o -j "$D/cache/actionlint-1.7.12.zip" actionlint.exe -d "$T"
+get https://github.com/zizmorcore/zizmor/releases/download/v1.32.0/zizmor-x86_64-pc-windows-msvc.zip \
+  zizmor-1.32.0.zip d284a16e09d9df4ce2c000357e7b59bd531be093bea5718a1ce225b449b59d49
+"$T/zizmor.exe" --version 2>/dev/null | grep -q '^zizmor 1\.32\.0$' ||
+  unzip -q -o -j "$D/cache/zizmor-1.32.0.zip" zizmor.exe -d "$T"
 # goinstall BIN MODULE@VERSION: build a Go tool into deps/tools unless that
 # version is already there.
 goinstall() {
