@@ -1,0 +1,51 @@
+name: Delete caches
+description: >-
+  Deletes the repository's Actions caches saved on one ref whose keys start
+  with a prefix, except the one to keep. On main it removes the copies a new
+  save replaces; for a closed pull request it removes everything the pull
+  request saved, which nothing can restore once it is merged or closed.
+  The job needs the actions: write permission. A deletion that fails, for
+  want of that permission or because another job got there first, is a
+  warning: a cache left behind costs quota, not correctness.
+
+inputs:
+  ref:
+    description: The ref whose caches to delete, such as refs/heads/main or refs/pull/1/merge.
+    required: true
+  prefix:
+    description: Delete only keys starting with this; empty for every key on the ref.
+    default: ""
+  keep:
+    description: A key to leave in place, usually the one just saved.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Delete superseded caches
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        REF: ${{ inputs.ref }}
+        PREFIX: ${{ inputs.prefix }}
+        KEEP: ${{ inputs.keep }}
+      run: |
+        # The API filters by key prefix itself; an empty key lists them all.
+        if ! listed=$(gh api --paginate --method GET "repos/$REPO/actions/caches" \
+          -f ref="$REF" -f key="$PREFIX" -f per_page=100 \
+          --jq '.actions_caches[] | "\(.id) \(.key)"'); then
+          echo "::warning::could not list the caches on $REF"
+          exit 0
+        fi
+        deleted=0
+        while read -r id key; do
+          [ -n "$id" ] && [ "$key" != "$KEEP" ] || continue
+          if gh api --method DELETE "repos/$REPO/actions/caches/$id" --silent; then
+            echo "deleted $key"
+            deleted=$((deleted + 1))
+          else
+            echo "::warning::could not delete the cache $key"
+          fi
+        done <<<"$listed"
+        echo "deleted $deleted cache(s) on $REF${PREFIX:+ starting $PREFIX}"
