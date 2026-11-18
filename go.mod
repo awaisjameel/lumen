@@ -6,10 +6,10 @@ require (
 	github.com/evanoberholster/imagemeta v1.1.0
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
-	github.com/sigstore/sigstore v1.11.1
+	github.com/sigstore/sigstore v1.11.3
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
-	github.com/wailsapp/wails/v3 v3.0.0-beta.30
-	github.com/yalue/onnxruntime_go v1.27.0
+	github.com/wailsapp/wails/v3 v3.2.0-nightly.20261103
+	github.com/yalue/onnxruntime_go v1.38.0
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/image v0.47.0
 	golang.org/x/sys v0.49.0
@@ -17,15 +17,13 @@ require (
 )
 
 require (
-	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
+	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.4 // indirect
 	github.com/google/go-containerregistry v0.22.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.1 // indirect
-	github.com/mattn/go-colorable v0.1.16 // indirect
-	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/philhofer/fwd v1.2.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
