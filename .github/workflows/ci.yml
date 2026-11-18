@@ -1,4 +1,4 @@
-# The checks every change passes: scripts/lint.sh (static checks, frontend
+# The checks a change passes: scripts/lint.sh (static checks, frontend
 # tests, documentation links), the Go race tests, a production build that
 # must leave the bindings and go.mod as committed, and the large-library
 # latency gate. Hosted runners are slower than the machine the latency
@@ -6,7 +6,11 @@
 # scripts/lint.sh on a developer's machine stays the binding gate.
 # The jobs run side by side, the race tests split three ways because the
 # store's tests alone take as long as every other package together.
-# The release workflow calls this one, so a release passes the same checks.
+# On a pull request, scripts/ci_scope.py picks the jobs its changed files
+# need: documentation alone gets only the documentation checks, a frontend
+# change skips the Go tests, and only what the benchmark compiles runs the
+# latency gate. Every other event runs everything, and the release workflow
+# calls this one, so a release passes every check.
 name: CI
 
 # Every change is checked on its pull request, so a merge does not repeat the
@@ -56,8 +60,72 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: bash scripts/check-commit-msg.sh --range "$BASE..$HEAD"
 
+  scope:
+    name: Change scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      app: ${{ steps.scope.outputs.app }}
+      go: ${{ steps.scope.outputs.go }}
+      latency: ${{ steps.scope.outputs.latency }}
+      docs: ${{ steps.scope.outputs.docs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15.1"
+      - name: Decide which jobs the change needs
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            # Both sides of a rename, so a moved file counts where it was too.
+            git diff --name-only --no-renames "$BASE...$HEAD" >"$RUNNER_TEMP/changed.txt"
+            python scripts/ci_scope.py <"$RUNNER_TEMP/changed.txt" >"$RUNNER_TEMP/scope.txt"
+            note="From $(wc -l <"$RUNNER_TEMP/changed.txt") changed paths."
+          else
+            python scripts/ci_scope.py --all >"$RUNNER_TEMP/scope.txt"
+            note="Not a pull request: every job runs."
+          fi
+          cat "$RUNNER_TEMP/scope.txt" >>"$GITHUB_OUTPUT"
+          {
+            echo "## Change scope ($EVENT)"
+            echo
+            echo "$note"
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/scope.txt"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  # A change to documentation alone. Otherwise the build job's lint.sh checks
+  # the documentation along with everything else.
+  docs:
+    name: Documentation
+    needs: scope
+    if: needs.scope.outputs.docs == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15.1"
+      - name: Links, anchors and screenshot integrity
+        run: bash scripts/check-docs.sh
+
   checks:
     name: Build and static checks
+    needs: scope
+    if: needs.scope.outputs.app == 'true'
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -177,6 +245,8 @@ jobs:
 
   tests:
     name: Go tests, ${{ matrix.shard }}
+    needs: scope
+    if: needs.scope.outputs.go == 'true'
     runs-on: windows-2025
     timeout-minutes: 60
     strategy:
@@ -233,6 +303,8 @@ jobs:
 
   latency:
     name: Large-library latency
+    needs: scope
+    if: needs.scope.outputs.latency == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
     steps:

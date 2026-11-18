@@ -61,6 +61,7 @@ step "native harness: error attribution and exit regressions" node --test e2e/li
 step "python: ruff" bash -c "'$T/ruff' check --quiet && '$T/ruff' format --check --quiet"
 step "installer: payload cleanup regressions" python scripts/installer_payload_test.py
 step "dependencies: warm extraction regressions" python scripts/dependency_cache_test.py
+step "ci: change scope rules match the code" python scripts/ci_scope_test.py
 step "runtime: every DLL import shipped or part of Windows" python scripts/runtime_imports.py
 step "docs: links, anchors and screenshot integrity" bash scripts/check-docs.sh
 step "shell: shellcheck" "$T/shellcheck" -x scripts/*.sh .githooks/*
