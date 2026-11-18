@@ -26,6 +26,11 @@ jobs:
   checks:
     name: Checks
     uses: ./.github/workflows/ci.yml
+    # A called workflow's jobs get no more than this; CI's Windows jobs ask
+    # for actions: write to replace main's caches, which on a tag they skip.
+    permissions:
+      contents: read
+      actions: write
 
   release:
     name: Draft release

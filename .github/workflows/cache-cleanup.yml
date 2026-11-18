@@ -1,0 +1,28 @@
+# Deletes a pull request's Actions caches once it is merged or closed.
+# Nothing restores them afterwards (caches are visible only to their own
+# ref and its base), yet they would count against the repository's quota for
+# seven days, crowding out main's, which every later pull request restores.
+name: Cache cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  cleanup:
+    name: Delete the pull request's caches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # check out the local action
+      actions: write # delete caches
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      - uses: ./.github/actions/delete-caches
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge

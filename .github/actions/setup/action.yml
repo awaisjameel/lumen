@@ -9,8 +9,16 @@ inputs:
   go-cache:
     description: >-
       The name of this job's Go build cache. Jobs that compile differently
-      (race tests, a production build, linting) keep separate caches.
-    required: true
+      (race tests, a production build, linting) keep separate caches. Empty
+      for a job that compiles no Go: it then restores no Go cache and
+      downloads no modules.
+    default: ""
+  go-cache-save:
+    description: >-
+      Whether this job may save its Go cache ("true" or "false"). A job that
+      shares another's cache and compiles the same packages leaves the saving
+      to that one, so a run never tries to save one key twice.
+    default: "true"
   wails:
     description: Whether to install the Wails CLI ("true" or "false").
     default: "false"
@@ -20,6 +28,9 @@ inputs:
 # a successful job, so one failing test would otherwise send every later run
 # back to a cold 1.7 GB dependency build. The Go caches fill during the job,
 # so the job saves them at its end with ./.github/actions/save-go-cache.
+# Whatever main saves replaces what main saved before, through
+# ./.github/actions/delete-caches: the repository's cache quota then holds
+# one copy of each, and GitHub never evicts the dependency cache to make room.
 runs:
   using: composite
   steps:
@@ -48,7 +59,7 @@ runs:
 
     - name: Install the supported npm release
       shell: bash
-      run: npm install --global npm@12.2.1
+      run: npm install --global npm@12.2.1 # zizmor: ignore[adhoc-packages] the exact release docs/development.md pins; npm has no lockfile for itself
 
     - id: python
       uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -77,9 +88,15 @@ runs:
       with:
         path: ${{ runner.temp }}/llvm-mingw
         key: ${{ steps.llvm.outputs.cache-primary-key }}
+    - if: steps.llvm.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: ./.github/actions/delete-caches
+      with:
+        ref: refs/heads/main
+        prefix: llvm-mingw-
+        keep: ${{ steps.llvm.outputs.cache-primary-key }}
     - name: Put the toolchain on PATH
       shell: bash
-      run: |
+      run: | # zizmor: ignore[github-env] constant values, and no attacker-triggered workflow uses this action
         cygpath -w "$(cygpath -u "$RUNNER_TEMP")/llvm-mingw/bin" >>"$GITHUB_PATH"
         echo 'C:\Program Files\7-Zip' >>"$GITHUB_PATH"
         { echo CGO_ENABLED=1; echo CC=clang; echo CXX=clang++; } >>"$GITHUB_ENV"
@@ -90,9 +107,10 @@ runs:
     # main save a fresh one, and other runs save only when nothing was found,
     # which keeps pull requests from crowding the repository's cache quota.
     - name: Locate the Go caches
+      if: inputs.go-cache != ''
       id: go-paths
       shell: bash
-      run: |
+      run: | # zizmor: ignore[github-env] a path under the runner's temporary folder, and no attacker-triggered workflow uses this action
         lint=$(cygpath -w "$(cygpath -u "$RUNNER_TEMP")/golangci-lint")
         echo "GOLANGCI_LINT_CACHE=$lint" >>"$GITHUB_ENV"
         {
@@ -102,6 +120,7 @@ runs:
           echo EOF
         } >>"$GITHUB_OUTPUT"
     - id: go-cache
+      if: inputs.go-cache != ''
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.go-paths.outputs.paths }}
@@ -110,13 +129,16 @@ runs:
           go-${{ runner.os }}-${{ inputs.go-cache }}-go${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-
           go-${{ runner.os }}-${{ inputs.go-cache }}-go${{ steps.go.outputs.go-version }}-
     - name: Note how to save the Go caches
+      if: inputs.go-cache != ''
       shell: bash
       env:
         PATHS: ${{ steps.go-paths.outputs.paths }}
         KEY: ${{ steps.go-cache.outputs.cache-primary-key }}
-        SAVE: ${{ github.ref == 'refs/heads/main' || steps.go-cache.outputs.cache-matched-key == '' }}
-      run: |
+        PREFIX: go-${{ runner.os }}-${{ inputs.go-cache }}-
+        SAVE: ${{ inputs.go-cache-save == 'true' && (github.ref == 'refs/heads/main' || steps.go-cache.outputs.cache-matched-key == '') }}
+      run: | # zizmor: ignore[github-env] cache keys and paths built here, and no attacker-triggered workflow uses this action
         {
+          echo "LUMEN_GO_CACHE_PREFIX=$PREFIX"
           echo "LUMEN_GO_CACHE_KEY=$KEY"
           echo "LUMEN_GO_CACHE_SAVE=$SAVE"
           echo 'LUMEN_GO_CACHE_PATHS<<EOF'
@@ -130,6 +152,7 @@ runs:
     # module proxy sometimes drops a download mid-stream, so retry; with a
     # restored cache this is quick.
     - name: Download the Go modules
+      if: inputs.go-cache != ''
       shell: bash
       run: |
         for attempt in 1 2 3; do
@@ -171,6 +194,12 @@ runs:
       with:
         path: ${{ steps.wails.outputs.bin }}
         key: ${{ steps.wails-cache.outputs.cache-primary-key }}
+    - if: inputs.wails == 'true' && steps.wails-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: ./.github/actions/delete-caches
+      with:
+        ref: refs/heads/main
+        prefix: wails3-${{ runner.os }}-
+        keep: ${{ steps.wails-cache.outputs.cache-primary-key }}
 
     # Everything scripts/deps.sh fetches is pinned by hash, so the key is the
     # scripts and sources that decide what it builds. The downloads also
@@ -207,6 +236,12 @@ runs:
           !deps/oxipng/cargo-*
           !deps/oxipng/rust-std-*
         key: ${{ steps.deps.outputs.cache-primary-key }}
+    - if: steps.deps.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: ./.github/actions/delete-caches
+      with:
+        ref: refs/heads/main
+        prefix: deps-${{ runner.os }}-
+        keep: ${{ steps.deps.outputs.cache-primary-key }}
 
     - name: Install the frontend's packages
       shell: bash

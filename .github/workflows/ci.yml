@@ -1,18 +1,25 @@
-# The checks every change passes: scripts/lint.sh (static checks, frontend
-# tests, documentation links), the Go race tests, a production build that
-# must leave the bindings and go.mod as committed, and the large-library
-# latency gate. Hosted runners are slower than the machine the latency
-# budgets were set on, so here that gate reports without failing;
-# scripts/lint.sh on a developer's machine stays the binding gate.
-# The jobs run side by side, the race tests split three ways because the
-# store's tests alone take as long as every other package together.
-# The release workflow calls this one, so a release passes the same checks.
+# The checks a change passes: a production build that must leave the
+# bindings and go.mod as committed, the native end-to-end suites against that
+# build, the installer, scripts/lint.sh (static checks, frontend tests,
+# workflow linters, documentation links, known vulnerabilities), the Go race
+# tests and the large-library latency gate. Hosted runners are slower than
+# the machine the latency budgets were set on, so here that gate reports
+# without failing; scripts/lint.sh on a developer's machine stays the binding
+# gate.
+#
+# On a pull request, scripts/ci_scope.py picks the jobs its changed files
+# need: documentation alone gets only the documentation checks, a frontend
+# change skips the Go tests and linters, only what the benchmark compiles runs
+# the latency gate, and only a dependency change reads the live advisory
+# database. Every other event runs everything: a merge that changes what the
+# caches hold (so main's caches, which later pull requests restore, stay
+# current), the weekly run (which keeps those caches from expiring after
+# seven idle days and reports new advisories against unchanged
+# dependencies), a manual run, and the release workflow, which calls this one
+# so a release passes every check. "CI result" is the one check to require:
+# it fails if any job the change needed failed or was cancelled.
 name: CI
 
-# Every change is checked on its pull request, so a merge does not repeat the
-# work, with one exception: a merge that changes what the caches hold runs
-# again to save them on main. A pull request's caches are visible only to
-# that pull request, so without main's, each new one would start cold.
 on:
   pull_request:
   push:
@@ -29,6 +36,8 @@ on:
       - native/lumen-raw/**
       - .github/actions/**
       - .github/workflows/ci.yml
+  schedule:
+    - cron: "17 3 * * 1" # Mondays, 03:17 UTC
   workflow_dispatch:
   workflow_call:
 
@@ -40,6 +49,52 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  scope:
+    name: Change scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      app: ${{ steps.scope.outputs.app }}
+      go: ${{ steps.scope.outputs.go }}
+      latency: ${{ steps.scope.outputs.latency }}
+      vuln: ${{ steps.scope.outputs.vuln }}
+      docs: ${{ steps.scope.outputs.docs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history, so the pull request's base and head are both here.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15.1"
+      - name: Decide which jobs the change needs
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            # Both sides of a rename, so a moved file counts where it was too.
+            git diff --name-only --no-renames "$BASE...$HEAD" >"$RUNNER_TEMP/changed.txt"
+            python scripts/ci_scope.py <"$RUNNER_TEMP/changed.txt" >"$RUNNER_TEMP/scope.txt"
+            note="From $(wc -l <"$RUNNER_TEMP/changed.txt") changed paths."
+          else
+            python scripts/ci_scope.py --all >"$RUNNER_TEMP/scope.txt"
+            note="Not a pull request: every job runs."
+          fi
+          cat "$RUNNER_TEMP/scope.txt" >>"$GITHUB_OUTPUT"
+          {
+            echo "## Change scope ($EVENT)"
+            echo
+            echo "$note"
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/scope.txt"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
   commits:
     name: Commit messages
     if: github.event_name == 'pull_request'
@@ -56,10 +111,35 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: bash scripts/check-commit-msg.sh --range "$BASE..$HEAD"
 
-  checks:
-    name: Build and static checks
+  # A change to documentation alone. Otherwise the static checks job's
+  # lint.sh checks the documentation along with everything else.
+  docs:
+    name: Documentation
+    needs: scope
+    if: needs.scope.outputs.docs == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15.1"
+      - name: Links, anchors and screenshot integrity
+        run: bash scripts/check-docs.sh
+
+  # The production build once, handed to the native suites as an artifact, so
+  # they test the very executable this job checked.
+  build:
+    name: Production build
+    needs: scope
+    if: needs.scope.outputs.app == 'true'
     runs-on: windows-2025
-    timeout-minutes: 60
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write # replace main's caches (./.github/actions/delete-caches)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,9 +148,6 @@ jobs:
         with:
           go-cache: build
           wails: "true"
-
-      # First, because Lumen.exe embeds frontend/dist, which a fresh clone
-      # lacks: no Go package compiles before the frontend is built.
       - name: Production build
         shell: bash
         run: wails3 build
@@ -85,17 +162,118 @@ jobs:
             echo "::error::the build changed tracked files: regenerate the bindings (docs/development.md) and commit them"
             exit 1
           fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lumen-exe
+          path: bin/Lumen.exe
+          retention-days: 1
+          if-no-files-found: error
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-go-cache
 
-      - name: Static checks, frontend tests and links
+  # The installer task builds the application itself, so this runs beside the
+  # build job rather than after it. It compiles what the build job compiles,
+  # so it restores that job's cache and leaves the saving to it.
+  installer:
+    name: Installer
+    needs: scope
+    if: needs.scope.outputs.app == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write # replace main's caches (./.github/actions/delete-caches)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          go-cache: build
+          go-cache-save: "false"
+          wails: "true"
+      - name: Build the installer with embedded application assets
         shell: bash
-        run: scripts/lint.sh --no-bench
+        run: |
+          wails3 task package
+          test -z "$(git status --porcelain)"
+
+  lint:
+    name: Static checks
+    needs: scope
+    if: needs.scope.outputs.app == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write # replace main's caches (./.github/actions/delete-caches)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          go-cache: ${{ needs.scope.outputs.go == 'true' && 'lint' || '' }}
+      # Go embeds frontend/dist; the linters need it to exist, not to be
+      # checked, which lint.sh's frontend steps do.
+      - name: Build the frontend
+        if: needs.scope.outputs.go == 'true'
+        shell: bash
+        run: cd frontend && npx vite build --mode production --logLevel warn
+      - name: Static checks, frontend tests, workflows and links
+        shell: bash
+        env:
+          GO: ${{ needs.scope.outputs.go }}
+          VULN: ${{ needs.scope.outputs.vuln }}
+        run: |
+          flags=(--no-bench)
+          [ "$GO" = true ] || flags+=(--no-go)
+          [ "$VULN" = true ] || flags+=(--no-vulncheck)
+          scripts/lint.sh "${flags[@]}"
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-go-cache
+
+  # The suites share one machine's GPU and run one after another, so they
+  # are split into two groups of about seven minutes each. Every suite that
+  # compares the pull request's base frontend is in the first group.
+  native:
+    name: Native suites, ${{ matrix.group }}
+    needs: [scope, build]
+    if: needs.scope.outputs.app == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write # replace main's caches (./.github/actions/delete-caches)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: comparisons
+            suites: commands favourite-undo album-draft collection-places smart-album-preview tagging-recovery search-history
+            baseline: true
+          - group: workflows
+            suites: collections navigation collection-recovery undo-recovery customise file-tools organise updates onboarding
+            baseline: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No Go cache: this job compiles nothing. Setup links the runtime into
+      # bin/, beside which the build job's executable goes.
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lumen-exe
+          path: bin
 
       # Compare built base and candidate frontends against the same synthetic
-      # preview/favourite fixtures and candidate engine; no runtime download.
-      # The whole base tree is extracted because the frontend reads shared
-      # contract data from outside frontend/ (internal/core/testdata).
-      - name: Build the PR base frontend for native comparison
-        if: github.event_name == 'pull_request'
+      # fixtures and candidate engine; no runtime download. The whole base
+      # tree is extracted because the frontend reads shared contract data
+      # from outside frontend/ (internal/core/testdata).
+      - name: Build the pull request's base frontend for comparison
+        id: baseline
+        if: matrix.baseline && github.event_name == 'pull_request'
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -105,98 +283,65 @@ jobs:
           git archive "$BASE_SHA" | tar -x -C e2e/.work/baseline
           npm ci --prefix e2e/.work/baseline/frontend
           npm run build --prefix e2e/.work/baseline/frontend
-          echo "LUMEN_BASELINE_FRONTEND=$(cygpath -m "$PWD/e2e/.work/baseline/frontend/dist")" >>"$GITHUB_ENV"
+          echo "dist=$(cygpath -m "$PWD/e2e/.work/baseline/frontend/dist")" >>"$GITHUB_OUTPUT"
 
-      - name: Prepare native regression dependencies
-        id: native_dependencies
+      - name: Prepare the suites' dependencies
         shell: bash
         run: |
           npm ci --prefix e2e
           python -m pip install -r e2e/requirements.txt
 
-      - name: Native command contract regressions
+      # run.mjs runs every named suite and fails at the end if any failed.
+      - name: Native suites
         shell: bash
-        run: node e2e/run.mjs commands
-
-      - name: Preserve command regression reports immediately
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: command-regressions
-          path: e2e/.work/results/commands
-          retention-days: 14
-          include-hidden-files: true
-          if-no-files-found: ignore
-
-      - name: Native collection, album, tagging, history and recoverable Undo regressions
-        # A command failure still leaves all existing suites exercised. Every
-        # failure keeps the job failed and prevents the installer step.
-        if: ${{ !cancelled() && steps.native_dependencies.outcome == 'success' }}
-        shell: bash
-        run: node e2e/run.mjs navigation collection-recovery album-draft collection-places smart-album-preview tagging-recovery undo-recovery search-history favourite-undo
-
-      - name: Native shared-control regressions
-        if: ${{ !cancelled() && steps.native_dependencies.outcome == 'success' }}
-        shell: bash
-        run: node e2e/run.mjs onboarding collections organise file-tools customise updates
-
-      - name: Build the installer with embedded application assets
-        shell: bash
+        env:
+          SUITES: ${{ matrix.suites }}
+          LUMEN_BASELINE_FRONTEND: ${{ steps.baseline.outputs.dist }}
         run: |
-          wails3 task package
-          test -z "$(git status --porcelain)"
+          read -ra suites <<<"$SUITES"
+          node e2e/run.mjs "${suites[@]}"
 
-      - name: Preserve native regression reports
+      - name: Preserve the suites' reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: native-regressions
-          path: |
-            e2e/.work/results/search-history
-            e2e/.work/results/favourite-undo
-            e2e/.work/results/undo-recovery
-            e2e/.work/results/tagging-recovery
-            e2e/.work/results/smart-album-preview
-            e2e/.work/results/collection-places
-            e2e/.work/results/album-draft
-            e2e/.work/results/commands
-            e2e/.work/results/navigation
-            e2e/.work/results/collection-recovery
-            e2e/.work/results/onboarding
-            e2e/.work/results/collections
-            e2e/.work/results/organise
-            e2e/.work/results/file-tools
-            e2e/.work/results/customise
-            e2e/.work/results/updates
+          name: native-${{ matrix.group }}
+          path: e2e/.work/results
           retention-days: 14
           include-hidden-files: true
           if-no-files-found: ignore
-
-      - if: ${{ !cancelled() }}
-        uses: ./.github/actions/save-go-cache
 
   tests:
     name: Go tests, ${{ matrix.shard }}
+    needs: scope
+    if: needs.scope.outputs.go == 'true'
     runs-on: windows-2025
     timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: write # replace main's caches (./.github/actions/delete-caches)
     strategy:
       fail-fast: false
       matrix:
         # The store's randomised oracles take as long as the rest of its
-        # tests, so -run and -skip split the package between two jobs.
+        # tests, so -run and -skip split the package between two jobs. They
+        # compile the same test binary, so only one of them saves the cache.
         include:
           - shard: store oracles
             packages: ./internal/store
             tests: -run Randomised
             cache: race-store
+            save: "true"
           - shard: store
             packages: ./internal/store
             tests: -skip Randomised
             cache: race-store
+            save: "false"
           - shard: everything else
             packages: . ./internal/... ./services/... ./cmd/... ./scripts/...
             skip: lumen/internal/store
             cache: race-rest
+            save: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -204,9 +349,10 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           go-cache: ${{ matrix.cache }}
+          go-cache-save: ${{ matrix.save }}
 
       # Go embeds frontend/dist; the tests need it to exist, not to be
-      # checked, which the build job does.
+      # checked, which the static checks job does.
       - name: Build the frontend
         shell: bash
         run: cd frontend && npx vite build --mode production --logLevel warn
@@ -233,8 +379,13 @@ jobs:
 
   latency:
     name: Large-library latency
+    needs: scope
+    if: needs.scope.outputs.latency == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write # replace main's caches (./.github/actions/delete-caches)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -275,3 +426,28 @@ jobs:
 
       - if: ${{ !cancelled() }}
         uses: ./.github/actions/save-go-cache
+
+  # The one check to require on main. A job the change did not need is
+  # skipped, which passes; one that failed or was cancelled fails this. It
+  # runs even when the run is cancelled, so a cancelled run never reads as
+  # passed (GitHub treats a skipped required check as success).
+  result:
+    name: CI result
+    needs: [scope, commits, docs, build, installer, lint, native, tests, latency]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job the change needed passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.value.result)\t\(.key)"' <<<"$NEEDS"
+          if [ "$(jq -r '.scope.result' <<<"$NEEDS")" != success ]; then
+            echo "::error::the change scope was not decided, so no job's result can be trusted"
+            exit 1
+          fi
+          if jq -e 'any(.[]; .result == "failure" or .result == "cancelled")' <<<"$NEEDS" >/dev/null; then
+            echo "::error::a job this change needed failed or was cancelled"
+            exit 1
+          fi

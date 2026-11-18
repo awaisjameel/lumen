@@ -1,0 +1,68 @@
+# Weekly version updates for everything pinned in a manifest. Each ecosystem
+# gets one grouped pull request for its minor and patch updates, and one per
+# major update. A release must be 14 days old first, the settling time this
+# repository gives every new version. Subjects are Conventional Commits, as
+# scripts/check-commit-msg.sh requires.
+#
+# Not covered, and kept by hand: the toolchains in .github/actions/setup and
+# docs/development.md (Go comes from go.mod), the native dependencies and
+# tools scripts/deps.sh pins by hash, and scripts/model-requirements.txt,
+# whose versions decide the prepared models' numbers.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directories: ["/", "/.github/actions/*"]
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      go-modules:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directories: ["/frontend", "/e2e"]
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      npm:
+        update-types: [minor, patch]
+
+  - package-ecosystem: pip
+    directory: /e2e
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      e2e-python:
+        update-types: [minor, patch]
