@@ -26,8 +26,13 @@ const reads = new Map([
   [bindingID('peopleservice', 'AssetFaces'), 'AssetFaces'],
   [bindingID('mediaservice', 'Inspect'), 'Inspect'],
 ])
+// Phases that block the selected photo while its details may still be loading.
+// The panel's file inspection can then reach the engine after the block and is
+// refused as not found, which DetailsPanel shows as the photo being unavailable.
+// The picker phase meets that race by timing; the deleted-album phase forces it.
+const inspectionRefusals = new Set(['multi-album picker partial Undo', 'deleted album identity and failed-item recovery'])
 function watch(page) {
-  s.watch(page, { context: () => phase, expected: row => row.kind === 'response' && row.context === 'deleted album identity and failed-item recovery' && row.method === 'Inspect' && row.code === 'not_found' })
+  s.watch(page, { context: () => phase, expected: row => row.kind === 'response' && inspectionRefusals.has(row.context) && row.method === 'Inspect' && row.code === 'not_found' })
   page.on('pageerror', (error) => console.log(`PAGE ERROR ${error.stack ?? error}`))
   page.on('console', (message) => {
     if (message.type() === 'error') {
