@@ -7,7 +7,7 @@ resolution and vulnerability checks use the network on the development PC.
 
 ## Setup
 
-Needs Go 1.27.4, a supported Node release (the exact ranges are below), npm 12.2.1+, a C compiler for cgo, Git Bash, 7-Zip on `PATH`, and Python 3.15.1 (`ruff.toml` targets 3.15). Toolchain used:
+Needs Go 1.27.4, a supported Node release (the exact ranges are below), npm 12.2.0+, a C compiler for cgo, Git Bash, 7-Zip on `PATH`, and Python 3.15.1 (`ruff.toml` targets 3.15). Toolchain used:
 
 - Go 1.27.4 and [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) 20261020 (UCRT x86_64) unpacked under `%LOCALAPPDATA%\Programs`, both on `PATH`
 - User environment: `CGO_ENABLED=1`, `CC=clang`, `CXX=clang++`
@@ -47,7 +47,9 @@ scripts/install-hooks.sh
 
 The supported Node ranges are `^22.23.4 || ^24.22.1 || >=26.12.1`;
 CI uses Node 24.22.1 and npm 12.2.1. `frontend/package.json` and
-`e2e/package.json` enforce those ranges. Install npm 12.2.1 for the selected
+`e2e/package.json` enforce those Node ranges and npm 12.2.0 or later, the
+npm that Dependabot's updater runs; npm 12.2.1 changed nothing this
+repository relies on. Install npm 12.2.1 for the selected
 Node (`npm install --global npm@12.2.1`), then check `npm --version` again.
 On this repository's prepared development machine, portable tools may live
 under ignored `deps/toolchains/`; they are not fetched or placed on PATH by
