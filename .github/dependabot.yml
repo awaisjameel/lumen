@@ -8,6 +8,16 @@
 # docs/development.md (Go comes from go.mod), the native dependencies and
 # tools scripts/deps.sh pins by hash, and scripts/model-requirements.txt,
 # whose versions decide the prepared models' numbers.
+#
+# Ignored here for the same reason, because each moves only together with
+# something Dependabot cannot change in the same pull request:
+# - Wails (github.com/wailsapp/wails/v3 and @wailsio/runtime): the Go module,
+#   the npm runtime, the wails3 CLI and the regenerated frontend/bindings must
+#   all name one release.
+# - github.com/yalue/onnxruntime_go: it asks the ONNX Runtime DLL that
+#   scripts/deps.sh pins for a fixed API version, so it follows that DLL.
+# Dependabot's npm updater runs npm 12.2.0, which is why the engines in
+# frontend/package.json and e2e/package.json admit it under engine-strict.
 version: 2
 
 updates:
@@ -35,6 +45,9 @@ updates:
     commit-message:
       prefix: build
       include: scope
+    ignore:
+      - dependency-name: github.com/wailsapp/wails/v3
+      - dependency-name: github.com/yalue/onnxruntime_go
     groups:
       go-modules:
         update-types: [minor, patch]
@@ -49,6 +62,8 @@ updates:
     commit-message:
       prefix: build
       include: scope
+    ignore:
+      - dependency-name: "@wailsio/runtime"
     groups:
       npm:
         update-types: [minor, patch]
