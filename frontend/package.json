@@ -22,34 +22,34 @@
     "check": "npm run typecheck && eslint . --max-warnings 0 && prettier --check . && node tools/check-navigation-mutations.mjs"
   },
   "dependencies": {
-    "@iconify/vue": "^5.0.3",
+    "@iconify/vue": "^5.0.5",
     "@nuxt/ui": "^4.12.0",
-    "@tanstack/vue-virtual": "^3.13.46",
+    "@tanstack/vue-virtual": "^3.13.52",
     "@vueuse/core": "^15.0.0",
     "@wailsio/runtime": "3.0.0-beta.30",
     "pinia": "^4.1.0",
     "reka-ui": "2.11.0",
-    "tailwindcss": "^4.3.3",
-    "vue": "^3.5.44",
+    "tailwindcss": "^4.3.4",
+    "vue": "^3.5.45",
     "vue-router": "^5.4.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@iconify-json/lucide": "^1.2.144",
+    "@iconify-json/lucide": "^1.2.151",
     "@vitejs/plugin-vue": "^6.0.10",
     "@vue/eslint-config-typescript": "14.9.0",
     "@vue/test-utils": "2.5.1",
-    "eslint": "10.12.0",
+    "eslint": "10.14.0",
     "eslint-config-prettier": "10.1.8",
-    "eslint-plugin-vue": "10.11.1",
-    "globals": "17.13.0",
+    "eslint-plugin-vue": "10.12.0",
+    "globals": "17.14.0",
     "jsdom": "31.0.0",
     "prettier": "3.9.10",
     "typescript": "^6.0.3",
-    "typescript-eslint": "8.71.2",
-    "vite": "^8.3.4",
-    "vitest": "5.0.4",
-    "vue-tsc": "^3.3.13"
+    "typescript-eslint": "8.72.1",
+    "vite": "^8.3.6",
+    "vitest": "5.1.0",
+    "vue-tsc": "^3.3.14"
   },
   "overrides": {
     "esbuild": "0.28.2"

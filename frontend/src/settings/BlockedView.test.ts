@@ -367,7 +367,10 @@ class FixedResizeObserver implements ResizeObserver {
 
 function giveTheGridASize() {
   vi.stubGlobal('ResizeObserver', FixedResizeObserver)
+  // The virtualiser sizes its scroller by the client box and each row by its
+  // offset box.
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(900)
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(900)
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600)
 }
