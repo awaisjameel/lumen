@@ -160,7 +160,12 @@ it('does not turn a photo by the details of the one shown before it', async () =
 
 it('keeps an already loaded original visible after presentation metadata refreshes', async () => {
   const photo = { ...detail(1), width: 600, height: 400, caps: { ...detail(1).caps, original: true } }
-  const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 1, width: 600, height: 400, detail: photo } })
+  // isVisible reads the computed style, which jsdom gives only an element in
+  // the document, so a detached image would always count as shown.
+  const wrapper = mount(ImageSurface, {
+    props: { id: 1, thumb: 1, width: 600, height: 400, detail: photo },
+    attachTo: document.body,
+  })
   try {
     await wrapper.get('img.original').trigger('load')
     expect(wrapper.get('img.original').isVisible()).toBe(true)
@@ -293,7 +298,11 @@ it('shows a still original as ever when animations are held, and an animated one
 
 it('retains the preview after a viewing-copy failure and retries the same page', async () => {
   vi.mocked(engine.render).mockReset().mockRejectedValueOnce(new Error('Drive disconnected')).mockResolvedValue(render)
-  const wrapper = mount(ImageSurface, { props: { id: 1, thumb: 1, width: 6000, height: 4000, detail: detail(1) } })
+  // Attached, so isVisible can see the computed style.
+  const wrapper = mount(ImageSurface, {
+    props: { id: 1, thumb: 1, width: 6000, height: 4000, detail: detail(1) },
+    attachTo: document.body,
+  })
   try {
     await flushPromises()
     expect(wrapper.get('img.preview').isVisible()).toBe(true)
