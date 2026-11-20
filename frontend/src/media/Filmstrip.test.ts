@@ -12,6 +12,10 @@ afterEach(() => {
 })
 
 it('keeps the current frame wider while virtualising a long strip', async () => {
+  // The virtualiser sizes the strip by its client box and each frame by its
+  // offset box.
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(56)
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(600)
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(56)
   const scrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')

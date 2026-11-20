@@ -61,16 +61,22 @@ if (typeof window.ResizeObserver !== 'function') {
 }
 
 // jsdom has no matchMedia, which the theme follows Windows with
-// (design/appearance.ts): tests see a light system that never changes.
+// (design/appearance.ts): tests see a light system that never changes. A
+// class declares the interface's deprecated listener methods, which an object
+// literal typed as MediaQueryList would count as using them.
 if (typeof window.matchMedia !== 'function') {
-  window.matchMedia = (query: string): MediaQueryList => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: () => undefined,
-    removeListener: () => undefined,
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined,
-    dispatchEvent: () => false,
-  })
+  class LightSystem extends EventTarget implements MediaQueryList {
+    readonly matches = false
+    onchange = null
+    constructor(readonly media: string) {
+      super()
+    }
+    addListener(): void {
+      /* the system never changes */
+    }
+    removeListener(): void {
+      /* the system never changes */
+    }
+  }
+  window.matchMedia = (query: string): MediaQueryList => new LightSystem(query)
 }
