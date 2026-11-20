@@ -4,9 +4,9 @@ go 1.27.4
 
 require (
 	github.com/evanoberholster/imagemeta v1.1.0
-	github.com/mattn/go-sqlite3 v1.14.52
+	github.com/mattn/go-sqlite3 v1.14.53
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
-	github.com/sigstore/sigstore v1.11.1
+	github.com/sigstore/sigstore v1.11.3
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
 	github.com/wailsapp/wails/v3 v3.0.0-beta.30
 	github.com/yalue/onnxruntime_go v1.27.0
