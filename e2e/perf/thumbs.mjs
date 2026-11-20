@@ -10,6 +10,7 @@ import { promisify } from 'node:util'
 import puppeteer from 'puppeteer-core'
 import { go, lib, sleep, unthrottle, usableGrid, waitIndexed } from '../lib/app.mjs'
 import { E2E, EXE, ROOT } from '../lib/suite.mjs'
+import { waitForAppPage } from '../lib/webview.mjs'
 import { finaliseRequest, quantile } from './thumbs-metrics.mjs'
 import { sampleWebviewMemory } from './thumbs-memory.mjs'
 import { checkBlockedThumbnail } from './thumbs-privacy.mjs'
@@ -82,19 +83,13 @@ async function start() {
   proc.on('error', (error) => {
     out.launchError = String(error)
   })
-  for (let i = 0; i < 300; i++) {
-    if (proc.exitCode !== null || out.launchError) throw new Error(out.launchError ?? `Lumen exited ${proc.exitCode}`)
-    const targets = await fetch(`http://127.0.0.1:${port}/json/list`)
-      .then((r) => r.json())
-      .catch(() => [])
-    if (targets.some((t) => t.type === 'page' && t.url.startsWith('http'))) {
-      browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null })
-      page = (await browser.pages()).find((p) => p.url().startsWith('http'))
-      if (page) break
-    }
-    await sleep(100)
+  await waitForAppPage(proc, port)
+  browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null })
+  for (let i = 0; i < 100 && !page; i++) {
+    page = (await browser.pages()).find((p) => p.url().startsWith('http'))
+    if (!page) await sleep(100)
   }
-  if (!page) throw new Error('the WebView did not open its app page')
+  if (!page) throw new Error('the WebView listed its app page but puppeteer found none')
   cdp = await page.createCDPSession()
   out.webview = await cdp.send('Browser.getVersion')
   cdp.on('Network.requestWillBeSent', (e) => {

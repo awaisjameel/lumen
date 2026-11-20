@@ -205,10 +205,17 @@ exact `selection_changed` response during that recapture is expected; the
 current selection must settle before the next action.
 Only the optional local `/wails/custom.js` 404 is ignored globally, alongside
 coded cancellation of the named cancellable reads. `scripts/lint.sh` exercises
-the recorder's negative cases and subprocess exit/report checks with
-`node --test e2e/lib/errors.test.mjs e2e/lib/suite.test.mjs`. A recorded
-`failure`, including a cleanup exception after behavioural checks pass, must
-produce a failed check and a nonzero exit.
+the recorder's negative cases, subprocess exit/report checks and the launch
+wait with
+`node --test e2e/lib/errors.test.mjs e2e/lib/suite.test.mjs e2e/lib/webview.test.mjs`.
+A recorded `failure`, including a cleanup exception after behavioural checks
+pass, must produce a failed check and a nonzero exit.
+
+`launch` waits for the WebView to list the app page on its DevTools port for up
+to 90 s, the installer sandbox's deadline, with each request limited to 2 s
+(`lib/webview.mjs`). The first launch on a fresh CI runner can take over 30 s
+while WebView2 creates its profile; later ones take seconds. It fails at once
+if Lumen exits, and a timeout says what the port last listed.
 
 ## Writing a suite
 
