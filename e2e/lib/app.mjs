@@ -5,6 +5,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import puppeteer, { ElementHandle } from 'puppeteer-core'
+import { waitForAppPage } from './webview.mjs'
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -36,21 +37,12 @@ export async function launch({ exe, dataDir, port, env = {}, args = [] }) {
   // A suite that throws must not leave its Lumen running.
   process.once('exit', () => proc.exitCode === null && kill(proc))
   let browser
-  for (let i = 0; i < 300 && !browser; i++) {
-    // A Lumen started while another is still closing on the same library exits at once.
-    if (proc.exitCode !== null) throw new Error(`Lumen exited with ${proc.exitCode} before its window opened`)
-    try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json())
-      if (targets.some((t) => t.type === 'page' && t.url.startsWith('http')))
-        browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null })
-    } catch {
-      /* not listening yet */
-    }
-    if (!browser) await sleep(100)
-  }
-  if (!browser) {
+  try {
+    await waitForAppPage(proc, port)
+    browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null })
+  } catch (e) {
     kill(proc)
-    throw new Error('the WebView did not open its DevTools port')
+    throw e
   }
   let page
   for (let i = 0; i < 100 && !page; i++) {
