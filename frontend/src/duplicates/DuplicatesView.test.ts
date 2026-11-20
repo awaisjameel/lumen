@@ -101,6 +101,12 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
     return height(this)
   })
+  // The virtualiser sizes its scroller by the client box and each row by its
+  // offset box, so both report the same laid-out height.
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(900)
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return height(this)
+  })
   vi.mocked(engine.duplicateGroups)
     .mockReset()
     .mockResolvedValue([
