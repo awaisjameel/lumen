@@ -12,7 +12,7 @@ require (
 	github.com/yalue/onnxruntime_go v1.27.0
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/image v0.47.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	golang.org/x/text v0.43.0
 )
 
