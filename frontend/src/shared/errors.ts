@@ -5,6 +5,7 @@ import {
   isErrorCode,
   logUIError,
   MAX_NAME_LEN,
+  MAX_RELATION_LABEL_LEN,
   PIN_COOLDOWN_SECONDS,
   PIN_MAX_LEN,
   PIN_MIN_LEN,
@@ -46,6 +47,8 @@ const codeText: Record<ErrorCode, MessageKey> = {
   [ErrorCode.AlbumManualOnly]: 'error.albumManualOnly',
   [ErrorCode.AlbumChanged]: 'error.albumChanged',
   [ErrorCode.PersonExists]: 'error.personExists',
+  [ErrorCode.InvalidRelation]: 'error.invalidRelation',
+  [ErrorCode.RelationConflict]: 'error.relationConflict',
   [ErrorCode.BlockedName]: 'error.blockedName',
   [ErrorCode.TagExists]: 'error.tagExists',
   [ErrorCode.BuiltinTag]: 'error.builtinTag',
@@ -102,6 +105,7 @@ export function failureText(code: string | undefined, msg: string): string {
   return isErrorCode(code)
     ? t(codeText[code], {
         max: MAX_NAME_LEN,
+        relationMax: MAX_RELATION_LABEL_LEN,
         pinMin: PIN_MIN_LEN,
         pinMax: PIN_MAX_LEN,
         pinCooldown: PIN_COOLDOWN_SECONDS,

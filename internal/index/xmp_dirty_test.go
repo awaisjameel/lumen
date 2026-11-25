@@ -160,7 +160,7 @@ func TestDirtySidecarsEqualAFullPassAfterRandomChanges(t *testing.T) {
 					if len(faces) > 0 {
 						other, err := f.st.NameFaces(ctx, []int64{faces[0].ID}, fmt.Sprintf("Guest %d", step))
 						check(t, err)
-						check(t, f.st.MergePeople(ctx, other, f.ali))
+						check(t, f.st.MergePeople(ctx, other, f.ali, core.MergeKeepAsk))
 					}
 				case 13:
 					files, err := f.st.KnownFiles(ctx, 1, "")
@@ -253,7 +253,7 @@ func TestDirtyExportMatchesTheFullPassForContentAndFileInputs(t *testing.T) {
 				check(t, err)
 				into, err := f.st.NameFaces(ctx, []int64{faces[0].ID}, "Ali")
 				check(t, err)
-				check(t, f.st.MergePeople(ctx, other, into))
+				check(t, f.st.MergePeople(ctx, other, into, core.MergeKeepAsk))
 			case "face":
 				check(t, f.st.RejectFaces(ctx, f.ali, []int64{f.aliFace}))
 			case "favourite":

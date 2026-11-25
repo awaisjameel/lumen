@@ -23,6 +23,8 @@ import { useRename } from '../shared/rename'
 import FaceThumb from './FaceThumb.vue'
 import { showNameSaved } from './naming'
 import PersonNameEditor from './PersonNameEditor.vue'
+import RelationshipEditor from './RelationshipEditor.vue'
+import { personName, relationText, setMe } from './relationships'
 import { usePeople } from './store'
 
 const props = defineProps<{ id: number; reviewing?: boolean; faceCount?: number }>()
@@ -35,6 +37,8 @@ const facts = ref<PersonFacts | null>(null)
 const places = ref<NamedPlace[]>([])
 const rename = useRename<true>()
 const { editing } = rename
+const relate = useRename<true>()
+const relating = relate.editing
 const error = ref('')
 const loading = ref(false)
 let request = 0
@@ -91,6 +95,7 @@ watch(
     clear()
     error.value = ''
     void rename.close(false)
+    void relate.close(false)
     void load()
   },
   { immediate: true },
@@ -103,6 +108,7 @@ onBeforeUnmount(
   }),
 )
 const name = computed(() => person.value?.name || t('person.unnamed'))
+const relation = computed(() => (person.value ? relationText(person.value) : ''))
 const faces = computed(() => props.faceCount ?? facts.value?.faces)
 const companions = computed(() => facts.value?.companions ?? [])
 const meta = computed(
@@ -126,6 +132,36 @@ async function saved(shown: number, name: string) {
   if (shown !== props.id) await router.replace(destination({ name: 'person', params: { id: shown } }))
   else await load()
 }
+function editRelation() {
+  if (person.value && !person.value.me) void relate.open(true, '')
+}
+async function relationSaved(saved: Person) {
+  await relate.close()
+  if (!alive || saved.id !== props.id || !person.value) return
+  // The engine returns them as kept: a typed "Mum" comes back as Mum.
+  person.value = { ...person.value, relation: saved.relation, relationLabel: saved.relationLabel }
+  const now = relationText(saved)
+  notify({
+    id: `person.${saved.id}.relation`,
+    kind: 'success',
+    title: now ? t('person.relationSaved', { name: personName(saved), relation: now }) : t('person.relationRemoved'),
+  })
+  void people.load().catch(logError)
+}
+/** Marks them as the user, or says they are not after all. */
+async function toggleMe() {
+  const shown = person.value
+  if (!shown) return
+  if (shown.me) await engine.removeMe(shown.id)
+  else if (!(await setMe(shown))) return
+  notify({
+    id: 'person.me',
+    kind: 'success',
+    title: t(shown.me ? 'person.notMe' : 'person.isMe', { name: personName(shown) }),
+  })
+  void people.load().catch(logError)
+  if (alive && props.id === shown.id) await load()
+}
 async function blockPerson(hide = false) {
   if (!person.value) return
   const id = props.id
@@ -140,6 +176,7 @@ const actions = computed(() => {
   const rename = menuItems([{ id: 'person.rename' }])
   return [
     ...rename,
+    ...menuItems([{ id: 'person.me' }, { id: 'person.relation' }]),
     {
       label: t('person.changePicture'),
       icon: icons.face,
@@ -162,6 +199,21 @@ useCommands([
     id: 'person.review',
     available: () => person.value !== null,
     run: review,
+  },
+  {
+    id: 'person.me',
+    title: () => t(person.value?.me ? 'person.removeMe' : 'person.setMe'),
+    available: () => person.value !== null,
+    enabled: () => !editing.value && !relating.value,
+    run: toggleMe,
+  },
+  {
+    id: 'person.relation',
+    title: () => t(relation.value ? 'person.changeRelation' : 'person.addRelation'),
+    available: () => person.value !== null,
+    enabled: () => !relating.value && !person.value?.me,
+    reason: () => (person.value?.me ? t('person.relationOfMe') : undefined),
+    run: editRelation,
   },
   {
     id: 'person.block',
@@ -190,6 +242,31 @@ useCommands([
             ><Icon name="pencil" :size="16"
           /></CommandButton>
         </h2>
+        <RelationshipEditor
+          v-if="relating"
+          :key="`relation-${person.id}`"
+          :person="person"
+          @cancel="relate.close()"
+          @saved="relationSaved"
+        />
+      </template>
+      <template #meta>
+        <span v-if="person.me" class="role me" data-person-role="me"
+          ><Icon name="user-check" :size="14" />{{ t('person.me') }}</span
+        >
+        <CommandButton
+          v-else-if="!relating"
+          :ref="relate.triggerRef(true)"
+          class="role"
+          color="neutral"
+          :variant="relation ? 'soft' : 'ghost'"
+          command="person.relation"
+          :aria-label="relation ? t('person.relationOf', { relation }) : t('person.addRelation')"
+          data-person-role="relation"
+          ><Icon name="people" :size="14" /><bdi>{{ relation || t('person.addRelation') }}</bdi
+          ><Icon name="pencil" :size="12"
+        /></CommandButton>
+        <span>{{ meta }}</span>
       </template>
       <template #facts>
         <div v-if="companions.length || places.length" class="facts" data-person-facts>
@@ -233,7 +310,7 @@ useCommands([
             :label="t('person.actions')"
             color="neutral"
             variant="ghost"
-            :disabled="editing !== null"
+            :disabled="editing !== null || relating !== null"
         /></UDropdownMenu>
       </template>
     </CollectionHero>
@@ -318,6 +395,27 @@ useCommands([
 .heading {
   margin: 0;
   min-width: 0;
+}
+.role {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 1.75rem;
+  margin-right: 0.5rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.8125rem;
+  vertical-align: middle;
+}
+.role.me {
+  border-radius: var(--lumen-r-sm);
+  background: var(--lumen-light-soft);
+  color: var(--ui-text-highlighted);
+  font-weight: 600;
+}
+@media (forced-colors: active) {
+  .role.me {
+    border: 1px solid CanvasText;
+  }
 }
 .name {
   max-width: 100%;

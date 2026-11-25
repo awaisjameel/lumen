@@ -1,4 +1,5 @@
 import { createTestNavigation } from '../shared/navigation/testing'
+import { Relation } from '../bridge'
 import type { Face, Person } from '../bridge'
 
 export const faceFixture: Face = {
@@ -17,7 +18,15 @@ export const faceFixture: Face = {
   name: 'Ali',
   byUser: false,
 }
-export const personFixture = (id = 1, name = 'Ali', count = 1): Person => ({ id, name, count, cover: faceFixture })
+export const personFixture = (id = 1, name = 'Ali', count = 1): Person => ({
+  id,
+  name,
+  count,
+  cover: faceFixture,
+  me: false,
+  relation: Relation.RelationNone,
+  relationLabel: '',
+})
 export function peopleRouter() {
   return createTestNavigation()
 }

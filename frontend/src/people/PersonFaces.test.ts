@@ -6,7 +6,7 @@ import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
-import { engine, ErrorCode, onLibraryChanged } from '../bridge'
+import { engine, ErrorCode, onLibraryChanged, Relation } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Face, Person } from '../bridge'
 import PersonFaces from './PersonFaces.vue'
@@ -43,7 +43,15 @@ const face: Face = {
   name: 'Ali',
   byUser: false,
 }
-const person: Person = { id: 1, name: 'Ali', count: 1, cover: face }
+const person: Person = {
+  id: 1,
+  name: 'Ali',
+  count: 1,
+  cover: face,
+  me: false,
+  relation: Relation.RelationNone,
+  relationLabel: '',
+}
 let wrapper: ReturnType<typeof mountInApp> | undefined
 
 beforeEach(() => {

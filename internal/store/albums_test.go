@@ -147,7 +147,7 @@ func TestSmartAlbumFollowsMergedPerson(t *testing.T) {
 	check(t, err)
 	id, err := st.CreateAlbum(ctx, "Family", core.AlbumSmart, core.AlbumRule{Person: from}, nil)
 	check(t, err)
-	check(t, st.MergePeople(ctx, from, into))
+	check(t, st.MergePeople(ctx, from, into, core.MergeKeepAsk))
 	albums, err := st.Albums(ctx, 0.02)
 	check(t, err)
 	if len(albums) != 1 || albums[0].Rule.Person != into || albums[0].Count != 2 {

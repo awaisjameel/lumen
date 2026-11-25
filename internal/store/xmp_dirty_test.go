@@ -79,7 +79,7 @@ func TestXMPDirtyWorkNamesOnlyTheAssetsAnInputTouches(t *testing.T) {
 			case "people merged":
 				other, err := st.NameFaces(ctx, []int64{facesOf(t, st, f.b)[0].ID}, "Sara")
 				check(t, err)
-				change = func() error { return st.MergePeople(ctx, other, f.ali) }
+				change = func() error { return st.MergePeople(ctx, other, f.ali, core.MergeKeepAsk) }
 				want = []int64{f.b}
 			case "favourite":
 				change = func() error { return st.SetFavourite(ctx, f.a, true) }

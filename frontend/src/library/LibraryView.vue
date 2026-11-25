@@ -857,7 +857,7 @@ function resultsHead(day: string): [string, string] {
   return [
     t('search.resultsFirst'),
     byPeople
-      ? t('search.withPeople', { names: listFormat.format(info.people.map((p) => p.name)) })
+      ? t('search.withPeople', { names: listFormat.format(info.people.map((p) => p.text)) })
       : t('search.closest'),
   ]
 }

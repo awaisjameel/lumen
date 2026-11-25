@@ -39,6 +39,15 @@ const open = computed({
         {{ t('common.cancel') }}
       </UButton>
       <UButton
+        v-if="question?.other"
+        color="primary"
+        variant="outline"
+        data-confirm="other"
+        @click="question.other.choose()"
+      >
+        {{ question.other.label }}
+      </UButton>
+      <UButton
         :color="question?.danger ? 'error' : 'primary'"
         variant="solid"
         data-confirm="ok"

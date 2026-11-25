@@ -60,6 +60,7 @@ sequential chain for every photo.
 - Press `Ctrl+F` or `/` and type in plain language, e.g. "dog on a beach at sunset". The SigLIP 2 model matches the meaning of the query.
 - Results come back best match first. Weak matches are cut off relative to the best one, so a query that matches nothing returns nothing. Warm searches can be quick; first use loads a model, and latency depends on the PC, library and query. Dated measurements are in the [dependency record](history/dependency-upgrade-2026-10-23.md#local-performance-samples).
 - **People in queries:** "Ali and Sara at the beach" narrows to photos containing both of them. A name on its own gives that person's photos. The search box suggests people as you type.
+- **Me and relationships in queries:** "me at the beach", "my mum" or "my friends" use who you marked as Me and the relationships you set. A phrase that could mean several people shows photos of any of them and offers each to choose; a phrase no one has yet is searched as a description, and the results say so.
 - **Video results** jump to the best matching moment.
 - **Text in images** (off by default) reads text in photos the AI classes as screenshots or documents (English, on the CPU). Photos containing every word of the query come first, ahead of the AI matches.
 
@@ -91,6 +92,7 @@ sequential chain for every photo.
 - **Face review** shows the least similar faces first, so mistakes are easy to find.
 - The details panel asks "Who is this?" for faces not yet recognised.
 - A person's page is the timeline filtered to their photos.
+- **Me and relationships (optional):** mark one person as **Me**, and give others a relationship such as Mum, Partner or Friend, or your own word. Both are private, never inferred from photos, survive renames, splits, merges and re-recognition, and can be filtered for in People. See [Me and relationships](using-lumen.md#me-and-relationships).
 
 ## 8. Albums
 

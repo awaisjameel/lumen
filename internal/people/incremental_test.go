@@ -153,7 +153,7 @@ func TestIncrementalEngineMatchesTheFullEngineThroughCorrectionsAndRestarts(t *t
 					}
 				case 4:
 					if len(people) > 1 {
-						err = st.MergePeople(ctx, people[0].ID, people[len(people)-1].ID)
+						err = st.MergePeople(ctx, people[0].ID, people[len(people)-1].ID, core.MergeKeepAsk)
 					} else {
 						coverage[op]--
 					}

@@ -5,6 +5,7 @@ import { nameTooLong, trimName } from '../shared/names'
 import { MAX_NAME_LEN } from '../bridge'
 import { notify } from '../shared/notify'
 import { reportError } from '../shared/errors'
+import { mergePeople } from './relationships'
 
 type MergeQuestion = (name: string) => Promise<boolean>
 const askMerge: MergeQuestion = (name) =>
@@ -12,8 +13,9 @@ const askMerge: MergeQuestion = (name) =>
 
 /**
  * Names person id. If someone else already has that name, asks whether they
- * are one person and, if so, merges this one into them. Returns who to show
- * now (the other person after a merge), or null if the user said no.
+ * are one person and, if so, merges this one into them, asking which
+ * relationship they keep if theirs differ. Returns who to show now (the
+ * other person after a merge), or null if the user said no.
  */
 export async function namePerson(id: number, name: string, merge: MergeQuestion = askMerge): Promise<number | null> {
   name = trimName(name)
@@ -27,8 +29,7 @@ export async function namePerson(id: number, name: string, merge: MergeQuestion 
   if (!(await merge(name))) return null
   const other = await engine.personByName(name)
   if (!other) return null // renamed meanwhile: nothing to merge with
-  await engine.mergePeople(id, other)
-  return other
+  return (await mergePeople(id, other)) ? other : null
 }
 
 /** Restoring a name never merges identities if someone has taken it meanwhile. */

@@ -1,11 +1,11 @@
-import { registerCommands } from '../shared/commands'
+import { commandState, registerCommands, runCommand } from '../shared/commands'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { mountInApp } from '../shared/testing'
 import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
-import { engine, ErrorCode, MAX_NAME_LEN, onLibraryChanged } from '../bridge'
+import { engine, ErrorCode, MAX_NAME_LEN, onLibraryChanged, Relation } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Changes, Person } from '../bridge'
 import PersonHeader from './PersonHeader.vue'
@@ -22,6 +22,9 @@ vi.mock('../bridge', async (importOriginal) => ({
     personFacts: vi.fn().mockResolvedValue({ faces: 0, companions: [] }),
     topPlaces: vi.fn().mockResolvedValue([]),
     suggestPeople: vi.fn().mockResolvedValue([]),
+    setRelation: vi.fn(),
+    setMe: vi.fn(),
+    removeMe: vi.fn(),
   },
 }))
 
@@ -45,6 +48,9 @@ const person = (id: number, name: string): Person => ({
     name,
     byUser: false,
   },
+  me: false,
+  relation: Relation.RelationNone,
+  relationLabel: '',
 })
 let wrapper: ReturnType<typeof mountInApp> | undefined
 afterEach(() => {
@@ -236,4 +242,57 @@ it('uses current command admission for rename aliases and blocking in the real m
   } finally {
     remove()
   }
+})
+
+it('shows a relationship beside the name, edits it in place and keeps the name', async () => {
+  setActivePinia(createPinia())
+  vi.mocked(engine.person)
+    .mockReset()
+    .mockResolvedValue({ ...person(1, 'Jane'), relation: Relation.RelationMother })
+  vi.mocked(engine.people).mockResolvedValue([])
+  vi.mocked(engine.setRelation).mockResolvedValue({ ...person(1, 'Jane'), relation: Relation.RelationGrandmother })
+  wrapper = mountHeader()
+  await flushPromises()
+  const role = wrapper.get('[data-person-role="relation"]')
+  expect(role.text()).toBe('Mum')
+  expect(role.attributes('aria-label')).toBe('Relationship: Mum')
+  await role.trigger('click')
+  await flushPromises()
+  const input = wrapper.get('[data-relation-editor] input')
+  await input.setValue('grandma')
+  await input.trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(engine.setRelation).toHaveBeenCalledWith(1, Relation.RelationGrandmother, '')
+  expect(wrapper.find('[data-relation-editor]').exists()).toBe(false)
+  expect(wrapper.get('[data-person-role="relation"]').text()).toBe('Grandma')
+  expect(wrapper.get('[data-action="rename"]').text()).toBe('Jane')
+})
+
+it('marks the person as Me and back, never offering Me a relationship', async () => {
+  setActivePinia(createPinia())
+  let me = false
+  vi.mocked(engine.person)
+    .mockReset()
+    .mockImplementation(() => Promise.resolve({ ...person(1, 'Ali'), me }))
+  vi.mocked(engine.people).mockResolvedValue([])
+  vi.mocked(engine.setMe).mockImplementation(() => {
+    me = true
+    return Promise.resolve()
+  })
+  vi.mocked(engine.removeMe).mockImplementation(() => {
+    me = false
+    return Promise.resolve()
+  })
+  wrapper = mountHeader()
+  await flushPromises()
+  await runCommand('person.me')
+  await flushPromises()
+  expect(engine.setMe).toHaveBeenCalledWith(1, false)
+  expect(wrapper.get('[data-person-role="me"]').text()).toBe('Me')
+  expect(wrapper.find('[data-person-role="relation"]').exists()).toBe(false)
+  expect(commandState('person.relation').enabled).toBe(false)
+  await runCommand('person.me')
+  await flushPromises()
+  expect(engine.removeMe).toHaveBeenCalledWith(1)
+  expect(wrapper.find('[data-person-role="me"]').exists()).toBe(false)
 })

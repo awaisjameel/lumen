@@ -62,7 +62,9 @@ func NewSearchService(st *store.Store, engine *search.Engine, faces bool, ix *in
 
 // Search finds photos matching a description, best match first. Named
 // people in it narrow the search to photos of all of them ("Ali at the
-// beach"); names alone give their photos, newest first. Photos whose text
+// beach"), as do "me" and relationships ("my mum", or "my friends": any of
+// them); names alone give their photos, newest first. A part that names
+// more people than it should is marked ambiguous, for the user to choose. Photos whose text
 // (read from screenshots and documents, when the user has that on) holds
 // every word of the description come first, newest first, then the photos
 // the description matches by meaning. Without the AI, the description can't
@@ -74,20 +76,12 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	matches := people.MatchNames(query, named)
-	if slices.ContainsFunc(matches, func(match people.NameMatch) bool { return match.Target.Blocked }) {
-		return core.SearchResult{Items: []core.GridItem{}, People: []core.SearchPerson{}, Complete: true, Blocked: true}, nil
+	parsed := people.ParseQuery(query, named)
+	if parsed.Blocked {
+		return core.SearchResult{Items: []core.GridItem{}, People: parsed.People, Unassigned: parsed.Unassigned, Complete: true, Blocked: true}, nil
 	}
-	personMatches := slices.DeleteFunc(matches, func(match people.NameMatch) bool { return match.Target.Kind != core.BlockPerson })
-	var who []int64
-	spelled := []core.SearchPerson{}
-	for _, match := range personMatches {
-		if !slices.Contains(who, match.Target.ID) {
-			who = append(who, match.Target.ID)
-			spelled = append(spelled, core.SearchPerson{ID: match.Target.ID, Name: query[match.Start:match.End]})
-		}
-	}
-	text := people.RemainingQuery(query, personMatches)
+	who := parsed.Groups()
+	text := parsed.Rest
 	var ids []int64 // the named people's photos, if any are named; then the result
 	var moments map[int64]int64
 	var waitFor []core.Stage // stages whose photos can't be found yet
@@ -162,7 +156,8 @@ func (s *SearchService) Search(ctx context.Context, query string) (core.SearchRe
 	if err != nil {
 		return core.SearchResult{}, err
 	}
-	return core.SearchResult{Items: items, People: spelled, Description: text, Pending: pending, Complete: complete, NoAI: noAI}, nil
+	return core.SearchResult{Items: items, People: parsed.People, Unassigned: parsed.Unassigned, Description: text,
+		Pending: pending, Complete: complete, NoAI: noAI}, nil
 }
 
 // RecentSearches lists the searches the user ran last, newest first. One that
@@ -199,7 +194,7 @@ func (s *SearchService) shownSearches(ctx context.Context, list []string) ([]str
 		if err != nil {
 			return nil, err
 		}
-		if !slices.ContainsFunc(people.MatchNames(query, named), func(match people.NameMatch) bool { return match.Target.Blocked }) {
+		if !people.ParseQuery(query, named).Blocked {
 			shown = append(shown, query)
 		}
 	}

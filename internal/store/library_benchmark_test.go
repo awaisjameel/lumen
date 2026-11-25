@@ -54,6 +54,11 @@ func BenchmarkLargeLibraryStore(b *testing.B) {
 			SELECT id, 1+(id*7+x)%180, 'ai', 0.5 FROM assets CROSS JOIN n`,
 			`WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<500)
 			INSERT INTO people(id, name, created_at) SELECT x, 'Person '||x, 0 FROM n`,
+			// The user, forty friends, a mum and a few with their own label.
+			`UPDATE people SET is_me = 1 WHERE id = 1`,
+			`UPDATE people SET relation = 'friend' WHERE id BETWEEN 2 AND 41`,
+			`UPDATE people SET relation = 'mother' WHERE id = 42`,
+			`UPDATE people SET relation = 'custom', relation_label = 'Coach' WHERE id BETWEEN 43 AND 50`,
 			`INSERT INTO faces(asset_id, x, y, w, h, score, sharpness, yaw, model, vec, person_id, assigned_by)
 			SELECT id, 0.1, 0.1, 0.2, 0.2, 0.9, 20, 0, 'bench', zeroblob(512), 1+(id/5)%500, 'auto'
 			FROM assets WHERE id%5<3`,
@@ -121,7 +126,11 @@ func largeLibraryCalls(ctx context.Context, b *testing.B, st *Store) {
 		coverHash ^= 1
 		return st.SaveThumbnails(ctx, "bench", []ThumbResult{{AssetID: event.Cover, PHash: &coverHash}})
 	}
-	named, pinned := false, false
+	named, pinned, related := false, false, false
+	friends := make([]int64, 0, 40)
+	for id := int64(2); id <= 41; id++ {
+		friends = append(friends, id)
+	}
 	// Another gap is a grouping no journal describes, so it is the whole
 	// regroup that the first call and an overrun history also pay.
 	gap := core.EventGapDefault
@@ -232,6 +241,19 @@ func largeLibraryCalls(ctx context.Context, b *testing.B, st *Store) {
 			return errOf(st.TopPlaces(ctx, core.View{Person: 2}, core.TagConfidenceDefault, 3))
 		}, invalidate, nil},
 		{"PersonFacts", func() error { return errOf(st.PersonFacts(ctx, 2, 3)) }, invalidate, nil},
+		{"SearchNamesRelated", func() error {
+			return errOf(st.SearchNames(ctx, "me with my mum and my friends at the beach"))
+		}, nil, nil},
+		{"PeopleAssetsRelated", func() error { return errOf(st.PeopleAssets(ctx, [][]int64{{1}, friends})) }, invalidate, nil},
+		{"SetRelation", func() error {
+			related = !related
+			relation := core.RelationNone
+			if related {
+				relation = core.RelationNeighbour
+			}
+			_, _, err := st.SetRelation(ctx, 60, relation, "")
+			return err
+		}, nil, nil},
 		{"SaveEmbeddings64", func() error { return st.SaveEmbeddings(ctx, "bench", "bench", embeddings) }, nil, nil},
 		{"SaveTags64", func() error { return st.ReplaceAITags(ctx, tags) }, nil, nil},
 		{"SaveFaces64", func() error { return st.SaveFaces(ctx, "bench", "bench", faces) }, nil, nil},
@@ -300,6 +322,7 @@ func assertLargeLibrarySeed(ctx context.Context, b *testing.B, st *Store) {
 		{"embeddings", "SELECT count(*) FROM embeddings WHERE model = 'bench' AND length(vec) = 768", largeLibrarySize},
 		{"faces", "SELECT count(*) FROM faces", 3 * largeLibrarySize / 5},
 		{"people coverage", "SELECT count(DISTINCT person_id) FROM faces", 500},
+		{"relationships", "SELECT count(*) FROM people WHERE is_me = 1 OR relation IS NOT NULL", 50},
 		{"places", "SELECT count(DISTINCT place_id) FROM assets", 200},
 		{"big day", "SELECT count(*) FROM assets WHERE taken_at = 1577836800 AND date_from = 'file'", largeLibrarySize / 10},
 		{"located", "SELECT count(*) FROM assets WHERE lat IS NOT NULL AND lon IS NOT NULL", largeLibrarySize / 4},

@@ -17,67 +17,155 @@ var fillers = map[string]bool{
 	"photo": true, "photos": true, "picture": true, "pictures": true, "pic": true, "pics": true,
 }
 
-// FindNames takes the names of named people out of a search query ("Ali at
-// the beach"). It returns who was named, with their names as the query
-// spelled them, and the rest of the query ("at the beach"), which is empty
-// if only fillers remain beside the names. Longer names win ("Ali Khan"
-// before "Ali"), a name only counts as whole words, and case is ignored as
-// everywhere else (core.Fold).
-func FindNames(query string, named []core.Person) (ids []int64, names []string, rest string) {
-	targets := make([]core.NamedTarget, len(named))
-	for i, p := range named {
-		targets[i] = core.NamedTarget{ID: p.ID, Name: p.Name, Kind: core.BlockPerson}
-	}
-	matches := MatchNames(query, targets)
-	seen := map[int64]bool{}
-	for _, match := range matches {
-		if !seen[match.Target.ID] {
-			seen[match.Target.ID] = true
-			ids = append(ids, match.Target.ID)
-			names = append(names, query[match.Start:match.End])
-		}
-	}
-	return ids, names, RemainingQuery(query, matches)
+// Query is what a search query names: the people it narrows to, and what
+// is left to search for.
+type Query struct {
+	// Blocked: the query names something blocked, so it finds nothing (and
+	// a recent search that does is not listed).
+	Blocked bool
+	// People are its parts that name people, each a name, "me" or "my …",
+	// in the order the query first names them.
+	People []core.SearchPerson
+	// Unassigned are its "me" and "my …" phrases no one is yet, as spelled.
+	// They stay in Rest: they are searched for as a description, and the
+	// UI says why they did not name anyone.
+	Unassigned []string
+	// Rest is the query without the people's parts; empty if only fillers
+	// remain beside them.
+	Rest string
 }
 
-// NameMatch locates a whole-word entity name using byte offsets in the query.
+// ParseQuery finds who a search names among named, as the store's
+// SearchNames finds them: names ("Ali at the beach"), "me", and
+// relationships ("my mum", "my friends"). Each part a person, a name or a
+// singular relationship, should name one person; one that names several
+// ("my mum" with two mums, or a person named "My Mum" beside someone set as
+// Mum) is Ambiguous, and its photos are those of any of them, so the user
+// can choose without the search choosing for them. A blocked name blocks
+// the whole query; a relationship only when everyone it names is blocked,
+// the others being searched for alone.
+func ParseQuery(query string, named []core.NamedTarget) Query {
+	blocked := Query{Blocked: true, People: []core.SearchPerson{}, Unassigned: []string{}}
+	// A blocked name blocks the query wherever it is, even inside a longer
+	// relationship phrase ("my family" beside a blocked Thing "Family").
+	names := slices.DeleteFunc(slices.Clone(named), func(t core.NamedTarget) bool { return t.Related })
+	if slices.ContainsFunc(MatchNames(query, names), NameMatch.Blocked) {
+		return blocked
+	}
+	if core.MentionsUser(query) {
+		named = slices.Concat(named, core.UnassignedTargets())
+	}
+	var q Query
+	var people []NameMatch // the matches that name someone
+	for _, match := range MatchNames(query, named) {
+		if match.Blocked() {
+			return blocked
+		}
+		ids, plural := match.People()
+		switch {
+		case len(ids) > 0:
+			people = append(people, match)
+			text := query[match.Start:match.End]
+			if i := slices.IndexFunc(q.People, func(p core.SearchPerson) bool { return slices.Equal(p.People, ids) }); i < 0 {
+				q.People = append(q.People, core.SearchPerson{Text: text, People: ids, Ambiguous: len(ids) > 1 && !plural})
+			}
+		case slices.ContainsFunc(match.Targets, func(t core.NamedTarget) bool { return t.Related }):
+			q.Unassigned = append(q.Unassigned, query[match.Start:match.End])
+		}
+	}
+	if q.People == nil {
+		q.People = []core.SearchPerson{}
+	}
+	if q.Unassigned == nil {
+		q.Unassigned = []string{}
+	}
+	q.Rest = RemainingQuery(query, people)
+	return q
+}
+
+// Groups returns the people of each part of q, for store.PeopleAssets.
+func (q Query) Groups() [][]int64 {
+	groups := make([][]int64, len(q.People))
+	for i, p := range q.People {
+		groups[i] = p.People
+	}
+	return groups
+}
+
+// NameMatch locates a whole-word entity name using byte offsets in the
+// query. Targets are everything of that name, whatever its case: a person
+// and a place may share a name, several people a relationship.
 type NameMatch struct {
-	Target     core.NamedTarget
+	Targets    []core.NamedTarget
 	Start, End int
 }
 
-// MatchNames resolves all occurrences, preferring longer names and blocked exact ties.
+// Blocked reports whether the match names something blocked. A name
+// blocks it outright; a relationship phrase only when every person it names
+// is blocked, as the others can be searched for without revealing them.
+func (m NameMatch) Blocked() bool {
+	everyone := true
+	for _, t := range m.Targets {
+		switch {
+		case t.Blocked && !t.Related:
+			return true
+		case t.ID != 0 && !t.Blocked:
+			everyone = false
+		}
+	}
+	return everyone && slices.ContainsFunc(m.Targets, func(t core.NamedTarget) bool { return t.Blocked })
+}
+
+// People returns the shown people the match names, in ascending order, and
+// whether its words expect several (a plural relationship phrase).
+func (m NameMatch) People() (ids []int64, plural bool) {
+	plural = len(m.Targets) > 0
+	for _, t := range m.Targets {
+		if t.Kind != core.BlockPerson {
+			continue
+		}
+		plural = plural && t.Plural
+		if t.ID != 0 && !t.Blocked && !slices.Contains(ids, t.ID) {
+			ids = append(ids, t.ID)
+		}
+	}
+	slices.Sort(ids)
+	return ids, plural
+}
+
+// MatchNames resolves all occurrences, preferring longer names. Targets of
+// the same name, whatever its case, match together.
 func MatchNames(query string, named []core.NamedTarget) []NameMatch {
-	named = slices.Clone(named)
-	slices.SortStableFunc(named, func(a, b core.NamedTarget) int {
-		if length := cmp.Compare(utf8.RuneCountInString(b.Name), utf8.RuneCountInString(a.Name)); length != 0 {
-			return length
+	byName := map[string][]core.NamedTarget{}
+	var names []string // one spelling of each, longest first
+	for _, t := range named {
+		if t.Name == "" {
+			continue
 		}
-		if a.Blocked != b.Blocked {
-			if a.Blocked {
-				return -1
-			}
-			return 1
+		key := core.Fold(t.Name)
+		if _, ok := byName[key]; !ok {
+			names = append(names, t.Name)
 		}
-		return 0
+		byName[key] = append(byName[key], t)
+	}
+	slices.SortStableFunc(names, func(a, b string) int {
+		return cmp.Compare(utf8.RuneCountInString(b), utf8.RuneCountInString(a))
 	})
 	remaining := []byte(query)
 	var matches []NameMatch
-	for _, p := range named {
-		if p.Name == "" {
-			continue
-		}
+	for _, name := range names {
 		for {
-			start, end := wordIndex(string(remaining), p.Name)
+			start, end := wordIndex(string(remaining), name)
 			if start < 0 {
 				break
 			}
-			matches = append(matches, NameMatch{Target: p, Start: start, End: end})
+			matches = append(matches, NameMatch{Targets: byName[core.Fold(name)], Start: start, End: end})
 			for index := start; index < end; index++ {
 				remaining[index] = ' '
 			}
 		}
 	}
+	slices.SortFunc(matches, func(a, b NameMatch) int { return cmp.Compare(a.Start, b.Start) })
 	return matches
 }
 

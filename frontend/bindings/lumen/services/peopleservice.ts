@@ -24,9 +24,12 @@ export function AssetFaces(assetID: number): $CancellablePromise<core$0.Face[] |
 
 /**
  * MergePeople says two people are one: everything of from moves to into.
+ * If they have different relationships, or one is Me and the other has a
+ * relationship, keep says whose relationship stays; MergeKeepAsk refuses
+ * (relation_conflict) so the user can be asked.
  */
-export function MergePeople($from: number, into: number): $CancellablePromise<void> {
-    return $Call.ByID(34334682, $from, into);
+export function MergePeople($from: number, into: number, keep: core$0.MergeKeep): $CancellablePromise<void> {
+    return $Call.ByID(34334682, $from, into, keep);
 }
 
 /**
@@ -92,10 +95,37 @@ export function RejectFaces(person: number, faces: number[] | null): $Cancellabl
 }
 
 /**
+ * RemoveMe says a person is not the user. Relationships stay: they are to
+ * the user, not to that person.
+ */
+export function RemoveMe(id: number): $CancellablePromise<void> {
+    return $Call.ByID(556493993, id);
+}
+
+/**
+ * SetMe marks a person as the user. Unless replace, it refuses
+ * (relation_conflict) when someone else is Me or the person has a
+ * relationship, so the user confirms replacing either.
+ */
+export function SetMe(id: number, replace: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1957441347, id, replace);
+}
+
+/**
  * SetPersonCover shows one of a person's faces for them.
  */
 export function SetPersonCover(id: number, face: number): $CancellablePromise<void> {
     return $Call.ByID(2077342895, id, face);
+}
+
+/**
+ * SetRelation sets what a person is to the user (RelationNone removes it)
+ * and returns the person as they are now: a custom label that is a built-in
+ * word comes back as that relationship. Neither faces nor clustering are
+ * touched.
+ */
+export function SetRelation(id: number, relation: core$0.Relation, label: string): $CancellablePromise<core$0.Person> {
+    return $Call.ByID(2362300437, id, relation, label);
 }
 
 /**

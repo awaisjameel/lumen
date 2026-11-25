@@ -55,7 +55,9 @@ var (
 	nameFirst = "instr(" + foldName + ", ?1) = 1 DESC, length(name), " + byName("name")
 )
 
-// SearchNames finds candidate names, including blocked labels, in one snapshot.
+// SearchNames finds candidate names, including blocked labels, in one
+// snapshot; with them, when the query may name the user ("me", "my mum"),
+// what names the user and the people with a relationship (relatedTargets).
 func (s *Store) SearchNames(ctx context.Context, query string) ([]core.NamedTarget, error) {
 	var queries []string
 	for _, target := range []struct {
@@ -76,8 +78,18 @@ func (s *Store) SearchNames(ctx context.Context, query string) ([]core.NamedTarg
 	// blocked, so a search for that name finds the block, whatever its mode.
 	queries = append(queries, "SELECT target_id, name, '"+string(core.BlockEvent)+"', 1 FROM blocks WHERE kind = '"+
 		string(core.BlockEvent)+"' AND name != '' AND instr(?1, "+foldKey("blocks.name")+") > 0")
-	return queryAll(ctx, s.r, func(r *sql.Rows) (target core.NamedTarget, err error) {
-		err = r.Scan(&target.ID, &target.Name, &target.Kind, &target.Blocked)
-		return target, err
-	}, strings.Join(queries, " UNION ALL "), core.Fold(query))
+	var targets []core.NamedTarget
+	err := s.read(ctx, func(tx *sql.Tx) (err error) {
+		targets, err = queryAll(ctx, tx, func(r *sql.Rows) (target core.NamedTarget, err error) {
+			err = r.Scan(&target.ID, &target.Name, &target.Kind, &target.Blocked)
+			return target, err
+		}, strings.Join(queries, " UNION ALL "), core.Fold(query))
+		if err != nil || !core.MentionsUser(query) {
+			return err
+		}
+		related, err := relatedTargets(ctx, tx)
+		targets = append(targets, related...)
+		return err
+	})
+	return targets, err
 }

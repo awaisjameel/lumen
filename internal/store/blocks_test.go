@@ -166,7 +166,7 @@ func TestPersonBlockFollowsMerge(t *testing.T) {
 	check(t, err)
 	_, err = st.SetBlock(ctx, core.BlockPerson, from, "", core.BlockPhotos)
 	check(t, err)
-	check(t, st.MergePeople(ctx, from, into))
+	check(t, st.MergePeople(ctx, from, into, core.MergeKeepAsk))
 	if blocked, err := st.IsBlocked(ctx, core.BlockPerson, into); err != nil || !blocked {
 		t.Fatalf("merged identity block = %v, %v", blocked, err)
 	}

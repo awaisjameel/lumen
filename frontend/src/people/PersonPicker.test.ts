@@ -4,7 +4,7 @@ import { createTestNavigation } from '../shared/navigation/testing'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
-import { engine, MAX_NAME_LEN } from '../bridge'
+import { engine, MAX_NAME_LEN, Relation } from '../bridge'
 import type { Face, Person } from '../bridge'
 import type * as Bridge from '../bridge'
 import PersonPicker from './PersonPicker.vue'
@@ -73,8 +73,8 @@ it('portals suggestions while retaining input focus, exclusion and arrow-key sel
     byUser: false,
   }
   const people: Person[] = [
-    { id: 1, name: 'Ali', count: 1, cover },
-    { id: 2, name: 'Sara', count: 1, cover },
+    { id: 1, name: 'Ali', count: 1, cover, me: false, relation: Relation.RelationNone, relationLabel: '' },
+    { id: 2, name: 'Sara', count: 1, cover, me: false, relation: Relation.RelationNone, relationLabel: '' },
   ]
   vi.mocked(engine.suggestPeople).mockResolvedValue(people)
   wrapper = mountInApp(PersonPicker, { props: { placeholder: 'Name', exclude: 1 }, plugins: [testRouter()] })
@@ -115,7 +115,15 @@ it('moves up from the typed text to the last suggestion and wraps both ways', as
     byUser: false,
   }
   vi.mocked(engine.suggestPeople).mockResolvedValue(
-    ['Ali', 'Sara', 'Zoya'].map((name, i): Person => ({ id: i + 1, name, count: 1, cover })),
+    ['Ali', 'Sara', 'Zoya'].map((name, i): Person => ({
+      id: i + 1,
+      name,
+      count: 1,
+      cover,
+      me: false,
+      relation: Relation.RelationNone,
+      relationLabel: '',
+    })),
   )
   wrapper = mountInApp(PersonPicker, { props: { placeholder: 'Name' }, plugins: [testRouter()] })
   const input = wrapper.get<HTMLInputElement>('input')

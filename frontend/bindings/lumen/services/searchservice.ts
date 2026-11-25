@@ -89,7 +89,9 @@ export function RenameThing(id: number, name: string): $CancellablePromise<void>
 /**
  * Search finds photos matching a description, best match first. Named
  * people in it narrow the search to photos of all of them ("Ali at the
- * beach"); names alone give their photos, newest first. Photos whose text
+ * beach"), as do "me" and relationships ("my mum", or "my friends": any of
+ * them); names alone give their photos, newest first. A part that names
+ * more people than it should is marked ambiguous, for the user to choose. Photos whose text
  * (read from screenshots and documents, when the user has that on) holds
  * every word of the description come first, newest first, then the photos
  * the description matches by meaning. Without the AI, the description can't

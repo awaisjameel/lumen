@@ -25,6 +25,14 @@ func downgradeToV18(t *testing.T, st *Store) {
 	// before rewinding user_version so the real migration can run on reopen.
 	check(t, errOf(st.w.ExecContext(ctx, "DROP TRIGGER albums_assign_identity")))
 	check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE albums DROP COLUMN identity")))
+	// It predates Me and relationships too (migration 0041): their indexes
+	// go before the columns they cover.
+	for _, drop := range []string{"INDEX people_me", "INDEX people_related"} {
+		check(t, errOf(st.w.ExecContext(ctx, "DROP "+drop)))
+	}
+	for _, column := range []string{"is_me", "relation", "relation_label"} {
+		check(t, errOf(st.w.ExecContext(ctx, "ALTER TABLE people DROP COLUMN "+column)))
+	}
 	// The kept counts (migration 0037) read tables this version lacks, so they
 	// go with their triggers.
 	for _, table := range []string{"day_counts", "tag_counts", "person_counts_faces", "person_counts", "job_counts", "count_rebuild", "trash_count"} {

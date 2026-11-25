@@ -14,10 +14,10 @@ import (
 )
 
 func peopleCountedReference(ctx context.Context, tx *sql.Tx) ([]core.Person, error) {
-	people, err := queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), count(DISTINCT f.asset_id)
+	people, err := queryAll(ctx, tx, scanPerson, `SELECT `+personFields+`, count(DISTINCT f.asset_id)
 		FROM people p JOIN faces f ON f.person_id = p.id JOIN assets a ON a.id = f.asset_id AND `+visibleA+`
 		WHERE NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND `+faceShown+`
-		GROUP BY p.id ORDER BY p.name IS NULL, count(DISTINCT f.asset_id) DESC, `+byName("p.name")+`, p.id`)
+		GROUP BY p.id ORDER BY p.is_me DESC, p.name IS NULL, count(DISTINCT f.asset_id) DESC, `+byName("p.name")+`, p.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func TestPersonCountsFollowManualPlacementClusteringMergesRejectionsAndReanalysi
 	verify()
 	check(t, st.SetPersonCover(ctx, other, fb[0].ID))
 	verify()
-	check(t, st.MergePeople(ctx, other, person))
+	check(t, st.MergePeople(ctx, other, person, core.MergeKeepAsk))
 	verify()
 	check(t, st.RejectFaces(ctx, person, []int64{fa[0].ID}))
 	verify()

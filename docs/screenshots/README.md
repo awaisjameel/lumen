@@ -9,9 +9,9 @@ and says where it comes from.
 - **Seven images were captured on 21 October 2026** (commit `44edd34`), from
   the build of that day: the Library, search, the viewer, Places, Things,
   albums and the dark theme. They are kept as they were.
-- **The face review was captured on 24 October 2026** by
+- **The face review and the relationship editor** are captured by
   [the capture script](#reproducing-the-face-review), from the build its record
-  names, and is the one image the script reproduces.
+  names, and are the images the script reproduces.
 
 The dates, the cities each photo is placed in, the albums, the favourites and
 the person's name are invented for the screenshots, set through the same
@@ -44,6 +44,12 @@ itself; the capture then named that person, as a user would. It shows the
 flow, not recognition quality: the five frames are one photo of one person.
 Selecting a face offers **Not Sample astronaut**, **Move to someone…** and
 **Use as their picture**.
+
+![The page of a person named Sample astronaut, with the relationship editor open beside the name and Friend highlighted](relationships.webp)
+
+The same person's page with **Add a relationship** open: `fri` typed to filter
+the relationships, the arrow key highlighting **Friend**, and **Use “fri”**
+offered as the user's own word.
 
 ## Viewer and collections
 
@@ -113,8 +119,9 @@ The capture uses `bin/Lumen.exe` (or `LUMEN_EXE`), DevTools port **9446** and
 its own library under `e2e/.work/docs-capture/<timestamp>/`, indexes it to the
 end (a few minutes with a GPU), names the person and closes only its own
 process, gracefully. It emulates the gallery's framing whatever the display,
-saves `faces.webp` at WebP quality 82 without editing it, and rewrites
-`capture.json`, carrying the seven kept images' record over unchanged. A
+saves `faces.webp` and `relationships.webp` at WebP quality 82 without editing
+them, and rewrites `capture.json`, carrying the seven kept images' record over
+unchanged. A
 failed run keeps a `failure.png` and `report.json` in its scratch folder.
 
 `e2e/docs/check.py` (run by `scripts/check-docs.sh` and `scripts/lint.sh`)
