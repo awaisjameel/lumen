@@ -39,6 +39,10 @@ func scanFace(r *sql.Rows) (f core.Face, err error) {
 const clearest = `f.id = (SELECT cover_face FROM people WHERE id = f.person_id) DESC,
 	f.w * a.width * f.h * a.height * f.score DESC`
 
+// personFields are a people row p's columns that scanPerson reads before
+// the count: who they are, and what they are to the user.
+const personFields = `p.id, COALESCE(p.name, ''), p.is_me, COALESCE(p.relation, ''), COALESCE(p.relation_label, '')`
+
 var countedFacesFrom = ` FROM faces f JOIN assets a ON a.id = f.asset_id WHERE f.person_id IS NOT NULL AND ` + visibleA + ` AND ` + faceShown
 
 var recountPersonCountsSQL = `DELETE FROM person_counts_faces;
@@ -66,8 +70,7 @@ func (s *Store) People(ctx context.Context) ([]core.Person, error) {
 func (s *Store) Person(ctx context.Context, id int64) (core.Person, error) {
 	var people []core.Person
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
-		people, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''),
-				COALESCE(c.count, 0)
+		people, err = queryAll(ctx, tx, scanPerson, `SELECT `+personFields+`, COALESCE(c.count, 0)
 			FROM people p LEFT JOIN person_counts c ON c.person_id = p.id WHERE p.id = ? AND NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND NOT `+personCovered("p.id"), id)
 		if err != nil {
 			return err
@@ -99,7 +102,7 @@ func (s *Store) PersonFacts(ctx context.Context, id int64, n int) (core.PersonFa
 		if err != nil {
 			return err
 		}
-		facts.Companions, err = queryAll(ctx, tx, scanPerson, `SELECT p.id, p.name, c.count
+		facts.Companions, err = queryAll(ctx, tx, scanPerson, `SELECT `+personFields+`, c.count
 			FROM (SELECT o.person_id, count(DISTINCT o.asset_id) AS shared
 				FROM person_counts_faces m JOIN person_counts_faces o ON o.asset_id = m.asset_id AND o.person_id <> m.person_id
 				WHERE m.person_id = ? GROUP BY o.person_id) s
@@ -115,11 +118,12 @@ func (s *Store) PersonFacts(ctx context.Context, id int64, n int) (core.PersonFa
 }
 
 // peopleKept reads the counts in the caller's snapshot; covers use it too.
+// The user comes first, then named people.
 func peopleKept(ctx context.Context, tx *sql.Tx) ([]core.Person, error) {
-	return queryAll(ctx, tx, scanPerson, `SELECT p.id, COALESCE(p.name, ''), c.count
+	return queryAll(ctx, tx, scanPerson, `SELECT `+personFields+`, c.count
 		FROM people p JOIN person_counts c ON c.person_id = p.id
 		WHERE c.count > 0 AND NOT `+labelBlocked(core.BlockPerson, "p.id")+`
-		ORDER BY p.name IS NULL, c.count DESC, `+byName("p.name")+`, p.id`)
+		ORDER BY p.is_me DESC, p.name IS NULL, c.count DESC, `+byName("p.name")+`, p.id`)
 }
 
 // addKeptCovers seeks the user's eligible pick or the first ranked candidate.
@@ -152,8 +156,9 @@ func addKeptCovers(ctx context.Context, tx *sql.Tx, people []core.Person) error 
 	return nil
 }
 
+// scanPerson reads personFields and then a count.
 func scanPerson(r *sql.Rows) (p core.Person, err error) {
-	err = r.Scan(&p.ID, &p.Name, &p.Count)
+	err = r.Scan(&p.ID, &p.Name, &p.Me, &p.Relation, &p.RelationLabel, &p.Count)
 	return p, err
 }
 
@@ -201,10 +206,21 @@ func (s *Store) NamedPeople(ctx context.Context) ([]core.Person, error) {
 		ORDER BY length(name) DESC, name`)
 }
 
-// PeopleAssets returns the visible assets in which every one of people
-// appears, newest first.
-func (s *Store) PeopleAssets(ctx context.Context, people []int64) ([]int64, error) {
-	list, err := json.Marshal(people)
+// PeopleAssets returns the visible assets that show someone of every one of
+// groups, newest first: a group is one person, or the people a search's
+// "my friends" names, any of whom will do.
+func (s *Store) PeopleAssets(ctx context.Context, groups [][]int64) ([]int64, error) {
+	type member struct {
+		Group  int   `json:"g"`
+		Person int64 `json:"p"`
+	}
+	var members []member
+	for g, people := range groups {
+		for _, p := range people {
+			members = append(members, member{g, p})
+		}
+	}
+	list, err := json.Marshal(members)
 	if err != nil {
 		return nil, err
 	}
@@ -212,11 +228,11 @@ func (s *Store) PeopleAssets(ctx context.Context, people []int64) ([]int64, erro
 		err = r.Scan(&id)
 		return id, err
 	},
-		`SELECT f.asset_id FROM faces f JOIN assets a ON a.id = f.asset_id
-		WHERE f.person_id IN (SELECT value FROM json_each(?1)) AND `+visibleA+` AND `+faceShown+`
-		AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+`
-		GROUP BY f.asset_id HAVING count(DISTINCT f.person_id) = (SELECT count(DISTINCT value) FROM json_each(?1))
-		ORDER BY max(a.taken_at) DESC, f.asset_id DESC`, string(list))
+		`WITH wanted(grp, person) AS (SELECT json_extract(value, '$.g'), json_extract(value, '$.p') FROM json_each(?1))
+		SELECT f.asset_id FROM wanted w CROSS JOIN faces f ON f.person_id = w.person JOIN assets a ON a.id = f.asset_id
+		WHERE `+visibleA+` AND `+faceShown+` AND NOT `+labelBlocked(core.BlockPerson, "f.person_id")+`
+		GROUP BY f.asset_id HAVING count(DISTINCT w.grp) = ?2
+		ORDER BY max(a.taken_at) DESC, f.asset_id DESC`, string(list), len(groups))
 }
 
 // SearchPeople returns up to limit named, shown people whose names contain
@@ -228,11 +244,9 @@ func (s *Store) SearchPeople(ctx context.Context, text string, limit int) ([]cor
 	}
 	var people []core.Person
 	err := s.read(ctx, func(tx *sql.Tx) (err error) {
-		people, err = queryAll(ctx, tx, func(r *sql.Rows) (p core.Person, err error) {
-			err = r.Scan(&p.ID, &p.Name)
-			return p, err
-		}, `SELECT id, name FROM people WHERE name IS NOT NULL AND `+nameMatch+`
-			AND NOT `+labelBlocked(core.BlockPerson, "people.id")+` AND NOT `+personCovered("people.id")+`
+		people, err = queryAll(ctx, tx, scanPerson, `SELECT `+personFields+`, 0 FROM people p
+			WHERE name IS NOT NULL AND `+nameMatch+`
+			AND NOT `+labelBlocked(core.BlockPerson, "p.id")+` AND NOT `+personCovered("p.id")+`
 			ORDER BY `+nameFirst+` LIMIT ?2`, core.Fold(text), limit)
 		if err != nil {
 			return err
@@ -297,19 +311,32 @@ func (s *Store) SetPersonCover(ctx context.Context, id, face int64) error {
 }
 
 // MergePeople says two people are one: everything of from moves to into.
-func (s *Store) MergePeople(ctx context.Context, from, into int64) error {
+// Whoever of them is the user stays so. When they have different
+// relationships, or one is the user and the other has one, keep says which
+// relationship stays; MergeKeepAsk makes that ErrRelationConflict, so the
+// user is asked rather than one being dropped unseen.
+func (s *Store) MergePeople(ctx context.Context, from, into int64, keep core.MergeKeep) error {
+	if !keep.Valid() {
+		return ErrInvalidRelation
+	}
 	if from == into {
 		return nil
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		var n int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM people WHERE id IN (?, ?)", from, into).Scan(&n); err != nil {
+		people, err := queryAll(ctx, tx, func(r *sql.Rows) (p core.RelatedPerson, err error) {
+			err = r.Scan(&p.ID, &p.Me, &p.Relation, &p.Label)
+			return p, err
+		}, "SELECT id, is_me, COALESCE(relation, ''), COALESCE(relation_label, '') FROM people WHERE id IN (?, ?)", from, into)
+		if err != nil {
 			return err
 		}
-		if n != 2 {
+		if len(people) != 2 {
 			return ErrNotFound
 		}
-		return mergePeople(ctx, tx, from, into)
+		if keep == core.MergeKeepAsk && relationsDisagree(people[0], people[1]) {
+			return ErrRelationConflict
+		}
+		return mergePeople(ctx, tx, from, into, keep)
 	})
 }
 

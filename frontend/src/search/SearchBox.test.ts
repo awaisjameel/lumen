@@ -3,7 +3,7 @@ import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { VueWrapper } from '@vue/test-utils'
 import { createTestNavigation } from '../shared/navigation/testing'
-import { engine, TagKind } from '../bridge'
+import { engine, Relation, TagKind } from '../bridge'
 import type * as Bridge from '../bridge'
 import type * as Errors from '../shared/errors'
 import { reportError } from '../shared/errors'
@@ -177,6 +177,9 @@ it('searches a picked person and ignores a hidden active suggestion after Escape
         name: 'Amina Khan',
         byUser: false,
       },
+      me: false,
+      relation: Relation.RelationNone,
+      relationLabel: '',
     },
   ])
   const input = await start()

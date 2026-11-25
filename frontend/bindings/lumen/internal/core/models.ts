@@ -1288,6 +1288,35 @@ export interface MediaTrack {
 }
 
 /**
+ * MergeKeep says which relationship a merged person keeps when the two
+ * people merged had different ones, or one was the user and the other had a
+ * relationship. Whoever is the user stays so, without a relationship.
+ */
+export enum MergeKeep {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The choices of MergeKeep.
+     *
+     * they must agree; else the merge is refused, so the user is asked
+     */
+    MergeKeepAsk = "",
+
+    /**
+     * the relationship of the person merged into
+     */
+    MergeKeepInto = "into",
+
+    /**
+     * the relationship of the person merged away
+     */
+    MergeKeepFrom = "from",
+};
+
+/**
  * Motion is how much the interface moves.
  */
 export enum Motion {
@@ -1491,6 +1520,22 @@ export interface Person {
      * the face to show; ID 0 = none
      */
     "cover": Face;
+
+    /**
+     * Me: the user marked this person as themself. At most one person is.
+     */
+    "me": boolean;
+
+    /**
+     * Relation is what they are to the user, apart from their name; ""
+     * when not set, and always "" for Me.
+     */
+    "relation": Relation;
+
+    /**
+     * the user's own word when Relation is RelationCustom
+     */
+    "relationLabel": string;
 }
 
 /**
@@ -1741,6 +1786,50 @@ export interface Progress {
 }
 
 /**
+ * Relation is what a person in the photos is to the user: their mum, a
+ * friend. It is always relative to the user, whether or not one of the
+ * people is marked as them (Person.Me), and it is only ever what the user
+ * chose: Lumen never guesses one from the photos.
+ */
+export enum Relation {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * The relationships a person can have. RelationCustom carries the user's own
+     * word in Person.RelationLabel. The others are built in: the UI names them
+     * in its own words, and a search finds them by several (MatchRelations).
+     */
+    RelationNone = "",
+    RelationPartner = "partner",
+    RelationMother = "mother",
+    RelationFather = "father",
+    RelationParent = "parent",
+    RelationDaughter = "daughter",
+    RelationSon = "son",
+    RelationChild = "child",
+    RelationSister = "sister",
+    RelationBrother = "brother",
+    RelationSibling = "sibling",
+    RelationGrandmother = "grandmother",
+    RelationGrandfather = "grandfather",
+    RelationGrandparent = "grandparent",
+    RelationGrandchild = "grandchild",
+    RelationAunt = "aunt",
+    RelationUncle = "uncle",
+    RelationCousin = "cousin",
+    RelationNiece = "niece",
+    RelationNephew = "nephew",
+    RelationRelative = "relative",
+    RelationFriend = "friend",
+    RelationColleague = "colleague",
+    RelationNeighbour = "neighbour",
+    RelationCustom = "custom",
+};
+
+/**
  * RenderInfo describes the pixels actually available to a viewer. A bounded
  * render must not claim to contain every source pixel when it was reduced.
  */
@@ -1766,12 +1855,25 @@ export interface RenderInfo {
 }
 
 /**
- * SearchPerson is a person a search named, spelled as the query spelled them,
- * so the query can be written again without them.
+ * SearchPerson is a part of a search that names people: a name, "me" or a
+ * relationship ("my mum"), spelled as the query spelled it, so the query can
+ * be written again without it. A photo matches it when any of its people is
+ * in the photo ("my friends").
  */
 export interface SearchPerson {
-    "id": number;
-    "name": string;
+    "text": string;
+
+    /**
+     * visible people it names, at least one
+     */
+    "people": number[] | null;
+
+    /**
+     * Ambiguous: a name or a singular relationship ("my mum") named more
+     * than one person. Photos of any of them are shown, and the UI asks which
+     * one was meant rather than choosing for the user.
+     */
+    "ambiguous": boolean;
 }
 
 /**
@@ -1784,6 +1886,11 @@ export interface SearchResult {
      * people named in the query: results show all of them
      */
     "people": SearchPerson[] | null;
+
+    /**
+     * "me" or "my …" as the query spelled them, which no one is yet: searched for as a description
+     */
+    "unassigned": string[] | null;
 
     /**
      * the rest of the query, searched for; empty if it only names people

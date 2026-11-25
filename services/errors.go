@@ -39,12 +39,14 @@ const (
 	CodeAlbumReference      ErrorCode = "album_reference"
 	CodeAlbumManualOnly     ErrorCode = "album_manual_only"
 	CodeAlbumChanged        ErrorCode = "album_changed"
-	CodePersonExists        ErrorCode = "person_exists"   // someone else has that name
-	CodeBlockedName         ErrorCode = "blocked_name"    // a name belongs to a blocked person or Thing
-	CodeTagExists           ErrorCode = "tag_exists"      // another Thing has that name
-	CodeBuiltinTag          ErrorCode = "builtin_tag"     // built-in Things can be blocked, not deleted
-	CodeTagInAlbum          ErrorCode = "tag_in_album"    // a smart album's rule uses the Thing
-	CodeAlreadyCovered      ErrorCode = "already_covered" // the folder is already in the library
+	CodePersonExists        ErrorCode = "person_exists" // someone else has that name
+	CodeInvalidRelation     ErrorCode = "invalid_relation"
+	CodeRelationConflict    ErrorCode = "relation_conflict" // it would replace Me, or lose a relationship: ask first
+	CodeBlockedName         ErrorCode = "blocked_name"      // a name belongs to a blocked person or Thing
+	CodeTagExists           ErrorCode = "tag_exists"        // another Thing has that name
+	CodeBuiltinTag          ErrorCode = "builtin_tag"       // built-in Things can be blocked, not deleted
+	CodeTagInAlbum          ErrorCode = "tag_in_album"      // a smart album's rule uses the Thing
+	CodeAlreadyCovered      ErrorCode = "already_covered"   // the folder is already in the library
 	CodeFolderNotFound      ErrorCode = "folder_not_found"
 	CodeInvalidPIN          ErrorCode = "invalid_pin"      // not 6 to 12 digits, or not the PIN
 	CodePINExists           ErrorCode = "pin_exists"       // a PIN was already created
@@ -126,6 +128,8 @@ var errorCodes = []struct {
 	{store.ErrAlbumChanged, CodeAlbumChanged},
 	{store.ErrInvalidAlbum, CodeInvalidAlbum},
 	{store.ErrPersonExists, CodePersonExists},
+	{store.ErrInvalidRelation, CodeInvalidRelation},
+	{store.ErrRelationConflict, CodeRelationConflict},
 	{store.ErrBlockedName, CodeBlockedName},
 	{store.ErrTagExists, CodeTagExists},
 	{store.ErrBuiltinTag, CodeBuiltinTag},

@@ -2,11 +2,12 @@ import { itemCommand, runCommand } from '../shared/commands'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
-import { engine, ErrorCode } from '../bridge'
+import { engine, ErrorCode, Relation } from '../bridge'
 import type * as Bridge from '../bridge'
 import type { Person } from '../bridge'
 import { blockRequest } from '../shared/block'
 import { mountInApp, recordNotifications } from '../shared/testing'
+import { meSetupSkipped } from './relationships'
 import { usePeople } from './store'
 import PeopleView from './PeopleView.vue'
 import { peopleRouter, personFixture } from './testing'
@@ -21,6 +22,9 @@ vi.mock('../bridge', async (importOriginal) => ({
     personByName: vi.fn(),
     mergePeople: vi.fn(),
     prepareSearch: vi.fn(),
+    setMe: vi.fn(),
+    removeMe: vi.fn(),
+    setRelation: vi.fn(),
   },
 }))
 let wrapper: ReturnType<typeof mountInApp> | undefined
@@ -51,7 +55,7 @@ it('shows live counts, separate groups and the filter in the top bar without pre
   expect(w.get('[aria-live="polite"]').text()).toBe('2 people')
   expect(w.get('[aria-label="Named"]').text()).toContain('1,284 photos')
   expect(w.get('[aria-label="Who are these?"]').text()).toContain('56 photos')
-  expect(w.get('[aria-label="Filter people by name"]').element.closest('header')).not.toBeNull()
+  expect(w.get('[aria-label="Filter people by name or relationship"]').element.closest('header')).not.toBeNull()
   await w.get('input').trigger('focus')
   expect(engine.prepareSearch).not.toHaveBeenCalled()
 })
@@ -128,7 +132,7 @@ it('recovers from a local read failure and shows the first-use next action', asy
 it('uses engine name matches and offers recovery when the filter finds nobody', async () => {
   vi.useFakeTimers()
   const w = await mounted()
-  await w.get('[aria-label="Filter people by name"]').setValue('Nobody')
+  await w.get('[aria-label="Filter people by name or relationship"]').setValue('Nobody')
   await vi.advanceTimersByTimeAsync(200)
   await flushPromises()
   expect(engine.suggestPeople).toHaveBeenCalledWith('Nobody')
@@ -137,4 +141,68 @@ it('uses engine name matches and offers recovery when the filter finds nobody', 
   if (!clear) throw new Error('The clear filter control is missing')
   await clear.trigger('click')
   expect(w.findAll('[data-person]')).toHaveLength(2)
+})
+
+it('shows Me and relationships on the cards and finds people by them', async () => {
+  vi.useFakeTimers()
+  vi.mocked(engine.people).mockResolvedValue([
+    { ...personFixture(1, 'Ali', 900), me: true },
+    { ...personFixture(2, 'Jane', 40), relation: Relation.RelationMother },
+    { ...personFixture(3, '', 12), relation: Relation.RelationCustom, relationLabel: 'Coach' },
+  ])
+  const w = await mounted()
+  expect(w.get('[data-person="1"]').text()).toContain('Me')
+  expect(w.get('[data-person="2"]').text()).toContain('Mum')
+  expect(w.get('[data-person="3"]').text()).toContain('Coach')
+  expect(w.find('[data-me-prompt]').exists()).toBe(false)
+  await w.get('[aria-label="Filter people by name or relationship"]').setValue('mum')
+  await vi.advanceTimersByTimeAsync(200)
+  await flushPromises()
+  expect(w.findAll('[data-person]').map((card) => card.attributes('data-person'))).toEqual(['2'])
+  await w.get('[aria-label="Filter people by name or relationship"]').setValue('coach')
+  await vi.advanceTimersByTimeAsync(200)
+  await flushPromises()
+  expect(w.findAll('[data-person]').map((card) => card.attributes('data-person'))).toEqual(['3'])
+})
+
+it('asks which person is you until one is chosen, and lets the user skip it', async () => {
+  meSetupSkipped.value = false
+  let me = 0
+  vi.mocked(engine.people).mockImplementation(() =>
+    Promise.resolve([personFixture(1, 'Ali', 900), personFixture(2, '', 56)].map((p) => ({ ...p, me: p.id === me }))),
+  )
+  vi.mocked(engine.setMe).mockImplementation((id) => {
+    me = id
+    return Promise.resolve()
+  })
+  const w = await mounted()
+  const prompt = w.get('[data-me-prompt]')
+  expect(prompt.text()).toContain('Which one is you?')
+  expect(prompt.findAll('[data-me-choice]').map((c) => c.text())).toEqual(['Ali', 'Unnamed person'])
+  await prompt.get('[data-me-choice="1"]').trigger('click')
+  await flushPromises()
+  expect(engine.setMe).toHaveBeenCalledWith(1, false)
+  expect(notices.find('person.me')?.title).toBe('Ali is now Me.')
+  expect(w.find('[data-me-prompt]').exists()).toBe(false)
+  me = 0
+  await usePeople().load()
+  await flushPromises()
+  await w.get('[data-me-skip]').trigger('click')
+  expect(w.find('[data-me-prompt]').exists()).toBe(false)
+  meSetupSkipped.value = false
+})
+
+it('edits a relationship from a card’s menu and reloads People', async () => {
+  vi.mocked(engine.setRelation).mockResolvedValue({ ...personFixture(2, ''), relation: Relation.RelationSon })
+  const w = await mounted()
+  await runCommand(itemCommand('person.relation', 2))
+  await flushPromises()
+  const input = w.get('[data-relation-editor] input')
+  await input.setValue('son')
+  await input.trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(engine.setRelation).toHaveBeenCalledWith(2, Relation.RelationSon, '')
+  expect(notices.find('person.2.relation')?.title).toBe('Unnamed person is now your Son.')
+  expect(w.find('[data-relation-editor]').exists()).toBe(false)
+  expect(engine.people).toHaveBeenCalledTimes(2)
 })

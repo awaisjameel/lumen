@@ -1,4 +1,5 @@
-// Captures the People face-review screenshot from the real production WebView,
+// Captures the People screenshots (face review, choosing a relationship) from
+// the real production WebView,
 // on a fresh library of the pinned public sample photos (fixtures.py).
 // Opt-in documentation tooling, outside run.mjs.
 import assert from 'node:assert/strict'
@@ -127,6 +128,21 @@ try {
   await page.click('[data-face] .face-tile')
   await page.mouse.move(2, 2)
   await shot('faces', 'Reviewing the faces of a named person, one selected.')
+
+  // Choosing a relationship, as a user does: the control beside the name,
+  // then typing to filter and the arrow key to highlight one.
+  await go(page, `/people/${person}`)
+  await page.waitForSelector('[data-person-role="relation"]', { visible: true })
+  await page.click('[data-person-role="relation"]')
+  await page.waitForSelector('[data-relation-editor] input', { visible: true })
+  await page.keyboard.type('fri')
+  await page.keyboard.press('ArrowDown')
+  check(
+    'Friend is highlighted for the relationship capture',
+    await page.$eval('[data-relation-editor] [aria-selected="true"]', (option) => option.textContent.trim() === 'Friend'),
+  )
+  await page.mouse.move(2, 2)
+  await shot('relationships', 'Choosing a relationship for a named person.')
   check('no uncaught page errors', errors.length === 0)
   check('no application request left the PC', external.length === 0)
   manifest.externalRequests = external

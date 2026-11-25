@@ -9,7 +9,7 @@ uploads, no telemetry.
 
 ![The Lumen Library: a timeline of photos grouped by day, with the place of each day](docs/screenshots/library.webp)
 
-- **Find a memory:** search by what is in a photo, by a person's name, or by text in screenshots and documents.
+- **Find a memory:** search by what is in a photo, by a person's name, by `me` or `my mum` once you choose who you and they are, or by text in screenshots and documents.
 - **Explore:** People, Things, Places, Events, favourites, and manual and smart albums.
 - **View:** photos, camera RAW, HEIC, JPEG XL, animations, multi-page images and video.
 - **Stay in control:** correct faces and tags; hide or block anything behind a PIN.

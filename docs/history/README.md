@@ -39,6 +39,7 @@ Phases 0 to 4 have no records of their own: Phase 0's measurements are in [the s
 - 23 October 2026: [dependency upgrade and acceptance record](dependency-upgrade-2026-10-23.md), [resolved inventory](dependency-inventory-2026-10-23.json)
 - 24 October 2026: [documentation refresh](documentation-refresh-2026-10-24.md): the guides checked against the code, new screenshots and their capture
 - 6 November 2026: [PR #56 integration audit](pr56-integration-audit-2026-11-06.md): the findings, repairs and verification ledger for the integrated children of issue #31, with its 11 November local addendum
+- 25 November 2026: [People: Me and relationships](people-relationships-2026-11-25.md): the Google Photos parity checklist, model, search rules and acceptance evidence for issue #30
 
 ## Acceptance logs
 

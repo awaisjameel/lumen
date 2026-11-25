@@ -34,11 +34,13 @@ import {
   FocusRing,
   Kind,
   Link,
+  MergeKeep,
   Motion,
   OrganiseMoveState,
   OrganiseRunState,
   Playback,
   PrefCategory,
+  Relation,
   SidecarState,
   SourceAvailability,
   StartView,
@@ -112,7 +114,7 @@ import type {
   ExportOptions,
   ExportJob,
   ExportPreset,
-  SearchPerson,
+  SearchPerson as RawSearchPerson,
   SearchResult,
   Settings as RawSettings,
   Source,
@@ -148,11 +150,13 @@ export {
   FocusRing,
   Kind,
   Link,
+  MergeKeep,
   Motion,
   OrganiseMoveState,
   OrganiseRunState,
   Playback,
   PrefCategory,
+  Relation,
   SidecarState,
   SourceAvailability,
   StartView,
@@ -202,7 +206,6 @@ export type {
   Place,
   Progress,
   RenderInfo,
-  SearchPerson,
   DisplayAdjustment,
   ViewerPreferences,
   MediaTrack,
@@ -228,8 +231,12 @@ export type AssetDetail = NonNullLists<RawAssetDetail, 'paths'>
 export type DayItems = NonNullLists<RawDayItems, 'items'>
 /** An exact smart-rule count with a bounded representative sample. */
 export type AlbumPreview = NonNullLists<RawAlbumPreview, 'items'>
+/** A part of a search that names people: a name, "me" or "my …". */
+export type SearchPerson = NonNullLists<RawSearchPerson, 'people'>
 /** A search's results, best first. */
-export type SearchResults = NonNullLists<SearchResult, 'items' | 'people'>
+export type SearchResults = Omit<NonNullLists<SearchResult, 'items' | 'unassigned'>, 'people'> & {
+  people: SearchPerson[]
+}
 
 export type PersonFacts = NonNullLists<RawPersonFacts, 'companions'>
 /** One asset in a duplicate group, with all its file paths (and each one's mtime). */
@@ -288,6 +295,33 @@ export const EVENT_GAP_DEFAULT = 12 // core.EventGapDefault
 export const EVENT_GAP_MIN = 1 // core.EventGapMin
 export const EVENT_GAP_MAX = 72 // core.EventGapMax
 export const MAX_NAME_LEN = 80 // core.MaxNameLen: people, Things and albums
+export const MAX_RELATION_LABEL_LEN = 40 // core.MaxRelationLabelLen
+/** The built-in relationships, in the order a picker offers them. */
+export const RELATIONS: readonly Relation[] = [
+  Relation.RelationPartner,
+  Relation.RelationMother,
+  Relation.RelationFather,
+  Relation.RelationParent,
+  Relation.RelationDaughter,
+  Relation.RelationSon,
+  Relation.RelationChild,
+  Relation.RelationSister,
+  Relation.RelationBrother,
+  Relation.RelationSibling,
+  Relation.RelationGrandmother,
+  Relation.RelationGrandfather,
+  Relation.RelationGrandparent,
+  Relation.RelationGrandchild,
+  Relation.RelationAunt,
+  Relation.RelationUncle,
+  Relation.RelationCousin,
+  Relation.RelationNiece,
+  Relation.RelationNephew,
+  Relation.RelationRelative,
+  Relation.RelationFriend,
+  Relation.RelationColleague,
+  Relation.RelationNeighbour,
+] // core.Relations
 export const PIN_MIN_LEN = 6 // core.PINMinLen
 export const BLOCK_UNLOCK_IDLE_MINUTES = 10 // services.blockUnlockIdle
 export const PIN_MAX_LEN = 12 // core.PINMaxLen
@@ -429,6 +463,8 @@ export const ErrorCode = {
   AlbumManualOnly: 'album_manual_only',
   AlbumChanged: 'album_changed',
   PersonExists: 'person_exists',
+  InvalidRelation: 'invalid_relation',
+  RelationConflict: 'relation_conflict',
   BlockedName: 'blocked_name',
   TagExists: 'tag_exists',
   BuiltinTag: 'builtin_tag',
@@ -751,7 +787,12 @@ export const engine = {
 
   search: async (query: string, signal?: AbortSignal): Promise<SearchResults> => {
     const r = await cancellable(SearchService.Search(query), signal)
-    return { ...r, items: r.items ?? [], people: r.people ?? [] }
+    return {
+      ...r,
+      items: r.items ?? [],
+      people: (r.people ?? []).map((p) => ({ ...p, people: p.people ?? [] })),
+      unassigned: r.unassigned ?? [],
+    }
   },
   /** Search results again as they are now, in order: hidden ones left out, thumbnails current. */
   searchHits: async (ids: number[], signal?: AbortSignal): Promise<GridItem[]> =>
@@ -786,7 +827,15 @@ export const engine = {
   suggestPeople: async (text: string): Promise<Person[]> => (await PeopleService.SuggestPeople(text)) ?? [],
   personByName: (name: string): Promise<number> => PeopleService.PersonByName(name),
   namePerson: (id: number, name: string): Promise<void> => PeopleService.NamePerson(id, name),
-  mergePeople: (from: number, into: number): Promise<void> => PeopleService.MergePeople(from, into),
+  /** Merges from into into; keep settles different relationships (see services.PeopleService.MergePeople). */
+  mergePeople: (from: number, into: number, keep: MergeKeep = MergeKeep.MergeKeepAsk): Promise<void> =>
+    PeopleService.MergePeople(from, into, keep),
+  /** Marks a person as the user; without replace, a Me or relationship it would replace is relation_conflict. */
+  setMe: (id: number, replace: boolean): Promise<void> => PeopleService.SetMe(id, replace),
+  removeMe: (id: number): Promise<void> => PeopleService.RemoveMe(id),
+  /** Sets what a person is to the user; returns them as kept (a custom "Mum" comes back as RelationMother). */
+  setRelation: (id: number, relation: Relation, label: string): Promise<Person> =>
+    PeopleService.SetRelation(id, relation, label),
   setPersonCover: (id: number, face: number): Promise<void> => PeopleService.SetPersonCover(id, face),
   rejectFaces: (person: number, faces: number[]): Promise<void> => PeopleService.RejectFaces(person, faces),
   nameFaces: (faces: number[], name: string): Promise<number> => PeopleService.NameFaces(faces, name),

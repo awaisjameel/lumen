@@ -41,6 +41,10 @@ export const SUITES = {
     port: 9415,
     about: 'empty collection recovery through the PIN gate and event-name Undo across a restart',
   },
+  'people-relationships': {
+    port: 9426,
+    about: 'Me and relationships through People, keyboard, search ambiguity, merge conflicts, a hidden person and restart',
+  },
   'search-history': {
     port: 9416,
     about: 'clear recent searches, run a new query and preserve engine history through navigation and restart',

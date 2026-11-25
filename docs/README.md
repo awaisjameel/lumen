@@ -42,10 +42,9 @@ The [feature completion audit](feature-audit.md), added for issue #31 on
 ## Keeping documentation aligned
 
 Read code and current manifests before copying a phase record. Dependency changes
-need a check of Development, AGENTS, release status and screenshots. People changes
-(including open [issue #30](https://github.com/awaisjameel/lumen/issues/30)) need
-another walkthrough and native capture review; relationship/Me features are not
-described as implemented before they exist.
+need a check of Development, AGENTS, release status and screenshots. People changes,
+including Me and relationships ([record](history/people-relationships-2026-11-25.md)),
+need another walkthrough and native capture review of the People screenshots.
 
 Run `scripts/check-docs.sh` ([prerequisites](development.md#setup)) and the
 [capture workflow](screenshots/README.md#reproducing-the-face-review). Keep offline

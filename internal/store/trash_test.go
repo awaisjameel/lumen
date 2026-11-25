@@ -132,7 +132,7 @@ var trashReaders = []struct {
 	}},
 	{"a person's photos", 1, func(t *testing.T, f trashFixture) int {
 		t.Helper()
-		ids, err := f.st.PeopleAssets(f.ctx, []int64{personNamed(t, f, "Alice")})
+		ids, err := f.st.PeopleAssets(f.ctx, eachPerson(personNamed(t, f, "Alice")))
 		check(t, err)
 		return len(ids)
 	}},

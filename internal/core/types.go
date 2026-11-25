@@ -594,17 +594,22 @@ type AssetTag struct {
 }
 
 // NamedTarget is a named entity considered when resolving a search query.
+// A person is also named by what they are to the user ("me", "my mum"):
+// such a target is Related, and ID 0 when no one is that yet.
 type NamedTarget struct {
 	ID      int64
 	Name    string
 	Kind    BlockKind
 	Blocked bool
+	Related bool // Name is "me" or a relationship phrase, not the person's name
+	Plural  bool // a relationship phrase that expects several people ("my friends")
 }
 
 // SearchResult is the answer to a natural-language search, best match first.
 type SearchResult struct {
 	Items       []GridItem     `json:"items"`
 	People      []SearchPerson `json:"people"`      // people named in the query: results show all of them
+	Unassigned  []string       `json:"unassigned"`  // "me" or "my …" as the query spelled them, which no one is yet: searched for as a description
 	Description string         `json:"description"` // the rest of the query, searched for; empty if it only names people
 	Pending     int            `json:"pending"`     // photos not yet understood, so not searchable yet
 	Complete    bool           `json:"complete"`    // false: more matched than are shown
@@ -612,11 +617,17 @@ type SearchResult struct {
 	Blocked     bool           `json:"blocked"`     // a blocked named entity occurred in the query
 }
 
-// SearchPerson is a person a search named, spelled as the query spelled them,
-// so the query can be written again without them.
+// SearchPerson is a part of a search that names people: a name, "me" or a
+// relationship ("my mum"), spelled as the query spelled it, so the query can
+// be written again without it. A photo matches it when any of its people is
+// in the photo ("my friends").
 type SearchPerson struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	Text   string  `json:"text"`
+	People []int64 `json:"people"` // visible people it names, at least one
+	// Ambiguous: a name or a singular relationship ("my mum") named more
+	// than one person. Photos of any of them are shown, and the UI asks which
+	// one was meant rather than choosing for the user.
+	Ambiguous bool `json:"ambiguous"`
 }
 
 // Face is one face in a photo or video: where it is, and who it is.
@@ -644,6 +655,12 @@ type Person struct {
 	Name  string `json:"name"`  // "" until the user names them
 	Count int    `json:"count"` // visible photos they appear in
 	Cover Face   `json:"cover"` // the face to show; ID 0 = none
+	// Me: the user marked this person as themself. At most one person is.
+	Me bool `json:"me"`
+	// Relation is what they are to the user, apart from their name; ""
+	// when not set, and always "" for Me.
+	Relation      Relation `json:"relation"`
+	RelationLabel string   `json:"relationLabel"` // the user's own word when Relation is RelationCustom
 }
 
 // PersonFacts is what a person's page says about them beside their photos.

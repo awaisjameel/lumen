@@ -521,7 +521,16 @@ export const useLibrary = defineStore('library', () => {
       if (s.kind === 'search') {
         const r = s.query
           ? await engine.search(s.query, signal)
-          : { items: [], people: [], description: '', pending: 0, complete: true, noAI: false, blocked: false }
+          : {
+              items: [],
+              people: [],
+              unassigned: [],
+              description: '',
+              pending: 0,
+              complete: true,
+              noAI: false,
+              blocked: false,
+            }
         if (current !== generation || request !== loadRequest) return
         let items = r.items
         // A pre-change answer must be read again before any of its hits
@@ -547,6 +556,7 @@ export const useLibrary = defineStore('library', () => {
           pending: r.pending,
           complete: r.complete,
           people: r.people,
+          unassigned: r.unassigned,
           description: r.description,
           noAI: r.noAI,
           blocked: r.blocked,

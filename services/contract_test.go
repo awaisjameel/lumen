@@ -57,6 +57,7 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		"EVENT_GAP_MIN":             core.EventGapMin,
 		"EVENT_GAP_MAX":             core.EventGapMax,
 		"MAX_NAME_LEN":              core.MaxNameLen,
+		"MAX_RELATION_LABEL_LEN":    core.MaxRelationLabelLen,
 		"PIN_MIN_LEN":               core.PINMinLen,
 		"PIN_MAX_LEN":               core.PINMaxLen,
 		"PIN_COOLDOWN_SECONDS":      float64(pinCooldown / time.Second),
@@ -96,6 +97,18 @@ func TestBridgeMirrorsTheEngine(t *testing.T) {
 		if got := constant(name); got != want {
 			t.Errorf("bridge %s = %v, engine has %v", name, got, want)
 		}
+	}
+
+	relations := regexp.MustCompile(`(?s)export const RELATIONS: readonly Relation\[\] = \[(.*?)\] // core.Relations`).FindStringSubmatch(bridge)
+	if relations == nil {
+		t.Fatal("bridge has no RELATIONS")
+	}
+	var mirrored []core.Relation
+	for _, m := range regexp.MustCompile(`Relation\.Relation(\w+)`).FindAllStringSubmatch(relations[1], -1) {
+		mirrored = append(mirrored, core.Relation(strings.ToLower(m[1])))
+	}
+	if !slices.Equal(mirrored, core.Relations) {
+		t.Errorf("bridge RELATIONS = %v, engine has %v", mirrored, core.Relations)
 	}
 
 	block := regexp.MustCompile(`(?s)export const ErrorCode = \{(.*?)\} as const`).FindStringSubmatch(bridge)

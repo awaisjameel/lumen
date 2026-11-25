@@ -406,12 +406,25 @@ func TestSearchNeverReturnsTextOfPhotosTheUserCannotSee(t *testing.T) {
 // nameAli names the faces of the given photos Ali, and returns who she is.
 func (l *textLibrary) nameAli(t *testing.T, ids ...int64) int64 {
 	t.Helper()
+	return l.name(t, "Ali", 0.1, ids...)
+}
+
+// name gives the given photos a face at x and names them all name ("": a
+// new unnamed person), returning who that is. Faces at other places stay.
+func (l *textLibrary) name(t *testing.T, name string, x float32, ids ...int64) int64 {
+	t.Helper()
 	ctx := t.Context()
 	var results []store.FaceResult
 	for _, id := range ids {
-		results = append(results, store.FaceResult{AssetID: id, Faces: []store.DetectedFace{
-			{X: 0.1, Y: 0.1, W: 0.2, H: 0.2, Score: 0.9, Sharpness: 50, Vec: []float32{1, 0}},
-		}})
+		faces := []store.DetectedFace{{X: x, Y: 0.1, W: 0.2, H: 0.2, Score: 0.9, Sharpness: 50, Vec: []float32{1, 0}}}
+		known, err := l.st.AssetFaces(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range known {
+			faces = append(faces, store.DetectedFace{X: f.X, Y: f.Y, W: f.W, H: f.H, Score: 0.9, Sharpness: 50, Vec: []float32{0, 1}})
+		}
+		results = append(results, store.FaceResult{AssetID: id, Faces: faces})
 	}
 	if err := l.st.SaveFaces(ctx, "f", "f", results); err != nil {
 		t.Fatal(err)
@@ -419,16 +432,83 @@ func (l *textLibrary) nameAli(t *testing.T, ids ...int64) int64 {
 	var faces []int64
 	for _, id := range ids {
 		fs, err := l.st.AssetFaces(ctx, id)
-		if err != nil || len(fs) != 1 {
+		i := slices.IndexFunc(fs, func(f core.Face) bool { return f.X == x })
+		if err != nil || i < 0 {
 			t.Fatalf("faces of %d: %v, %v", id, fs, err)
 		}
-		faces = append(faces, fs[0].ID)
+		faces = append(faces, fs[i].ID)
 	}
-	ali, err := l.st.NameFaces(ctx, faces, "Ali")
+	person, err := l.st.NameFaces(ctx, faces, name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ali
+	return person
+}
+
+func TestSearchFindsTheUserAndTheirRelationships(t *testing.T) {
+	l := newTextLibrary(t)
+	ctx := t.Context()
+	me := l.name(t, "Ali", 0.1, l.a, l.b, l.c)
+	mum := l.name(t, "", 0.5, l.a, l.d) // unnamed: a relationship needs no name
+	friend := l.name(t, "Sara", 0.7, l.b)
+	other := l.name(t, "Omar", 0.7, l.c)
+	people := &PeopleService{store: l.st}
+	check := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Before anyone is set, "me" and "my mum" are only descriptions, and the
+	// result says so instead of guessing.
+	r, err := l.svc.Search(ctx, "me and my mum")
+	check(err)
+	if !slices.Equal(r.Unassigned, []string{"me", "my mum"}) || len(r.People) != 0 || r.Description != "me and my mum" {
+		t.Fatalf("unassigned search = %+v", r)
+	}
+	check(people.SetMe(ctx, me, false))
+	_, err = people.SetRelation(ctx, mum, core.RelationMother, "")
+	check(err)
+	for _, id := range []int64{friend, other} {
+		_, err = people.SetRelation(ctx, id, core.RelationFriend, "")
+		check(err)
+	}
+	l.engine.asked = nil
+	r, err = l.svc.Search(ctx, "me with my mum")
+	check(err)
+	if !slices.Equal(resultIDs(r), []int64{l.a}) || len(r.Unassigned) != 0 || r.Description != "" || len(l.engine.asked) != 0 {
+		t.Fatalf("me with my mum = %v %+v", resultIDs(r), r)
+	}
+	if want := []core.SearchPerson{{Text: "me", People: []int64{me}}, {Text: "my mum", People: []int64{mum}}}; !reflect.DeepEqual(r.People, want) {
+		t.Errorf("parts = %+v, want %+v", r.People, want)
+	}
+	// "my friends" is either friend; "my friend" is too, but asks which.
+	r, err = l.svc.Search(ctx, "my friends")
+	check(err)
+	if !slices.Equal(resultIDs(r), []int64{l.c, l.b}) || len(r.People) != 1 || r.People[0].Ambiguous {
+		t.Errorf("my friends = %v %+v", resultIDs(r), r.People)
+	}
+	r, err = l.svc.Search(ctx, "my friend")
+	check(err)
+	if len(r.People) != 1 || !r.People[0].Ambiguous || !slices.Equal(r.People[0].People, []int64{friend, other}) {
+		t.Errorf("my friend = %+v, want both friends, ambiguous", r.People)
+	}
+	// Blocking her keeps "my mum" from naming or finding her, in results and
+	// in the recent searches.
+	_, err = l.st.SetBlock(ctx, core.BlockPerson, mum, "", core.BlockLabel)
+	check(err)
+	r, err = l.svc.Search(ctx, "my mum at the beach")
+	check(err)
+	if !r.Blocked || len(r.Items) != 0 || len(r.People) != 0 || len(r.Unassigned) != 0 {
+		t.Errorf("a blocked mum = %+v", r)
+	}
+	_, err = l.svc.RememberSearch(ctx, "my mum at the beach")
+	check(err)
+	recent, err := l.svc.RememberSearch(ctx, "my friends")
+	check(err)
+	if !slices.Equal(recent, []string{"my friends"}) {
+		t.Errorf("recent searches = %q, want the blocked one left out", recent)
+	}
 }
 
 func TestSearchNarrowsTextMatchesToTheNamedPeople(t *testing.T) {
@@ -442,7 +522,7 @@ func TestSearchNarrowsTextMatchesToTheNamedPeople(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []int64{l.a, l.c}; !slices.Equal(resultIDs(r), want) || !slices.Equal(r.People, []core.SearchPerson{{ID: ali, Name: "Ali"}}) || r.Description != "boarding" {
+	if want := []int64{l.a, l.c}; !slices.Equal(resultIDs(r), want) || !reflect.DeepEqual(r.People, []core.SearchPerson{{Text: "Ali", People: []int64{ali}}}) || r.Description != "boarding" {
 		t.Fatalf("results = %v for %v, want Ali's photo with the text, then her other that the engine found, Ali and \"boarding\" searched", resultIDs(r), r.People)
 	}
 	// The engine searches only Ali's photos.

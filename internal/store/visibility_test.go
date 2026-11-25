@@ -257,7 +257,7 @@ func TestPeopleAssetsRefuseLabelBlockedPeople(t *testing.T) {
 	check(t, err)
 	second, err := st.NameFaces(ctx, []int64{faces[1].ID}, "Bob")
 	check(t, err)
-	ids, err := st.PeopleAssets(ctx, []int64{first, second, first})
+	ids, err := st.PeopleAssets(ctx, eachPerson(first, second, first))
 	check(t, err)
 	if len(ids) != 1 || ids[0] != a {
 		t.Fatalf("visible people did not match their shared photo: %v", ids)
@@ -265,19 +265,19 @@ func TestPeopleAssetsRefuseLabelBlockedPeople(t *testing.T) {
 	block, err := st.SetBlock(ctx, core.BlockPerson, first, "", core.BlockLabel)
 	check(t, err)
 	for _, people := range [][]int64{{first}, {first, first}, {first, second}} {
-		ids, err := st.PeopleAssets(ctx, people)
+		ids, err := st.PeopleAssets(ctx, eachPerson(people...))
 		check(t, err)
 		if len(ids) != 0 {
 			t.Fatalf("blocked people %v returned photos: %v", people, ids)
 		}
 	}
-	ids, err = st.PeopleAssets(ctx, []int64{second})
+	ids, err = st.PeopleAssets(ctx, eachPerson(second))
 	check(t, err)
 	if len(ids) != 1 || ids[0] != a {
 		t.Fatalf("label block hid another person's photo: %v", ids)
 	}
 	check(t, st.RemoveBlock(ctx, block))
-	ids, err = st.PeopleAssets(ctx, []int64{first, second})
+	ids, err = st.PeopleAssets(ctx, eachPerson(first, second))
 	check(t, err)
 	if len(ids) != 1 || ids[0] != a {
 		t.Fatalf("unblocked people did not match their photo: %v", ids)

@@ -211,8 +211,9 @@ type ClusterFace struct {
 // ClusterPerson is a person as clustering sees them.
 type ClusterPerson struct {
 	ID int64
-	// Confirmed: the user named or blocked them, so they are never merged
-	// into anyone automatically (a block must not move to someone else).
+	// Confirmed: the user named or blocked them, marked them as themself or
+	// gave them a relationship, so they are never merged into anyone
+	// automatically (a block or relationship must not move to someone else).
 	Confirmed bool
 }
 
@@ -253,7 +254,7 @@ func clusterCorrections(ctx context.Context, q querier) ([]ClusterPerson, []Reje
 	people, err := queryAll(ctx, q, func(r *sql.Rows) (p ClusterPerson, err error) {
 		err = r.Scan(&p.ID, &p.Confirmed)
 		return p, err
-	}, "SELECT id, name IS NOT NULL OR "+labelBlocked(core.BlockPerson, "people.id")+" FROM people ORDER BY id")
+	}, "SELECT id, name IS NOT NULL OR "+userKnown("people")+" OR "+labelBlocked(core.BlockPerson, "people.id")+" FROM people ORDER BY id")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -339,7 +340,7 @@ type Merge struct{ From, Into int64 }
 // ApplyClusters saves a clustering run in one transaction. The run worked
 // from a snapshot, so anything the user changed since wins: only faces still
 // unassigned are placed, and only unnamed, unblocked people without
-// user-placed faces are merged away.
+// user-placed faces, a relationship or being the user are merged away.
 func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		// Two faces in one photo (or one video frame) are never one person:
@@ -374,7 +375,7 @@ func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 		}
 		for _, m := range c.Merges {
 			var ok bool
-			err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM people WHERE id = ?1 AND name IS NULL
+			err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM people WHERE id = ?1 AND name IS NULL AND NOT `+userKnown("people")+`
 					AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = ?1 AND assigned_by = 'user')
 					AND NOT `+labelBlocked(core.BlockPerson, "?1")+`)
 				AND EXISTS (SELECT 1 FROM people WHERE id = ?2)
@@ -387,7 +388,7 @@ func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 				return err
 			}
 			if ok {
-				if err := mergePeople(ctx, tx, m.From, m.Into); err != nil {
+				if err := mergePeople(ctx, tx, m.From, m.Into, core.MergeKeepInto); err != nil {
 					return err
 				}
 			}
@@ -397,10 +398,14 @@ func (s *Store) ApplyClusters(ctx context.Context, c ClusterChanges) error {
 }
 
 // mergePeople moves everything of person from to person into and deletes
-// from. into keeps its name and picture, or takes from's if it has none.
-func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64) error {
-	var name sql.NullString
-	if err := tx.QueryRowContext(ctx, "SELECT name FROM people WHERE id = ?", from).Scan(&name); err != nil {
+// from. into keeps its name and picture, or takes from's if it has none. If
+// from was the user, into is now, without a relationship; else into keeps
+// its relationship, or takes from's if it has none or keep says so.
+func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64, keep core.MergeKeep) error {
+	var name, relation, label sql.NullString
+	var me bool
+	if err := tx.QueryRowContext(ctx, "SELECT name, is_me, relation, relation_label FROM people WHERE id = ?", from).
+		Scan(&name, &me, &relation, &label); err != nil {
 		return err
 	}
 	for _, q := range []string{
@@ -425,16 +430,33 @@ func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64) error {
 		}
 	}
 	if name.Valid {
-		_, err := tx.ExecContext(ctx, "UPDATE people SET name = ? WHERE id = ? AND name IS NULL", name.String, into)
+		if _, err := tx.ExecContext(ctx, "UPDATE people SET name = ? WHERE id = ? AND name IS NULL", name.String, into); err != nil {
+			return err
+		}
+	}
+	switch {
+	case me: // from is gone, so the one Me can move
+		_, err := tx.ExecContext(ctx, "UPDATE people SET is_me = 1, relation = NULL, relation_label = NULL WHERE id = ?", into)
+		return err
+	case relation.Valid:
+		_, err := tx.ExecContext(ctx, `UPDATE people SET relation = ?, relation_label = ?
+			WHERE id = ? AND is_me = 0 AND (relation IS NULL OR ?)`, relation, label, into, keep == core.MergeKeepFrom)
 		return err
 	}
 	return nil
 }
 
+// userKnown is true when the user marked the people row (an SQL table
+// alias) as themself or gave it a relationship.
+func userKnown(people string) string {
+	return "(" + people + ".is_me = 1 OR " + people + ".relation IS NOT NULL)"
+}
+
 // dropEmptyPeople deletes unnamed people without faces or saved references.
-// Names, album rules and rejections retain identities for future photos.
+// Names, Me, relationships, album rules and rejections retain identities for
+// future photos.
 func dropEmptyPeople(ctx context.Context, tx *sql.Tx) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM people WHERE name IS NULL
+	_, err := tx.ExecContext(ctx, `DELETE FROM people WHERE name IS NULL AND NOT `+userKnown("people")+`
 		AND NOT EXISTS (SELECT 1 FROM faces WHERE person_id = people.id)
 		AND NOT EXISTS (SELECT 1 FROM albums WHERE kind = 'smart' AND `+rulePerson+` = people.id)
 		AND NOT EXISTS (SELECT 1 FROM face_rejections WHERE person_id = people.id)

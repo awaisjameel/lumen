@@ -160,3 +160,19 @@ BenchmarkLargeLibraryStore/folder/DayItemsPhotos 5ms # 0.053..0.146 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/Counts 5ms # 0.347..0.391 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/DayBucketsPhotos 8ms # 2.011..2.441 ms/op
 BenchmarkLargeLibraryStore/folder_tag_person/DayItemsPhotos 5ms # 0.047..0.082 ms/op
+# People relationships (issue #30), 2026-11-25: five repeats, three warmed calls
+# each, on the same machine, interleaved with five runs of main; the seed gained
+# a Me and 49 related people. SearchNamesRelated looks up "me" and "my ..."
+# phrases, PeopleAssetsRelated finds photos of Me with any of 40 friends, and
+# SetRelation writes one relationship. The same ceiling rule above applies;
+# existing budgets are unchanged (People, PersonFacts and TopPlacesPerson medians
+# moved -9..+14% against main in the same runs, within run-to-run noise).
+BenchmarkLargeLibraryStore/none/SearchNamesRelated 5ms # 0.237..0.858 ms/op
+BenchmarkLargeLibraryStore/none/PeopleAssetsRelated 200ms # 9.242..36.640 ms/op
+BenchmarkLargeLibraryStore/none/SetRelation 30ms # 0.443..7.378 ms/op
+BenchmarkLargeLibraryStore/folder/SearchNamesRelated 5ms # 0.246..0.383 ms/op
+BenchmarkLargeLibraryStore/folder/PeopleAssetsRelated 40ms # 9.159..13.124 ms/op
+BenchmarkLargeLibraryStore/folder/SetRelation 5ms # 0.438..0.781 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/SearchNamesRelated 5ms # 0.236..0.324 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/PeopleAssetsRelated 40ms # 9.667..10.683 ms/op
+BenchmarkLargeLibraryStore/folder_tag_person/SetRelation 5ms # 0.433..0.574 ms/op

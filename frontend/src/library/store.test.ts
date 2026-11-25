@@ -180,6 +180,7 @@ it('refines search hits by media and favourites while preserving relevance', asy
     noAI: false,
     pending: 0,
     people: [],
+    unassigned: [],
     description: '',
     blocked: false,
   })
@@ -196,6 +197,7 @@ it('leads search results with the four best matches, then the rest, best first',
     noAI: false,
     pending: 0,
     people: [],
+    unassigned: [],
     description: 'sea',
     blocked: false,
   })
@@ -225,6 +227,7 @@ it('keeps existing results during a repeated search and ignores its answer after
     noAI: false,
     pending: 0,
     people: [],
+    unassigned: [],
     description: '',
     blocked: false,
   }
@@ -512,6 +515,7 @@ describe('library requests', () => {
     search.resolve({
       items: result(1)[0]?.items ?? [],
       people: [],
+      unassigned: [],
       description: '',
       pending: 0,
       complete: true,
@@ -539,6 +543,7 @@ describe('library requests', () => {
     search.resolve({
       items: result(1)[0]?.items ?? [],
       people: [],
+      unassigned: [],
       description: '',
       pending: 0,
       complete: true,
@@ -564,6 +569,7 @@ describe('library requests', () => {
     search.resolve({
       items: result(1)[0]?.items ?? [],
       people: [],
+      unassigned: [],
       description: '',
       pending: 0,
       complete: true,
@@ -603,7 +609,8 @@ describe('library requests', () => {
     const lib = shownLibrary()
     vi.mocked(engine.search).mockResolvedValueOnce({
       items: [3, 1, 2].map((id) => ({ id, w: 100, h: 100, t: 1 })),
-      people: [{ id: 7, name: 'Ali' }],
+      people: [{ text: 'Ali', people: [7], ambiguous: false }],
+      unassigned: [],
       description: '',
       pending: 5,
       complete: false,
@@ -619,7 +626,8 @@ describe('library requests', () => {
     expect(lib.total).toBe(2)
     expect(lib.buckets).toEqual([{ day: 'best', count: 2 }])
     expect(lib.searchInfo).toEqual({
-      people: [{ id: 7, name: 'Ali' }],
+      people: [{ text: 'Ali', people: [7], ambiguous: false }],
+      unassigned: [],
       description: '',
       pending: 5,
       complete: false,
@@ -639,6 +647,7 @@ describe('library requests', () => {
         { id: 1, w: 100, h: 100, t: 1 },
       ],
       people: [],
+      unassigned: [],
       description: '',
       pending: 0,
       complete: true,
@@ -660,6 +669,7 @@ describe('library requests', () => {
     vi.mocked(engine.search).mockResolvedValueOnce({
       items: [1, 2, 3].map((id) => ({ id, w: 100, h: 100, t: 1 })),
       people: [],
+      unassigned: [],
       description: '',
       pending: 0,
       complete: true,
@@ -683,6 +693,7 @@ describe('library requests', () => {
     vi.mocked(engine.search).mockResolvedValueOnce({
       items: result(1)[0]?.items ?? [],
       people: [],
+      unassigned: [],
       description: '',
       pending: 0,
       complete: true,
@@ -702,6 +713,7 @@ describe('library requests', () => {
     vi.mocked(engine.search).mockResolvedValue({
       items: [],
       people: [],
+      unassigned: [],
       description: '',
       pending: 0,
       complete: true,
@@ -727,6 +739,7 @@ describe('library requests', () => {
     pending.resolve({
       items: result(1)[0]?.items ?? [],
       people: [],
+      unassigned: [],
       description: '',
       pending: 0,
       complete: true,
@@ -870,6 +883,7 @@ describe('library requests', () => {
       .mockResolvedValueOnce({
         items: result(2)[0]?.items ?? [],
         people: [],
+        unassigned: [],
         description: '',
         pending: 0,
         complete: true,
@@ -882,6 +896,7 @@ describe('library requests', () => {
     old.resolve({
       items: result(1)[0]?.items ?? [],
       people: [],
+      unassigned: [],
       description: '',
       pending: 0,
       complete: true,
@@ -898,6 +913,7 @@ describe('library requests', () => {
       .mockResolvedValueOnce({
         items: result(1)[0]?.items ?? [],
         people: [],
+        unassigned: [],
         description: '',
         pending: 0,
         complete: true,
@@ -907,6 +923,7 @@ describe('library requests', () => {
       .mockResolvedValueOnce({
         items: [],
         people: [],
+        unassigned: [],
         description: '',
         pending: 0,
         complete: true,

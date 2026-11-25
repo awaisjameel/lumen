@@ -176,7 +176,7 @@ func TestPeopleEdits(t *testing.T) {
 	if err := st.SetPersonCover(ctx, pb, fb[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.MergePeople(ctx, pb, pa); err != nil {
+	if err := st.MergePeople(ctx, pb, pa, core.MergeKeepAsk); err != nil {
 		t.Fatal(err)
 	}
 	ali, err := st.Person(ctx, pa)
@@ -192,7 +192,7 @@ func TestPeopleEdits(t *testing.T) {
 	if len(days) != 1 || len(days[0].Items) != 2 {
 		t.Errorf("Ali's grid = %+v", days)
 	}
-	both, _ := st.PeopleAssets(ctx, []int64{pa, pc})
+	both, _ := st.PeopleAssets(ctx, eachPerson(pa, pc))
 	if len(both) != 1 || both[0] != a {
 		t.Errorf("photos with Ali and the other = %v, want only a", both)
 	}
@@ -269,4 +269,13 @@ func TestAPersonsFactsCountTheirFacesAndNameWhoIsMostOftenWithThem(t *testing.T)
 	if _, err := st.PersonFacts(ctx, ali, 3); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a blocked person's facts: %v, want ErrNotFound", err)
 	}
+}
+
+// eachPerson asks PeopleAssets for photos with every one of people.
+func eachPerson(people ...int64) [][]int64 {
+	groups := make([][]int64, len(people))
+	for i, p := range people {
+		groups[i] = []int64{p}
+	}
+	return groups
 }

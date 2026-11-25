@@ -77,8 +77,35 @@ func (s *PeopleService) NamePerson(ctx context.Context, id int64, name string) e
 }
 
 // MergePeople says two people are one: everything of from moves to into.
-func (s *PeopleService) MergePeople(ctx context.Context, from, into int64) error {
-	return s.edited(s.store.MergePeople(ctx, from, into))
+// If they have different relationships, or one is Me and the other has a
+// relationship, keep says whose relationship stays; MergeKeepAsk refuses
+// (relation_conflict) so the user can be asked.
+func (s *PeopleService) MergePeople(ctx context.Context, from, into int64, keep core.MergeKeep) error {
+	return s.edited(s.store.MergePeople(ctx, from, into, keep))
+}
+
+// SetMe marks a person as the user. Unless replace, it refuses
+// (relation_conflict) when someone else is Me or the person has a
+// relationship, so the user confirms replacing either.
+func (s *PeopleService) SetMe(ctx context.Context, id int64, replace bool) error {
+	return s.store.SetMe(ctx, id, replace)
+}
+
+// RemoveMe says a person is not the user. Relationships stay: they are to
+// the user, not to that person.
+func (s *PeopleService) RemoveMe(ctx context.Context, id int64) error {
+	return s.store.RemoveMe(ctx, id)
+}
+
+// SetRelation sets what a person is to the user (RelationNone removes it)
+// and returns the person as they are now: a custom label that is a built-in
+// word comes back as that relationship. Neither faces nor clustering are
+// touched.
+func (s *PeopleService) SetRelation(ctx context.Context, id int64, relation core.Relation, label string) (core.Person, error) {
+	if _, _, err := s.store.SetRelation(ctx, id, relation, label); err != nil {
+		return core.Person{}, err
+	}
+	return s.store.Person(ctx, id)
 }
 
 // SetPersonCover shows one of a person's faces for them.

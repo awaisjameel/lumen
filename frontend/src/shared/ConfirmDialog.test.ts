@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
-import { confirm, question } from './confirm'
+import { choose, confirm, question } from './confirm'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { mountInApp } from './testing'
 
@@ -13,7 +13,7 @@ afterEach(() => {
   wrapper = undefined
 })
 
-function button(which: 'cancel' | 'ok'): HTMLButtonElement {
+function button(which: 'cancel' | 'ok' | 'other'): HTMLButtonElement {
   const el = document.body.querySelector<HTMLButtonElement>(`[data-confirm="${which}"]`)
   if (!el) throw new Error(`the confirmation has no ${which} button`)
   return el
@@ -42,4 +42,21 @@ it('resolves false when cancelled, and when a newer question replaces it', async
   expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('Second?')
   button('cancel').click()
   expect(await second).toBe(false)
+})
+
+it('offers a second way on only when asked, and resolves which one was chosen', async () => {
+  wrapper = mountInApp(ConfirmDialog)
+  void confirm('Plain?', 'One way.', 'Yes')
+  await flushPromises()
+  expect(document.body.querySelector('[data-confirm="other"]')).toBeNull()
+  const choice = choose('Which relationship do they keep?', 'Friend or Coach.', 'Keep Coach', 'Keep Friend')
+  await flushPromises()
+  expect(button('other').textContent.trim()).toBe('Keep Friend')
+  expect(button('ok').textContent.trim()).toBe('Keep Coach')
+  button('other').click()
+  expect(await choice).toBe('other')
+  const declined = choose('Again?', 'Friend or Coach.', 'Keep Coach', 'Keep Friend')
+  await flushPromises()
+  button('cancel').click()
+  expect(await declined).toBeNull()
 })

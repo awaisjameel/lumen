@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import CommandButton from '../shared/CommandButton.vue'
-import { itemCommand, useCommands, useItemCommands } from '../shared/commands'
+import { itemCommand, runCommand, useCommands, useItemCommands } from '../shared/commands'
 import { destination } from '../shared/navigation/contract'
 import UButton from '../shared/navigation/NavButton.vue'
 import UDropdownMenu from '../shared/navigation/NavDropdownMenu.vue'
@@ -12,6 +12,7 @@ import type { Person } from '../bridge'
 import { icons } from '../design/icons'
 import { block } from '../shared/block'
 import CardGrid from '../shared/CardGrid.vue'
+import Chip from '../shared/Chip.vue'
 import CollectionCard from '../shared/CollectionCard.vue'
 import { logError } from '../shared/errors'
 import FeatureState from '../shared/FeatureState.vue'
@@ -29,7 +30,10 @@ import FilterField from '../shared/FilterField.vue'
 import FaceThumb from './FaceThumb.vue'
 import { showNameSaved } from './naming'
 import PersonNameEditor from './PersonNameEditor.vue'
+import RelationshipEditor from './RelationshipEditor.vue'
+import { meSetupSkipped, personName, relationText, roleText, setMe, skipMeSetup } from './relationships'
 import { usePeople } from './store'
+import { nameIncludes } from '../shared/names'
 
 const lib = useLibrary()
 const router = useNavigation()
@@ -38,8 +42,22 @@ const query = ref('')
 const saving = ref(false)
 const matches = useSuggestions<Person[]>(query, engine.suggestPeople, [])
 const matching = computed(() => new Set(matches.value.map((p) => p.id)))
-const named = computed(() => people.list.filter((p) => p.name && (!query.value.trim() || matching.value.has(p.id))))
-const unnamed = computed(() => (query.value.trim() ? [] : people.list.filter((p) => !p.name)))
+/** Whether p matches the filter: by a suggested name, or by "Me" or a relationship. */
+function matchesFilter(p: Person, filter: string): boolean {
+  const role = roleText(p)
+  return matching.value.has(p.id) || (role !== '' && nameIncludes(role, filter))
+}
+const named = computed(() => {
+  const filter = query.value.trim()
+  return people.list.filter((p) => p.name && (!filter || matchesFilter(p, filter)))
+})
+const unnamed = computed(() => {
+  const filter = query.value.trim()
+  return people.list.filter((p) => !p.name && (!filter || (roleText(p) !== '' && matchesFilter(p, filter))))
+})
+const hasMe = computed(() => people.list.some((p) => p.me))
+/** Who the Me prompt offers: the most photographed, as the user often is. */
+const meCandidates = computed(() => people.list.slice(0, 6))
 const namedLimit = ref(48)
 const unnamedLimit = ref(6)
 const facesError = computed(() => lib.progress?.ai.facesError ?? '')
@@ -47,6 +65,13 @@ const looking = computed(() => lib.progress?.faces ?? 0)
 const rename = useRename<number>()
 const { editing } = rename
 const editingPerson = computed(() => people.list.find((p) => p.id === editing.value))
+const relate = useRename<number>()
+const relating = computed(() => people.list.find((p) => p.id === relate.editing.value))
+/** A named card's menu reopens focus after either editor it can open. */
+const menuRef = (id: number) => (el: unknown) => {
+  rename.triggerRef(id)(el)
+  relate.triggerRef(id)(el)
+}
 
 onMounted(() => void people.load().catch(logError))
 useLiveReload(people.load, (c) => c.people || c.assets || c.thumbs)
@@ -54,6 +79,22 @@ const refresh = () => people.load().catch(logError)
 
 async function blockPerson(p: Person, hide = false) {
   if (await block(BlockKind.BlockPerson, p.id, p.name || t('person.unnamed'), true, '', !hide)) await refresh()
+}
+async function toggleMe(p: Person) {
+  if (p.me) await engine.removeMe(p.id)
+  else if (!(await setMe(p))) return
+  notify({ id: 'person.me', kind: 'success', title: t(p.me ? 'person.notMe' : 'person.isMe', { name: personName(p) }) })
+  await refresh()
+}
+async function relationSaved(saved: Person) {
+  await relate.close()
+  const now = relationText(saved)
+  notify({
+    id: `person.${saved.id}.relation`,
+    kind: 'success',
+    title: now ? t('person.relationSaved', { name: personName(saved), relation: now }) : t('person.relationRemoved'),
+  })
+  await refresh()
 }
 async function namedPerson(p: Person, shown: number, name: string) {
   await rename.close()
@@ -76,6 +117,19 @@ const personItems = useItemCommands(
       id: itemCommand('person.review', p.id),
       title: () => t('person.review'),
       run: () => router.push(destination({ name: 'personFaces', params: { id: p.id } })),
+    },
+    {
+      id: itemCommand('person.me', p.id),
+      title: () => t(p.me ? 'person.removeMe' : 'person.setMe'),
+      enabled: () => !saving.value,
+      run: () => toggleMe(p),
+    },
+    {
+      id: itemCommand('person.relation', p.id),
+      title: () => t(relationText(p) ? 'person.changeRelation' : 'person.addRelation'),
+      enabled: () => !saving.value && !p.me,
+      reason: () => (p.me ? t('person.relationOfMe') : undefined),
+      run: () => relate.open(p.id, ''),
     },
     {
       id: itemCommand('person.hide', p.id),
@@ -167,6 +221,30 @@ useCommands([
       </div>
     </section>
     <template v-if="people.loaded && people.list.length">
+      <section
+        v-if="!hasMe && !meSetupSkipped && !query.trim()"
+        class="me-prompt"
+        :aria-label="t('people.meTitle')"
+        data-me-prompt
+      >
+        <Icon name="user-check" :size="20" />
+        <div>
+          <h2 class="me-title">{{ t('people.meTitle') }}</h2>
+          <p>{{ t('people.meHint') }}</p>
+        </div>
+        <div class="me-choices" role="group" :aria-label="t('people.meLabel')">
+          <Chip
+            v-for="p in meCandidates"
+            :key="p.id"
+            :disabled="saving"
+            :data-me-choice="p.id"
+            @click="void runCommand(itemCommand('person.me', p.id))"
+          >
+            <FaceThumb :face="p.cover" :size="20" round /><bdi>{{ personName(p) }}</bdi>
+          </Chip>
+          <UButton color="neutral" variant="ghost" data-me-skip @click="skipMeSetup">{{ t('people.notNow') }}</UButton>
+        </div>
+      </section>
       <section v-if="named.length" :aria-label="t('people.named')" class="people-section">
         <div class="section-head">
           <h2 class="section-heading">{{ t('people.named') }}</h2>
@@ -180,6 +258,7 @@ useCommands([
             :data-person="p.id"
             :to="destination({ name: 'person', params: { id: p.id } })"
             :title="p.name"
+            :subtitle="roleText(p) || undefined"
             :count="t('person.photos', { n: p.count })"
             icon="people"
             round
@@ -199,7 +278,7 @@ useCommands([
             >
             <UDropdownMenu :items="personItems(p.id)"
               ><IconButton
-                :ref="rename.triggerRef(p.id)"
+                :ref="menuRef(p.id)"
                 :icon="icons.more"
                 :label="t('people.actions', { name: p.name })"
                 color="neutral"
@@ -234,6 +313,7 @@ useCommands([
             :class="{ editing: editing === p.id }"
             :to="destination({ name: 'person', params: { id: p.id } })"
             :title="t('people.openPerson', { name: t('person.unnamed'), count: t('person.photos', { n: p.count }) })"
+            :subtitle="roleText(p) || undefined"
             :count="t('person.photos', { n: p.count })"
             icon="people"
             round
@@ -261,6 +341,7 @@ useCommands([
             </template>
             <UDropdownMenu :items="personItems(p.id)"
               ><IconButton
+                :ref="relate.triggerRef(p.id)"
                 :icon="icons.more"
                 :label="t('people.actions', { name: t('person.unnamed') })"
                 color="neutral"
@@ -272,6 +353,15 @@ useCommands([
           t('people.more', { n: Math.min(24, unnamed.length - unnamedLimit) })
         }}</UButton>
       </section>
+      <RelationshipEditor
+        v-if="relating"
+        :key="`relation-${relating.id}`"
+        class="named-editor"
+        :person="relating"
+        @busy="saving = $event"
+        @cancel="relate.close()"
+        @saved="relationSaved"
+      />
       <FeatureState
         v-if="query.trim() && !named.length"
         kind="empty"
@@ -282,7 +372,7 @@ useCommands([
           t('people.clearFilter')
         }}</UButton></FeatureState
       >
-      <p class="privacy"><Icon name="lock" :size="16" />{{ t('people.privacy') }}</p>
+      <p class="privacy"><Icon name="lock" :size="16" />{{ t('people.privacy') }} {{ t('people.relationships') }}</p>
     </template>
     <FeatureState
       v-else-if="people.loaded && !people.error && !facesError"
@@ -414,6 +504,42 @@ useCommands([
   padding: 1rem;
   background: var(--lumen-bg-sunken);
   border-radius: var(--lumen-r-md);
+}
+.me-prompt {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--lumen-r-md);
+  background: var(--lumen-bg-sunken);
+  font-size: 0.8125rem;
+  color: var(--ui-text-toned);
+}
+.me-prompt > div {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.me-prompt p {
+  margin: 0.125rem 0 0;
+}
+.me-title {
+  margin: 0;
+  color: var(--ui-text-highlighted);
+  font: 600 0.875rem/1.3 var(--font-display);
+}
+.me-choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+@media (forced-colors: active) {
+  .me-prompt {
+    border-color: CanvasText;
+  }
 }
 .privacy {
   display: flex;

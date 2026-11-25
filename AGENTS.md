@@ -101,7 +101,7 @@ A scratch library's SQLite file cannot be edited with the `sqlite3` CLI: its ind
 - **Formats.** An extension is recognised in exactly one place, `internal/core/formats.go`. Code asks for a format's `core.Family`, never compares extensions; which decoder reads a family is `internal/media`'s choice.
 - **Videos** stream from `services.Streamer` on 127.0.0.1 (random secret path, Host check), because Wails on Windows buffers a whole response before handing it to WebView2.
 - **Search** is an in-memory int8 scan over vectors stored in SQLite; no vector extension is loaded. Events are grouped when read, not stored in a table.
-- **User corrections always win** over the AI (people, faces, tags); the faces stage and clustering never undo them (`internal/people/cluster.go`).
+- **User corrections always win** over the AI (people, faces, tags, Me and relationships); the faces stage and clustering never undo them (`internal/people/cluster.go`). Me and relationships (`core.Relation`) live on the `people` row and are never inferred; a change that would silently replace Me or lose a relationship is `store.ErrRelationConflict`, which the UI turns into a question.
 
 ### The Go → TypeScript contract
 

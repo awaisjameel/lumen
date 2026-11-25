@@ -54,6 +54,8 @@ Press `Ctrl+F` or `/`, then try these queries with suitable photos:
 | `cat on a sofa` | Matches the scene's meaning rather than filenames alone. | Plausible matches can be wrong, and a weak query may return nothing. |
 | `Ali` | A named person's visible photos. | Name them in People first; a name in a filename does not name a face. |
 | `Ali and Sara at the beach` | Photos of both named people, ranked for the remaining description. | Both people must be recognised or manually assigned in the photo. |
+| `me at the beach` | Photos of the person you marked **This is me**. | Choose yourself in People first; see [Me and relationships](#me-and-relationships). |
+| `my mum and my friends` | Photos with your Mum and at least one of your Friends. | Relationships are only what you set; `my` is required, so `mum` alone stays a description or a name. |
 | `invoice total` | Photos whose recognised text contains every word come before the semantic matches. | Turn on **Find text in screenshots and documents** in **AI and search** first. English only, and only photos the AI sorts as screenshots or documents are read. |
 
 Suggestions in the search box help you select named people. Video search can
@@ -94,9 +96,46 @@ for those faces. User assignments and names take precedence over clustering.
 confirming. See [privacy](#hide-block-and-unblock).
 
 The person page's **Most photographed with** lists co-occurrence, not inferred
-family relationships. A designated **Me** identity and relationship labels are
-not implemented in this source; [issue #30](https://github.com/awaisjameel/lumen/issues/30)
-tracks that work. Recheck these instructions and the People screenshots after it merges.
+family relationships.
+
+## Me and relationships
+
+Lumen can know which person is you and what the others are to you, so a search
+for `me` or `my mum at the beach` finds the right people. Both are optional and
+private to this library; Lumen never guesses them from photos.
+
+1. Open **People**. Until someone is Me, **Which one is you?** offers the most
+   photographed people: choose yourself, or **Not now**. Any person's actions
+   also offer **This is me**, and **This isn't me** takes it back.
+2. Open a person and choose **Add a relationship** beside their name (also in
+   their actions and on each card's menu). Type to filter, such as `gr` for
+   Grandma, Grandad, Grandparent and Grandchild, and use the arrow keys and
+   `Enter`, or type your own word, such as `Coach`, and choose **Use “Coach”**.
+   **Remove relationship** takes it away; the name stays as it was.
+3. Search for `me`, `my mum`, `my parents`, `my friends` or `my coach`.
+
+![The page of a person named Sample astronaut, with the relationship editor open beside the name and Friend highlighted](screenshots/relationships.webp)
+
+Rules that keep your choices safe:
+
+- One person is Me. Choosing someone else, or choosing a person who has a
+  relationship, first says what will change: Me has no relationship.
+- Relationships are relative to you, not to the Me person. Removing or changing
+  Me keeps every relationship.
+- Several people may share a relationship. `my friends` finds any of them;
+  `my friend` with two friends shows photos of either and names both, with
+  **Only Sara**-style buttons to choose one. A person named `My Mum` beside
+  someone set as Mum is treated the same way: Lumen never picks one for you.
+- A phrase no one has yet, such as `my mum` before anyone is Mum, is searched
+  as a description, and the results say **No one is set as “my mum” yet**.
+- A label is up to 40 characters. A built-in word, such as `mom` or `Mummy`,
+  becomes that relationship; `me` and `family` cannot be labels.
+- Renaming, removing a name, splitting faces and new face recognition keep Me
+  and relationships. Merging two people keeps Me and a relationship they share;
+  if they disagree, Lumen asks which relationship to keep. Clustering never
+  merges away a person with Me or a relationship.
+- A hidden or blocked person cannot be chosen or found by `me` or `my …`. A
+  search that would name only blocked people says something is blocked.
 
 ## Correct Things and make albums
 

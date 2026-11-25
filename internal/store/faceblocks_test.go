@@ -251,7 +251,7 @@ func TestLabelModeTakesCoveredFacesOutOfFaceListsButKeepsThePhotos(t *testing.T)
 	if len(people) != 1 || people[0].ID != friend || people[0].Count != 2 {
 		t.Fatalf("people = %+v, want only Sara", people)
 	}
-	if assets, err := l.st.PeopleAssets(l.ctx, []int64{blocked}); err != nil || len(assets) != 0 {
+	if assets, err := l.st.PeopleAssets(l.ctx, eachPerson(blocked)); err != nil || len(assets) != 0 {
 		t.Fatalf("photos of the blocked face's person = %v, %v", assets, err)
 	}
 }
